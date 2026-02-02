@@ -1,0 +1,2 @@
+# Dependencies for shared Python types (Pydantic)
+pydantic>=2.0.0

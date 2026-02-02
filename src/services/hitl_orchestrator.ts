@@ -1,0 +1,236 @@
+/**
+ * High-Value Escalation (HITL) — Human-in-the-Loop orchestrator.
+ *
+ * 1. Thresholds: Any transaction/journal entry over $X (e.g. $10,000) or any change to
+ *    Critical Accounting Policies requires a human signature.
+ * 2. Staging Area: Bot presents "Proposed Action" and "Justification"; items stay Pending until approved.
+ * 3. Approval Flow: Bot remains in Pending until webhook returns HumanApproved signal.
+ * 4. Feedback Loop: If human rejects, the AI must ask "Why?" and update Context Memory to avoid the same mistake twice.
+ */
+
+// --- Default threshold (configurable) ---
+
+const DEFAULT_AMOUNT_THRESHOLD = 10_000;
+
+/** High-Value Escalation config */
+export interface HitlThresholds {
+  /** Any transaction or journal entry over this amount (absolute) requires human signature. */
+  amountThreshold: number;
+  /** If true, any change to Critical Accounting Policies requires human signature. */
+  criticalPolicyChangeRequiresApproval: boolean;
+}
+
+let thresholds: HitlThresholds = {
+  amountThreshold: DEFAULT_AMOUNT_THRESHOLD,
+  criticalPolicyChangeRequiresApproval: true,
+};
+
+export function getThresholds(): HitlThresholds {
+  return { ...thresholds };
+}
+
+export function setThresholds(next: Partial<HitlThresholds>): void {
+  thresholds = { ...thresholds, ...next };
+}
+
+/**
+ * Whether this action must be escalated to human (staging area + signature).
+ */
+export function shouldEscalateToHuman(params: {
+  amount?: number;
+  isCriticalAccountingPolicyChange?: boolean;
+}): boolean {
+  const { amount, isCriticalAccountingPolicyChange } = params;
+  if (amount != null && Math.abs(amount) >= thresholds.amountThreshold) return true;
+  if (thresholds.criticalPolicyChangeRequiresApproval && isCriticalAccountingPolicyChange) return true;
+  return false;
+}
+
+// --- Staging Area ---
+
+export type StagingStatus = 'pending' | 'approved' | 'rejected';
+
+export type StagingItemType = 'journal_entry' | 'policy_change' | 'adjustment' | 'flag_override' | 'other';
+
+export interface StagingItem {
+  id: string;
+  /** What the bot proposes to do (e.g. "Post journal entry: Dr Expense $12,000, Cr Cash"). */
+  proposedAction: string;
+  /** Why the bot proposes this (e.g. "Accrual for invoice #X per ASC 606"). */
+  justification: string;
+  status: StagingStatus;
+  type: StagingItemType;
+  /** Amount involved (for threshold display). */
+  amount?: number;
+  /** Optional payload (e.g. debit_account, credit_account, description). */
+  payload?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  /** Set when approved via webhook. */
+  approvedAt?: string;
+  approvedBy?: string;
+  /** Set when rejected; reason stored for feedback loop. */
+  rejectedAt?: string;
+  rejectedReason?: string;
+}
+
+const stagingStore = new Map<string, StagingItem>();
+let idCounter = 0;
+
+function nextId(): string {
+  idCounter += 1;
+  return `hitl-${Date.now()}-${idCounter}`;
+}
+
+/**
+ * Submit a proposed action to the Staging Area. Status is 'pending' until webhook approves/rejects.
+ */
+export function submitToStaging(params: {
+  proposedAction: string;
+  justification: string;
+  type?: StagingItemType;
+  amount?: number;
+  payload?: Record<string, unknown>;
+}): StagingItem {
+  const id = nextId();
+  const now = new Date().toISOString();
+  const item: StagingItem = {
+    id,
+    proposedAction: params.proposedAction,
+    justification: params.justification,
+    status: 'pending',
+    type: params.type ?? 'other',
+    amount: params.amount,
+    payload: params.payload,
+    createdAt: now,
+    updatedAt: now,
+  };
+  stagingStore.set(id, item);
+  return { ...item };
+}
+
+/**
+ * Staging Area: list all items (for UI). Filter by status if needed.
+ */
+export function getStagingArea(options?: { status?: StagingStatus; limit?: number }): StagingItem[] {
+  let items = Array.from(stagingStore.values());
+  if (options?.status) items = items.filter((i) => i.status === options.status);
+  items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const limit = options?.limit ?? 100;
+  return items.slice(0, limit).map((i) => ({ ...i }));
+}
+
+export function getStagingItem(id: string): StagingItem | undefined {
+  const item = stagingStore.get(id);
+  return item ? { ...item } : undefined;
+}
+
+// --- Approval Flow (webhook) ---
+
+export type WebhookSignal = 'HumanApproved' | 'HumanRejected';
+
+export interface ApprovalWebhookPayload {
+  id: string;
+  signal: WebhookSignal;
+  signedBy?: string;
+  signatureToken?: string;
+  /** Required when signal is HumanRejected: reason for rejection (for feedback loop). */
+  rejectionReason?: string;
+}
+
+/**
+ * Webhook: Human approved. Marks item approved; bot can proceed.
+ */
+export function receiveHumanApproval(params: {
+  id: string;
+  signedBy?: string;
+  signatureToken?: string;
+}): { ok: boolean; item?: StagingItem; error?: string } {
+  const item = stagingStore.get(params.id);
+  if (!item) return { ok: false, error: 'Staging item not found' };
+  if (item.status !== 'pending') return { ok: false, error: `Item is not pending (status: ${item.status})` };
+  const now = new Date().toISOString();
+  item.status = 'approved';
+  item.updatedAt = now;
+  item.approvedAt = now;
+  item.approvedBy = params.signedBy;
+  return { ok: true, item: { ...item } };
+}
+
+/**
+ * Webhook: Human rejected. Marks item rejected and records reason for feedback loop.
+ */
+export function receiveHumanRejection(params: { id: string; rejectionReason: string }): { ok: boolean; item?: StagingItem; error?: string } {
+  const item = stagingStore.get(params.id);
+  if (!item) return { ok: false, error: 'Staging item not found' };
+  if (item.status !== 'pending') return { ok: false, error: `Item is not pending (status: ${item.status})` };
+  const now = new Date().toISOString();
+  item.status = 'rejected';
+  item.updatedAt = now;
+  item.rejectedAt = now;
+  item.rejectedReason = params.rejectionReason?.trim() || 'No reason provided';
+  recordRejectionFeedback(params.id, item.rejectedReason, item);
+  return { ok: true, item: { ...item } };
+}
+
+/**
+ * Handle webhook payload (HumanApproved or HumanRejected).
+ */
+export function handleApprovalWebhook(payload: ApprovalWebhookPayload): { ok: boolean; item?: StagingItem; error?: string } {
+  if (payload.signal === 'HumanApproved') {
+    return receiveHumanApproval({
+      id: payload.id,
+      signedBy: payload.signedBy,
+      signatureToken: payload.signatureToken,
+    });
+  }
+  if (payload.signal === 'HumanRejected') {
+    return receiveHumanRejection({
+      id: payload.id,
+      rejectionReason: payload.rejectionReason ?? 'No reason provided',
+    });
+  }
+  return { ok: false, error: `Unknown signal: ${payload.signal}` };
+}
+
+// --- Feedback Loop: Context Memory ---
+
+export interface RejectionFeedback {
+  id: string;
+  stagingItemId: string;
+  reason: string;
+  /** Snapshot of proposedAction so AI can avoid repeating same pattern. */
+  proposedActionPreview: string;
+  createdAt: string;
+}
+
+const contextMemory: RejectionFeedback[] = [];
+const MAX_CONTEXT_MEMORY = 500;
+
+/**
+ * When a human rejects, the AI must ask "Why?" — the reason is stored here and in the staging item.
+ * Update Context Memory so the AI can avoid making the same mistake twice.
+ */
+export function recordRejectionFeedback(stagingItemId: string, reason: string, item: StagingItem): void {
+  contextMemory.push({
+    id: `fb-${Date.now()}-${contextMemory.length}`,
+    stagingItemId,
+    reason,
+    proposedActionPreview: item.proposedAction.slice(0, 500),
+    createdAt: new Date().toISOString(),
+  });
+  if (contextMemory.length > MAX_CONTEXT_MEMORY) contextMemory.splice(0, contextMemory.length - MAX_CONTEXT_MEMORY);
+}
+
+/**
+ * Get Context Memory (rejection history) so the AI can avoid repeating the same mistake.
+ */
+export function getContextMemory(options?: { limit?: number }): RejectionFeedback[] {
+  const limit = options?.limit ?? 100;
+  return contextMemory.slice(-limit).map((f) => ({ ...f }));
+}
+
+/**
+ * Prompt snippet for the AI: "Why?" after rejection — and instruction to use Context Memory.
+ */
+export const FEEDBACK_LOOP_PROMPT = `If a human rejected your proposed action, you must ask "Why?" and record the reason. Update your internal Context Memory so you do not make the same mistake twice. Use getContextMemory() to retrieve past rejection reasons when proposing similar actions.`;

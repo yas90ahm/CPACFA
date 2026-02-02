@@ -1,0 +1,19 @@
+# FinOS CPA-Agent backend
+# Python 3.10+
+
+# REST API (Justification Chat, GL endpoints)
+flask>=3.0.0
+
+# Quantitative Agent: secure Python execution (NPV, WACC, depreciation)
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.10.0
+
+# Ingestion: PDF/Excel parsing and pipeline
+openpyxl>=3.1.0
+
+# Big-4 Style Report export (PDF)
+reportlab>=4.0.0
+# Optional but recommended for PDF: pip install "unstructured[pdf]"
+# Full: pip install "unstructured[all-docs]"
+unstructured>=0.18.0

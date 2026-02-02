@@ -1,0 +1,12 @@
+accountCode,accountName,debit,credit
+1000,Cash,50000,0
+1100,Accounts Receivable,25000,0
+1200,Inventory,30000,0
+2000,Accounts Payable,0,20000
+2100,Accrued Expenses,0,5000
+3000,Common Stock,0,75000
+3100,Retained Earnings,0,10000
+4000,Revenue,0,35000
+5000,Cost of Goods Sold,15000,0
+5100,Salary Expense,8000,0
+5200,Rent Expense,2000,0

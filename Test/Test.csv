@@ -1,0 +1,14 @@
+Account ID,Account Name,Account Type,Debit,Credit
+1010,Cash and Equivalents,Asset,125000.00,0.00
+1100,Accounts Receivable,Asset,84000.00,0.00
+1200,Inventory,Asset,62000.00,0.00
+1500,Property Plant & Equipment,Asset,210000.00,0.00
+2010,Accounts Payable,Liability,0.00,45000.00
+2100,Accrued Expenses,Liability,0.00,22000.00
+2500,Long-term Debt,Liability,0.00,125000.00
+3010,Common Stock,Equity,0.00,100000.00
+3100,Retained Earnings,Equity,0.00,184000.00
+4010,Sales Revenue,Revenue,0.00,150000.00
+5010,Cost of Goods Sold,Expense,95000.00,0.00
+6010,Salary Expense,Expense,50000.00,0.00
+TOTALS,,,626000.00,626000.00

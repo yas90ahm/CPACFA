@@ -1,0 +1,5 @@
+# FinOS Connectors — ERP MCP server
+# Python 3.10+
+
+# MCP (Model Context Protocol) server
+mcp[cli]>=1.0.0

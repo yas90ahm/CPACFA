@@ -1,0 +1,24 @@
+/**
+ * Financial Calm Design — Enterprise theme
+ * Palette: Deep Navy (primary), Neutral Stone (background), Audit Green, Risk Red
+ * Borders: 1px #E2E8F0 | Radius: 6px (rounded-md) | No bright gradients
+ */
+
+:root {
+  /* Financial Calm palette */
+  --calm-primary: 217 56% 22%;           /* Deep Navy #1A365D */
+  --calm-primary-foreground: 0 0% 100%;
+  --calm-background: 210 20% 98%;       /* Neutral Gray/Stone #F8F9FA */
+  --calm-foreground: 217 56% 18%;
+  --calm-card: 0 0% 100%;
+  --calm-card-foreground: 217 56% 18%;
+  --calm-border: 214 32% 91%;           /* #E2E8F0 */
+  --calm-audit-green: 152 39% 30%;      /* #2D6A4F - positive balances */
+  --calm-risk-red: 357 65% 37%;         /* #9B2226 - alerts */
+  --calm-muted: 210 20% 94%;
+  --calm-muted-foreground: 215 16% 47%;
+  --calm-radius: 6px;
+  --calm-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.04);
+  --calm-shadow: 0 2px 4px -1px rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.03);
+  --calm-shadow-md: 0 4px 6px -2px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.03);
+}

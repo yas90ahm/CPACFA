@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "@asteasolutions/zod-to-openapi": "^7.0.0",
+    "swagger-ui-express": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/swagger-ui-express": "^4.1.6"
+  }
+}
