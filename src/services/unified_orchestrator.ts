@@ -23,6 +23,7 @@ import {
 } from '../agents/auditor_agent.js';
 import type { RawTrialBalanceRow } from './trialBalanceParser.js';
 import { DATA_GROUNDING_RULE } from '../llm/guardrails.js';
+import { updatePolicyMemory } from '../memory/index.js';
 
 /** Re-export so callers can rely on a single grounding rule. */
 export { DATA_GROUNDING_RULE };
@@ -214,13 +215,11 @@ export async function runUnifiedSupervisor(
       : undefined;
   const onObservationPersisted =
     pool && sessionId
-      ? (lastStep: string, lastResultSummary: string) =>
-          updateSession(pool, sessionId, { lastStep, lastResultSummary })
+      ? (lastStep: string, lastResultSummary: string) => updateSession(pool, sessionId, { lastStep, lastResultSummary })
       : undefined;
   const onMessageHistoryPersisted =
     pool && sessionId
-      ? (payload: { provider: string; messages: unknown[] }) =>
-          updateSession(pool, sessionId, { messageHistory: payload })
+      ? (payload: { provider: string; messages: unknown[] }) => updateSession(pool, sessionId, { messageHistory: payload })
       : undefined;
 
   const context =
@@ -230,6 +229,7 @@ export async function runUnifiedSupervisor(
           pool,
           sessionId,
           validatedEntries: entries,
+          pipelineInput,
           onReasoningStep,
           onObservationPersisted,
           onMessageHistoryPersisted,
@@ -239,6 +239,7 @@ export async function runUnifiedSupervisor(
       : entries
         ? {
             validatedEntries: entries,
+            pipelineInput,
             onReasoningStep,
             onObservationPersisted,
             onMessageHistoryPersisted,
@@ -246,6 +247,19 @@ export async function runUnifiedSupervisor(
             accountingContext,
           }
         : undefined;
+
+  // Sync policy memory when pipeline has entity meta (from legacy supervisor_agent behavior).
+  const meta = pipelineInput?.meta;
+  if (meta?.entityId && pool && tenantId) {
+    await updatePolicyMemory(meta.entityId, {
+      ...(meta.standard ? { standard: meta.standard } : {}),
+      country: meta.country,
+      jurisdiction: meta.jurisdiction,
+      currency: meta.currency,
+      taxId: meta.taxId,
+      businessNumber: meta.businessNumber,
+    }, undefined, { pool, tenantId });
+  }
 
   const runAgentic = useVerifiedPath
     ? (inp: { message: string; entries?: typeof entries }) =>
@@ -263,6 +277,7 @@ export async function runUnifiedSupervisor(
           supervisorResponse: out.response,
           skepticFinding: gate.skepticFinding,
           consensus: gate.consensus,
+          dissentingOpinion: out.dissentingOpinion,
         };
       };
 
@@ -274,6 +289,7 @@ export async function runUnifiedSupervisor(
     skepticReviewed: out.skepticReviewed,
     skepticFinding: out.skepticFinding,
     consensus: out.consensus,
+    dissentingOpinion: out.dissentingOpinion,
     sessionId,
     strategy: 'forensic',
   };

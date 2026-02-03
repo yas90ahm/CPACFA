@@ -16,7 +16,7 @@ import type {
 } from '../types/financial.js';
 import type { RawTrialBalanceRow } from './trialBalanceParser.js';
 import { parseTrialBalance } from './trialBalanceParser.js';
-import { buildFinancialStatements } from './financialStatements.js';
+import { buildValidatedStatements } from './financialStatements.js';
 import { generateStatements } from './statementGenerator.js';
 import { listContracts } from '../db/repositories/revenue_recognition_repository.js';
 import type { IntegrityContractFact } from '../types/integrity.js';
@@ -236,7 +236,7 @@ export async function step1CPA(
         reasoningChain: pev,
       };
     }
-    const { balanceSheet, profitAndLoss, classifiedEntries } = await buildFinancialStatements(trialBalance);
+    const { balanceSheet, profitAndLoss, classifiedEntries } = await buildValidatedStatements(trialBalance);
     const pev = runPlanExecuteVerify({ trialBalance, balanceSheet, profitAndLoss });
     if (!pev.verification.passed) {
       throw new Error(`Verification failed: ${pev.verification.checks.join('; ')}. Statements cannot be returned.`);
@@ -246,7 +246,7 @@ export async function step1CPA(
         ? buildCashFlowFromTransactions(meta.transactions)
         : buildCashFlowStatement(trialBalance, profitAndLoss, priorTB)
       : undefined;
-    const priorBalanceSheet = priorTB ? (await buildFinancialStatements(priorTB)).balanceSheet : undefined;
+    const priorBalanceSheet = priorTB ? (await buildValidatedStatements(priorTB)).balanceSheet : undefined;
     const equityChanges = fullSet ? buildEquityChangesStatement(balanceSheet, priorBalanceSheet, profitAndLoss) : undefined;
     const notesAndPolicies = fullSet && meta.standard ? buildNotesAndPolicies(meta.standard) : undefined;
     return {

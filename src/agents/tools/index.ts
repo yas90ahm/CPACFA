@@ -57,8 +57,22 @@ import {
   type ReconcileCPAwithCFAInput,
 } from './reconcileCPAwithCFA.js';
 import * as persistence from '../../services/persistence_service.js';
+import {
+  executeTool as executeSupervisorServiceTool,
+  type SupervisorToolContext,
+} from '../../services/supervisor_tools.js';
 
 export type { ToolDefinition, ToolResult } from './types.js';
+
+const SUPERVISOR_SERVICE_TOOL_NAMES = new Set([
+  'list_datasets',
+  'query_dataset',
+  'resolve_query_intent',
+  'summarize_query_result',
+  'step1CPA',
+  'step2CFA',
+  'step3Supervisor',
+]);
 export {
   postTrialBalanceToPython,
   callPythonMathWorker,
@@ -183,6 +197,12 @@ export interface ToolContext {
   validatedEntries?: Array<{ accountName: string; debit: number; credit: number; accountCode?: string }>;
   /** Session id for Source of Truth lookup (pipeline_input_snapshot) when present. */
   sessionId?: string;
+  /** Pipeline input for step1CPA/step2CFA/step3Supervisor and catalog tools (delegated to supervisor_tools). */
+  pipelineInput?: import('../../services/result_generator.js').PipelineInput;
+  /** Mutated by supervisor_tools when step1CPA/step2CFA/step3Supervisor or catalog tools run. */
+  step1Output?: SupervisorToolContext['step1Output'];
+  step2Output?: SupervisorToolContext['step2Output'];
+  lastCatalogResult?: SupervisorToolContext['lastCatalogResult'];
 }
 
 const DATA_GROUNDING_VIOLATION = 'Data Grounding Violation: No source data found to perform this calculation.';
@@ -209,6 +229,27 @@ export async function executeTool(
   input: unknown,
   context?: ToolContext
 ): Promise<{ success: true; data: unknown } | { success: false; error: string }> {
+  if (SUPERVISOR_SERVICE_TOOL_NAMES.has(name)) {
+    const ctx: SupervisorToolContext = {
+      pipelineInput: context?.pipelineInput,
+      tenantId: context?.tenantId,
+      pool: context?.pool ?? null,
+      step1Output: context?.step1Output,
+      step2Output: context?.step2Output,
+      lastCatalogResult: context?.lastCatalogResult,
+    };
+    const result = await executeSupervisorServiceTool(name, input as Record<string, unknown>, ctx);
+    if (context) {
+      context.step1Output = ctx.step1Output;
+      context.step2Output = ctx.step2Output;
+      context.lastCatalogResult = ctx.lastCatalogResult;
+    }
+    if (result.success) {
+      return { success: true, data: result.output ?? { summary: result.summary } };
+    }
+    return { success: false, error: result.error ?? result.summary ?? 'Unknown error' };
+  }
+
   const buildContext = context?.tenantId && context?.pool ? { tenantId: context.tenantId, pool: context.pool } : undefined;
   switch (name) {
     case 'classifyAccount':

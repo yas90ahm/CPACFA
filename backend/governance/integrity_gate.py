@@ -1,26 +1,58 @@
 """
 Integrity Gate — Hard Gate middleware that runs after any Agentic adjustment.
 
-Performs deterministic checks:
+Performs deterministic checks (rules from shared/config/financial_rules.json):
 1. Sum(Debits) == Sum(Credits) (trial balance)
 2. Assets == Liabilities + Equity (balance sheet equation)
 
 If the math fails, the service intercepts the response before it reaches the user
 and returns an error to the Agent so the user never sees a Balance Sheet that doesn't balance.
+
+Rounding tolerance is read from shared/config/financial_rules.json on each call
+so changes to the JSON file are respected instantly by both Node and Python.
 """
 
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Optional
-
-DEFAULT_TOLERANCE = Decimal("0.01")
 
 # Error returned to the Agent when the gate fails; response must not reach the user.
 INTEGRITY_GATE_CRITICAL_MESSAGE = (
     "CRITICAL: Your proposed adjustment unbalances the ledger. Re-calculating."
 )
+
+_DEFAULT_TOLERANCE_FALLBACK = Decimal("0.01")
+
+
+def _get_rules_config_path() -> Path:
+    env_path = os.environ.get("RULES_CONFIG_PATH")
+    if env_path:
+        return Path(env_path)
+    # backend/governance/integrity_gate.py -> project root = parent of backend
+    this_dir = Path(__file__).resolve().parent
+    project_root = this_dir.parent.parent
+    return project_root / "shared" / "config" / "financial_rules.json"
+
+
+def _get_rounding_tolerance_from_config() -> Decimal:
+    """Read roundingTolerance from shared/config/financial_rules.json. No cache — re-reads each time."""
+    path = _get_rules_config_path()
+    if not path.exists():
+        return _DEFAULT_TOLERANCE_FALLBACK
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        tol = data.get("roundingTolerance")
+        if tol is not None and isinstance(tol, (int, float)):
+            return Decimal(str(tol))
+    except (json.JSONDecodeError, OSError):
+        pass
+    return _DEFAULT_TOLERANCE_FALLBACK
 
 
 @dataclass
@@ -43,8 +75,13 @@ def run_integrity_gate(
     Run the Hard Gate: deterministic check that Sum(Debits) == Sum(Credits) and
     Assets == Liabilities + Equity. If either fails, return passed=False and the
     CRITICAL message so the response can be intercepted before reaching the user.
+    When tolerance is not provided, uses roundingTolerance from shared/config/financial_rules.json.
     """
-    tol = Decimal(str(tolerance)) if tolerance is not None else DEFAULT_TOLERANCE
+    tol = (
+        Decimal(str(tolerance))
+        if tolerance is not None
+        else _get_rounding_tolerance_from_config()
+    )
     d = Decimal(str(total_debits))
     c = Decimal(str(total_credits))
     a = Decimal(str(total_assets))

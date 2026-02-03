@@ -195,8 +195,7 @@ def _run_trial_balance_math(body: dict) -> tuple[date, Any, Any]:
         as_of_date = date.today()
     if as_of_str:
         as_of_date = date.fromisoformat(as_of_str)
-    tb = agent.trial_balance(as_of_date)
-    bs = agent.balance_sheet(as_of_date)
+    tb, bs, _ = build_validated_statements(agent.gl, as_of_date, agent.coa)
     return as_of_date, tb, bs
 
 
@@ -236,6 +235,30 @@ def _jsonify_trial_balance_response(as_of_date: date, tb: Any, bs: Any) -> dict:
     }
 
 
+def _math_integrity_422(e: MathematicalIntegrityError) -> tuple[Any, int]:
+    details = {}
+    if e.total_debits is not None:
+        details["totalDebits"] = float(e.total_debits)
+    if e.total_credits is not None:
+        details["totalCredits"] = float(e.total_credits)
+    if e.total_assets is not None:
+        details["totalAssets"] = float(e.total_assets)
+    if e.total_liabilities is not None:
+        details["totalLiabilities"] = float(e.total_liabilities)
+    if e.total_equity is not None:
+        details["totalEquity"] = float(e.total_equity)
+    return (
+        jsonify({
+            "error": "MathematicalIntegrityError",
+            "message": str(e),
+            "check": e.check,
+            "imbalanceAmount": float(e.imbalance_amount),
+            "details": details,
+        }),
+        422,
+    )
+
+
 @app.route("/api/math/trial-balance", methods=["POST"])
 def api_math_trial_balance():
     """
@@ -247,6 +270,8 @@ def api_math_trial_balance():
     try:
         as_of_date, tb, bs = _run_trial_balance_math(body)
         return jsonify(_jsonify_trial_balance_response(as_of_date, tb, bs))
+    except MathematicalIntegrityError as e:
+        return _math_integrity_422(e)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except ValidationError as e:
@@ -382,6 +407,8 @@ def api_gl_process():
     try:
         as_of_date, tb, bs = _run_trial_balance_math(body)
         return jsonify(_jsonify_trial_balance_response(as_of_date, tb, bs))
+    except MathematicalIntegrityError as e:
+        return _math_integrity_422(e)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except ValidationError as e:

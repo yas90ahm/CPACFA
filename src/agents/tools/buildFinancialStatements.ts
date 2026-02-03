@@ -7,7 +7,7 @@
 import { z } from 'zod';
 import type { Pool } from 'pg';
 import { parseTrialBalance } from '../../services/trialBalanceParser.js';
-import { buildFinancialStatements as buildFinancialStatementsService } from '../../services/financialStatements.js';
+import { buildValidatedStatements as buildFinancialStatementsService, MathematicalIntegrityError } from '../../services/financialStatements.js';
 import { generateStatements } from '../../services/statementGenerator.js';
 import { listContracts } from '../../db/repositories/revenue_recognition_repository.js';
 import type { IntegrityContractFact } from '../../types/integrity.js';
@@ -271,6 +271,17 @@ export async function runBuildFinancialStatements(
       },
     };
   } catch (e) {
+    if (e instanceof MathematicalIntegrityError) {
+      const selfHealMessage =
+        e.check === 'A'
+          ? `ERROR: Your proposed entry unbalances the trial balance by ${e.imbalanceAmount}. You must provide a correcting debit/credit so that Sum(Debits) = Sum(Credits).`
+          : `ERROR: Your proposed entry unbalances the ledger by ${e.imbalanceAmount}. You must provide a correcting debit/credit to maintain $Assets = L+E$.`;
+      return {
+        success: false,
+        error: selfHealMessage,
+        data: { check: e.check, imbalanceAmount: e.imbalanceAmount, details: e.details },
+      } as ToolResult<unknown>;
+    }
     const message = e instanceof Error ? e.message : String(e);
     return { success: false, error: message };
   }

@@ -19,7 +19,7 @@ import type {
 import type { TrialBalanceResult, TrialBalanceEntry, BalanceSheet, ProfitAndLoss } from '../types/financial.js';
 import { parseTrialBalance } from './trialBalanceParser.js';
 import type { RawTrialBalanceRow } from './trialBalanceParser.js';
-import { buildFinancialStatements } from './financialStatements.js';
+import { buildValidatedStatements } from './financialStatements.js';
 import { classifyTrialBalance } from './accountClassifier.js';
 import { computeLiquidityMetrics, assessLiquidityRisk } from './analysis_agent.js';
 import type { LiquidityInputs } from '../types/analysis.js';
@@ -338,7 +338,7 @@ export async function prepareQ4Financials(
   setStepStatus(plan, 'adjust_accruals', 'completed', { note: 'Accruals assumed adjusted in GL; no automated adjustments applied.' });
 
   setStepStatus(plan, 'generate_pl', 'running');
-  const { balanceSheet, profitAndLoss, classifiedEntries } = await buildFinancialStatements(trialBalance);
+  const { balanceSheet, profitAndLoss, classifiedEntries } = await buildValidatedStatements(trialBalance);
   setStepStatus(plan, 'generate_pl', 'completed', { balanceSheet, profitAndLoss });
 
   setStepStatus(plan, 'reconcile_banks', 'running');

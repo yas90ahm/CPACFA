@@ -1,6 +1,9 @@
 /**
  * Build Balance Sheet and P&L from classified Trial Balance
  * FASB ASC 210 (Balance Sheet), ASC 220 (Comprehensive Income), IAS 1
+ *
+ * Accounting Kill Switch: buildValidatedStatements() enforces (A) Sum(Debits)==Sum(Credits)
+ * and (B) Total Assets==Total Liabilities+Total Equity. If either fails, throws MathematicalIntegrityError.
  */
 
 import type {
@@ -12,8 +15,31 @@ import type {
   AccountType,
 } from '../types/financial.js';
 import { BALANCE_SHEET, COMPREHENSIVE_INCOME } from '../constants/codification.js';
-import { round2, sumRound2, absLt } from '../utils/decimal.js';
+import { round2, sumRound2, absLt, absGt } from '../utils/decimal.js';
 import { classifyTrialBalanceDeterministic } from './accountClassifier.js';
+import { getRoundingTolerance } from './rules_registry.js';
+
+/** Thrown when trial balance or balance sheet equation fails (Kill Switch). API must return 422 with imbalanceAmount. */
+export class MathematicalIntegrityError extends Error {
+  /** 'A' = Sum(Debits) != Sum(Credits); 'B' = Total Assets != Total Liabilities + Total Equity */
+  readonly check: 'A' | 'B';
+  /** Exact imbalance amount (absolute difference). */
+  readonly imbalanceAmount: number;
+  readonly details?: { totalDebits?: number; totalCredits?: number; totalAssets?: number; totalLiabilities?: number; totalEquity?: number };
+
+  constructor(check: 'A' | 'B', imbalanceAmount: number, details?: MathematicalIntegrityError['details']) {
+    const msg =
+      check === 'A'
+        ? `Trial balance does not balance: Sum(Debits) != Sum(Credits). Imbalance: ${imbalanceAmount}. Data is illegal for a CPA.`
+        : `Balance sheet equation violated: Total Assets != Total Liabilities + Total Equity. Imbalance: ${imbalanceAmount}. Data is illegal for a CPA.`;
+    super(msg);
+    this.name = 'MathematicalIntegrityError';
+    this.check = check;
+    this.imbalanceAmount = imbalanceAmount;
+    this.details = details;
+    Object.setPrototypeOf(this, MathematicalIntegrityError.prototype);
+  }
+}
 
 /** Net amount for an account (debit − credit). Assets/Expenses: positive = debit. Liabilities/Equity/Revenue: positive = credit. Uses decimal round for display. */
 function netAmount(entry: TrialBalanceEntry): number {
@@ -124,4 +150,89 @@ export function buildFinancialStatements(
   const balanceSheet = buildBalanceSheet(classified, buildOpts);
   const profitAndLoss = buildProfitAndLoss(classified, buildOpts);
   return { balanceSheet, profitAndLoss, classifiedEntries: classified };
+}
+
+/** Sum debits and credits from entries (for Kill Switch check A). */
+function getTrialBalanceTotals(entries: TrialBalanceEntry[]): { totalDebits: number; totalCredits: number } {
+  let totalDebits = 0;
+  let totalCredits = 0;
+  for (const e of entries) {
+    totalDebits += e.debit ?? 0;
+    totalCredits += e.credit ?? 0;
+  }
+  return { totalDebits, totalCredits };
+}
+
+/**
+ * Validate already-built trial balance and balance sheet (Kill Switch).
+ * Throws MathematicalIntegrityError if (A) Sum(Debits) != Sum(Credits) or (B) Assets != L+E.
+ * Use when returning stored statements (e.g. audit binder) to ensure we never serve illegal data.
+ */
+export function validateTrialBalanceAndBalanceSheet(
+  trialBalance: TrialBalanceResult | { entries: TrialBalanceEntry[]; totalDebits?: number; totalCredits?: number },
+  balanceSheet: BalanceSheet,
+  tolerance?: number
+): void {
+  const tol = tolerance ?? getRoundingTolerance();
+  const entries = trialBalance.entries ?? [];
+  const totalDebits =
+    'totalDebits' in trialBalance && typeof trialBalance.totalDebits === 'number'
+      ? trialBalance.totalDebits
+      : entries.reduce((s, e) => s + (e.debit ?? 0), 0);
+  const totalCredits =
+    'totalCredits' in trialBalance && typeof trialBalance.totalCredits === 'number'
+      ? trialBalance.totalCredits
+      : entries.reduce((s, e) => s + (e.credit ?? 0), 0);
+
+  if (absGt(totalDebits, totalCredits, tol)) {
+    const imbalanceAmount = round2(Math.abs(totalDebits - totalCredits));
+    throw new MathematicalIntegrityError('A', imbalanceAmount, { totalDebits, totalCredits });
+  }
+
+  const rhs = sumRound2([balanceSheet.totalLiabilities, balanceSheet.totalEquity]);
+  if (absGt(balanceSheet.totalAssets, rhs, tol)) {
+    const imbalanceAmount = round2(Math.abs(balanceSheet.totalAssets - rhs));
+    throw new MathematicalIntegrityError('B', imbalanceAmount, {
+      totalAssets: balanceSheet.totalAssets,
+      totalLiabilities: balanceSheet.totalLiabilities,
+      totalEquity: balanceSheet.totalEquity,
+    });
+  }
+}
+
+/**
+ * Unified validated builder: (A) Sum(Debits)==Sum(Credits), (B) Total Assets==Total Liabilities+Total Equity.
+ * If either check fails, throws MathematicalIntegrityError and returns no data. Use for all API paths that return financials.
+ */
+export function buildValidatedStatements(
+  trialBalanceResult: TrialBalanceResult,
+  options?: { preClassifiedEntries?: TrialBalanceEntry[]; materiality?: number; tolerance?: number }
+): { balanceSheet: BalanceSheet; profitAndLoss: ProfitAndLoss; classifiedEntries: TrialBalanceEntry[] } {
+  const tol = options?.tolerance ?? getRoundingTolerance();
+  const entries = trialBalanceResult.entries ?? [];
+  const totalDebits =
+    trialBalanceResult.totalDebits != null
+      ? trialBalanceResult.totalDebits
+      : entries.reduce((s, e) => s + (e.debit ?? 0), 0);
+  const totalCredits =
+    trialBalanceResult.totalCredits != null
+      ? trialBalanceResult.totalCredits
+      : entries.reduce((s, e) => s + (e.credit ?? 0), 0);
+
+  if (absGt(totalDebits, totalCredits, tol)) {
+    const imbalanceAmount = round2(Math.abs(totalDebits - totalCredits));
+    throw new MathematicalIntegrityError('A', imbalanceAmount, { totalDebits, totalCredits });
+  }
+
+  const result = buildFinancialStatements(trialBalanceResult, options);
+  const rhs = sumRound2([result.balanceSheet.totalLiabilities, result.balanceSheet.totalEquity]);
+  if (absGt(result.balanceSheet.totalAssets, rhs, tol)) {
+    const imbalanceAmount = round2(Math.abs(result.balanceSheet.totalAssets - rhs));
+    throw new MathematicalIntegrityError('B', imbalanceAmount, {
+      totalAssets: result.balanceSheet.totalAssets,
+      totalLiabilities: result.balanceSheet.totalLiabilities,
+      totalEquity: result.balanceSheet.totalEquity,
+    });
+  }
+  return result;
 }

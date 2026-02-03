@@ -10,7 +10,7 @@ import type {
   FinancialStatementLine,
   TrialBalanceEntry,
 } from '../types/financial.js';
-import { buildBalanceSheet, buildProfitAndLoss, buildFinancialStatements } from './financialStatements.js';
+import { buildBalanceSheet, buildProfitAndLoss, buildFinancialStatements, validateTrialBalanceAndBalanceSheet } from './financialStatements.js';
 import { classifyTrialBalanceDeterministic } from './accountClassifier.js';
 import { getStandardsRegistry, requiresLeaseLiabilityCalculation, usesSimplifiedDepreciation } from '../constants/accounting/index.js';
 import type { AccountingStandard } from '../constants/accounting/index.js';
@@ -169,6 +169,14 @@ export async function generateStatements(
       ) < 0.02,
     };
   }
+
+  // Accounting Kill Switch: (A) Sum(Debits)==Sum(Credits), (B) Assets==L+E. Throw if illegal for CPA.
+  const totalDebits = classified.reduce((s, e) => s + (e.debit ?? 0), 0);
+  const totalCredits = classified.reduce((s, e) => s + (e.credit ?? 0), 0);
+  validateTrialBalanceAndBalanceSheet(
+    { entries: classified, totalDebits, totalCredits },
+    balanceSheet
+  );
 
   return {
     balanceSheet,

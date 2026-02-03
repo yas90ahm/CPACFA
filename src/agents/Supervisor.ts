@@ -6,12 +6,14 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { MessageParam, Tool } from '@anthropic-ai/sdk/resources/messages.js';
 import type { Pool } from 'pg';
-import { executeTool } from './tools/index.js';
+import { executeTool, type ToolContext } from './tools/index.js';
 import { getProviderFromEnv } from '../llm/provider.js';
 import type { ReasoningLogEntry } from '../services/persistence_service.js';
 import type { LLMTool } from '../llm/tool_schema.js';
 import { toAnthropicTools, toOpenAITools, toMistralTools } from '../llm/tool_schema.js';
-import { DATA_GROUNDING_RULE } from '../llm/guardrails.js';
+import { DATA_GROUNDING_RULE, shouldEscalateToHuman } from '../llm/guardrails.js';
+import { SUPERVISOR_TOOLS } from '../services/supervisor_tools.js';
+import type { PipelineInput } from '../services/result_generator.js';
 
 const MODEL = 'claude-sonnet-4-5-20250929';
 const MAX_REACT_ITERATIONS = 15;
@@ -30,14 +32,21 @@ RULES:
    - storeUserCorrection: When the user explicitly confirms or corrects a category (e.g. "Yes, keep Stripe as Software"), call this to store the correction so future runs are consistent.
    - getPortfolioFinalizationPolicy: When the user asks about changing past performance, back-dating, or correcting finalized periods, call this and cite the returned policy in your answer.
    - reconcileCPAwithCFA: When you have called both buildFinancialStatements and computeRatios, you MUST call this with those results before giving your final answer; if it returns a conflict, include that in your response.
+   - list_datasets: List available datasets for ad-hoc query. Call when the user asks about data you can query.
+   - query_dataset: Run a query on a dataset (datasetId required; optional periodLabel, entityId, limit). Call after list_datasets or resolve_query_intent.
+   - resolve_query_intent: Resolve a natural-language question to suggested datasetId and filters. Call when the user asks in plain language (e.g. "What was our runway?").
+   - summarize_query_result: Produce a short narrative summary of the last query_dataset result. Call after query_dataset when the user wants a summary.
+   - step1CPA: Build Balance Sheet and P&L from trial balance. Input: optional raw_rows; or omit to use pipeline data from session.
+   - step2CFA: Compute 5 key ratios from the last step1CPA output. Call after step1CPA.
+   - step3Supervisor: Produce Executive Memo from step1CPA and step2CFA. Call after step2CFA.
 3. After each Observation (tool result), output a Thought about what you observed and what you will do next (e.g. call another tool, or answer the user). Only stop when you have fully answered the user's core intent.
 4. When you have enough information to answer the user, provide a clear, complete response. Do not stop mid-flow; ensure the user's question is fully addressed.
 
 ${DATA_GROUNDING_RULE}`;
 
-/** Build Anthropic tool list from toolbox (name, description, input_schema). */
+/** Build Anthropic tool list from toolbox (name, description, input_schema). Includes master tools + catalog/step tools. */
 function buildTools(): LLMTool[] {
-  return [
+  const masterTools: LLMTool[] = [
     {
       name: 'classifyAccount',
       description: classifyAccountDescription,
@@ -178,6 +187,7 @@ function buildTools(): LLMTool[] {
       },
     },
   ];
+  return [...masterTools, ...CATALOG_STEP_TOOLS];
 }
 
 const classifyAccountDescription =
@@ -199,6 +209,9 @@ const getPortfolioFinalizationPolicyDescription =
 const reconcileCPAwithCFADescription =
   'Compare CPA (Balance Sheet / P&L) and CFA (ratios) outputs for conflicts. Call after both buildFinancialStatements and computeRatios; pass those results. If a conflict is returned, include it in your final response.';
 
+/** Catalog and step tools (from supervisor_tools); getPortfolioFinalizationPolicy is already in buildTools above. */
+const CATALOG_STEP_TOOLS = SUPERVISOR_TOOLS.filter((t) => t.name !== 'getPortfolioFinalizationPolicy');
+
 export interface SupervisorInput {
   message: string;
   /** Optional trial balance entries to include in context (e.g. for buildFinancialStatements or forensicRescan). */
@@ -210,6 +223,8 @@ export interface SupervisorOutput {
   thoughts: string[];
   toolCalls: Array<{ name: string; input: unknown; result: string }>;
   stopReason: string;
+  /** When step3Supervisor (or reconcile) detected CPA vs CFA conflict. */
+  dissentingOpinion?: unknown;
 }
 
 function getApiKey(): string {
@@ -232,6 +247,8 @@ export async function runSupervisor(
     pool?: Pool;
     sessionId?: string;
     validatedEntries?: Array<{ accountName: string; debit: number; credit: number; accountCode?: string }>;
+    /** Pipeline input for step1CPA/step2CFA/step3Supervisor and catalog tools. */
+    pipelineInput?: PipelineInput;
     /** When set, each Thought or Tool step is appended to the session reasoning_logs (audit trail). */
     onReasoningStep?: (entry: ReasoningLogEntry) => void | Promise<void>;
     /** When set, after each Observation (tool result) the session row is updated with last_step and last_result_summary. */
@@ -249,16 +266,34 @@ export async function runSupervisor(
     ...context,
     validatedEntries: context?.validatedEntries ?? (input.entries?.length ? input.entries : undefined),
     sessionId: context?.sessionId,
+    pipelineInput: context?.pipelineInput,
+    step1Output: undefined,
+    step2Output: undefined,
+    lastCatalogResult: undefined,
   };
-  const fireReasoningStep = (entry: ReasoningLogEntry) => {
+  let lastDissentingOpinion: unknown;
+  /** Persistence reliability: await so a crash never loses the last thought/observation. */
+  const fireReasoningStep = async (entry: ReasoningLogEntry): Promise<void> => {
     const ts = { ...entry, timestamp: entry.timestamp || new Date().toISOString() };
-    void Promise.resolve(context?.onReasoningStep?.(ts)).catch(() => {});
+    try {
+      await Promise.resolve(context?.onReasoningStep?.(ts));
+    } catch {
+      // Log but do not fail the loop
+    }
   };
-  const fireObservationPersisted = (lastStep: string, lastResultSummary: string) => {
-    void Promise.resolve(context?.onObservationPersisted?.(lastStep, lastResultSummary)).catch(() => {});
+  const fireObservationPersisted = async (lastStep: string, lastResultSummary: string): Promise<void> => {
+    try {
+      await Promise.resolve(context?.onObservationPersisted?.(lastStep, lastResultSummary));
+    } catch {
+      // Log but do not fail the loop
+    }
   };
-  const fireMessageHistoryPersisted = (providerName: string, messagesArray: unknown[]) => {
-    void Promise.resolve(context?.onMessageHistoryPersisted?.({ provider: providerName, messages: messagesArray })).catch(() => {});
+  const fireMessageHistoryPersisted = async (providerName: string, messagesArray: unknown[]): Promise<void> => {
+    try {
+      await Promise.resolve(context?.onMessageHistoryPersisted?.({ provider: providerName, messages: messagesArray }));
+    } catch {
+      // Log but do not fail the loop
+    }
   };
 
   const userContent = input.entries?.length
@@ -306,7 +341,7 @@ export async function runSupervisor(
           if (thoughtMatch) {
             const thoughtText = thoughtMatch[1].trim();
             thoughts.push(thoughtText);
-            fireReasoningStep({
+            await fireReasoningStep({
               stepType: 'thought',
               timestamp: new Date().toISOString(),
               thought: thoughtText,
@@ -329,29 +364,31 @@ export async function runSupervisor(
       });
 
       if (lastStopReason === 'end_turn' && toolUseBlocks.length === 0) {
-        fireMessageHistoryPersisted('anthropic', messages);
+        await fireMessageHistoryPersisted('anthropic', messages);
         return {
           response: textBlocks.join('\n').trim() || 'No response generated.',
           thoughts,
           toolCalls,
           stopReason: lastStopReason,
+          dissentingOpinion: lastDissentingOpinion,
         };
       }
 
       if (toolUseBlocks.length === 0) {
-        fireMessageHistoryPersisted('anthropic', messages);
+        await fireMessageHistoryPersisted('anthropic', messages);
         return {
           response: textBlocks.join('\n').trim() || 'No response generated.',
           thoughts,
           toolCalls,
           stopReason: lastStopReason,
+          dissentingOpinion: lastDissentingOpinion,
         };
       }
 
       const toolResults: Array<{ type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }> = [];
 
       for (const use of toolUseBlocks) {
-        const toolResult = await executeTool(use.name, use.input, toolContext);
+        const toolResult = await executeTool(use.name, use.input, toolContext as ToolContext);
         const contentStr =
           toolResult.success
             ? JSON.stringify(toolResult.data, null, 2)
@@ -363,8 +400,9 @@ export async function runSupervisor(
           result: resultSummary,
         });
         const data = toolResult.success ? (toolResult.data as Record<string, unknown>) : undefined;
+        if (data?.dissentingOpinion != null) lastDissentingOpinion = data.dissentingOpinion;
         const reasoningChain = data?.reasoningChain as { plan?: string; verification?: { passed: boolean; checks: string[] } } | undefined;
-        fireReasoningStep({
+        await fireReasoningStep({
           stepType: 'tool',
           timestamp: new Date().toISOString(),
           toolName: use.name,
@@ -374,7 +412,7 @@ export async function runSupervisor(
           ruleApplied: reasoningChain?.plan,
           verificationResult: reasoningChain?.verification,
         });
-        fireObservationPersisted(use.name, resultSummary);
+        await fireObservationPersisted(use.name, resultSummary);
         toolResults.push({
           type: 'tool_result',
           tool_use_id: use.id,
@@ -383,11 +421,23 @@ export async function runSupervisor(
         });
       }
 
+      const step1Conf = (toolContext as { step1Output?: { confidence?: number } }).step1Output?.confidence;
+      if (step1Conf != null && shouldEscalateToHuman(step1Conf)) {
+        fireMessageHistoryPersisted('anthropic', messages);
+        return {
+          response: 'Low confidence in the input data. Please review the trial balance and confirm any missing bank statements or identity details before proceeding.',
+          thoughts,
+          toolCalls,
+          stopReason: 'low_confidence',
+          dissentingOpinion: lastDissentingOpinion,
+        };
+      }
+
       messages.push({
         role: 'user',
         content: toolResults,
       });
-      fireMessageHistoryPersisted('anthropic', messages);
+      await fireMessageHistoryPersisted('anthropic', messages);
     }
   }
 
@@ -414,7 +464,8 @@ export async function runSupervisor(
       messagesO.push(msg as Record<string, unknown>);
       const toolCallsResp = msg.tool_calls ?? [];
       if (!toolCallsResp.length) {
-        return { response: msg.content?.trim() ?? '', thoughts, toolCalls, stopReason: 'end_turn' };
+        await fireMessageHistoryPersisted('openai', messagesO);
+        return { response: msg.content?.trim() ?? '', thoughts, toolCalls, stopReason: 'end_turn', dissentingOpinion: lastDissentingOpinion };
       }
       for (const call of toolCallsResp) {
         const name = call.function?.name;
@@ -424,12 +475,13 @@ export async function runSupervisor(
         } catch {
           inputObj = {};
         }
-        const result = await executeTool(name, inputObj, toolContext);
+        const result = await executeTool(name, inputObj, toolContext as ToolContext);
         const resultStr = result.success ? JSON.stringify(result.data).slice(0, 2000) : `Error: ${result.error}`;
         toolCalls.push({ name, input: inputObj, result: resultStr });
         const data = result.success ? (result.data as Record<string, unknown>) : undefined;
+        if (data?.dissentingOpinion != null) lastDissentingOpinion = data.dissentingOpinion;
         const reasoningChain = data?.reasoningChain as { plan?: string; verification?: { passed: boolean; checks: string[] } } | undefined;
-        fireReasoningStep({
+        await fireReasoningStep({
           stepType: 'tool',
           timestamp: new Date().toISOString(),
           toolName: name,
@@ -439,7 +491,7 @@ export async function runSupervisor(
           ruleApplied: reasoningChain?.plan,
           verificationResult: reasoningChain?.verification,
         });
-        fireObservationPersisted(name, resultStr);
+        await fireObservationPersisted(name, resultStr);
         messagesO.push({
           role: 'tool',
           tool_call_id: call.id,
@@ -448,10 +500,20 @@ export async function runSupervisor(
             : `Error: ${result.error}`,
         });
       }
-      fireMessageHistoryPersisted('openai', messagesO);
+      const step1ConfO = (toolContext as { step1Output?: { confidence?: number } }).step1Output?.confidence;
+      if (step1ConfO != null && shouldEscalateToHuman(step1ConfO)) {
+        return {
+          response: 'Low confidence in the input data. Please review the trial balance and confirm any missing bank statements or identity details before proceeding.',
+          thoughts,
+          toolCalls,
+          stopReason: 'low_confidence',
+          dissentingOpinion: lastDissentingOpinion,
+        };
+      }
+      await fireMessageHistoryPersisted('openai', messagesO);
     }
-    fireMessageHistoryPersisted('openai', messagesO);
-    return { response: 'Reached maximum iterations.', thoughts, toolCalls, stopReason: 'max_iterations' };
+    await fireMessageHistoryPersisted('openai', messagesO);
+    return { response: 'Reached maximum iterations.', thoughts, toolCalls, stopReason: 'max_iterations', dissentingOpinion: lastDissentingOpinion };
   }
 
   if (provider === 'mistral') {
@@ -477,8 +539,8 @@ export async function runSupervisor(
       messagesM.push(msg as Record<string, unknown>);
       const toolCallsResp = msg.tool_calls ?? [];
       if (!toolCallsResp.length) {
-        fireMessageHistoryPersisted('mistral', messagesM);
-        return { response: msg.content?.trim() ?? '', thoughts, toolCalls, stopReason: 'end_turn' };
+        await fireMessageHistoryPersisted('mistral', messagesM);
+        return { response: msg.content?.trim() ?? '', thoughts, toolCalls, stopReason: 'end_turn', dissentingOpinion: lastDissentingOpinion };
       }
       for (const call of toolCallsResp) {
         const name = call.function?.name;
@@ -488,12 +550,13 @@ export async function runSupervisor(
         } catch {
           inputObj = {};
         }
-        const result = await executeTool(name, inputObj, toolContext);
+        const result = await executeTool(name, inputObj, toolContext as ToolContext);
         const resultStr = result.success ? JSON.stringify(result.data).slice(0, 2000) : `Error: ${result.error}`;
         toolCalls.push({ name, input: inputObj, result: resultStr });
         const data = result.success ? (result.data as Record<string, unknown>) : undefined;
+        if (data?.dissentingOpinion != null) lastDissentingOpinion = data.dissentingOpinion;
         const reasoningChain = data?.reasoningChain as { plan?: string; verification?: { passed: boolean; checks: string[] } } | undefined;
-        fireReasoningStep({
+        await fireReasoningStep({
           stepType: 'tool',
           timestamp: new Date().toISOString(),
           toolName: name,
@@ -503,7 +566,7 @@ export async function runSupervisor(
           ruleApplied: reasoningChain?.plan,
           verificationResult: reasoningChain?.verification,
         });
-        fireObservationPersisted(name, resultStr);
+        await fireObservationPersisted(name, resultStr);
         messagesM.push({
           role: 'tool',
           tool_call_id: call.id,
@@ -512,10 +575,20 @@ export async function runSupervisor(
             : `Error: ${result.error}`,
         });
       }
-      fireMessageHistoryPersisted('mistral', messagesM);
+      const step1ConfM = (toolContext as { step1Output?: { confidence?: number } }).step1Output?.confidence;
+      if (step1ConfM != null && shouldEscalateToHuman(step1ConfM)) {
+        return {
+          response: 'Low confidence in the input data. Please review the trial balance and confirm any missing bank statements or identity details before proceeding.',
+          thoughts,
+          toolCalls,
+          stopReason: 'low_confidence',
+          dissentingOpinion: lastDissentingOpinion,
+        };
+      }
+      await fireMessageHistoryPersisted('mistral', messagesM);
     }
-    fireMessageHistoryPersisted('mistral', messagesM);
-    return { response: 'Reached maximum iterations.', thoughts, toolCalls, stopReason: 'max_iterations' };
+    await fireMessageHistoryPersisted('mistral', messagesM);
+    return { response: 'Reached maximum iterations.', thoughts, toolCalls, stopReason: 'max_iterations', dissentingOpinion: lastDissentingOpinion };
   }
 
   const lastAssistant = messages.filter((m) => m.role === 'assistant').pop();
@@ -533,5 +606,6 @@ export async function runSupervisor(
     thoughts,
     toolCalls,
     stopReason: lastStopReason,
+    dissentingOpinion: lastDissentingOpinion,
   };
 }

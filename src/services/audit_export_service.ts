@@ -77,6 +77,12 @@ export async function registerStatementGeneration(
     revenueRationales?: RevenueRationaleEntry[];
   } = {}
 ): Promise<void> {
+  // Accounting Kill Switch: never register statements that fail (A) or (B).
+  validateTrialBalanceAndBalanceSheet(
+    statements.trialBalance ?? { entries: [], totalDebits: 0, totalCredits: 0 },
+    statements.balanceSheet
+  );
+
   const id = () => `gen-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   const registeredAt = new Date().toISOString();
   const payload: StoredStatementGeneration = {
@@ -227,6 +233,12 @@ export async function buildAuditBinder(options: BuildAuditBinderOptions): Promis
   if (!statements) {
     return binder;
   }
+
+  // Accounting Kill Switch: never return financials that fail (A) or (B). Throw so route returns 422.
+  validateTrialBalanceAndBalanceSheet(
+    statements.trialBalance ?? { entries: [], totalDebits: 0, totalCredits: 0 },
+    statements.balanceSheet
+  );
 
   const sourceDocumentId = stored?.sourceDocumentId ?? 'unknown';
   const sourceDocumentName = stored?.sourceDocumentName ?? 'Source document';

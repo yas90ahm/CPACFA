@@ -213,6 +213,93 @@ class ValidationError(Exception):
     pass
 
 
+# --- Accounting Kill Switch: exact imbalance for 422 Unprocessable Entity ---
+class MathematicalIntegrityError(Exception):
+    """
+    Raised when (A) Sum(Debits) != Sum(Credits) or (B) Total Assets != Total Liabilities + Total Equity.
+    API must return 422 with imbalance_amount so the system knows the data is illegal for a CPA.
+    """
+
+    def __init__(
+        self,
+        check: str,
+        imbalance_amount: Decimal,
+        *,
+        total_debits: Optional[Decimal] = None,
+        total_credits: Optional[Decimal] = None,
+        total_assets: Optional[Decimal] = None,
+        total_liabilities: Optional[Decimal] = None,
+        total_equity: Optional[Decimal] = None,
+    ):
+        self.check = check  # "A" | "B"
+        self.imbalance_amount = imbalance_amount
+        self.total_debits = total_debits
+        self.total_credits = total_credits
+        self.total_assets = total_assets
+        self.total_liabilities = total_liabilities
+        self.total_equity = total_equity
+        if check == "A":
+            msg = (
+                f"Trial balance does not balance: Sum(Debits) != Sum(Credits). "
+                f"Imbalance: {imbalance_amount}. Data is illegal for a CPA."
+            )
+        else:
+            msg = (
+                f"Balance sheet equation violated: Total Assets != Total Liabilities + Total Equity. "
+                f"Imbalance: {imbalance_amount}. Data is illegal for a CPA."
+            )
+        super().__init__(msg)
+
+
+DEFAULT_TOLERANCE = Decimal("0.01")
+
+
+def build_validated_statements(
+    gl: GeneralLedger,
+    as_of: date,
+    coa: ChartOfAccounts,
+    period_start: Optional[date] = None,
+    period_end: Optional[date] = None,
+    tolerance: Decimal = DEFAULT_TOLERANCE,
+) -> tuple[TrialBalance, BalanceSheet, IncomeStatement]:
+    """
+    Unified validated builder: (A) Sum(Debits)==Sum(Credits), (B) Total Assets==Total Liabilities+Total Equity.
+    If either check fails, raises MathematicalIntegrityError and returns no data.
+    Returns (trial_balance, balance_sheet, income_statement).
+    """
+    gl.assert_no_pending_before_statements()
+    tb = gl.trial_balance(as_of, coa)
+
+    # Check (A): Sum(Debits) == Sum(Credits)
+    if abs(tb.total_debits - tb.total_credits) > tolerance:
+        imbalance = abs(tb.total_debits - tb.total_credits)
+        raise MathematicalIntegrityError(
+            "A",
+            imbalance,
+            total_debits=tb.total_debits,
+            total_credits=tb.total_credits,
+        )
+
+    bs = gl.balance_sheet(as_of, coa)
+
+    # Check (B): Total Assets == Total Liabilities + Total Equity
+    rhs = bs.total_liabilities + bs.total_equity
+    if abs(bs.total_assets - rhs) > tolerance:
+        imbalance = abs(bs.total_assets - rhs)
+        raise MathematicalIntegrityError(
+            "B",
+            imbalance,
+            total_assets=bs.total_assets,
+            total_liabilities=bs.total_liabilities,
+            total_equity=bs.total_equity,
+        )
+
+    period_end = period_end or as_of
+    period_start = period_start or period_end
+    is_ = gl.income_statement(period_start, period_end, coa)
+    return tb, bs, is_
+
+
 def validate_balance_sheet(bs: BalanceSheet, tolerance: Decimal = Decimal("0.02")) -> None:
     """Raises ValidationError if Assets != Liabilities + Equity."""
     rhs = bs.total_liabilities + bs.total_equity

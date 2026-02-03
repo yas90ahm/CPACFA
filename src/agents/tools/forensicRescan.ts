@@ -5,7 +5,7 @@
 
 import { z } from 'zod';
 import { parseTrialBalance } from '../../services/trialBalanceParser.js';
-import { buildFinancialStatements } from '../../services/financialStatements.js';
+import { buildValidatedStatements } from '../../services/financialStatements.js';
 import { runPlanExecuteVerifyAgentic } from '../../services/agentic_plan_execute_verify.js';
 import type { ToolDefinition, ToolResult } from './types.js';
 
@@ -55,7 +55,7 @@ export async function runForensicRescan(input: ForensicRescanInput): Promise<Too
   try {
     const parsed = forensicRescanSchema.parse(input);
     const trialBalance = parseTrialBalance(parsed.entries);
-    const { balanceSheet, profitAndLoss } = await buildFinancialStatements(trialBalance);
+    const { balanceSheet, profitAndLoss } = await buildValidatedStatements(trialBalance);
     const reasoningChain = await runPlanExecuteVerifyAgentic({
       trialBalance,
       balanceSheet,

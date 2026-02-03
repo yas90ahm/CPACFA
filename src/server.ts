@@ -30,7 +30,7 @@ import supervisorRouter from './routes/supervisor.js';
 import memoryRouter from './routes/memory.js';
 import integrationsRouter from './routes/integrations.js';
 import pipelinesRouter from './routes/pipelines.js';
-import closeRouter from './routes/close.js';
+import closeRouter from './routes/close/index.js';
 import forecastingRouter from './routes/forecasting.js';
 import capitalRouter from './routes/capital.js';
 import enterpriseRouter from './routes/enterprise.js';

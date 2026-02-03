@@ -8,7 +8,7 @@
 
 import type { Pool } from 'pg';
 import { getAdjustedTrialBalance } from './adjusted_trial_balance_service.js';
-import { buildFinancialStatements } from './financialStatements.js';
+import { buildValidatedStatements } from './financialStatements.js';
 import type { TrialBalanceResult } from '../types/financial.js';
 
 export interface AccountingContextSnapshot {
@@ -58,7 +58,7 @@ export async function getHistoricalSnapshotFromCPA(
       errors: [],
     };
 
-    const { balanceSheet, profitAndLoss } = buildFinancialStatements(trialBalance);
+    const { balanceSheet, profitAndLoss } = buildValidatedStatements(trialBalance);
     const totalRevenue = profitAndLoss.totalRevenue ?? 0;
     const netIncome = profitAndLoss.netIncome ?? 0;
     const totalAssets = balanceSheet.totalAssets ?? 0;

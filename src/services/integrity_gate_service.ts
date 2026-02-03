@@ -1,7 +1,7 @@
 /**
  * Integrity Gate — Hard Gate middleware that runs after any Agentic adjustment.
  *
- * Performs deterministic checks:
+ * Performs deterministic checks (rules from shared/config/financial_rules.json):
  * 1. Sum(Debits) == Sum(Credits) (trial balance)
  * 2. Assets == Liabilities + Equity (balance sheet equation)
  *
@@ -10,12 +10,11 @@
  */
 
 import { absGt } from '../utils/decimal.js';
+import { getRoundingTolerance } from './rules_registry.js';
 
 /** Error returned to the Agent when the gate fails; response must not reach the user. */
 export const INTEGRITY_GATE_CRITICAL_MESSAGE =
   'CRITICAL: Your proposed adjustment unbalances the ledger. Re-calculating.';
-
-const DEFAULT_TOLERANCE = 0.01;
 
 export interface IntegrityGateTrialBalanceInput {
   totalDebits: number;
@@ -35,7 +34,7 @@ export interface IntegrityGateBalanceSheetInput {
 export interface IntegrityGateInput {
   trialBalance: IntegrityGateTrialBalanceInput | IntegrityGateTrialBalanceFromEntries;
   balanceSheet: IntegrityGateBalanceSheetInput;
-  /** Tolerance for floating-point comparison (default 0.01). */
+  /** Tolerance for floating-point comparison; when omitted, uses shared/config/financial_rules.json roundingTolerance. */
   tolerance?: number;
 }
 
@@ -74,7 +73,7 @@ function getTrialBalanceTotals(
  * CRITICAL message so the response can be intercepted before reaching the user.
  */
 export function runIntegrityGate(input: IntegrityGateInput): IntegrityGateResult {
-  const tolerance = input.tolerance ?? DEFAULT_TOLERANCE;
+  const tolerance = input.tolerance ?? getRoundingTolerance();
   const { totalDebits, totalCredits } = getTrialBalanceTotals(input.trialBalance);
   const { totalAssets, totalLiabilities, totalEquity } = input.balanceSheet;
 

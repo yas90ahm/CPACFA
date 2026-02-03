@@ -163,6 +163,8 @@ export interface SupervisorWithSkepticOutput {
   consensus?: 'no_error' | 'correction_accepted';
   /** Original Supervisor response (before Skeptic). */
   supervisorResponse: string;
+  /** When Supervisor (e.g. step3Supervisor) detected CPA vs CFA conflict. */
+  dissentingOpinion?: unknown;
 }
 
 /**
@@ -191,6 +193,7 @@ export async function runSupervisorWithSkeptic(
       finalReport: supervisorOutput.response,
       skepticReviewed: true,
       supervisorResponse: supervisorOutput.response,
+      dissentingOpinion: supervisorOutput.dissentingOpinion,
     };
   }
 
@@ -206,5 +209,6 @@ export async function runSupervisorWithSkeptic(
     skepticFinding: review.finding,
     consensus: discussion.consensus,
     supervisorResponse: supervisorOutput.response,
+    dissentingOpinion: supervisorOutput.dissentingOpinion,
   };
 }

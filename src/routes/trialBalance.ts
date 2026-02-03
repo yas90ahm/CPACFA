@@ -7,7 +7,7 @@ import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import { parseTrialBalance } from '../services/trialBalanceParser.js';
 import { ingestTrialBalanceFile, SUPPORTED_MIMES } from '../services/fileIngestion.js';
-import { buildFinancialStatements } from '../services/financialStatements.js';
+import { buildValidatedStatements, MathematicalIntegrityError } from '../services/financialStatements.js';
 import { generateStatements } from '../services/statementGenerator.js';
 import { buildCashFlowStatement, buildCashFlowFromTransactions } from '../services/cashFlow.js';
 import { buildEquityChangesStatement } from '../services/equityChanges.js';
@@ -37,8 +37,27 @@ import type { Pool } from 'pg';
 import type { StatementGeneratorOptions } from '../services/statementGenerator.js';
 import { assertPeriodNotLocked, PeriodLockedError } from '../services/period_lock_service.js';
 import { appendAuditLog } from '../services/audit_log_service.js';
-import { validateBody } from '../middleware/validateRequest.js';
-import { statementsBodySchema } from '../schemas/trialBalanceSchemas.js';
+import { validateBody, requireValidTenantId } from '../middleware/validationMiddleware.js';
+import {
+  ingestBodySchema,
+  type IngestBody,
+  classificationSuggestionsBodySchema,
+  type ClassificationSuggestionsBody,
+  applyClassificationBodySchema,
+  type ApplyClassificationBody,
+} from '../schemas/request/trialBalance.js';
+import {
+  statementsBodySchema,
+  cashFlowNarrativeBodySchema,
+  notesNarrativeBodySchema,
+  confirmStandardBodySchema,
+  equityChangesNarrativeBodySchema,
+  type StatementsBody,
+  type CashFlowNarrativeBody,
+  type NotesNarrativeBody,
+  type ConfirmStandardBody,
+  type EquityChangesNarrativeBody,
+} from '../schemas/trialBalanceSchemas.js';
 import { loadCloseContext } from '../services/close_context.js';
 import { getPrecedentForCloseStep, toSimilarPrecedentSummary } from '../services/precedent_for_close_step.js';
 import { runProfessionalReview } from '../services/professional_review_service.js';
@@ -84,7 +103,7 @@ const upload = multer({
  * so the user can Pause, refresh, and see the same Action Card to approve the AI's cleanup.
  * Returns: FinancialStatementsOutput (Reasoning Chain + TB + BS + P&L)
  */
-router.post('/ingest', upload.single('file'), async (req: Request, res: Response) => {
+router.post('/ingest', upload.single('file'), requireValidTenantId, validateBody(ingestBodySchema), async (req: Request, res: Response) => {
   try {
     const file = req.file;
     if (!file) {
@@ -101,6 +120,12 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
     const ingestSessionId = hasTenantContext
       ? `ingest-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
       : null;
+    // Validate server-generated sessionId format (ingest-{timestamp}-{random})
+    if (ingestSessionId && !/^ingest-\d+-[a-z0-9]+$/.test(ingestSessionId)) {
+      console.error('Invalid sessionId format generated:', ingestSessionId);
+      res.status(500).json({ error: 'Internal error', message: 'Session ID generation failed' });
+      return;
+    }
 
     let uploadId: string | null = null;
     if (hasTenantContext && ingestSessionId) {
@@ -142,32 +167,12 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
     }
 
     const trialBalance = parseTrialBalance(rawRows);
-    const body = req.body as {
-      standard?: string;
-      fullSet?: string;
-      comparative?: string | boolean;
-      country?: string;
-      jurisdiction?: string;
-      currency?: string;
-      taxId?: string;
-      businessNumber?: string;
-      entityId?: string;
-      publiclyAccountable?: boolean;
-      prior_entries?: RawTrialBalanceRow[] | string;
-      transactions?: string;
-      periodLabel?: string;
-      /** When true, use agentic classification for statement build (legacy behavior). Default false = deterministic-first. */
-      useAgenticClassification?: boolean;
-      /** Optional raw contract narrative(s) for substance-over-form (embedded lease) assessment. */
-      contractText?: string | string[];
-      /** Optional lease document narrative(s) for substance-over-form (embedded lease) assessment. */
-      leaseDocuments?: string | string[];
-    };
-    const fullSetIngest = body?.fullSet === 'false' ? false : true;
-    const comparativeIngest = body?.comparative === true || body?.comparative === 'true';
+    const body: IngestBody = req.body;
+    const fullSetIngest = body.fullSet === false ? false : true;
+    const comparativeIngest = body.comparative === true;
     let priorTrialBalanceIngest: import('../types/financial.js').TrialBalanceResult | undefined;
     if (fullSetIngest && comparativeIngest) {
-      const priorEntriesRaw = body?.prior_entries;
+      const priorEntriesRaw = body.prior_entries;
       const priorRows =
         Array.isArray(priorEntriesRaw) ? priorEntriesRaw
         : typeof priorEntriesRaw === 'string'
@@ -182,62 +187,62 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
       }
       priorTrialBalanceIngest = parseTrialBalance(priorRows);
     }
-    if (body?.periodLabel) {
+    if (body.periodLabel) {
       const tenantId = getTenantId(req);
       const pool = getTenantPool(req);
       await assertPeriodNotLocked(body.periodLabel, tenantId ?? undefined, pool);
     }
-    const transactions = parseTransactions(body?.transactions);
+    const transactions = parseTransactions(body.transactions);
     const categorizedTransactions =
       transactions && transactions.length > 0
         ? attachCategories(
             transactions,
-            await classifyTransactionsAgentic(transactions, { entityId: body?.entityId })
+            await classifyTransactionsAgentic(transactions, { entityId: body.entityId })
           )
         : undefined;
-    const explicitStandard = normalizeStandard(body?.standard);
+    const explicitStandard = normalizeStandard(body.standard);
     let standard =
       explicitStandard ??
       await inferAccountingStandard({
         standard: explicitStandard,
-        entityId: body?.entityId,
-        country: body?.country,
-        jurisdiction: body?.jurisdiction,
-        currency: body?.currency,
-        taxId: body?.taxId,
-        businessNumber: body?.businessNumber,
-        publiclyAccountable: body?.publiclyAccountable,
-        periodLabel: (body as { periodLabel?: string })?.periodLabel,
+        entityId: body.entityId,
+        country: body.country,
+        jurisdiction: body.jurisdiction,
+        currency: body.currency,
+        taxId: body.taxId,
+        businessNumber: body.businessNumber,
+        publiclyAccountable: body.publiclyAccountable,
+        periodLabel: body.periodLabel,
         pool: poolIngest ?? undefined,
         tenantId: tenantIdIngest ?? undefined,
       });
     const standardInference = !standard
       ? await inferStandardAgentic({
-          country: body?.country,
-          jurisdiction: body?.jurisdiction,
-          currency: body?.currency,
-          taxId: body?.taxId,
-          businessNumber: body?.businessNumber,
+          country: body.country,
+          jurisdiction: body.jurisdiction,
+          currency: body.currency,
+          taxId: body.taxId,
+          businessNumber: body.businessNumber,
         })
       : null;
     // Trial-balance-first flow: default to inferred or US_GAAP so upload always proceeds; review follows
     if (!standard) {
       standard = standardInference?.standard ?? 'US_GAAP';
     }
-    if (body?.entityId) {
+    if (body.entityId) {
       const opts = poolIngest && tenantIdIngest ? { pool: poolIngest, tenantId: tenantIdIngest } : undefined;
       await updatePolicyMemory(body.entityId, {
         ...(standard ? { standard } : {}),
         ...(body.publiclyAccountable !== undefined ? { publiclyAccountable: body.publiclyAccountable } : {}),
-        country: body?.country,
-        jurisdiction: body?.jurisdiction,
-        currency: body?.currency,
-        taxId: body?.taxId,
-        businessNumber: body?.businessNumber,
+        country: body.country,
+        jurisdiction: body.jurisdiction,
+        currency: body.currency,
+        taxId: body.taxId,
+        businessNumber: body.businessNumber,
       }, undefined, opts);
     }
-    const fullSet = body?.fullSet === 'false' ? false : true;
-    const useAgenticClassification = body?.useAgenticClassification === true || body?.useAgenticClassification === 'true';
+    const fullSet = body.fullSet === false ? false : true;
+    const useAgenticClassification = body.useAgenticClassification === true;
     let preClassified: import('../types/financial.js').TrialBalanceEntry[] | undefined;
     let priorPreClassified: import('../types/financial.js').TrialBalanceEntry[] | undefined;
     if (useAgenticClassification) {
@@ -294,12 +299,12 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
 
     const base = standard
       ? await generateStatements(trialBalanceForBuild, standard, body.periodLabel && tenantIdIngest ? { ...stmtOpts, preClassifiedEntries: undefined } : stmtOpts)
-      : await buildFinancialStatements(trialBalanceForBuild, body.periodLabel && tenantIdIngest ? undefined : buildOpts);
+      : await buildValidatedStatements(trialBalanceForBuild, body.periodLabel && tenantIdIngest ? undefined : buildOpts);
     const { balanceSheet, profitAndLoss } = base;
     const classifiedEntries = base.classifiedEntries;
     const standardMetadata = 'standardMetadata' in base ? base.standardMetadata : undefined;
     const priorBalanceSheetIngest = priorTrialBalanceIngest
-      ? (await buildFinancialStatements(priorTrialBalanceIngest, priorPreClassified?.length === priorTrialBalanceIngest.entries.length ? { preClassifiedEntries: priorPreClassified } : undefined)).balanceSheet
+      ? (await buildValidatedStatements(priorTrialBalanceIngest, priorPreClassified?.length === priorTrialBalanceIngest.entries.length ? { preClassifiedEntries: priorPreClassified } : undefined)).balanceSheet
       : undefined;
     const cashFlow = fullSet
       ? categorizedTransactions && categorizedTransactions.length > 0
@@ -344,7 +349,7 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
 
     // Run configurable data quality rules on TB/BS and persist exceptions when tenant context exists
     if (authReq.tenantId && authReq.tenantPool) {
-      const periodLabel = (body as { periodLabel?: string })?.periodLabel ?? `ingest-${new Date().toISOString().slice(0, 10)}`;
+      const periodLabel = body.periodLabel ?? `ingest-${new Date().toISOString().slice(0, 10)}`;
       const ctx: RuleEvaluationContext = {
         scope: 'balance_sheet',
         periodLabel,
@@ -360,16 +365,16 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
       runRulesAndPersistExceptions(authReq.tenantPool, authReq.tenantId, ctx).catch(() => {});
     }
 
-    const periodLabelIngest = (body as { periodLabel?: string })?.periodLabel ?? `ingest-${new Date().toISOString().slice(0, 10)}`;
+    const periodLabelIngest = body.periodLabel ?? `ingest-${new Date().toISOString().slice(0, 10)}`;
     const meta = {
       standard,
-      entityId: body?.entityId,
+      entityId: body.entityId,
       periodLabel: periodLabelIngest,
-      country: body?.country,
-      jurisdiction: body?.jurisdiction,
-      currency: body?.currency,
-      taxId: body?.taxId,
-      businessNumber: body?.businessNumber,
+      country: body.country,
+      jurisdiction: body.jurisdiction,
+      currency: body.currency,
+      taxId: body.taxId,
+      businessNumber: body.businessNumber,
       ...(categorizedTransactions ? { transactions: categorizedTransactions } : {}),
       fullSet,
     };
@@ -413,9 +418,9 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
 
     // Mandatory similar precedent for close step (auditability)
     const precedentResult = getPrecedentForCloseStep('trial_balance_ingest', {
-      entityId: body?.entityId,
-      currentPeriodLabel: (body as { periodLabel?: string })?.periodLabel,
-      priorPeriodLabel: (body as { prior_period_label?: string })?.prior_period_label,
+      entityId: body.entityId,
+      currentPeriodLabel: body.periodLabel,
+      priorPeriodLabel: body.prior_period_label,
       standard,
     });
     const similarPrecedent = toSimilarPrecedentSummary('trial_balance_ingest', precedentResult);
@@ -511,6 +516,15 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
       );
       return res.status(403).json({ error: 'Period locked', periodLabel: err.periodLabel });
     }
+    if (err instanceof MathematicalIntegrityError) {
+      return res.status(422).json({
+        error: 'MathematicalIntegrityError',
+        message: err.message,
+        check: err.check,
+        imbalanceAmount: err.imbalanceAmount,
+        details: err.details,
+      });
+    }
     const message = err instanceof Error ? err.message : 'Ingestion failed';
     res.status(400).json({ error: 'Ingestion error', message });
   }
@@ -521,15 +535,10 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
  * Body: { cashFlowStatement: CashFlowStatement, periodLabel?: string }
  * Returns: { narrative: string } — agentic driver narrative for the cash flow statement.
  */
-router.post('/cash-flow-narrative', async (req: Request, res: Response) => {
+router.post('/cash-flow-narrative', validateBody(cashFlowNarrativeBodySchema), async (req: Request, res: Response) => {
   try {
-    const body = req.body as { cashFlowStatement?: { operating?: { label: string; amount: number }[]; investing?: { label: string; amount: number }[]; financing?: { label: string; amount: number }[]; netChangeInCash?: number; beginningCash?: number; endingCash?: number }; periodLabel?: string };
-    const cfs = body?.cashFlowStatement;
-    if (!cfs || !Array.isArray(cfs.operating)) {
-      res.status(400).json({ error: 'Missing cashFlowStatement', message: 'Body must include cashFlowStatement with at least operating array.' });
-      return;
-    }
-    const narrative = await generateCashFlowNarrativeAgentic(cfs as import('../types/financial.js').CashFlowStatement, body.periodLabel);
+    const body: CashFlowNarrativeBody = req.body;
+    const narrative = await generateCashFlowNarrativeAgentic(body.cashFlowStatement as import('../types/financial.js').CashFlowStatement, body.periodLabel);
     res.json({ narrative });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
@@ -542,15 +551,10 @@ router.post('/cash-flow-narrative', async (req: Request, res: Response) => {
  * Body: { standard: ASPE|IFRS|FRS102|US_GAAP, context?: string }
  * Returns: { narrative: string } — entity-specific notes narrative for MD&A or note header.
  */
-router.post('/notes-narrative', async (req: Request, res: Response) => {
+router.post('/notes-narrative', validateBody(notesNarrativeBodySchema), async (req: Request, res: Response) => {
   try {
-    const body = req.body as { standard?: string; context?: string };
-    const standard = body?.standard as 'ASPE' | 'IFRS' | 'FRS102' | 'US_GAAP' | undefined;
-    if (!standard || !['ASPE', 'IFRS', 'FRS102', 'US_GAAP'].includes(standard)) {
-      res.status(400).json({ error: 'Missing or invalid standard', message: 'Body must include standard: ASPE, IFRS, FRS102, or US_GAAP.' });
-      return;
-    }
-    const narrative = await generateNotesNarrativeAgentic(standard, body.context);
+    const body: NotesNarrativeBody = req.body;
+    const narrative = await generateNotesNarrativeAgentic(body.standard, body.context);
     res.json({ narrative });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
@@ -563,16 +567,9 @@ router.post('/notes-narrative', async (req: Request, res: Response) => {
  * Body: { entityId: string; standard: 'ASPE' | 'IFRS' | 'FRS102' | 'US_GAAP'; fiscalYear?: string }
  * Persists the confirmed standard to policy memory so subsequent statement generation uses it (no re-infer). Returns success.
  */
-router.post('/confirm-standard', async (req: Request, res: Response) => {
+router.post('/confirm-standard', validateBody(confirmStandardBodySchema), async (req: Request, res: Response) => {
   try {
-    const body = req.body as { entityId?: string; standard?: 'ASPE' | 'IFRS' | 'FRS102' | 'US_GAAP'; fiscalYear?: string };
-    if (!body?.entityId || !body?.standard) {
-      res.status(400).json({
-        error: 'Missing entityId or standard',
-        message: 'Body must include entityId and standard (ASPE, IFRS, FRS102, US_GAAP).',
-      });
-      return;
-    }
+    const body: ConfirmStandardBody = req.body;
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
     const opts = pool && tenantId ? { pool, tenantId } : undefined;
@@ -596,21 +593,13 @@ router.post('/confirm-standard', async (req: Request, res: Response) => {
  * Body: { entries: { accountName: string; debit: number; credit: number }[] }
  * Returns deterministic classification plus agentic suggested overrides (diff only). Do not apply suggestions to statement build until user confirms.
  */
-router.post('/classification-suggestions', async (req: Request, res: Response) => {
+router.post('/classification-suggestions', validateBody(classificationSuggestionsBodySchema), async (req: Request, res: Response) => {
   try {
-    const body = req.body as { entries?: { accountName: string; debit: number; credit: number }[] };
-    const raw = body?.entries;
-    if (!Array.isArray(raw) || raw.length === 0) {
-      res.status(400).json({
-        error: 'Missing entries',
-        message: 'Body must include entries (array of { accountName, debit, credit }).',
-      });
-      return;
-    }
-    const entries: TrialBalanceEntry[] = raw.map((e) => ({
+    const body: ClassificationSuggestionsBody = req.body;
+    const entries: TrialBalanceEntry[] = body.entries.map((e) => ({
       accountName: e.accountName,
-      debit: Number(e.debit) || 0,
-      credit: Number(e.credit) || 0,
+      debit: e.debit,
+      credit: e.credit,
     }));
     const result = await getClassificationSuggestions(entries);
     res.json(result);
@@ -625,27 +614,15 @@ router.post('/classification-suggestions', async (req: Request, res: Response) =
  * Body: { entries: { accountName, debit, credit }[]; overrides: { index: number; accountType: AccountType; rationale?: string }[] }
  * Returns entries with deterministic base + user-confirmed overrides applied. Use returned entries for subsequent statement build (e.g. preClassifiedEntries).
  */
-router.post('/apply-classification', async (req: Request, res: Response) => {
+router.post('/apply-classification', validateBody(applyClassificationBodySchema), async (req: Request, res: Response) => {
   try {
-    const body = req.body as {
-      entries?: { accountName: string; debit: number; credit: number }[];
-      overrides?: { index: number; accountType: AccountType; rationale?: string }[];
-    };
-    const raw = body?.entries;
-    const overrides = body?.overrides ?? [];
-    if (!Array.isArray(raw) || raw.length === 0) {
-      res.status(400).json({
-        error: 'Missing entries',
-        message: 'Body must include entries (array of { accountName, debit, credit }).',
-      });
-      return;
-    }
-    const entries: TrialBalanceEntry[] = raw.map((e) => ({
+    const body: ApplyClassificationBody = req.body;
+    const entries: TrialBalanceEntry[] = body.entries.map((e) => ({
       accountName: e.accountName,
-      debit: Number(e.debit) || 0,
-      credit: Number(e.credit) || 0,
+      debit: e.debit,
+      credit: e.credit,
     }));
-    const classified = applyUserClassificationOverrides(entries, overrides);
+    const classified = applyUserClassificationOverrides(entries, body.overrides);
     res.json({ entries: classified });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
@@ -658,15 +635,10 @@ router.post('/apply-classification', async (req: Request, res: Response) => {
  * Body: { equityChangesStatement: EquityChangesStatement }
  * Returns: { narrative: string } — agentic narrative for residual/other equity movements (empty when negligible).
  */
-router.post('/equity-changes-narrative', async (req: Request, res: Response) => {
+router.post('/equity-changes-narrative', validateBody(equityChangesNarrativeBodySchema), async (req: Request, res: Response) => {
   try {
-    const body = req.body as { equityChangesStatement?: import('../types/financial.js').EquityChangesStatement };
-    const stmt = body?.equityChangesStatement;
-    if (!stmt) {
-      res.status(400).json({ error: 'Missing equityChangesStatement', message: 'Body must include equityChangesStatement.' });
-      return;
-    }
-    const narrative = await generateEquityChangesNarrativeAgentic(stmt);
+    const body: EquityChangesNarrativeBody = req.body;
+    const narrative = await generateEquityChangesNarrativeAgentic(body.equityChangesStatement as import('../types/financial.js').EquityChangesStatement);
     res.json({ narrative });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
@@ -679,86 +651,53 @@ router.post('/equity-changes-narrative', async (req: Request, res: Response) => 
  * Body: JSON { entries: RawTrialBalanceRow[] }
  * Returns: FinancialStatementsOutput (same as ingest, for programmatic use)
  */
-router.post('/statements', async (req: Request, res: Response) => {
+router.post('/statements', validateBody(statementsBodySchema), async (req: Request, res: Response) => {
   try {
-    const body = req.body as {
-      entries?: RawTrialBalanceRow[];
-      prior_entries?: RawTrialBalanceRow[];
-      standard?: string;
-      fullSet?: boolean;
-      comparative?: boolean;
-      country?: string;
-      jurisdiction?: string;
-      currency?: string;
-      taxId?: string;
-      businessNumber?: string;
-      entityId?: string;
-      publiclyAccountable?: boolean;
-      transactions?: string;
-      periodLabel?: string;
-      /** When true, use agentic classification for statement build (legacy behavior). Default false = deterministic-first. */
-      useAgenticClassification?: boolean;
-    };
-    if (body?.periodLabel) {
+    const body: StatementsBody = req.body;
+    if (body.periodLabel) {
       const tenantId = getTenantId(req);
       const pool = getTenantPool(req);
       await assertPeriodNotLocked(body.periodLabel, tenantId ?? undefined, pool);
     }
-    const fullSetStatements = body?.fullSet !== undefined ? Boolean(body.fullSet) : true;
-    const comparativeStatements = body?.comparative === true;
-    if (fullSetStatements && comparativeStatements) {
-      if (!Array.isArray(body.prior_entries) || body.prior_entries.length === 0) {
-        res.status(400).json({
-          error: 'Prior period trial balance required for cash flow and equity roll-forward.',
-          message: 'When fullSet and comparative are true, provide prior_entries (trial balance for prior period).',
-        });
-        return;
-      }
-    }
-    const transactions = parseTransactions(body?.transactions);
+    const fullSetStatements = body.fullSet !== undefined ? Boolean(body.fullSet) : true;
+    const comparativeStatements = body.comparative === true;
+    const transactions = parseTransactions(body.transactions);
     const categorizedTransactions =
       transactions && transactions.length > 0
         ? attachCategories(
             transactions,
-            await classifyTransactionsAgentic(transactions, { entityId: body?.entityId })
+            await classifyTransactionsAgentic(transactions, { entityId: body.entityId })
           )
         : undefined;
-    const rawRows = body?.entries;
-    if (!Array.isArray(rawRows) || rawRows.length === 0) {
-      res.status(400).json({
-        error: 'Missing entries',
-        message: 'Body must be { entries: [ { accountName, debit, credit }, ... ] }.',
-      });
-      return;
-    }
+    const rawRows = body.entries;
 
     const trialBalance = parseTrialBalance(rawRows);
-    const priorTrialBalance = Array.isArray(body.prior_entries) ? parseTrialBalance(body.prior_entries) : undefined;
-    const explicitStandard = normalizeStandard(body?.standard);
+    const priorTrialBalance = body.prior_entries ? parseTrialBalance(body.prior_entries) : undefined;
+    const explicitStandard = normalizeStandard(body.standard);
     const tenantIdStmt = getTenantId(req);
     const poolStmt = getTenantPool(req);
     let standard =
       explicitStandard ??
       await inferAccountingStandard({
         standard: explicitStandard,
-        entityId: body?.entityId,
-        country: body?.country,
-        jurisdiction: body?.jurisdiction,
-        currency: body?.currency,
-        taxId: body?.taxId,
-        businessNumber: body?.businessNumber,
-        publiclyAccountable: body?.publiclyAccountable,
-        periodLabel: body?.periodLabel,
+        entityId: body.entityId,
+        country: body.country,
+        jurisdiction: body.jurisdiction,
+        currency: body.currency,
+        taxId: body.taxId,
+        businessNumber: body.businessNumber,
+        publiclyAccountable: body.publiclyAccountable,
+        periodLabel: body.periodLabel,
         pool: poolStmt ?? undefined,
         tenantId: tenantIdStmt ?? undefined,
       });
     const standardInferenceStmt = !standard
       ? await inferStandardAgentic({
-          country: body?.country,
-          jurisdiction: body?.jurisdiction,
-          currency: body?.currency,
-          taxId: body?.taxId,
-          businessNumber: body?.businessNumber,
+          country: body.country,
+          jurisdiction: body.jurisdiction,
+          currency: body.currency,
+          taxId: body.taxId,
+          businessNumber: body.businessNumber,
         })
       : null;
     if (!standard) {
@@ -772,20 +711,20 @@ router.post('/statements', async (req: Request, res: Response) => {
       });
       return;
     }
-    if (body?.entityId) {
+    if (body.entityId) {
       const opts = poolStmt && tenantIdStmt ? { pool: poolStmt, tenantId: tenantIdStmt } : undefined;
       await updatePolicyMemory(body.entityId, {
         ...(standard ? { standard } : {}),
         ...(body.publiclyAccountable !== undefined ? { publiclyAccountable: body.publiclyAccountable } : {}),
-        country: body?.country,
-        jurisdiction: body?.jurisdiction,
-        currency: body?.currency,
-        taxId: body?.taxId,
-        businessNumber: body?.businessNumber,
+        country: body.country,
+        jurisdiction: body.jurisdiction,
+        currency: body.currency,
+        taxId: body.taxId,
+        businessNumber: body.businessNumber,
       }, undefined, opts);
     }
-    const fullSet = body?.fullSet !== undefined ? Boolean(body.fullSet) : true;
-    const useAgenticClassificationStmt = body?.useAgenticClassification === true || body?.useAgenticClassification === 'true';
+    const fullSet = body.fullSet !== undefined ? Boolean(body.fullSet) : true;
+    const useAgenticClassificationStmt = body.useAgenticClassification === true;
     let preClassifiedStmt: import('../types/financial.js').TrialBalanceEntry[] | undefined;
     let priorPreClassifiedStmt: import('../types/financial.js').TrialBalanceEntry[] | undefined;
     if (useAgenticClassificationStmt) {
@@ -815,15 +754,15 @@ router.post('/statements', async (req: Request, res: Response) => {
         ? await loadCloseContext({
             pool: poolStmt,
             tenantId: tenantIdStmt,
-            entityId: body?.entityId ?? '',
-            currentPeriodLabel: body?.periodLabel ?? '',
-            priorPeriodLabel: (body as { prior_period_label?: string })?.prior_period_label,
+            entityId: body.entityId ?? '',
+            currentPeriodLabel: body.periodLabel ?? '',
+            priorPeriodLabel: body.prior_period_label,
             priorTrialBalance,
           })
         : undefined;
     const base = standard
       ? await generateStatements(trialBalance, standard, stmtOptsStmt)
-      : await buildFinancialStatements(trialBalance, buildOptsStmt);
+      : await buildValidatedStatements(trialBalance, buildOptsStmt);
     const { balanceSheet, profitAndLoss } = base;
     const classifiedEntries = base.classifiedEntries;
     const standardMetadata = 'standardMetadata' in base ? base.standardMetadata : undefined;
@@ -833,7 +772,7 @@ router.post('/statements', async (req: Request, res: Response) => {
         : buildCashFlowStatement(trialBalance, profitAndLoss, priorTrialBalance)
       : undefined;
     const priorBalanceSheet = priorTrialBalance
-      ? (await buildFinancialStatements(priorTrialBalance, priorPreClassifiedStmt?.length === priorTrialBalance.entries.length ? { preClassifiedEntries: priorPreClassifiedStmt } : undefined)).balanceSheet
+      ? (await buildValidatedStatements(priorTrialBalance, priorPreClassifiedStmt?.length === priorTrialBalance.entries.length ? { preClassifiedEntries: priorPreClassifiedStmt } : undefined)).balanceSheet
       : undefined;
     const equityChanges = fullSet ? buildEquityChangesStatement(balanceSheet, priorBalanceSheet, profitAndLoss) : undefined;
     const notesAndPolicies = fullSet && standard ? buildNotesAndPolicies(standard) : undefined;
@@ -895,13 +834,13 @@ router.post('/statements', async (req: Request, res: Response) => {
 
     const meta = {
       standard,
-      entityId: body?.entityId,
+      entityId: body.entityId,
       periodLabel: periodLabelStmt,
-      country: body?.country,
-      jurisdiction: body?.jurisdiction,
-      currency: body?.currency,
-      taxId: body?.taxId,
-      businessNumber: body?.businessNumber,
+      country: body.country,
+      jurisdiction: body.jurisdiction,
+      currency: body.currency,
+      taxId: body.taxId,
+      businessNumber: body.businessNumber,
       ...(categorizedTransactions ? { transactions: categorizedTransactions } : {}),
       fullSet,
     };
@@ -942,9 +881,9 @@ router.post('/statements', async (req: Request, res: Response) => {
 
     // Mandatory similar precedent for close step (auditability)
     const precedentResultStmt = getPrecedentForCloseStep('trial_balance_statements', {
-      entityId: body?.entityId,
-      currentPeriodLabel: body?.periodLabel,
-      priorPeriodLabel: (body as { prior_period_label?: string })?.prior_period_label,
+      entityId: body.entityId,
+      currentPeriodLabel: body.periodLabel,
+      priorPeriodLabel: body.prior_period_label,
       standard,
     });
     const similarPrecedentStmt = toSimilarPrecedentSummary('trial_balance_statements', precedentResultStmt);
@@ -961,7 +900,7 @@ router.post('/statements', async (req: Request, res: Response) => {
         professionalReviewStmt = await runProfessionalReview(
           {
             tenantId: authReqStatements.tenantId,
-            periodLabel: body?.periodLabel ?? `stmt-${new Date().toISOString().slice(0, 10)}`,
+            periodLabel: body.periodLabel ?? `stmt-${new Date().toISOString().slice(0, 10)}`,
             runId: sourceDocumentId,
             narrativeEvidenceSummary: '',
             trialBalance: { entries: output.trialBalance?.entries ?? [] },
@@ -1011,6 +950,15 @@ router.post('/statements', async (req: Request, res: Response) => {
         auditContext
       );
       return res.status(403).json({ error: 'Period locked', periodLabel: err.periodLabel });
+    }
+    if (err instanceof MathematicalIntegrityError) {
+      return res.status(422).json({
+        error: 'MathematicalIntegrityError',
+        message: err.message,
+        check: err.check,
+        imbalanceAmount: err.imbalanceAmount,
+        details: err.details,
+      });
     }
     const message = err instanceof Error ? err.message : 'Processing failed';
     res.status(400).json({ error: 'Processing error', message });
@@ -1116,7 +1064,7 @@ router.get('/period/:periodLabel/statements', async (req: Request, res: Response
     const base =
       standard && ['US_GAAP', 'IFRS', 'ASPE', 'FRS102'].includes(standard)
         ? await generateStatements(trialBalanceForBuild, standard as 'US_GAAP' | 'IFRS' | 'ASPE' | 'FRS102', stmtOpts)
-        : await buildFinancialStatements(trialBalanceForBuild);
+        : await buildValidatedStatements(trialBalanceForBuild);
     const priorTrialBalance = undefined;
     const cashFlow = fullSet ? buildCashFlowStatement(trialBalanceForBuild, base.profitAndLoss, priorTrialBalance) : undefined;
     const priorBalanceSheet = undefined;
@@ -1130,6 +1078,15 @@ router.get('/period/:periodLabel/statements', async (req: Request, res: Response
       ...('standard' in base ? { standard: base.standard } : {}),
     });
   } catch (e) {
+    if (e instanceof MathematicalIntegrityError) {
+      return res.status(422).json({
+        error: 'MathematicalIntegrityError',
+        message: e.message,
+        check: e.check,
+        imbalanceAmount: e.imbalanceAmount,
+        details: e.details,
+      });
+    }
     const message = e instanceof Error ? e.message : String(e);
     if (message.includes('No unadjusted trial balance')) {
       res.status(404).json({ error: 'No unadjusted trial balance for period', periodLabel: req.params.periodLabel });
