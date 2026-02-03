@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
+import { AuthProvider } from '@/lib/auth-context';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -15,8 +16,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'FinOS — Your CPA & CFA Partner',
-  description: 'Your agentic financial partner: audit-ready statements, justifications, and insights in one place.',
+  title: 'FinOS — Financial close & valuation',
+  description: 'Financial close, valuation, and reporting for corporate finance teams.',
 };
 
 export default function RootLayout({
@@ -26,7 +27,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
-      <body className="font-sans min-h-screen">{children}</body>
+      <body className="font-sans min-h-screen">
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }

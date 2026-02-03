@@ -4,6 +4,8 @@
  * Phase 1: DB (Postgres when DATABASE_URL set), auth (JWT), optionalAuth middleware sets req.tenantId.
  */
 
+import 'dotenv/config';
+
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
@@ -79,7 +81,11 @@ app.use(helmet());
 const corsOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)
   : (process.env.CORS_ORIGIN ? [process.env.CORS_ORIGIN] : []);
-app.use(cors(corsOrigins.length ? { origin: corsOrigins } : { origin: false }));
+// When no CORS env is set, allow local dev (frontend on 3000 calling API on 3001)
+const corsOptions = corsOrigins.length
+  ? { origin: corsOrigins }
+  : { origin: ['http://localhost:3000', 'http://127.0.0.1:3000'] };
+app.use(cors(corsOptions));
 
 app.use(express.json({ limit: '1mb' }));
 app.use(requestIdMiddleware);

@@ -3,6 +3,13 @@
  * Minimal Stage-1 implementation; integrate into flows as tools mature.
  */
 
+/**
+ * Data-grounding rule appended to every LLM system prompt so responses are based only on provided data.
+ * Reduces hallucination (inventing facts, amounts, or accounts not in the input).
+ */
+export const DATA_GROUNDING_RULE =
+  'Base your response only on the data provided in the prompt. Do not invent facts, amounts, accounts, or entities not present in the input. If the data is insufficient to answer, say so instead of guessing.';
+
 export interface ConfidenceSignals {
   hasTrialBalance: boolean;
   hasBankStatements: boolean;

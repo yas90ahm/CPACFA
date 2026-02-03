@@ -6,6 +6,8 @@ import type { Pool } from 'pg';
 
 export interface CloseChecklistTemplateStepSpec {
   label: string;
+  category?: string;
+  verificationMethod?: string;
   controlId?: string;
   dueOffsetDays?: number;
   assignee?: string;

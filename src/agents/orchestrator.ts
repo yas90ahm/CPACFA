@@ -42,7 +42,9 @@ RULES:
      "Answer: <your answer citing specific data points, e.g. 'Current cash is $X; monthly burn is $Y; runway is Z months. Burn rate is [not] sustainable because...'>"
    - If you are uncertain or lack data, output "Confidence: low" and continue with another Thought → Action → Observation → Reflect cycle.
 
-6. After "Confidence: high" and "Answer: ...", do not call more tools. End your turn.`;
+6. After "Confidence: high" and "Answer: ...", do not call more tools. End your turn.
+
+${DATA_GROUNDING_RULE}`;
 
 /** Build tool list for the orchestrator (get_financial_statements + computeRatios). */
 function buildOrchestratorTools(): LLMTool[] {

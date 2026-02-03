@@ -18,6 +18,7 @@ import { classifyTransactionsAgentic } from '../services/transaction_classifier.
 import { runPlanExecuteVerifyAgentic } from '../services/agentic_plan_execute_verify.js';
 import { registerStatementGeneration, recordPolicyChange } from '../services/audit_export_service.js';
 import { markUploadCompleted, runResultPipeline } from '../services/result_generator.js';
+import * as persistence from '../services/persistence_service.js';
 import { assessAgenticQuality } from '../services/agentic_quality_assessor.js';
 import { shouldEscalateToHuman, submitToStaging } from '../services/hitl_orchestrator.js';
 import { addTodosFromGaps } from '../services/reconciliation_todos.js';
@@ -51,6 +52,13 @@ import {
   applyUserClassificationOverrides,
 } from '../services/accountClassifier.js';
 import type { TrialBalanceEntry, AccountType } from '../types/financial.js';
+import { saveUnadjustedFromUpload, getUnadjusted } from '../services/trial_balance_store_service.js';
+import { getUnadjustedOrRollup } from '../services/trial_balance_rollup_service.js';
+import { getAdjustedTrialBalance } from '../services/adjusted_trial_balance_service.js';
+import {
+  isMessyTrialBalance,
+  agenticLedgerToTrialBalance,
+} from '../services/agentic_ledger_to_tb.js';
 
 const router = Router();
 
@@ -84,13 +92,21 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
       return;
     }
 
-    const rawRows = ingestTrialBalanceFile(file.buffer, file.mimetype);
+    let rawRows = ingestTrialBalanceFile(file.buffer, file.mimetype);
     if (rawRows.length === 0) {
       res.status(400).json({
         error: 'Empty or invalid file',
         message: 'No trial balance rows found. Expected columns: account name, debit, credit.',
       });
       return;
+    }
+    if (isMessyTrialBalance(rawRows)) {
+      try {
+        const agenticRows = await agenticLedgerToTrialBalance(file.buffer, file.mimetype);
+        if (agenticRows.length > 0) rawRows = agenticRows;
+      } catch {
+        // keep original rawRows so parseTrialBalance still runs (may show zeros)
+      }
     }
 
     const trialBalance = parseTrialBalance(rawRows);
@@ -174,16 +190,9 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
           businessNumber: body?.businessNumber,
         })
       : null;
+    // Trial-balance-first flow: default to inferred or US_GAAP so upload always proceeds; review follows
     if (!standard) {
-      res.status(400).json({
-        error: 'Reporting standard required; jurisdiction ambiguous',
-        message: 'Provide an explicit standard in the request body, or confirm the suggested standard via the confirm-standard API.',
-        inferredStandard: standardInference?.standard,
-        confidence: standardInference?.confidence,
-        rationale: standardInference?.rationale,
-        promptForUser: standardInference?.promptForUser ?? 'Please confirm reporting standard (US_GAAP, IFRS, ASPE, FRS102).',
-      });
-      return;
+      standard = standardInference?.standard ?? 'US_GAAP';
     }
     if (body?.entityId) {
       const opts = poolIngest && tenantIdIngest ? { pool: poolIngest, tenantId: tenantIdIngest } : undefined;
@@ -213,14 +222,49 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
     if (standard && tenantIdIngest && poolIngest) {
       stmtOpts.tenantId = tenantIdIngest;
       stmtOpts.loadContracts = async (tid: string) => {
-        const rows = await listContracts(poolIngest as Pool, tid);
-        return rows.map((r) => ({ id: r.id, totalContractValue: r.totalContractValue, periodRecognizedRevenue: undefined }));
+        try {
+          const rows = await listContracts(poolIngest as Pool, tid);
+          return rows.map((r) => ({ id: r.id, totalContractValue: r.totalContractValue, periodRecognizedRevenue: undefined }));
+        } catch {
+          return [];
+        }
       };
     }
     const buildOpts = useAgenticClassification && preClassified ? { preClassifiedEntries: preClassified } : undefined;
+
+    let trialBalanceForBuild: import('../types/financial.js').TrialBalanceResult = trialBalance;
+    if (body.periodLabel) {
+      const tenantIdForSave = tenantIdIngest ?? 'default';
+      const entriesToStore = preClassified ?? await classifyTrialBalance(trialBalance.entries);
+      await saveUnadjustedFromUpload(
+        tenantIdForSave,
+        body.periodLabel,
+        entriesToStore,
+        {
+          uploadedBy: (req as AuthRequest).userId,
+          fileName: file.originalname,
+        },
+        poolIngest
+      );
+      try {
+        const adjustedEntries = await getAdjustedTrialBalance(tenantIdForSave, body.periodLabel, poolIngest ?? undefined);
+        const totalDebits = adjustedEntries.reduce((s, e) => s + (e.debit ?? 0), 0);
+        const totalCredits = adjustedEntries.reduce((s, e) => s + (e.credit ?? 0), 0);
+        trialBalanceForBuild = {
+          entries: adjustedEntries,
+          totalDebits,
+          totalCredits,
+          balances: Math.abs(totalDebits - totalCredits) < 0.01,
+          errors: Math.abs(totalDebits - totalCredits) >= 0.01 ? ['Adjusted trial balance does not balance'] : [],
+        };
+      } catch {
+        trialBalanceForBuild = trialBalance;
+      }
+    }
+
     const base = standard
-      ? await generateStatements(trialBalance, standard, stmtOpts)
-      : await buildFinancialStatements(trialBalance, buildOpts);
+      ? await generateStatements(trialBalanceForBuild, standard, body.periodLabel && tenantIdIngest ? { ...stmtOpts, preClassifiedEntries: undefined } : stmtOpts)
+      : await buildFinancialStatements(trialBalanceForBuild, body.periodLabel && tenantIdIngest ? undefined : buildOpts);
     const { balanceSheet, profitAndLoss } = base;
     const classifiedEntries = base.classifiedEntries;
     const standardMetadata = 'standardMetadata' in base ? base.standardMetadata : undefined;
@@ -230,20 +274,20 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
     const cashFlow = fullSet
       ? categorizedTransactions && categorizedTransactions.length > 0
         ? buildCashFlowFromTransactions(categorizedTransactions)
-        : buildCashFlowStatement(trialBalance, profitAndLoss, priorTrialBalanceIngest)
+        : buildCashFlowStatement(trialBalanceForBuild, profitAndLoss, priorTrialBalanceIngest)
       : undefined;
     const equityChanges = fullSet ? buildEquityChangesStatement(balanceSheet, priorBalanceSheetIngest, profitAndLoss) : undefined;
     const notesAndPolicies = fullSet && standard ? buildNotesAndPolicies(standard) : undefined;
 
     const reasoningChain = await runPlanExecuteVerifyAgentic({
-      trialBalance,
+      trialBalance: trialBalanceForBuild,
       balanceSheet,
       profitAndLoss,
     });
 
     const output: FinancialStatementsOutput = {
       reasoningChain,
-      trialBalance: { ...trialBalance, entries: classifiedEntries },
+      trialBalance: { ...trialBalanceForBuild, entries: classifiedEntries },
       balanceSheet,
       profitAndLoss,
       ...(standard ? { standard } : {}),
@@ -301,7 +345,16 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
     };
     // Trigger Specialist Brains pipeline as soon as Upload is marked Completed (CPA → CFA → Supervisor)
     markUploadCompleted({ type: 'statements', output, meta });
-    const pipelineResult = await runResultPipeline({ type: 'statements', output, meta });
+    const pipelineResult = await runResultPipeline(
+      { type: 'statements', output, meta },
+      authReq.tenantId && authReq.tenantPool ? { tenantId: authReq.tenantId, pool: authReq.tenantPool } : undefined
+    );
+    if (authReq.tenantId && authReq.tenantPool) {
+      await persistence.createSession(authReq.tenantPool, authReq.tenantId, {
+        mode: 'pipeline',
+        pipelineInputSnapshot: { type: 'statements', output, meta },
+      });
+    }
     const agenticAssessment = await assessAgenticQuality({
       qualityChecks: pipelineResult.qualityChecks ?? [],
       dataGaps: pipelineResult.dataGaps ?? [],
@@ -311,11 +364,16 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
     if (!hitl.escalated && agenticAssessment?.overallSeverity === 'critical') {
       const escalate = shouldEscalateToHuman({ isCriticalAccountingPolicyChange: true });
       if (escalate) {
-        const item = submitToStaging({
-          proposedAction: 'Review agentic CPA assessment',
-          justification: agenticAssessment.summary,
-          type: 'other',
-        });
+        const item = await Promise.resolve(
+          submitToStaging(
+            {
+              proposedAction: 'Review agentic CPA assessment',
+              justification: agenticAssessment.summary,
+              type: 'other',
+            },
+            authReq.tenantId && authReq.tenantPool ? { pool: authReq.tenantPool, tenantId: authReq.tenantId } : undefined
+          )
+        );
         hitl = { escalated: true, stagingId: item.id };
       }
     }
@@ -712,8 +770,12 @@ router.post('/statements', async (req: Request, res: Response) => {
     if (standard && tenantIdStmt && poolStmt) {
       stmtOptsStmt.tenantId = tenantIdStmt;
       stmtOptsStmt.loadContracts = async (tid: string) => {
-        const rows = await listContracts(poolStmt, tid);
-        return rows.map((r) => ({ id: r.id, totalContractValue: r.totalContractValue, periodRecognizedRevenue: undefined }));
+        try {
+          const rows = await listContracts(poolStmt, tid);
+          return rows.map((r) => ({ id: r.id, totalContractValue: r.totalContractValue, periodRecognizedRevenue: undefined }));
+        } catch {
+          return [];
+        }
       };
     }
     const buildOptsStmt = useAgenticClassificationStmt && preClassifiedStmt ? { preClassifiedEntries: preClassifiedStmt } : undefined;
@@ -818,6 +880,12 @@ router.post('/statements', async (req: Request, res: Response) => {
       { type: 'statements', output, meta },
       authReqStatements.tenantId && authReqStatements.tenantPool ? { tenantId: authReqStatements.tenantId, pool: authReqStatements.tenantPool } : undefined
     );
+    if (authReqStatements.tenantId && authReqStatements.tenantPool) {
+      await persistence.createSession(authReqStatements.tenantPool, authReqStatements.tenantId, {
+        mode: 'pipeline',
+        pipelineInputSnapshot: { type: 'statements', output, meta },
+      });
+    }
     const agenticAssessment = await assessAgenticQuality({
       qualityChecks: pipelineResult.qualityChecks ?? [],
       dataGaps: pipelineResult.dataGaps ?? [],
@@ -827,11 +895,14 @@ router.post('/statements', async (req: Request, res: Response) => {
     if (!hitl.escalated && agenticAssessment?.overallSeverity === 'critical') {
       const escalate = shouldEscalateToHuman({ isCriticalAccountingPolicyChange: true });
       if (escalate) {
-        const item = submitToStaging({
-          proposedAction: 'Review agentic CPA assessment',
-          justification: agenticAssessment.summary,
-          type: 'other',
-        });
+        const item = await submitToStaging(
+          {
+            proposedAction: 'Review agentic CPA assessment',
+            justification: agenticAssessment.summary,
+            type: 'other',
+          },
+          authReqStatements.tenantId && authReqStatements.tenantPool ? { pool: authReqStatements.tenantPool, tenantId: authReqStatements.tenantId } : undefined
+        );
         hitl = { escalated: true, stagingId: item.id };
       }
     }
@@ -912,6 +983,128 @@ router.post('/statements', async (req: Request, res: Response) => {
     }
     const message = err instanceof Error ? err.message : 'Processing failed';
     res.status(400).json({ error: 'Processing error', message });
+  }
+});
+
+/**
+ * GET /api/trial-balance/period/:periodLabel
+ * Returns stored unadjusted trial balance for the period (entries + meta). For quarter/year,
+ * returns roll-up from constituent months when no direct TB exists. 404 if none.
+ */
+router.get('/period/:periodLabel', async (req: Request, res: Response) => {
+  try {
+    const periodLabel = req.params.periodLabel;
+    const tenantId = getTenantId(req) ?? 'default';
+    const pool = getTenantPool(req);
+    if (!periodLabel) {
+      res.status(400).json({ error: 'periodLabel required' });
+      return;
+    }
+    const result = await getUnadjustedOrRollup(tenantId, periodLabel, pool ?? undefined);
+    if (!result) {
+      res.status(404).json({ error: 'No unadjusted trial balance for period', periodLabel });
+      return;
+    }
+    res.json({
+      periodLabel,
+      entries: result.entries,
+      source: result.source,
+      at: result.at,
+      by: result.by,
+      ...(result.source !== 'rollup' && 'connectionId' in result && result.connectionId ? { connectionId: result.connectionId } : {}),
+      ...(result.source !== 'rollup' && 'fileName' in result && result.fileName ? { fileName: result.fileName } : {}),
+      ...(result.source === 'rollup' && 'constituentPeriods' in result ? { constituentPeriods: result.constituentPeriods } : {}),
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    res.status(500).json({ error: 'Failed to load unadjusted trial balance', message });
+  }
+});
+
+/**
+ * GET /api/trial-balance/period/:periodLabel/adjusted
+ * Returns adjusted trial balance (unadjusted + posted adjustments). 404 if no unadjusted TB for period.
+ */
+router.get('/period/:periodLabel/adjusted', async (req: Request, res: Response) => {
+  try {
+    const periodLabel = req.params.periodLabel;
+    const tenantId = getTenantId(req) ?? 'default';
+    const pool = getTenantPool(req);
+    if (!periodLabel) {
+      res.status(400).json({ error: 'periodLabel required' });
+      return;
+    }
+    const adjustedEntries = await getAdjustedTrialBalance(tenantId, periodLabel, pool ?? undefined);
+    res.json({ periodLabel, entries: adjustedEntries });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message.includes('No unadjusted trial balance')) {
+      res.status(404).json({ error: 'No unadjusted trial balance for period', periodLabel: req.params.periodLabel });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to load adjusted trial balance', message });
+  }
+});
+
+/**
+ * GET /api/trial-balance/period/:periodLabel/statements
+ * Returns financial statements for the period from adjusted TB (unadjusted + posted adjustments). 404 if no unadjusted TB.
+ */
+router.get('/period/:periodLabel/statements', async (req: Request, res: Response) => {
+  try {
+    const periodLabel = req.params.periodLabel;
+    const tenantId = getTenantId(req) ?? 'default';
+    const pool = getTenantPool(req);
+    if (!periodLabel) {
+      res.status(400).json({ error: 'periodLabel required' });
+      return;
+    }
+    const adjustedEntries = await getAdjustedTrialBalance(tenantId, periodLabel, pool ?? undefined);
+    const totalDebits = adjustedEntries.reduce((s, e) => s + (e.debit ?? 0), 0);
+    const totalCredits = adjustedEntries.reduce((s, e) => s + (e.credit ?? 0), 0);
+    const trialBalanceForBuild: import('../types/financial.js').TrialBalanceResult = {
+      entries: adjustedEntries,
+      totalDebits,
+      totalCredits,
+      balances: Math.abs(totalDebits - totalCredits) < 0.01,
+      errors: Math.abs(totalDebits - totalCredits) >= 0.01 ? ['Adjusted trial balance does not balance'] : [],
+    };
+    const standard = (req.query.standard as string) || 'US_GAAP';
+    const fullSet = (req.query.fullSet as string) !== 'false';
+    const stmtOpts: StatementGeneratorOptions = { fullSet, tenantId: tenantId ?? undefined };
+    if (pool && tenantId) {
+      stmtOpts.loadContracts = async (tid: string) => {
+        try {
+          const rows = await listContracts(pool as Pool, tid);
+          return rows.map((r) => ({ id: r.id, totalContractValue: r.totalContractValue, periodRecognizedRevenue: undefined }));
+        } catch {
+          return [];
+        }
+      };
+    }
+    const base =
+      standard && ['US_GAAP', 'IFRS', 'ASPE', 'FRS102'].includes(standard)
+        ? await generateStatements(trialBalanceForBuild, standard as 'US_GAAP' | 'IFRS' | 'ASPE' | 'FRS102', stmtOpts)
+        : await buildFinancialStatements(trialBalanceForBuild);
+    const priorTrialBalance = undefined;
+    const cashFlow = fullSet ? buildCashFlowStatement(trialBalanceForBuild, base.profitAndLoss, priorTrialBalance) : undefined;
+    const priorBalanceSheet = undefined;
+    const equityChanges = fullSet ? buildEquityChangesStatement(base.balanceSheet, priorBalanceSheet, base.profitAndLoss) : undefined;
+    res.json({
+      periodLabel,
+      balanceSheet: base.balanceSheet,
+      profitAndLoss: base.profitAndLoss,
+      ...(cashFlow ? { cashFlow } : {}),
+      ...(equityChanges ? { equityChanges } : {}),
+      ...('standard' in base ? { standard: base.standard } : {}),
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message.includes('No unadjusted trial balance')) {
+      res.status(404).json({ error: 'No unadjusted trial balance for period', periodLabel: req.params.periodLabel });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to build statements', message });
   }
 });
 

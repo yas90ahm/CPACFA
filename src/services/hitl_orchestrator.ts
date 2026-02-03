@@ -6,7 +6,12 @@
  * 2. Staging Area: Bot presents "Proposed Action" and "Justification"; items stay Pending until approved.
  * 3. Approval Flow: Bot remains in Pending until webhook returns HumanApproved signal.
  * 4. Feedback Loop: If human rejects, the AI must ask "Why?" and update Context Memory to avoid the same mistake twice.
+ *
+ * When pool and tenantId are provided, staging is persisted to Postgres (persistence_service); otherwise in-memory.
  */
+
+import type { Pool } from 'pg';
+import * as persistence from './persistence_service.js';
 
 // --- Default threshold (configurable) ---
 
@@ -74,6 +79,11 @@ export interface StagingItem {
   rejectedReason?: string;
 }
 
+export interface HitlPersistenceOptions {
+  pool: Pool;
+  tenantId: string;
+}
+
 const stagingStore = new Map<string, StagingItem>();
 let idCounter = 0;
 
@@ -84,24 +94,35 @@ function nextId(): string {
 
 /**
  * Submit a proposed action to the Staging Area. Status is 'pending' until webhook approves/rejects.
+ * When opts.pool and opts.tenantId are provided, persists to Postgres; otherwise in-memory.
  */
-export function submitToStaging(params: {
-  proposedAction: string;
-  justification: string;
-  type?: StagingItemType;
-  amount?: number;
-  payload?: Record<string, unknown>;
-}): StagingItem {
+export function submitToStaging(
+  params: {
+    proposedAction: string;
+    justification: string;
+    type?: StagingItemType;
+    amount?: number;
+    payload?: Record<string, unknown>;
+  },
+  opts?: HitlPersistenceOptions
+): StagingItem | Promise<StagingItem> {
+  const itemParams = {
+    proposedAction: params.proposedAction,
+    justification: params.justification,
+    type: params.type,
+    amount: params.amount,
+    payload: params.payload,
+  };
+  if (opts?.pool && opts?.tenantId) {
+    return persistence.createStagingItem(opts.pool, opts.tenantId, itemParams);
+  }
   const id = nextId();
   const now = new Date().toISOString();
   const item: StagingItem = {
     id,
-    proposedAction: params.proposedAction,
-    justification: params.justification,
+    ...itemParams,
     status: 'pending',
     type: params.type ?? 'other',
-    amount: params.amount,
-    payload: params.payload,
     createdAt: now,
     updatedAt: now,
   };
@@ -111,8 +132,17 @@ export function submitToStaging(params: {
 
 /**
  * Staging Area: list all items (for UI). Filter by status if needed.
+ * When options.pool and options.tenantId are provided, uses Postgres; otherwise in-memory.
  */
-export function getStagingArea(options?: { status?: StagingStatus; limit?: number }): StagingItem[] {
+export async function getStagingArea(
+  options?: { status?: StagingStatus; limit?: number } & Partial<HitlPersistenceOptions>
+): Promise<StagingItem[]> {
+  if (options?.pool && options?.tenantId) {
+    return persistence.listStagingItems(options.pool, options.tenantId, {
+      status: options.status,
+      limit: options.limit,
+    });
+  }
   let items = Array.from(stagingStore.values());
   if (options?.status) items = items.filter((i) => i.status === options.status);
   items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -120,7 +150,11 @@ export function getStagingArea(options?: { status?: StagingStatus; limit?: numbe
   return items.slice(0, limit).map((i) => ({ ...i }));
 }
 
-export function getStagingItem(id: string): StagingItem | undefined {
+/** When opts.pool is provided, fetches from Postgres; otherwise in-memory. */
+export async function getStagingItem(id: string, opts?: { pool?: Pool }): Promise<StagingItem | undefined> {
+  if (opts?.pool) {
+    return persistence.getStagingItem(opts.pool, id);
+  }
   const item = stagingStore.get(id);
   return item ? { ...item } : undefined;
 }
@@ -140,12 +174,23 @@ export interface ApprovalWebhookPayload {
 
 /**
  * Webhook: Human approved. Marks item approved; bot can proceed.
+ * When opts.pool is provided, updates in Postgres; otherwise in-memory.
  */
-export function receiveHumanApproval(params: {
-  id: string;
-  signedBy?: string;
-  signatureToken?: string;
-}): { ok: boolean; item?: StagingItem; error?: string } {
+export async function receiveHumanApproval(
+  params: { id: string; signedBy?: string; signatureToken?: string },
+  opts?: { pool?: Pool; tenantId?: string }
+): Promise<{ ok: boolean; item?: StagingItem; error?: string }> {
+  if (opts?.pool) {
+    const existing = await persistence.getStagingItem(opts.pool, params.id);
+    if (!existing) return { ok: false, error: 'Staging item not found' };
+    if (existing.status !== 'pending') return { ok: false, error: `Item is not pending (status: ${existing.status})` };
+    const updated = await persistence.updateStagingStatus(opts.pool, params.id, {
+      status: 'approved',
+      approvedAt: new Date().toISOString(),
+      approvedBy: params.signedBy,
+    });
+    return { ok: true, item: updated };
+  }
   const item = stagingStore.get(params.id);
   if (!item) return { ok: false, error: 'Staging item not found' };
   if (item.status !== 'pending') return { ok: false, error: `Item is not pending (status: ${item.status})` };
@@ -159,8 +204,25 @@ export function receiveHumanApproval(params: {
 
 /**
  * Webhook: Human rejected. Marks item rejected and records reason for feedback loop.
+ * When opts.pool is provided, updates in Postgres; otherwise in-memory.
  */
-export function receiveHumanRejection(params: { id: string; rejectionReason: string }): { ok: boolean; item?: StagingItem; error?: string } {
+export async function receiveHumanRejection(
+  params: { id: string; rejectionReason: string },
+  opts?: { pool?: Pool; tenantId?: string }
+): Promise<{ ok: boolean; item?: StagingItem; error?: string }> {
+  const reason = params.rejectionReason?.trim() || 'No reason provided';
+  if (opts?.pool) {
+    const existing = await persistence.getStagingItem(opts.pool, params.id);
+    if (!existing) return { ok: false, error: 'Staging item not found' };
+    if (existing.status !== 'pending') return { ok: false, error: `Item is not pending (status: ${existing.status})` };
+    const updated = await persistence.updateStagingStatus(opts.pool, params.id, {
+      status: 'rejected',
+      rejectedAt: new Date().toISOString(),
+      rejectedReason: reason,
+    });
+    recordRejectionFeedback(params.id, reason, existing);
+    return { ok: true, item: updated };
+  }
   const item = stagingStore.get(params.id);
   if (!item) return { ok: false, error: 'Staging item not found' };
   if (item.status !== 'pending') return { ok: false, error: `Item is not pending (status: ${item.status})` };
@@ -168,7 +230,7 @@ export function receiveHumanRejection(params: { id: string; rejectionReason: str
   item.status = 'rejected';
   item.updatedAt = now;
   item.rejectedAt = now;
-  item.rejectedReason = params.rejectionReason?.trim() || 'No reason provided';
+  item.rejectedReason = reason;
   recordRejectionFeedback(params.id, item.rejectedReason, item);
   return { ok: true, item: { ...item } };
 }
@@ -176,19 +238,21 @@ export function receiveHumanRejection(params: { id: string; rejectionReason: str
 /**
  * Handle webhook payload (HumanApproved or HumanRejected).
  */
-export function handleApprovalWebhook(payload: ApprovalWebhookPayload): { ok: boolean; item?: StagingItem; error?: string } {
+export async function handleApprovalWebhook(
+  payload: ApprovalWebhookPayload,
+  opts?: { pool?: Pool }
+): Promise<{ ok: boolean; item?: StagingItem; error?: string }> {
   if (payload.signal === 'HumanApproved') {
-    return receiveHumanApproval({
-      id: payload.id,
-      signedBy: payload.signedBy,
-      signatureToken: payload.signatureToken,
-    });
+    return receiveHumanApproval(
+      { id: payload.id, signedBy: payload.signedBy, signatureToken: payload.signatureToken },
+      opts ? { pool: opts.pool, tenantId: opts.tenantId } : undefined
+    );
   }
   if (payload.signal === 'HumanRejected') {
-    return receiveHumanRejection({
-      id: payload.id,
-      rejectionReason: payload.rejectionReason ?? 'No reason provided',
-    });
+    return receiveHumanRejection(
+      { id: payload.id, rejectionReason: payload.rejectionReason ?? 'No reason provided' },
+      opts ? { pool: opts.pool, tenantId: opts.tenantId } : undefined
+    );
   }
   return { ok: false, error: `Unknown signal: ${payload.signal}` };
 }

@@ -10,7 +10,7 @@ import { formatConflictForSupervisor } from './lead_partner_orchestrator.js';
 import type { ConflictVariance } from '../types/orchestrator.js';
 import { getProviderFromEnv } from '../llm/provider.js';
 import { toOpenAITools, toMistralTools } from '../llm/tool_schema.js';
-import { shouldEscalateToHuman } from '../llm/guardrails.js';
+import { shouldEscalateToHuman, DATA_GROUNDING_RULE } from '../llm/guardrails.js';
 import { updatePolicyMemory } from '../memory/index.js';
 
 const MODEL = 'claude-sonnet-4-5-20250929';
@@ -33,13 +33,17 @@ Tools:
 - step3Supervisor: Produce Executive Memo. Call after step2CFA.
 - getPortfolioFinalizationPolicy: When the user asks about changing past performance, back-dating, or correcting finalized periods, call this and cite the returned policy in your answer.
 
-After you have enough information, answer the user clearly. Cite specific numbers and ratios when relevant. Do not invent data; only use what the tools returned.`;
+After you have enough information, answer the user clearly. Cite specific numbers and ratios when relevant. Do not invent data; only use what the tools returned.
+
+${DATA_GROUNDING_RULE}`;
 
 export interface SupervisorChatInput {
   message: string;
   pipelineInput?: SupervisorToolContext['pipelineInput'];
   tenantId?: string;
   pool?: import('pg').Pool | null;
+  /** When present, session is persisted (pipeline_input_snapshot) for resume/Source of Truth. */
+  sessionId?: string;
 }
 
 export interface SupervisorChatOutput {

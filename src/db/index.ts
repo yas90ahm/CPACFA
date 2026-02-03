@@ -144,6 +144,8 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 54, file: '054_risk_context_conflicts.sql' },
   { version: 58, file: '058_period_financial_data_state.sql' },
   { version: 59, file: '059_close_adjustments_posted_external_id.sql' },
+  { version: 60, file: '060_period_trial_balance.sql' },
+  { version: 61, file: '061_tenant_close_calendar_entries.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 
@@ -171,12 +173,11 @@ export async function runTenantMigrations(pool: pg.Pool): Promise<void> {
 
 /**
  * Get tenant pool and ensure tenant schema is applied (lazy migration).
+ * When tenants share the control DB (no database_url), tenant migrations run on the control pool.
  */
 export async function getTenantPoolWithMigrations(tenantId: string): Promise<pg.Pool> {
   const pool = await getTenantPool(tenantId);
-  if (pool !== getControlPool()) {
-    await runTenantMigrations(pool);
-  }
+  await runTenantMigrations(pool);
   return pool;
 }
 

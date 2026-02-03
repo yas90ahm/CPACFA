@@ -90,7 +90,7 @@ router.post('/submit', async (req: Request, res: Response) => {
     }
     const existing = await getRequestByResource(pool, tenantId, body.resourceType, body.resourceId);
     if (existing && existing.status === 'pending') {
-      res.json({ request: existing, message: 'Already pending approval' });
+      res.json({ request: existing, approvalRequestId: existing.id, message: 'Already pending approval' });
       return;
     }
     const request = await createRequest(
@@ -100,7 +100,7 @@ router.post('/submit', async (req: Request, res: Response) => {
       body.resourceType,
       body.resourceId
     );
-    res.status(201).json(request);
+    res.status(201).json({ ...request, approvalRequestId: request.id });
   } catch (e) {
     send500(res, e, 'Submit for approval failed');
   }

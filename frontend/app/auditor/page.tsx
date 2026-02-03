@@ -136,7 +136,7 @@ export default function AuditorPortalPage() {
     setDownloadPackageLoading(true);
     const reportDate = new Date().toISOString().slice(0, 10);
     try {
-      const basePayload = binder ? buildReportPayloadFromBinder(binder) : {
+      const basePayload = binder ? buildReportPayloadFromBinder(binder as Parameters<typeof buildReportPayloadFromBinder>[0]) : {
         cover: { title: 'Financial Report', entity_name: 'Entity', report_date: reportDate },
         financial_statements: { balance_sheet: {}, profit_and_loss: {}, report_date: reportDate },
         executive_summary: '',

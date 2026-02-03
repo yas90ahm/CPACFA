@@ -78,6 +78,8 @@ export function createCloseChecklist(
   return DEFAULT_CHECKLIST_SPECS.map((spec, i) => ({
     id: `step-${i + 1}`,
     label: spec.label,
+    category: spec.category,
+    verificationMethod: spec.verificationMethod,
     status: 'pending' as const,
     controlId: spec.controlId,
     assignee: options?.assignee,

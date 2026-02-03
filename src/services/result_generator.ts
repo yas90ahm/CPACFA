@@ -34,6 +34,7 @@ import type { LiquidityInputs } from '../types/analysis.js';
 import type { ConflictVariance } from '../types/orchestrator.js';
 import { getFlagsForContext } from './risk_context_store.js';
 import { resolveConflict } from './lead_partner_orchestrator.js';
+import { runPlanExecuteVerify } from './planExecuteVerify.js';
 
 /** Optional tenant context for integrity gate (load contracts when building statements). */
 export type ResultPipelineContext = { tenantId: string; pool: Pool };
@@ -186,6 +187,9 @@ export async function step1CPA(
 }> {
   if (input.type === 'raw_rows') {
     const trialBalance = parseTrialBalance(input.rawRows);
+    if (!trialBalance.balances) {
+      throw new Error('Trial balance does not balance; generateStatements cannot be called.');
+    }
     const meta = input.meta ?? {};
     const fullSet = meta.fullSet ?? false;
     const comparative = meta.comparative === true;
@@ -218,6 +222,10 @@ export async function step1CPA(
         };
       }
       const res = await generateStatements(trialBalance, standard, stmtOpts);
+      const pev = runPlanExecuteVerify({ trialBalance, balanceSheet: res.balanceSheet, profitAndLoss: res.profitAndLoss });
+      if (!pev.verification.passed) {
+        throw new Error(`Verification failed: ${pev.verification.checks.join('; ')}. Statements cannot be returned.`);
+      }
       return {
         balanceSheet: res.balanceSheet,
         profitAndLoss: res.profitAndLoss,
@@ -225,9 +233,14 @@ export async function step1CPA(
         equityChanges: res.equityChanges,
         notesAndPolicies: res.notesAndPolicies,
         trialBalance: { ...trialBalance, entries: res.classifiedEntries },
+        reasoningChain: pev,
       };
     }
     const { balanceSheet, profitAndLoss, classifiedEntries } = await buildFinancialStatements(trialBalance);
+    const pev = runPlanExecuteVerify({ trialBalance, balanceSheet, profitAndLoss });
+    if (!pev.verification.passed) {
+      throw new Error(`Verification failed: ${pev.verification.checks.join('; ')}. Statements cannot be returned.`);
+    }
     const cashFlow = fullSet
       ? meta.transactions && meta.transactions.length > 0
         ? buildCashFlowFromTransactions(meta.transactions)
@@ -243,6 +256,7 @@ export async function step1CPA(
       equityChanges,
       notesAndPolicies,
       trialBalance: { ...trialBalance, entries: classifiedEntries },
+      reasoningChain: pev,
     };
   }
   const { balanceSheet, profitAndLoss, trialBalance } = input.output;
@@ -426,14 +440,17 @@ export async function runResultPipeline(
   if (critical.length > 0 || highGaps.length > 0) {
     const escalated = shouldEscalateToHuman({ isCriticalAccountingPolicyChange: true });
     if (escalated) {
-      const item = submitToStaging({
-        proposedAction: 'Review statement quality flags and data gaps',
-        justification: [
-          ...critical.map((c) => `${c.title}: ${c.message}`),
-          ...highGaps.map((g) => `${g.title}: ${g.description}`),
-        ].join(' | '),
-        type: 'other',
-      });
+      const item = await submitToStaging(
+        {
+          proposedAction: 'Review statement quality flags and data gaps',
+          justification: [
+            ...critical.map((c) => `${c.title}: ${c.message}`),
+            ...highGaps.map((g) => `${g.title}: ${g.description}`),
+          ].join(' | '),
+          type: 'other',
+        },
+        context ? { pool: context.pool, tenantId: context.tenantId } : undefined
+      );
       hitl = { escalated: true, stagingId: item.id };
     }
   }

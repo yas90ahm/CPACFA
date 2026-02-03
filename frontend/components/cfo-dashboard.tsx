@@ -24,7 +24,8 @@ import {
   type ScenarioKPIs,
 } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { Check, Mic, Square } from 'lucide-react';
+import { Check } from 'lucide-react';
+import { ExecutiveNarrative } from '@/components/executive_narrative';
 
 /** Default snapshot for demo when no data is loaded */
 const DEFAULT_SNAPSHOT: CFOFinancialSnapshot = {
@@ -81,10 +82,6 @@ export function CFODashboard({
     interpretedShock: string;
   } | null>(null);
   const [pointedLoading, setPointedLoading] = React.useState(false);
-  const [voiceLoading, setVoiceLoading] = React.useState(false);
-  const [isRecording, setIsRecording] = React.useState(false);
-  const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
-  const streamRef = React.useRef<MediaStream | null>(null);
 
   // Fetch MD&A narrative + KPIs when snapshot is available
   React.useEffect(() => {
@@ -153,51 +150,6 @@ export function CFODashboard({
     },
     [snapshot]
   );
-
-  const startRecording = React.useCallback(() => {
-    if (isRecording || voiceLoading) return;
-    navigator.mediaDevices
-      .getUserMedia({ audio: true })
-      .then((stream) => {
-        streamRef.current = stream;
-        const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-          ? 'audio/webm;codecs=opus'
-          : 'audio/webm';
-        const recorder = new MediaRecorder(stream);
-        mediaRecorderRef.current = recorder;
-        const chunks: Blob[] = [];
-        recorder.ondataavailable = (e) => {
-          if (e.data.size > 0) chunks.push(e.data);
-        };
-        recorder.onstop = () => {
-          stream.getTracks().forEach((t) => t.stop());
-          streamRef.current = null;
-          mediaRecorderRef.current = null;
-          setIsRecording(false);
-          if (chunks.length === 0) {
-            setVoiceLoading(false);
-            return;
-          }
-          const blob = new Blob(chunks, { type: mime });
-          setVoiceLoading(true);
-          transcribeAudio(blob)
-            .then(({ text }) => {
-              setPointedQuestion(text);
-              runQuestionFromText(text);
-            })
-            .catch(() => setVoiceLoading(false))
-            .finally(() => setVoiceLoading(false));
-        };
-        recorder.start(100);
-        setIsRecording(true);
-      })
-      .catch(() => setIsRecording(false));
-  }, [isRecording, voiceLoading, runQuestionFromText]);
-
-  const stopRecording = React.useCallback(() => {
-    if (!isRecording || !mediaRecorderRef.current) return;
-    mediaRecorderRef.current.stop();
-  }, [isRecording]);
 
   const marginChartData = sensitivityResult?.chartData ?? (kpis ? [
     { scenario: 'Current', grossMargin: kpis.grossMarginPercent, operatingMargin: kpis.operatingMarginPercent, netMargin: kpis.netMarginPercent },
@@ -274,7 +226,7 @@ export function CFODashboard({
             </CardHeader>
             <CardContent className="pb-3 px-3">
               <p className="text-xl font-semibold font-currency">
-                {effectiveKpis.burnRate > 0 ? `$${(effectiveKpis.burnRate / 1000).toFixed(0)}k/mo` : '—'}
+                {effectiveKpis?.burnRate != null && effectiveKpis.burnRate > 0 ? `$${(effectiveKpis.burnRate / 1000).toFixed(0)}k/mo` : '—'}
               </p>
             </CardContent>
           </Card>
@@ -287,11 +239,11 @@ export function CFODashboard({
             </CardHeader>
             <CardContent className="pb-3 px-3">
               <p className="text-xl font-semibold font-currency">
-                {effectiveKpis.runwayMonths >= 999 || effectiveKpis.burnRate <= 0 ? 'N/A' : `${effectiveKpis.runwayMonths.toFixed(1)} mo`}
+                {effectiveKpis?.runwayMonths == null || (effectiveKpis?.runwayMonths ?? 0) >= 999 || (effectiveKpis?.burnRate ?? 0) <= 0 ? 'N/A' : `${(effectiveKpis?.runwayMonths ?? 0).toFixed(1)} mo`}
               </p>
             </CardContent>
           </Card>
-          {(effectiveKpis.breakEvenRevenue != null && effectiveKpis.breakEvenRevenue > 0) && (
+          {(effectiveKpis?.breakEvenRevenue != null && effectiveKpis.breakEvenRevenue > 0) && (
             <Card>
               <CardHeader className="pb-1 pt-3 px-3">
                 <CardTitle className="text-xs font-medium text-muted-foreground flex items-center flex-wrap">
@@ -301,7 +253,7 @@ export function CFODashboard({
               </CardHeader>
               <CardContent className="pb-3 px-3">
                 <p className="text-xl font-semibold font-currency">
-                  ${(effectiveKpis.breakEvenRevenue / 1_000_000).toFixed(2)}M
+                  ${((effectiveKpis?.breakEvenRevenue ?? 0) / 1_000_000).toFixed(2)}M
                 </p>
                 <p className="text-xs text-muted-foreground">Annual revenue</p>
               </CardContent>
@@ -401,29 +353,10 @@ export function CFODashboard({
               onKeyDown={(e) => e.key === 'Enter' && handlePointedQuestion()}
               className="flex-1"
             />
-            <Button
-              variant="outline"
-              size="icon"
-              title="Talk to CFO — record a question (Whisper)"
-              onClick={isRecording ? stopRecording : startRecording}
-              disabled={pointedLoading || voiceLoading}
-              className={cn(isRecording && 'text-red-600')}
-            >
-              {isRecording ? (
-                <Square className="h-4 w-4" />
-              ) : (
-                <Mic className="h-4 w-4" />
-              )}
-            </Button>
             <Button onClick={handlePointedQuestion} disabled={pointedLoading}>
               {pointedLoading ? 'Running…' : 'Run'}
             </Button>
           </div>
-          {(voiceLoading || isRecording) && (
-            <p className="text-xs text-muted-foreground">
-              {isRecording ? 'Recording… Click the square to stop and transcribe.' : 'Transcribing…'}
-            </p>
-          )}
           {sensitivityResult && (
             <div className="rounded-md border bg-muted/30 p-3 text-sm">
               <p className="font-medium">

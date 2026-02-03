@@ -33,6 +33,7 @@ const SYSTEM = [
   'Canonical AP: vendor, vendorId, invoiceNumber, invoiceDate, dueDate, amount, totalAmount, taxAmount, currency, status, lineDescription, poNumber.',
   'Canonical AR: customer, customerId, invoiceNumber, invoiceDate, dueDate, amount, totalAmount, taxAmount, currency, status, lineDescription.',
   'Canonical Payroll: employee, employeeId, payDate, payPeriodStart, payPeriodEnd, grossPay, netPay, taxes, benefits, deductions, currency, department.',
+  'Canonical Trial Balance / General Ledger: accountName (or account, description, name; if the column holds a single concatenated line with comma-separated values e.g. line#, date, type, account, description, amount, map it to line), accountCode, debit, credit, amount (use when there is only one amount column; caller will put in debit or credit). For trial_balance and general_ledger, schemaMapping must map each relevant source header to exactly one of these canonical names.',
 ].join(' ');
 
 export async function classifyIngestionAgentic(input: {

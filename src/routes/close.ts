@@ -68,8 +68,12 @@ import {
   setPeriodCloseStatus,
   setReviewerSignOff,
 } from '../services/period_close_service.js';
+import { getPeriodEndDate } from '../services/close_context.js';
 import { buildCloseReadiness } from '../services/close_readiness_service.js';
-import { buildCloseStatus } from '../services/close_status_service.js';
+import { buildCloseStatus, computeCloseStage } from '../services/close_status_service.js';
+import { getUnadjustedMeta } from '../services/trial_balance_store_service.js';
+import { getAdjustedTrialBalance } from '../services/adjusted_trial_balance_service.js';
+import { buildClosingEntrySuggestion } from '../services/closing_entries_service.js';
 import { buildCloseOnePager, exportCloseOnePagerToPdf } from '../services/close_one_pager_service.js';
 import { getCloseExceptions } from '../services/close_exceptions_service.js';
 import { generateCloseExceptionsNarrativeAgentic } from '../services/agentic_close_exceptions.js';
@@ -78,6 +82,7 @@ import { generateTieOutNarrativeAgentic } from '../services/agentic_tie_out_narr
 import { buildClosePackage } from '../services/close_package_service.js';
 import { exportClosePackageToPdf, exportClosePackageToCsv } from '../services/close_package_export_service.js';
 import { generateCloseNarrativeAgentic } from '../services/agentic_close_narrative.js';
+import { getCloseCoach } from '../services/agentic_close_coach.js';
 import {
   addControl,
   listControls,
@@ -196,28 +201,48 @@ router.post('/checklist', validateBody(createChecklistSchema), async (req: Reque
   }
 });
 
+/** GET /api/close/period-end?periodLabel= — Period end date (ISO) for YYYY-MM, YYYY-Qn, YYYY/FYyyyy */
+router.get('/period-end', (req: Request, res: Response) => {
+  try {
+    const periodLabel = (req.query.periodLabel as string) ?? '';
+    const periodEnd = getPeriodEndDate(periodLabel);
+    res.json({ periodLabel, periodEnd });
+  } catch (e) {
+    send500(res, e, 'Period end failed');
+  }
+});
+
 /** GET /api/close/checklist/:periodLabel — Get checklist for period (stored or default) — FW1 */
-router.get('/checklist/:periodLabel', (req: Request, res: Response) => {
+router.get('/checklist/:periodLabel', async (req: Request, res: Response) => {
   try {
     const periodLabel = req.params.periodLabel ?? '';
-    const steps = getChecklist(periodLabel);
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    const steps = await getChecklist(periodLabel, undefined, tenantId ?? undefined, pool);
     res.json({ periodLabel, steps });
   } catch (e) {
     send500(res, e, 'Get checklist failed');
   }
 });
 
-/** PATCH /api/close/checklist/:periodLabel/step/:stepId — Set evidence link on step (FW1) */
+/** PATCH /api/close/checklist/:periodLabel/step/:stepId — Set evidence link and/or dueDate/assignee on step (FW1) */
 router.patch('/checklist/:periodLabel/step/:stepId', async (req: Request, res: Response) => {
   try {
     const periodLabel = req.params.periodLabel ?? '';
     const stepId = req.params.stepId ?? '';
-    const body = req.body as { evidenceId?: string; evidenceType?: 'reconciliation' | 'document' | 'checklist_sign_off' };
+    const body = req.body as {
+      evidenceId?: string;
+      evidenceType?: 'reconciliation' | 'document' | 'checklist_sign_off';
+      dueDate?: string;
+      assignee?: string;
+    };
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
     const updated = await updateStepEvidence(periodLabel, stepId, {
       evidenceId: body.evidenceId,
       evidenceType: body.evidenceType,
+      dueDate: body.dueDate,
+      assignee: body.assignee,
     }, tenantId ?? undefined, pool);
     if (!updated) {
       res.status(404).json({ error: 'Checklist or step not found' });
@@ -790,10 +815,10 @@ router.get('/readiness', async (req: Request, res: Response) => {
   try {
     const periodLabel = req.query.periodLabel as string;
     const includeNarrative = String(req.query.includeNarrative ?? '') === 'true';
-    const tenantId = getTenantId(req);
+    const tenantId = getTenantId(req) ?? 'default';
     const pool = getTenantPool(req);
-    if (!periodLabel || !tenantId) {
-      res.status(400).json({ error: 'Missing periodLabel query or tenant context' });
+    if (!periodLabel) {
+      res.status(400).json({ error: 'Missing periodLabel query' });
       return;
     }
     const readiness = await buildCloseReadiness(tenantId, periodLabel, pool ?? undefined, { includeNarrative });
@@ -804,14 +829,32 @@ router.get('/readiness', async (req: Request, res: Response) => {
   }
 });
 
+/** GET /api/close/coach?periodLabel=... — Close coach: single next best action and reason (agentic). */
+router.get('/coach', async (req: Request, res: Response) => {
+  try {
+    const periodLabel = req.query.periodLabel as string;
+    const tenantId = getTenantId(req) ?? 'default';
+    const pool = getTenantPool(req);
+    if (!periodLabel) {
+      res.status(400).json({ error: 'Missing periodLabel query' });
+      return;
+    }
+    const result = await getCloseCoach(tenantId, periodLabel, pool ?? undefined);
+    res.json(result);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    res.status(500).json({ error: 'Close coach failed', message });
+  }
+});
+
 /** GET /api/close/status — Single close status view: lock, checklist, rec tie-out, readiness, sign-off, materiality. */
 router.get('/status', async (req: Request, res: Response) => {
   try {
     const periodLabel = req.query.periodLabel as string;
-    const tenantId = getTenantId(req);
+    const tenantId = getTenantId(req) ?? 'default';
     const pool = getTenantPool(req);
-    if (!periodLabel || !tenantId) {
-      res.status(400).json({ error: 'Missing periodLabel query or tenant context' });
+    if (!periodLabel) {
+      res.status(400).json({ error: 'Missing periodLabel query' });
       return;
     }
     const status = await buildCloseStatus(tenantId, periodLabel, pool ?? undefined);
@@ -868,10 +911,10 @@ router.get('/exceptions', async (req: Request, res: Response) => {
   try {
     const periodLabel = req.query.periodLabel as string;
     const includeNarrative = String(req.query.includeNarrative ?? '') === 'true';
-    const tenantId = getTenantId(req);
+    const tenantId = getTenantId(req) ?? 'default';
     const pool = getTenantPool(req);
-    if (!periodLabel || !tenantId) {
-      res.status(400).json({ error: 'Missing periodLabel query or tenant context' });
+    if (!periodLabel) {
+      res.status(400).json({ error: 'Missing periodLabel query' });
       return;
     }
     const exceptions = await getCloseExceptions(tenantId, periodLabel, pool ?? undefined);
@@ -1102,7 +1145,7 @@ router.get('/calendar', async (req: Request, res: Response) => {
   }
 });
 
-/** POST /api/close/calendar — Set close due date for a period */
+/** POST /api/close/calendar — Set close due date for a period (persisted to DB when tenant context present) */
 router.post('/calendar', async (req: Request, res: Response) => {
   try {
     const body = req.body as { periodLabel: string; closeDueDate: string };
@@ -1110,10 +1153,10 @@ router.post('/calendar', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Missing periodLabel or closeDueDate' });
       return;
     }
-    setCloseDueDate(body.periodLabel, body.closeDueDate);
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    const entry = await getPeriodEntry(body.periodLabel, tenantId, pool);
+    await setCloseDueDate(body.periodLabel, body.closeDueDate, tenantId ?? undefined, pool);
+    const entry = await getPeriodEntry(body.periodLabel, tenantId ?? undefined, pool);
     res.json(entry);
   } catch (e) {
     res.status(500).json({
@@ -1123,14 +1166,33 @@ router.post('/calendar', async (req: Request, res: Response) => {
   }
 });
 
-/** GET /api/close/periods — List periods with status (alias for calendar) */
+/** GET /api/close/periods — List periods with status and close progress (hasUnadjustedTB, tbSource, closeStage). */
 router.get('/periods', async (req: Request, res: Response) => {
   try {
     const periodLabels = req.query.periodLabels as string | undefined;
-    const tenantId = getTenantId(req);
+    const tenantId = getTenantId(req) ?? 'default';
     const pool = getTenantPool(req);
     const list = await listPeriods(periodLabels ? periodLabels.split(',') : undefined, tenantId, pool);
-    res.json({ periods: list });
+    const enriched = await Promise.all(
+      list.map(async (p) => {
+        const [tbMeta, adjustments, readiness] = await Promise.all([
+          getUnadjustedMeta(tenantId, p.periodLabel, pool),
+          listAdjustments({ periodLabel: p.periodLabel }, tenantId, pool),
+          buildCloseReadiness(tenantId, p.periodLabel, pool ?? undefined, { includeNarrative: false }),
+        ]);
+        const locked = p.status === 'locked';
+        const postedCount = adjustments.filter((a) => a.status === 'posted').length;
+        const closeStage = computeCloseStage(!!tbMeta, locked, readiness.ready, postedCount);
+        return {
+          ...p,
+          hasUnadjustedTB: !!tbMeta,
+          tbSource: tbMeta?.source ?? undefined,
+          tbAt: tbMeta?.at,
+          closeStage,
+        };
+      })
+    );
+    res.json({ periods: enriched });
   } catch (e) {
     send500(res, e, 'List periods failed');
   }
@@ -1178,6 +1240,68 @@ router.post('/adjustments/from-je', async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Period locked', periodLabel: e.periodLabel });
     }
     send500(res, e, 'Add JE adjustments failed');
+  }
+});
+
+/** GET /api/close/closing-entries — Suggested closing entry (revenue/expense to retained earnings) from adjusted TB. Query: periodLabel. */
+router.get('/closing-entries', async (req: Request, res: Response) => {
+  try {
+    const periodLabel = req.query.periodLabel as string;
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!periodLabel || !tenantId) {
+      res.status(400).json({ error: 'periodLabel query and tenant context required' });
+      return;
+    }
+    const entries = await getAdjustedTrialBalance(tenantId, periodLabel, pool ?? undefined);
+    const suggestion = buildClosingEntrySuggestion(entries);
+    if (!suggestion) {
+      res.json({ suggestion: null, message: 'No revenue or expense to close for this period.' });
+      return;
+    }
+    res.json({ suggestion });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message.includes('No unadjusted trial balance')) {
+      res.status(404).json({ error: 'No trial balance for period', message });
+      return;
+    }
+    res.status(500).json({ error: 'Closing entries failed', message });
+  }
+});
+
+/** POST /api/close/closing-entries/add — Add suggested closing entry as adjustment (pending). Body: periodLabel. */
+router.post('/closing-entries/add', async (req: Request, res: Response) => {
+  try {
+    const body = req.body as { periodLabel: string };
+    if (!body?.periodLabel) {
+      res.status(400).json({ error: 'periodLabel required' });
+      return;
+    }
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    await assertPeriodNotLocked(body.periodLabel, tenantId ?? undefined, pool);
+    const entries = await getAdjustedTrialBalance(tenantId ?? '', body.periodLabel, pool ?? undefined);
+    const suggestion = buildClosingEntrySuggestion(entries);
+    if (!suggestion) {
+      res.status(400).json({ error: 'No closing entry to add', message: 'No revenue or expense to close for this period.' });
+      return;
+    }
+    const added = await addJEAsAdjustments(body.periodLabel, [suggestion], tenantId ?? undefined, pool);
+    res.json({ added, count: added.length });
+  } catch (e) {
+    if (e instanceof PeriodLockedError) {
+      const pool = getTenantPool(req);
+      const tenantId = getTenantId(req);
+      const auditContext = pool && tenantId ? { pool, tenantId } : undefined;
+      appendAuditLog(
+        { action: 'period_edit_blocked', resource: `period:${(e as PeriodLockedError).periodLabel}`, detail: 'Period is locked', actor: (req as AuthRequest).userId ?? 'anonymous' },
+        auditContext
+      );
+      return res.status(403).json({ error: 'Period locked', periodLabel: (e as PeriodLockedError).periodLabel });
+    }
+    const message = e instanceof Error ? e.message : String(e);
+    res.status(500).json({ error: 'Add closing entry failed', message });
   }
 });
 
@@ -1445,8 +1569,8 @@ router.post('/perform-action', (req: Request, res: Response) => {
   }
 });
 
-/** POST /api/close/checklist-sign-off — Sign off a checklist step (identity + timestamp) */
-router.post('/checklist-sign-off', (req: Request, res: Response) => {
+/** POST /api/close/checklist-sign-off — Sign off a checklist step (identity + timestamp); persists to DB. */
+router.post('/checklist-sign-off', async (req: Request, res: Response) => {
   try {
     const body = req.body as {
       periodLabel: string;
@@ -1473,6 +1597,7 @@ router.post('/checklist-sign-off', (req: Request, res: Response) => {
     );
     const pool = getTenantPool(req);
     const tenantId = getTenantId(req);
+    await setChecklist(body.periodLabel, steps, tenantId ?? undefined, pool);
     const auditContext = pool && tenantId ? { pool, tenantId } : undefined;
     appendAuditLog(
       { action: 'close_checklist_complete', resource: `checklist:${body.periodLabel}:${body.stepId}`, actor: body.signedOffBy, detail: 'signed off' },

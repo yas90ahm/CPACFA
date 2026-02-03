@@ -6,7 +6,7 @@
 import { Router, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { queryControl, isDbConfigured } from '../db/index.js';
-import { getUserByEmail } from '../db/repositories/user_repository.js';
+import { getUserByEmail, getUserByEmailOnly } from '../db/repositories/user_repository.js';
 import { verifyPassword, signToken } from '../auth/index.js';
 import { hashPassword } from '../auth/index.js';
 import { send500 } from '../lib/errorHandler.js';
@@ -42,7 +42,9 @@ router.post('/login', loginLimiter, validateBody(loginSchema), async (req: Reque
       return res.status(503).json({ error: 'Auth requires DATABASE_URL (Postgres)' });
     }
     const { tenantId, email, password } = req.body;
-    const user = await getUserByEmail(tenantId, email);
+    const user = tenantId
+      ? await getUserByEmail(tenantId, email)
+      : await getUserByEmailOnly(email);
     if (!user || !user.password_hash) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
@@ -68,12 +70,13 @@ router.post('/register', registerLimiter, validateBody(registerSchema), async (r
     if (!isDbConfigured()) {
       return res.status(503).json({ error: 'Register requires DATABASE_URL (Postgres)' });
     }
-    const { tenantName, email, password, role, databaseUrl } = req.body;
+    const { tenantName, name, email, password, role, databaseUrl } = req.body;
     const roleValue = role ?? 'accountant';
     const tenantId = `tenant-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const displayName = tenantName ?? name ?? 'My organization';
     await queryControl(
       'INSERT INTO tenants (id, name, database_url, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW())',
-      [tenantId, tenantName, databaseUrl ?? null]
+      [tenantId, displayName, databaseUrl ?? null]
     );
     const { createUser } = await import('../db/repositories/user_repository.js');
     const passwordHash = await hashPassword(password);

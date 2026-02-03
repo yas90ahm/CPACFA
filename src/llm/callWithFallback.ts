@@ -1,9 +1,11 @@
 /**
  * LLM call-with-fallback: single place for try/catch + parse + fallback.
  * Use in agentic services to avoid repeated boilerplate.
+ * Appends DATA_GROUNDING_RULE to every system prompt to reduce hallucination.
  */
 
 import { generateText, type TextGenerationInput } from './provider.js';
+import { DATA_GROUNDING_RULE } from './guardrails.js';
 
 export interface CallLLMWithFallbackOptions<T> {
   system: string;
@@ -18,12 +20,13 @@ export interface CallLLMWithFallbackOptions<T> {
 
 /**
  * Call LLM; on success run parse(raw); on throw return fallback.
- * Same behavior as per-service try/catch, centralized for consistency and future logging/retries.
+ * Appends DATA_GROUNDING_RULE to system so responses are based only on provided data.
  */
 export async function callLLMWithFallback<T>(options: CallLLMWithFallbackOptions<T>): Promise<T> {
   const { system, prompt, maxTokens, model, parse, fallback } = options;
+  const systemWithRule = `${system.trim()}\n\n${DATA_GROUNDING_RULE}`;
   try {
-    const raw = await generateText({ system, prompt, maxTokens, model } satisfies TextGenerationInput);
+    const raw = await generateText({ system: systemWithRule, prompt, maxTokens, model } satisfies TextGenerationInput);
     const result = parse(raw ?? '');
     return result;
   } catch {

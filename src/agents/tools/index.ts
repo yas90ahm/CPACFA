@@ -56,8 +56,74 @@ import {
   runReconcileCPAwithCFA,
   type ReconcileCPAwithCFAInput,
 } from './reconcileCPAwithCFA.js';
+import * as persistence from '../../services/persistence_service.js';
 
 export type { ToolDefinition, ToolResult } from './types.js';
+
+/** Entry shape used for buildFinancialStatements / Source of Truth. */
+type ValidatedEntry = { accountName: string; debit: number; credit: number; accountCode?: string };
+
+/**
+ * When context has sessionId and pool, fetch pipeline_input_snapshot and return entries (raw_rows or statements output).
+ * Used for Source of Truth so tools use Postgres snapshot instead of LLM-supplied input.
+ */
+async function getEntriesFromSession(
+  context?: ToolContext
+): Promise<ValidatedEntry[] | undefined> {
+  if (!context?.sessionId || !context?.pool) return undefined;
+  const session = await persistence.getSession(context.pool, context.sessionId);
+  const snap = session?.pipelineInputSnapshot as
+    | { type: 'raw_rows'; rawRows?: Array<{ accountName?: string; debit?: number; credit?: number; accountCode?: string }> }
+    | { type: 'statements'; output?: { trialBalance?: { entries?: ValidatedEntry[] } } }
+    | undefined;
+  if (!snap) return undefined;
+  if (snap.type === 'raw_rows' && Array.isArray(snap.rawRows) && snap.rawRows.length > 0) {
+    return snap.rawRows.map((r) => ({
+      accountName: r.accountName ?? '',
+      debit: Number(r.debit) || 0,
+      credit: Number(r.credit) || 0,
+      accountCode: r.accountCode,
+    }));
+  }
+  if (snap.type === 'statements' && snap.output?.trialBalance?.entries?.length) {
+    return snap.output.trialBalance.entries.map((e) => ({
+      accountName: e.accountName ?? '',
+      debit: Number(e.debit) || 0,
+      credit: Number(e.credit) || 0,
+      accountCode: e.accountCode,
+    }));
+  }
+  return undefined;
+}
+
+/** Ratio-relevant totals for computeRatios (from session snapshot when available). */
+interface RatioTotals {
+  totalAssets: number;
+  totalLiabilities: number;
+  totalEquity: number;
+  totalRevenue: number;
+  netIncome: number;
+}
+
+async function getRatioTotalsFromSession(context?: ToolContext): Promise<RatioTotals | undefined> {
+  if (!context?.sessionId || !context?.pool) return undefined;
+  const session = await persistence.getSession(context.pool, context.sessionId);
+  const snap = session?.pipelineInputSnapshot as
+    | { type: 'statements'; output?: { balanceSheet?: { totalAssets?: number; totalLiabilities?: number; totalEquity?: number }; profitAndLoss?: { totalRevenue?: number; netIncome?: number } } }
+    | undefined;
+  if (snap?.type !== 'statements' || !snap.output) return undefined;
+  const bs = snap.output.balanceSheet;
+  const pl = snap.output.profitAndLoss;
+  if (!bs || !pl) return undefined;
+  const totalAssets = Number(bs.totalAssets);
+  const totalLiabilities = Number(bs.totalLiabilities);
+  const totalEquity = Number(bs.totalEquity);
+  const totalRevenue = Number(pl.totalRevenue);
+  const netIncome = Number(pl.netIncome);
+  if (!Number.isFinite(totalAssets) || !Number.isFinite(totalLiabilities) || !Number.isFinite(totalEquity) || !Number.isFinite(totalRevenue) || !Number.isFinite(netIncome))
+    return undefined;
+  return { totalAssets, totalLiabilities, totalEquity, totalRevenue, netIncome };
+}
 
 // --- Tool definitions (metadata for LLM / orchestration) ---
 
@@ -106,6 +172,28 @@ export type { LookupVendorMemoryInput, CheckCategoryConsistencyInput, StoreUserC
 export interface ToolContext {
   tenantId?: string;
   pool?: Pool;
+  /** Validated entries from request/session; used for pre-flight and as Source of Truth. */
+  validatedEntries?: Array<{ accountName: string; debit: number; credit: number; accountCode?: string }>;
+  /** Session id for Source of Truth lookup (pipeline_input_snapshot) when present. */
+  sessionId?: string;
+}
+
+const DATA_GROUNDING_VIOLATION = 'Data Grounding Violation: No source data found to perform this calculation.';
+
+function hasValidEntries(context: ToolContext | undefined, input: unknown): boolean {
+  if (context?.validatedEntries && context.validatedEntries.length > 0) return true;
+  const entries = (input as { entries?: unknown[] })?.entries;
+  return Array.isArray(entries) && entries.length > 0;
+}
+
+function hasValidRatioInput(input: unknown): boolean {
+  const o = input as Record<string, unknown>;
+  const totalAssets = typeof o?.totalAssets === 'number' && Number.isFinite(o.totalAssets);
+  const totalLiabilities = typeof o?.totalLiabilities === 'number' && Number.isFinite(o.totalLiabilities);
+  const totalEquity = typeof o?.totalEquity === 'number' && Number.isFinite(o.totalEquity);
+  const totalRevenue = typeof o?.totalRevenue === 'number' && Number.isFinite(o.totalRevenue);
+  const netIncome = typeof o?.netIncome === 'number' && Number.isFinite(o.netIncome);
+  return !!(totalAssets && totalLiabilities && totalEquity && totalRevenue && netIncome);
 }
 
 /** Execute a tool by name with parsed input. Returns JSON-serializable result. Async for semantic memory tools. */
@@ -119,11 +207,43 @@ export async function executeTool(
     case 'classifyAccount':
       return runClassifyAccount(input as ClassifyAccountInput);
     case 'buildFinancialStatements':
-      return runBuildFinancialStatements(input as BuildFinancialStatementsInput, buildContext);
-    case 'get_financial_statements':
-      return runBuildFinancialStatements(input as BuildFinancialStatementsInput, buildContext);
-    case 'computeRatios':
-      return runComputeRatios(input as ComputeRatiosInput);
+    case 'get_financial_statements': {
+      const sessionEntries = await getEntriesFromSession(context);
+      const hasSession = sessionEntries && sessionEntries.length > 0;
+      const hasContext = context?.validatedEntries && context.validatedEntries.length > 0;
+      const hasInput = hasValidEntries(context, input);
+      if (!hasSession && !hasContext && !hasInput) {
+        return { success: false, error: DATA_GROUNDING_VIOLATION };
+      }
+      const effectiveEntries = sessionEntries ?? context?.validatedEntries ?? (input as { entries?: Array<{ accountName: string; debit: number; credit: number; accountCode?: string }> }).entries;
+      const effectiveInput: BuildFinancialStatementsInput = effectiveEntries?.length
+        ? { ...(input as BuildFinancialStatementsInput), entries: effectiveEntries }
+        : (input as BuildFinancialStatementsInput);
+      return runBuildFinancialStatements(effectiveInput, buildContext);
+    }
+    case 'computeRatios': {
+      const ratioInput = input as ComputeRatiosInput & Record<string, unknown>;
+      const sessionTotals = await getRatioTotalsFromSession(context);
+      const hasInput = hasValidRatioInput(input);
+      if (!sessionTotals && !hasInput) {
+        return { success: false, error: DATA_GROUNDING_VIOLATION };
+      }
+      const effectiveInput: ComputeRatiosInput = sessionTotals && !hasInput
+        ? {
+            totalAssets: sessionTotals.totalAssets,
+            totalLiabilities: sessionTotals.totalLiabilities,
+            totalEquity: sessionTotals.totalEquity,
+            totalRevenue: sessionTotals.totalRevenue,
+            netIncome: sessionTotals.netIncome,
+            ...(ratioInput.currentAssets != null && { currentAssets: ratioInput.currentAssets as number }),
+            ...(ratioInput.currentLiabilities != null && { currentLiabilities: ratioInput.currentLiabilities as number }),
+            ...(ratioInput.inventory != null && { inventory: ratioInput.inventory as number }),
+            ...(ratioInput.accountsReceivable != null && { accountsReceivable: ratioInput.accountsReceivable as number }),
+            ...(ratioInput.accountsPayable != null && { accountsPayable: ratioInput.accountsPayable as number }),
+          }
+        : (input as ComputeRatiosInput);
+      return runComputeRatios(effectiveInput);
+    }
     case 'forensicRescan':
       return runForensicRescan(input as ForensicRescanInput);
     case 'get_data_gaps':

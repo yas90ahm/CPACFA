@@ -15,6 +15,9 @@ import {
   addCommentarySnippet,
   searchCommentaryByTags,
 } from '../services/commentary_library_service.js';
+import { suggestReportingCommentaryAgentic } from '../services/agentic_reporting_commentary.js';
+import { validateBody } from '../middleware/validateRequest.js';
+import { suggestCommentarySchema } from '../schemas/reportingSchemas.js';
 import type { ReportPackInput } from '../types/reporting_packs.js';
 
 const router = Router();

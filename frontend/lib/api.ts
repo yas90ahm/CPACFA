@@ -255,22 +255,6 @@ export async function runScenarioAnalysis(
   return res.json();
 }
 
-/** Transcribe audio via Next.js API route (Whisper). Use relative URL when in browser. */
-export async function transcribeAudio(audioBlob: Blob): Promise<{ text: string }> {
-  const form = new FormData();
-  form.append('audio', audioBlob, 'recording.webm');
-  const base = typeof window !== 'undefined' ? '' : (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000');
-  const res = await fetch(`${base}/api/voice/transcribe`, {
-    method: 'POST',
-    body: form,
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error((data as { error?: string }).error ?? res.statusText);
-  }
-  return res.json();
-}
-
 export async function runPointedQuestion(question: string, snapshot: CFOFinancialSnapshot): Promise<{
   question: string;
   interpretedVariable: string;
@@ -490,7 +474,6 @@ export function buildReportPayloadFromBinder(binder: {
     audit_trail: auditTrail,
     audit_trail_rules_cited: rulesCited,
     clean_ledger: cleanLedgerNormalized,
-    ...(agentContext && { agent_context: agentContext }),
     ...(binder.periodStart && { periodStart: binder.periodStart }),
     ...(binder.periodEnd && { periodEnd: binder.periodEnd }),
   };

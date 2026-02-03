@@ -19,6 +19,10 @@ export interface CloseChecklistStep {
   id: string;
   label: string;
   status: 'pending' | 'in_progress' | 'completed' | 'skipped';
+  /** Category for grouping (e.g. Cash, Receivables, Reporting) */
+  category?: string;
+  /** How to verify (e.g. Match bank to GL, Post invoices) */
+  verificationMethod?: string;
   completedAt?: string; // ISO
   completedBy?: string;
   note?: string;
@@ -88,13 +92,24 @@ export interface CloseTaskAssignment {
 /** Period close status (FW1: close calendar) */
 export type PeriodCloseStatus = 'open' | 'in_progress' | 'locked';
 
-/** Close calendar entry: period + due date + status */
+/** Close progress stage for "where we are" in close */
+export type CloseStage = 'no_tb' | 'unadjusted_in' | 'adjustments' | 'ready_to_close' | 'closed';
+
+/** Close calendar entry: period + due date + status (+ optional progress for list) */
 export interface CloseCalendarEntry {
   periodLabel: string;
   closeDueDate: string; // ISO date (e.g. 5th of next month)
   status: PeriodCloseStatus;
   lockedAt?: string;
   lockedBy?: string;
+  /** Whether unadjusted TB exists for this period */
+  hasUnadjustedTB?: boolean;
+  /** Source of unadjusted TB: uploaded or synced */
+  tbSource?: 'uploaded' | 'synced';
+  /** When unadjusted TB was saved (ISO) */
+  tbAt?: string;
+  /** Derived stage for UI: no_tb | unadjusted_in | adjustments | ready_to_close | closed */
+  closeStage?: CloseStage;
 }
 
 /** Unified close adjustment: JE or accrual suggestion with workflow status (FW1) */

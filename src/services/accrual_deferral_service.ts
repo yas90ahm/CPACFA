@@ -62,10 +62,11 @@ export function buildAccrualSuggestions(input: AccrualSuggestionInput): AccrualS
 }
 
 const SYSTEM = [
-  'You are a CPA close specialist. Given period-end and optional open AR/AP/payroll amounts and context,',
-  'suggest 1–4 accrual or deferral journal entries. Return a JSON array of objects:',
+  'You are a CPA close specialist. Given period-end and optional open AR/AP/payroll amounts and context (or trial balance summary),',
+  'suggest 1–4 accrual or deferral journal entries only when supported by the data provided. Return a JSON array of objects:',
   '[{"type":"accrual"|"deferral","description":"...","debitAccount":"...","creditAccount":"...","amount":number}]',
   'Use only these keys. Amounts must be non-negative. Be concise.',
+  'Suggest only accruals/deferrals supported by the trial balance and open items in the prompt. Do not invent accounts or amounts not present in that data. If no trial balance or open items are provided, return [].',
 ].join(' ');
 
 /**

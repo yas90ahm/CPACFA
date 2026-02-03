@@ -62,6 +62,12 @@ const SAMPLE_CHART: GenUIStructuredContent = {
   chartType: 'line',
 };
 
+const SUGGESTED_ACTIONS = [
+  { label: 'Show me the balance sheet', query: 'Show me the balance sheet' },
+  { label: 'P&L', query: 'P&L' },
+  { label: 'Revenue vs operating margin trend', query: 'Revenue vs operating margin trend' },
+];
+
 export default function GenUIPage() {
   const handleSendMessage = React.useCallback(
     async (message: string): Promise<{ content: string | GenUIStructuredContent; state?: 'idle' | 'thinking' | 'writing_code' | 'checking_compliance' }> => {

@@ -26,6 +26,10 @@
     --audit-green: 152 39% 30%;
     --risk-red: 357 65% 37%;
     --radius: 6px;
+    /* Close workspace: soft blue/grey (FloQast-style) */
+    --close-status-bg: 210 20% 98%;
+    --close-status-border: 214 32% 91%;
+    --close-due-soon: 38 92% 50%;
   }
 
   .dark {
@@ -72,6 +76,15 @@
   box-shadow: 0 2px 4px -1px rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.03);
   border-radius: 6px;
   border: 1px solid #E2E8F0;
+}
+
+/* Close workspace: status strip and at-risk use soft palette */
+.close-status-strip {
+  background-color: hsl(var(--close-status-bg));
+  border-color: hsl(var(--close-status-border));
+}
+.close-at-risk-row {
+  border-left: 4px solid hsl(var(--close-due-soon));
 }
 
 /* Export: subtle pulse when report needs re-generation */

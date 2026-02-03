@@ -34,9 +34,9 @@ router.post(
       res.status(400).json({ error: 'Missing id or action (approve | reject)' });
       return;
     }
-    const item = getStagingItem(body.id);
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
+    const item = await getStagingItem(body.id, pool ? { pool } : undefined);
     const isOverride = item && OVERRIDE_TYPES.includes(item.type);
 
     if (body.action === 'approve') {
@@ -57,7 +57,7 @@ router.post(
           createdBy: body.signedBy,
         });
       }
-      const result = receiveHumanApproval({ id: body.id, signedBy: body.signedBy });
+      const result = await receiveHumanApproval({ id: body.id, signedBy: body.signedBy }, pool ? { pool } : undefined);
       if (!result.ok) {
         res.status(result.error === 'Staging item not found' ? 404 : 400).json({ error: result.error });
         return;
@@ -83,7 +83,7 @@ router.post(
           createdBy: body.signedBy,
         });
       }
-      const result = receiveHumanRejection({ id: body.id, rejectionReason: body.reason ?? 'No reason provided' });
+      const result = await receiveHumanRejection({ id: body.id, rejectionReason: body.reason ?? 'No reason provided' }, pool ? { pool } : undefined);
       if (!result.ok) {
         res.status(result.error === 'Staging item not found' ? 404 : 400).json({ error: result.error });
         return;
@@ -140,13 +140,21 @@ router.post(
       res.status(400).json({ error: 'proposedAction and justification required' });
       return;
     }
-    const item = submitToStaging({
-      proposedAction: body.proposedAction,
-      justification: body.justification,
-      type: body.type,
-      amount: body.amount,
-      payload: body.payload,
-    });
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    const opts = pool && tenantId ? { pool, tenantId } : undefined;
+    const item = await Promise.resolve(
+      submitToStaging(
+        {
+          proposedAction: body.proposedAction,
+          justification: body.justification,
+          type: body.type,
+          amount: body.amount,
+          payload: body.payload,
+        },
+        opts
+      )
+    );
     res.status(201).json({ ok: true, item });
   })
 );
@@ -157,7 +165,9 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const status = req.query.status as 'pending' | 'approved' | 'rejected' | undefined;
     const limit = req.query.limit != null ? Math.min(500, Math.max(1, Number(req.query.limit))) : 100;
-    const items = getStagingArea({ status, limit });
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    const items = await getStagingArea({ status, limit, ...(pool && tenantId ? { pool, tenantId } : {}) });
     res.json({ items, count: items.length });
   })
 );
@@ -166,7 +176,8 @@ router.get(
 router.get(
   '/staging/:id',
   asyncHandler(async (req: Request, res: Response) => {
-    const item = getStagingItem(req.params.id);
+    const pool = getTenantPool(req);
+    const item = await getStagingItem(req.params.id, pool ? { pool } : undefined);
     if (!item) {
       res.status(404).json({ error: 'Staging item not found' });
       return;
@@ -195,7 +206,8 @@ router.post(
       res.status(400).json({ error: 'rejectionReason required when signal is HumanRejected (feedback loop: Why?)' });
       return;
     }
-    const result = handleApprovalWebhook(body);
+    const pool = getTenantPool(req);
+    const result = await handleApprovalWebhook(body, pool ? { pool } : undefined);
     if (!result.ok) {
       res.status(result.error === 'Staging item not found' ? 404 : 400).json({ ok: false, error: result.error });
       return;

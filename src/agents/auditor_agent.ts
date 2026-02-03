@@ -26,7 +26,9 @@ You must output exactly one of the following:
    Write: "NO_ISSUE"
    You may add one line: "NOTE: [brief note]" if you want to qualify (e.g. "NOTE: Assumed trial balance is correct.").
 
-Do not invent errors. Only report a finding if there is a clear mathematical inconsistency or a clear misapplication of FASB/GAAP.`;
+Do not invent errors. Only report a finding if there is a clear mathematical inconsistency or a clear misapplication of FASB/GAAP.
+
+${DATA_GROUNDING_RULE}`;
 
 const DISCUSSION_SYSTEM = `You are mediating an internal discussion between the Supervisor and the Skeptic.
 
@@ -41,7 +43,9 @@ Output format (you must include both lines):
 CONSENSUS: [no_error | correction_accepted]
 FINAL_REPORT: [The final report text the user should see. If correction_accepted, incorporate the correction or add a short note that the issue was corrected. If no_error, use the original report plus an optional one-line note that the Skeptic reviewed and found no issue.]
 
-Keep FINAL_REPORT concise and user-ready. Do not expose internal debate.`;
+Keep FINAL_REPORT concise and user-ready. Do not expose internal debate.
+
+${DATA_GROUNDING_RULE}`;
 
 export interface SupervisorReport {
   /** Supervisor's final response text. */

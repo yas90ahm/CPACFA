@@ -9,7 +9,7 @@ import { z } from 'zod';
 // ============================================================================
 
 export const loginSchema = z.object({
-  tenantId: z.string().min(1, 'Tenant ID required'),
+  tenantId: z.string().min(1).optional(),
   email: z.string().email('Invalid email format'),
   password: z.string().min(1, 'Password required'),
 });
@@ -29,7 +29,8 @@ const passwordComplexity = z
   );
 
 export const registerSchema = z.object({
-  tenantName: z.string().min(1, 'Tenant name required'),
+  tenantName: z.string().min(1, 'Tenant name required').optional(),
+  name: z.string().optional(),
   email: z.string().email('Invalid email format'),
   password: passwordComplexity,
   role: allowedRolesSchema.optional(),

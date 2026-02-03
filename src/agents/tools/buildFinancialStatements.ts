@@ -10,6 +10,7 @@ import { buildFinancialStatements as buildFinancialStatementsService } from '../
 import { generateStatements } from '../../services/statementGenerator.js';
 import { listContracts } from '../../db/repositories/revenue_recognition_repository.js';
 import type { IntegrityContractFact } from '../../types/integrity.js';
+import { runPlanExecuteVerify } from '../../services/planExecuteVerify.js';
 import type { ToolDefinition, ToolResult } from './types.js';
 
 const trialBalanceEntrySchema = z.object({
@@ -125,6 +126,14 @@ export async function runBuildFinancialStatements(
     const profitAndLoss = result.profitAndLoss;
     const classifiedEntries = result.classifiedEntries;
     const standardMetadata = 'standardMetadata' in result ? result.standardMetadata : undefined;
+
+    const pev = runPlanExecuteVerify({ trialBalance, balanceSheet, profitAndLoss });
+    if (!pev.verification.passed) {
+      return {
+        success: false,
+        error: `Verification failed: ${pev.verification.checks.join('; ')}. Unverified statements are not returned.`,
+      };
+    }
 
     return {
       success: true,

@@ -10,6 +10,7 @@ import { executeTool } from './tools/index.js';
 import { getProviderFromEnv } from '../llm/provider.js';
 import type { LLMTool } from '../llm/tool_schema.js';
 import { toAnthropicTools, toOpenAITools, toMistralTools } from '../llm/tool_schema.js';
+import { DATA_GROUNDING_RULE } from '../llm/guardrails.js';
 
 const MODEL = 'claude-sonnet-4-5-20250929';
 const MAX_REACT_ITERATIONS = 15;
@@ -29,7 +30,9 @@ RULES:
    - getPortfolioFinalizationPolicy: When the user asks about changing past performance, back-dating, or correcting finalized periods, call this and cite the returned policy in your answer.
    - reconcileCPAwithCFA: When you have called both buildFinancialStatements and computeRatios, you MUST call this with those results before giving your final answer; if it returns a conflict, include that in your response.
 3. After each Observation (tool result), output a Thought about what you observed and what you will do next (e.g. call another tool, or answer the user). Only stop when you have fully answered the user's core intent.
-4. When you have enough information to answer the user, provide a clear, complete response. Do not stop mid-flow; ensure the user's question is fully addressed.`;
+4. When you have enough information to answer the user, provide a clear, complete response. Do not stop mid-flow; ensure the user's question is fully addressed.
+
+${DATA_GROUNDING_RULE}`;
 
 /** Build Anthropic tool list from toolbox (name, description, input_schema). */
 function buildTools(): LLMTool[] {
@@ -233,9 +236,14 @@ function getApiKey(): string {
  */
 export async function runSupervisor(
   input: SupervisorInput,
-  context?: { tenantId: string; pool: Pool }
+  context?: { tenantId?: string; pool?: Pool; sessionId?: string; validatedEntries?: Array<{ accountName: string; debit: number; credit: number; accountCode?: string }> }
 ): Promise<SupervisorOutput> {
   const provider = getProviderFromEnv();
+  const toolContext = {
+    ...context,
+    validatedEntries: context?.validatedEntries ?? (input.entries?.length ? input.entries : undefined),
+    sessionId: context?.sessionId,
+  };
 
   const userContent = input.entries?.length
     ? `${input.message}\n\n[Trial balance entries available: ${input.entries.length} rows. Use buildFinancialStatements with these entries when building statements, or forensicRescan with the same entries if you see an anomaly.]`
@@ -310,7 +318,7 @@ export async function runSupervisor(
       const toolResults: Array<{ type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }> = [];
 
       for (const use of toolUseBlocks) {
-        const toolResult = await executeTool(use.name, use.input, context);
+        const toolResult = await executeTool(use.name, use.input, toolContext);
         const contentStr =
           toolResult.success
             ? JSON.stringify(toolResult.data, null, 2)
@@ -415,7 +423,7 @@ export async function runSupervisor(
         } catch {
           inputObj = {};
         }
-        const result = await executeTool(name, inputObj, context);
+        const result = await executeTool(name, inputObj, toolContext);
         toolCalls.push({ name, input: inputObj, result: result.success ? JSON.stringify(result.data).slice(0, 2000) : `Error: ${result.error}` });
         messagesM.push({
           role: 'tool',

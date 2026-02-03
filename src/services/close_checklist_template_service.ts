@@ -76,6 +76,8 @@ export async function createChecklistFromTemplate(
       id: `step-${i + 1}`,
       label: spec.label,
       status: 'pending' as const,
+      category: spec.category,
+      verificationMethod: spec.verificationMethod,
       controlId: spec.controlId,
       assignee: spec.assignee ?? options.assignee,
       dueDate: dueDate ?? undefined,

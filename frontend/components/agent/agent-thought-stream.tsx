@@ -93,7 +93,7 @@ function SourceTruthBlock({
         <div className="border-t border-audit-green/20">
           {step.type === 'thought' && hasThought ? (
             <p className="p-2.5 text-xs text-primary-foreground/90 whitespace-pre-wrap leading-relaxed">
-              {step.thought.trim()}
+              {step.thought?.trim() ?? ''}
             </p>
           ) : (
             <pre className="p-2.5 text-[11px] font-mono text-primary-foreground/80 overflow-x-auto max-h-[180px] overflow-y-auto whitespace-pre-wrap break-words">
@@ -246,7 +246,6 @@ export function AgentThoughtStream({
                   isCompleted={isCompleted}
                   expanded={expandedIndex === index}
                   onToggleExpand={() => setExpandedIndex((i) => (i === index ? null : index))}
-                  isLast={index === lastIndex}
                 />
               );
             })}

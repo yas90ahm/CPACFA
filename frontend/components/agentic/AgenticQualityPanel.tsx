@@ -62,14 +62,14 @@ export function AgenticQualityPanel({
         <Accordion type="multiple" className="w-full">
           {hasChecks && (
             <AccordionItem value="quality-checks">
-              <AccordionTrigger>
+              <AccordionTrigger value="quality-checks">
                 <span>Quality checks</span>
                 <span className="ml-2 text-xs text-muted-foreground">
                   {qualityChecks.filter((c) => c.severity === 'critical').length} critical,{' '}
                   {qualityChecks.filter((c) => c.severity === 'warning').length} warning
                 </span>
               </AccordionTrigger>
-              <AccordionContent>
+              <AccordionContent value="quality-checks">
                 <ul className="space-y-2">
                   {qualityChecks.map((c) => (
                     <li
@@ -89,11 +89,11 @@ export function AgenticQualityPanel({
           )}
           {hasGaps && (
             <AccordionItem value="data-gaps">
-              <AccordionTrigger>
+              <AccordionTrigger value="data-gaps">
                 <span>Data gaps</span>
                 <span className="ml-2 text-xs text-muted-foreground">{dataGaps.length} item(s)</span>
               </AccordionTrigger>
-              <AccordionContent>
+              <AccordionContent value="data-gaps">
                 <ul className="space-y-2">
                   {dataGaps.map((g) => (
                     <li key={g.id} className="rounded border-l-2 border-l-amber-500 pl-3 py-1 text-sm">

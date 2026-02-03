@@ -4,13 +4,15 @@
  */
 
 import type { Pool } from 'pg';
-import type { CloseChecklistStep } from '../types/close_and_controls.js';
+import type { CloseChecklistStep, CloseStage } from '../types/close_and_controls.js';
 import { getPeriodCloseRecord } from './period_close_service.js';
 import { isPeriodLocked, getPeriodLock } from './period_lock_service.js';
 import { getChecklist } from './checklist_store_service.js';
 import { buildReconciliationTieOut } from './reconciliation_tie_out_service.js';
 import { buildCloseReadiness } from './close_readiness_service.js';
 import { getMateriality, materialityThresholdFromSettings } from './materiality_service.js';
+import { getUnadjustedMeta } from './trial_balance_store_service.js';
+import { listAdjustments } from './close_adjustments_service.js';
 
 export interface CloseStatusChecklist {
   total: number;
@@ -54,6 +56,28 @@ export interface CloseStatus {
   readiness: CloseStatusReadiness;
   signOff: CloseStatusSignOff;
   materialityRef?: MaterialityRef;
+  hasUnadjustedTB: boolean;
+  tbSource: 'uploaded' | 'synced' | null;
+  tbAt?: string;
+  adjustmentCount: number;
+  postedCount: number;
+  closeStage: CloseStage;
+}
+
+/**
+ * Derive close stage from TB presence, lock, readiness, and posted adjustments.
+ */
+export function computeCloseStage(
+  hasUnadjustedTB: boolean,
+  locked: boolean,
+  readinessReady: boolean,
+  postedCount: number
+): CloseStage {
+  if (locked) return 'closed';
+  if (!hasUnadjustedTB) return 'no_tb';
+  if (readinessReady) return 'ready_to_close';
+  if (postedCount > 0) return 'adjustments';
+  return 'unadjusted_in';
 }
 
 /**
@@ -64,13 +88,15 @@ export async function buildCloseStatus(
   periodLabel: string,
   pool: Pool | undefined
 ): Promise<CloseStatus> {
-  const [periodClose, locked, lockRecord, steps, tieOut, readiness] = await Promise.all([
+  const [periodClose, locked, lockRecord, steps, tieOut, readiness, tbMeta, adjustments] = await Promise.all([
     getPeriodCloseRecord(tenantId, periodLabel, pool),
     isPeriodLocked(periodLabel, tenantId, pool),
     getPeriodLock(periodLabel, tenantId, pool),
     getChecklist(periodLabel, undefined, tenantId, pool),
     buildReconciliationTieOut(tenantId, periodLabel, pool),
     buildCloseReadiness(tenantId, periodLabel, pool, { includeNarrative: false }),
+    getUnadjustedMeta(tenantId, periodLabel, pool),
+    listAdjustments({ periodLabel }, tenantId, pool),
   ]);
 
   const completed = steps.filter((s: CloseChecklistStep) => s.status === 'completed' || s.status === 'skipped');
@@ -88,6 +114,10 @@ export async function buildCloseStatus(
         periodLabel,
       }
     : undefined;
+
+  const hasUnadjustedTB = !!tbMeta;
+  const postedCount = adjustments.filter((a) => a.status === 'posted').length;
+  const closeStage = computeCloseStage(hasUnadjustedTB, locked, readiness.ready, postedCount);
 
   return {
     periodLabel,
@@ -120,5 +150,11 @@ export async function buildCloseStatus(
       reviewedAt: periodClose?.reviewedAt,
     },
     materialityRef,
+    hasUnadjustedTB,
+    tbSource: tbMeta?.source ?? null,
+    tbAt: tbMeta?.at,
+    adjustmentCount: adjustments.length,
+    postedCount,
+    closeStage,
   };
 }

@@ -22,6 +22,15 @@ export async function getUserByEmail(tenantId: string, email: string): Promise<U
   return r.rows[0] ?? null;
 }
 
+/** Find user by email (first match). Use when tenantId is not provided (e.g. wedge login). */
+export async function getUserByEmailOnly(email: string): Promise<UserRow | null> {
+  const r = await queryControl<UserRow>(
+    'SELECT id, tenant_id, email, password_hash, role, created_at, updated_at FROM users WHERE email = $1 LIMIT 1',
+    [email]
+  );
+  return r.rows[0] ?? null;
+}
+
 export async function getUserById(id: string): Promise<UserRow | null> {
   const r = await queryControl<UserRow>(
     'SELECT id, tenant_id, email, password_hash, role, created_at, updated_at FROM users WHERE id = $1',

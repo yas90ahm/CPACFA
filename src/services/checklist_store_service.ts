@@ -60,12 +60,17 @@ export async function setChecklist(
 }
 
 /**
- * Update a step's evidence link. When pool/tenantId present, uses tenant DB.
+ * Update a step's evidence link and/or dueDate/assignee. When pool/tenantId present, uses tenant DB.
  */
 export async function updateStepEvidence(
   periodLabel: string,
   stepId: string,
-  evidence: { evidenceId?: string; evidenceType?: 'reconciliation' | 'document' | 'checklist_sign_off' },
+  evidence: {
+    evidenceId?: string;
+    evidenceType?: 'reconciliation' | 'document' | 'checklist_sign_off';
+    dueDate?: string;
+    assignee?: string;
+  },
   tenantId?: string,
   pool?: Pool
 ): Promise<CloseChecklistStep | undefined> {
@@ -76,6 +81,8 @@ export async function updateStepEvidence(
     if (!step) return undefined;
     if (evidence.evidenceId != null) step.evidenceId = evidence.evidenceId;
     if (evidence.evidenceType != null) step.evidenceType = evidence.evidenceType;
+    if (evidence.dueDate !== undefined) step.dueDate = evidence.dueDate || undefined;
+    if (evidence.assignee !== undefined) step.assignee = evidence.assignee || undefined;
     await checklistRepo.upsertChecklist(pool, tenantId, periodLabel, steps);
     return { ...step };
   }
@@ -85,5 +92,7 @@ export async function updateStepEvidence(
   if (!step) return undefined;
   if (evidence.evidenceId != null) step.evidenceId = evidence.evidenceId;
   if (evidence.evidenceType != null) step.evidenceType = evidence.evidenceType;
+  if (evidence.dueDate !== undefined) step.dueDate = evidence.dueDate || undefined;
+  if (evidence.assignee !== undefined) step.assignee = evidence.assignee || undefined;
   return { ...step };
 }

@@ -22,13 +22,13 @@ export function PolicyProposalsPanel({
       <Accordion type="multiple" className="w-full">
         {policyProposals.map((p, i) => (
           <AccordionItem key={i} value={`proposal-${i}`}>
-            <AccordionTrigger>
+            <AccordionTrigger value={`proposal-${i}`}>
               <span className="font-medium">{p.policyArea}</span>
               <span className="ml-2 text-xs text-muted-foreground">
                 confidence {Math.round(p.confidence * 100)}%
               </span>
             </AccordionTrigger>
-            <AccordionContent className="space-y-2 text-sm">
+            <AccordionContent value={`proposal-${i}`} className="space-y-2 text-sm">
               <p><span className="font-medium">Change:</span> {p.changeDescription}</p>
               <p className="text-muted-foreground">{p.reasoning}</p>
               {p.citation && (

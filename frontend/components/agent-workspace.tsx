@@ -27,6 +27,9 @@ import {
 import { useAgentThoughtStream, buildThoughtStreamSteps } from '@/components/agent';
 import { TransactionInterrogatorModal } from '@/components/transaction-interrogator-modal';
 
+const DATA_SAFETY_RESPONSE =
+  'Your data is protected using SOC2-aligned controls and a zero-knowledge architecture. Only you and authorized users can access your financial data.';
+
 export interface StatementRow {
   label: string;
   amount: number;
@@ -49,6 +52,8 @@ interface ChatMessage {
   timestamp: string;
   reasoningPath?: string;
   citation?: string;
+  thoughts?: string[];
+  toolCalls?: Array<{ name: string; input?: unknown; result?: string }>;
 }
 
 export function AgentWorkspace({

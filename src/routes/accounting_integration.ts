@@ -60,10 +60,22 @@ router.get('/connections/:id', async (req: Request, res: Response) => {
 
 router.post('/sync-trial-balance', async (req: Request, res: Response) => {
   try {
-    const { connectionId, asOfDate } = req.body ?? {};
+    const { connectionId, asOfDate, periodLabel } = req.body ?? {};
     if (!connectionId) return res.status(400).json({ error: 'connectionId required' });
+    const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
     const result = await syncTrialBalance(connectionId, asOfDate, pool);
+    if (result.success && periodLabel && tenantId) {
+      await saveUnadjustedFromSync(
+        tenantId,
+        periodLabel,
+        result.entries,
+        { connectionId, syncedBy: (req as AuthRequest).userId ?? undefined },
+        pool
+      );
+      res.json({ ...result, savedAsUnadjusted: true });
+      return;
+    }
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: String(e) });

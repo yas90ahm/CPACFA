@@ -23,6 +23,14 @@ import {
   analyzeRateChangeAgentic,
   generateTaxFootnoteAgentic,
 } from '../services/agentic_deferred_tax.js';
+import { validateBody, validateParams, validateQuery } from '../middleware/validateRequest.js';
+import {
+  calculateDeferredTaxBodySchema,
+  listDeferredTaxItemsQuerySchema,
+  deferredTaxItemIdParamSchema,
+  updateDeferredTaxItemSchema,
+  listValuationAllowanceQuerySchema,
+} from '../schemas/deferredTaxSchemas.js';
 
 const router = Router();
 

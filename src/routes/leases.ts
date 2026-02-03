@@ -28,6 +28,7 @@ import {
   suggestClassificationSchema,
   suggestDiscountRateSchema,
   leaseIdParamSchema,
+  generateFootnoteSchema,
 } from '../schemas/leaseSchemas.js';
 
 const router = Router();
