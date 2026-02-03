@@ -21,6 +21,13 @@ try:
 except ImportError:
     HAS_CPA = False
 
+# Optional strategic analyst for DCF (CFA path injects CPA historical metrics)
+try:
+    from strategic_analyst import dcf_valuation
+    HAS_STRATEGIC_ANALYST = True
+except ImportError:
+    HAS_STRATEGIC_ANALYST = False
+
 
 class Intent(str, Enum):
     CPA = "cpa"   # Financial statement generation / "How do we stand?"
@@ -307,13 +314,35 @@ def route(
         )
 
     if intent == Intent.CFA:
-        cfa_out = _run_cfa_agent(query, cpa_output)
+        # CFA path: get CPA historical metrics first and inject into DCF so CFA never asks for data CPA has
+        historical_metrics: Optional[dict[str, Any]] = None
+        if cpa_context.cpa_agent and cpa_context.as_of is not None:
+            period_end = cpa_context.period_end or cpa_context.as_of
+            period_start = cpa_context.period_start or period_end
+            try:
+                historical_metrics = cpa_context.cpa_agent.get_historical_metrics(
+                    as_of=cpa_context.as_of,
+                    period_start=period_start,
+                    period_end=period_end,
+                )
+            except Exception:
+                pass
+        cfa_out = _run_cfa_agent(
+            query,
+            cpa_output,
+            historical_metrics=historical_metrics,
+        )
         internal_monologue = cfa_out.get("internal_monologue", [])
         roe = cfa_out.get("roe")
         note = cfa_out.get("valuation_note", "")
         final = note
         if roe is not None:
             final = f"ROE = {roe:.2%} (from CPA-generated Net Income and Equity). " + note
+        if cfa_out.get("dcf"):
+            dcf = cfa_out["dcf"]
+            ev = dcf.get("enterprise_value")
+            if ev is not None:
+                final += f" DCF Enterprise Value (CPA-injected FCF): ${ev:,.0f}."
         return RouterResponse(
             intent=intent,
             internal_monologue=internal_monologue,
@@ -372,13 +401,23 @@ def route_with_precomputed_statements(
     )
     intent = detect_intent(query)
     if intent == Intent.CFA:
-        cfa_out = _run_cfa_agent(query, cpa_output)
+        # Build historical_metrics from precomputed summaries so DCF gets injected (CFA never asks for data)
+        historical_metrics = None
+        if net_income is not None:
+            ni_float = float(net_income)
+            historical_metrics = {"free_cash_flows": [ni_float * (1.05 ** t) for t in range(5)]}
+        cfa_out = _run_cfa_agent(query, cpa_output, historical_metrics=historical_metrics)
+        final = cfa_out.get("valuation_note", "")
+        if cfa_out.get("roe") is not None:
+            final = f"ROE = {cfa_out['roe']:.2%} (from CPA P&L and BS). " + final
+        if cfa_out.get("dcf") and cfa_out["dcf"].get("enterprise_value") is not None:
+            final += f" DCF Enterprise Value (CPA-injected FCF): ${cfa_out['dcf']['enterprise_value']:,.0f}."
         return RouterResponse(
             intent=intent,
             internal_monologue=cfa_out.get("internal_monologue", []),
             cpa_output=cpa_output,
             cfa_output=cfa_out,
-            final_answer=f"ROE = {cfa_out['roe']:.2%} (from CPA P&L and BS). " + cfa_out.get("valuation_note", "") if cfa_out.get("roe") is not None else cfa_out.get("valuation_note", ""),
+            final_answer=final,
         )
     if intent == Intent.CPA:
         internal_monologue = [

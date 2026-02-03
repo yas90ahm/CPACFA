@@ -35,12 +35,6 @@ except ImportError:
     HAS_INGESTION = False
 
 try:
-    from agent_orchestrator import route, route_with_precomputed_statements, detect_intent
-    HAS_ORCHESTRATOR = True
-except ImportError:
-    HAS_ORCHESTRATOR = False
-
-try:
     from compliance.guardrail import calculate_tax_provision_with_guardrail, TaxProvisionResult
     from compliance.citation_check import run_citation_check, CitationCheckResult
     from compliance.audit_log import init_audit_db, log_chain_of_thought, get_audit_trail
@@ -61,19 +55,15 @@ except ImportError:
     ForensicEntryForScan = None
     get_forensic_anomalies = None
 
-try:
-    from tax.fx_engine import (
-        remeasure_to_functional,
-        translate_to_reporting,
-        compute_unrealized_fx_gain_loss,
-        batch_remeasure_to_functional,
-        FXPosition,
-    )
-    from tax.tax_provisioning import compute_deferred_taxes, TemporaryDifference
-    from tax.nexus_checker import check_nexus, add_known_nexus, get_known_nexus
-    HAS_TAX = True
-except ImportError:
-    HAS_TAX = False
+from tax.fx_engine import (
+    remeasure_to_functional,
+    translate_to_reporting,
+    compute_unrealized_fx_gain_loss,
+    batch_remeasure_to_functional,
+    FXPosition,
+)
+from tax.tax_provisioning import compute_deferred_taxes, TemporaryDifference
+from tax.nexus_checker import check_nexus, add_known_nexus, get_known_nexus
 
 try:
     from consolidation import (
@@ -151,9 +141,6 @@ except ImportError:
 
 app = Flask(__name__)
 
-# Store last ingestion classified transactions for Transaction Interrogator drill-down
-_last_ingestion_transactions: list[dict[str, Any]] = []
-
 
 def _decimal_to_json(d: Decimal) -> str:
     return str(d)
@@ -163,6 +150,150 @@ def _codification_to_dict(c: CodificationRef | None) -> dict | None:
     if c is None:
         return None
     return {"framework": c.framework, "citation": c.citation, "description": c.description}
+
+
+# --- Pure REST Math API (Node calls Python; no auth/session) ---
+
+def _run_trial_balance_math(body: dict) -> tuple[date, Any, Any]:
+    """Run accounting_engine: coa + entries + as_of -> trial_balance, balance_sheet. Returns (as_of_date, tb, bs)."""
+    coa_list = body.get("coa") or []
+    entries_list = body.get("entries") or []
+    as_of_str = body.get("as_of")
+    accounts = {}
+    for a in coa_list:
+        code = a.get("code") or ""
+        name = a.get("name") or code
+        acc_type_str = (a.get("account_type") or "ASSET").upper()
+        try:
+            acc_type = AccountType(acc_type_str)
+        except ValueError:
+            acc_type = AccountType.ASSET
+        accounts[code] = GLAccount(code=code, name=name, account_type=acc_type)
+    coa = ChartOfAccounts(accounts=accounts)
+    if not accounts:
+        raise ValueError("Missing or empty 'coa'")
+    agent = CPAAgent(coa)
+    as_of_date = None
+    for e in entries_list:
+        dt = e.get("date")
+        if isinstance(dt, str):
+            d = date.fromisoformat(dt)
+        else:
+            d = date.today()
+        if as_of_date is None or d > as_of_date:
+            as_of_date = d
+        entry = GLEntry(
+            date=d,
+            description=e.get("description") or "",
+            debit_account=e.get("debit_account") or "",
+            credit_account=e.get("credit_account") or "",
+            amount=Decimal(str(e.get("amount", 0))),
+        )
+        agent.stage_entry(entry)
+    agent.approve_all_pending()
+    if as_of_date is None:
+        as_of_date = date.today()
+    if as_of_str:
+        as_of_date = date.fromisoformat(as_of_str)
+    tb = agent.trial_balance(as_of_date)
+    bs = agent.balance_sheet(as_of_date)
+    return as_of_date, tb, bs
+
+
+def _jsonify_trial_balance_response(as_of_date: date, tb: Any, bs: Any) -> dict:
+    def _tb_line(l):
+        return {
+            "account_code": l.account_code,
+            "account_name": l.account_name,
+            "debit": _decimal_to_json(l.debit),
+            "credit": _decimal_to_json(l.credit),
+            "account_type": l.account_type.value,
+        }
+    def _stmt_line(l):
+        return {"label": l.label, "amount": _decimal_to_json(l.amount), "account_code": l.account_code}
+    return {
+        "as_of": as_of_date.isoformat(),
+        "trial_balance": {
+            "lines": [_tb_line(l) for l in tb.lines],
+            "total_debits": _decimal_to_json(tb.total_debits),
+            "total_credits": _decimal_to_json(tb.total_credits),
+            "balances": tb.balances,
+        },
+        "balance_sheet": {
+            "report_date": bs.report_date.isoformat(),
+            "assets": [_stmt_line(l) for l in bs.assets],
+            "liabilities": [_stmt_line(l) for l in bs.liabilities],
+            "equity": [_stmt_line(l) for l in bs.equity],
+            "total_assets": _decimal_to_json(bs.total_assets),
+            "total_liabilities": _decimal_to_json(bs.total_liabilities),
+            "total_equity": _decimal_to_json(bs.total_equity),
+            "codification_ref": _codification_to_dict(bs.codification_ref),
+        },
+        "validation": {
+            "balances": abs(bs.total_assets - (bs.total_liabilities + bs.total_equity)) <= Decimal("0.02"),
+            "message": "Assets = Liabilities + Equity (ASC 210-10-45)",
+        },
+    }
+
+
+@app.route("/api/math/trial-balance", methods=["POST"])
+def api_math_trial_balance():
+    """
+    Pure REST: POST { "coa": [...], "entries": [...], "as_of": "YYYY-MM-DD"? }.
+    Runs accounting_engine; returns trial_balance, balance_sheet, validation.
+    Called by Node pythonBridge. No auth/session.
+    """
+    body = request.get_json(silent=True) or {}
+    try:
+        as_of_date, tb, bs = _run_trial_balance_math(body)
+        return jsonify(_jsonify_trial_balance_response(as_of_date, tb, bs))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except ValidationError as e:
+        return jsonify({"error": "Validation failed", "message": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/math/dcf", methods=["POST"])
+def api_math_dcf():
+    """
+    Pure REST: POST { "risk_free_rate", "free_cash_flows": [...], "terminal_growth_rate", "equity_risk_premium"?, "beta"? }.
+    Runs strategic_analyst.dcf_valuation; returns enterprise_value, wacc, assumptions_summary, etc.
+    Called by Node pythonBridge. No auth/session.
+    """
+    if not HAS_STRATEGIC_ANALYST:
+        return jsonify({"error": "Strategic analyst (DCF) not available"}), 503
+    from strategic_analyst import dcf_valuation
+    body = request.get_json(silent=True) or {}
+    try:
+        risk_free_rate = float(body.get("risk_free_rate", 0.045))
+        free_cash_flows = [float(x) for x in (body.get("free_cash_flows") or [])]
+        terminal_growth_rate = float(body.get("terminal_growth_rate", 0.02))
+        equity_risk_premium = float(body.get("equity_risk_premium", 0.055))
+        beta = float(body.get("beta", 1.0))
+        result = dcf_valuation(
+            risk_free_rate=risk_free_rate,
+            free_cash_flows=free_cash_flows,
+            terminal_growth_rate=terminal_growth_rate,
+            equity_risk_premium=equity_risk_premium,
+            beta=beta,
+        )
+        return jsonify({
+            "enterprise_value": result.enterprise_value,
+            "present_value_explicit": result.present_value_explicit,
+            "present_value_terminal": result.present_value_terminal,
+            "terminal_value": result.terminal_value,
+            "risk_free_rate": result.risk_free_rate,
+            "wacc": result.wacc,
+            "terminal_growth_rate": result.terminal_growth_rate,
+            "num_explicit_years": result.num_explicit_years,
+            "assumptions_summary": result.assumptions_summary,
+        })
+    except (TypeError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # --- Justification Engine (Chat) ---
@@ -244,89 +375,19 @@ def api_depreciation_schedule():
 @app.route("/api/gl/process", methods=["POST"])
 def api_gl_process():
     """
-    Process a general ledger: POST body with coa and entries.
-    coa: [ { "code", "name", "account_type": "ASSET"|"LIABILITY"|"EQUITY"|"REVENUE"|"EXPENSE" } ]
-    entries: [ { "date": "YYYY-MM-DD", "description", "debit_account", "credit_account", "amount" } ]
-    as_of: "YYYY-MM-DD" (optional, default last entry date)
-    Returns: trial_balance, balance_sheet, validation (Assets = Liabilities + Equity).
+    Alias for /api/math/trial-balance. POST { "coa": [...], "entries": [...], "as_of": "YYYY-MM-DD"? }.
+    Returns trial_balance, balance_sheet, validation.
     """
     body = request.get_json(silent=True) or {}
-    coa_list = body.get("coa") or []
-    entries_list = body.get("entries") or []
-    as_of_str = body.get("as_of")
-    accounts = {}
-    for a in coa_list:
-        code = a.get("code") or ""
-        name = a.get("name") or code
-        acc_type_str = (a.get("account_type") or "ASSET").upper()
-        try:
-            acc_type = AccountType(acc_type_str)
-        except ValueError:
-            acc_type = AccountType.ASSET
-        accounts[code] = GLAccount(code=code, name=name, account_type=acc_type)
-    coa = ChartOfAccounts(accounts=accounts)
-    if not accounts:
-        return jsonify({"error": "Missing or empty 'coa'"}), 400
-    agent = CPAAgent(coa)
-    as_of_date = None
-    for e in entries_list:
-        dt = e.get("date")
-        if isinstance(dt, str):
-            d = date.fromisoformat(dt)
-        else:
-            d = date.today()
-        if as_of_date is None or d > as_of_date:
-            as_of_date = d
-        entry = GLEntry(
-            date=d,
-            description=e.get("description") or "",
-            debit_account=e.get("debit_account") or "",
-            credit_account=e.get("credit_account") or "",
-            amount=Decimal(str(e.get("amount", 0))),
-        )
-        agent.post_entry(entry)
-    if as_of_date is None:
-        as_of_date = date.today()
-    if body.get("as_of"):
-        as_of_date = date.fromisoformat(body["as_of"])
     try:
-        tb = agent.trial_balance(as_of_date)
-        bs = agent.balance_sheet(as_of_date)
-    except ValidationError as err:
-        return jsonify({"error": "Validation failed", "message": str(err)}), 400
-    def _tb_line(l):
-        return {
-            "account_code": l.account_code,
-            "account_name": l.account_name,
-            "debit": _decimal_to_json(l.debit),
-            "credit": _decimal_to_json(l.credit),
-            "account_type": l.account_type.value,
-        }
-    def _stmt_line(l):
-        return {"label": l.label, "amount": _decimal_to_json(l.amount), "account_code": l.account_code}
-    return jsonify({
-        "as_of": as_of_date.isoformat(),
-        "trial_balance": {
-            "lines": [_tb_line(l) for l in tb.lines],
-            "total_debits": _decimal_to_json(tb.total_debits),
-            "total_credits": _decimal_to_json(tb.total_credits),
-            "balances": tb.balances,
-        },
-        "balance_sheet": {
-            "report_date": bs.report_date.isoformat(),
-            "assets": [_stmt_line(l) for l in bs.assets],
-            "liabilities": [_stmt_line(l) for l in bs.liabilities],
-            "equity": [_stmt_line(l) for l in bs.equity],
-            "total_assets": _decimal_to_json(bs.total_assets),
-            "total_liabilities": _decimal_to_json(bs.total_liabilities),
-            "total_equity": _decimal_to_json(bs.total_equity),
-            "codification_ref": _codification_to_dict(bs.codification_ref),
-        },
-        "validation": {
-            "balances": abs(bs.total_assets - (bs.total_liabilities + bs.total_equity)) <= Decimal("0.02"),
-            "message": "Assets = Liabilities + Equity (ASC 210-10-45)",
-        },
-    })
+        as_of_date, tb, bs = _run_trial_balance_math(body)
+        return jsonify(_jsonify_trial_balance_response(as_of_date, tb, bs))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except ValidationError as e:
+        return jsonify({"error": "Validation failed", "message": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # --- Ingestion: financial document pipeline ---
@@ -378,19 +439,6 @@ def api_ingestion_process():
         content = file.read()
         result = process_document(content=content, filename=file.filename, confidence_threshold=0.9)
         out = _serialize_pipeline_result(result)
-        # Store classified transactions for Transaction Interrogator drill-down
-        global _last_ingestion_transactions
-        _last_ingestion_transactions = []
-        for ct in result.classified + result.needs_review:
-            ext = ct.extracted
-            _last_ingestion_transactions.append({
-                "description": ext.description or "",
-                "amount": str(ext.amount) if ext.amount is not None else None,
-                "counterparty": ext.counterparty,
-                "date": (ext.transaction_date or "")[:10] if ext.transaction_date else None,
-                "account_name": ct.classification.account_name,
-                "account_code": ct.classification.account_code,
-            })
         if run_forensic and HAS_GOVERNANCE and ForensicEntryForScan is not None and run_forensic_scan is not None:
             entries_forensic = []
             for ct in result.classified + result.needs_review:
@@ -487,21 +535,20 @@ def api_feedback_confirm():
 def api_transaction_interrogator():
     """
     Drill-down: user clicks a P&L line item (e.g. "Travel Expenses").
-    GET ?line_item=Travel%20Expenses&account_code=7700
-    POST body: { "line_item_label": "Travel Expenses", "account_code": "7700", "transactions": [...] } (optional; if omitted, use last ingestion).
+    Node owns session state; caller must POST with "transactions" in body.
+    POST body: { "line_item_label": "Travel Expenses", "account_code": "7700", "transactions": [...] } (transactions required).
     Returns: { "transactions": [...], "justification": "CPA Agent explanation...", "count": N }.
     """
     if not HAS_DRILL_DOWN or run_drill_down is None:
         return jsonify({"error": "Drill-down module not available"}), 503
     line_item_label = request.args.get("line_item") or request.args.get("line_item_label")
     account_code = request.args.get("account_code")
-    transactions = _last_ingestion_transactions
+    transactions = []
     if request.method == "POST":
         body = request.get_json(silent=True) or {}
         line_item_label = line_item_label or body.get("line_item_label") or body.get("line_item")
         account_code = account_code or body.get("account_code")
-        if body.get("transactions") is not None:
-            transactions = body["transactions"]
+        transactions = body.get("transactions") or []
     if not line_item_label or not line_item_label.strip():
         return jsonify({"error": "Missing 'line_item' or 'line_item_label'"}), 400
     try:
@@ -567,117 +614,6 @@ def api_parser_extract():
         return jsonify(_serialize_extraction_result(result))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-# --- Router Agent (CPA / CFA orchestration) ---
-def _serialize_router_response(resp):
-    if not HAS_ORCHESTRATOR:
-        return None
-    def ser_cpa(cpa):
-        if cpa is None:
-            return None
-        return {
-            "net_income": str(cpa.net_income) if cpa.net_income is not None else None,
-            "total_equity": str(cpa.total_equity) if cpa.total_equity is not None else None,
-            "total_assets": str(cpa.total_assets) if cpa.total_assets is not None else None,
-            "total_liabilities": str(cpa.total_liabilities) if cpa.total_liabilities is not None else None,
-            "balance_sheet_summary": cpa.balance_sheet_summary,
-            "income_statement_summary": cpa.income_statement_summary,
-        }
-    return {
-        "intent": resp.intent.value,
-        "internal_monologue": resp.internal_monologue,
-        "final_answer": resp.final_answer,
-        "cpa_output": ser_cpa(resp.cpa_output),
-        "cfa_output": resp.cfa_output,
-        "balance_sheet_summary": resp.balance_sheet_summary,
-        "income_statement_summary": resp.income_statement_summary,
-    }
-
-
-@app.route("/api/orchestrator/route", methods=["POST"])
-def api_orchestrator_route():
-    """
-    Router Agent: POST body { "query": "...", optional "balance_sheet_summary", "income_statement_summary" }.
-    Returns intent, internal_monologue (chain of thought), final_answer, cpa_output, cfa_output.
-    Governance: logs every LLM decision to immutable audit DB; if CPA/CFA conflict, returns Decision Memo and pauses.
-    """
-    if not HAS_ORCHESTRATOR:
-        return jsonify({"error": "Orchestrator not available"}), 503
-    body = request.get_json(silent=True) or {}
-    query = (body.get("query") or "").strip()
-    if not query:
-        return jsonify({"error": "Missing 'query' in body"}), 400
-    try:
-        bs_sum = body.get("balance_sheet_summary")
-        is_sum = body.get("income_statement_summary")
-        if bs_sum is not None or is_sum is not None:
-            resp = route_with_precomputed_statements(query, bs_sum, is_sum)
-        else:
-            resp = route(query)
-
-        # Conflict resolution: if CPA and CFA disagree on valuation, pause and return Decision Memo for human
-        if HAS_GOVERNANCE:
-            memo = check_cpa_cfa_conflict(resp.cpa_output, resp.cfa_output, resp.intent.value)
-            if memo is not None:
-                financial_data_conflict = {
-                    "balance_sheet_summary": resp.balance_sheet_summary,
-                    "income_statement_summary": resp.income_statement_summary,
-                    "cpa_output": _serialize_router_response(resp).get("cpa_output") if resp else None,
-                    "cfa_output": resp.cfa_output,
-                }
-                log_llm_decision(
-                    prompt=query,
-                    decision_summary=f"[CONFLICT] {memo.conflict_reason}",
-                    agent_type=resp.intent.value,
-                    financial_data_accessed=financial_data_conflict,
-                    endpoint="/api/orchestrator/route",
-                )
-                return jsonify({
-                    "paused": True,
-                    "decision_memo": {
-                        "conflict_reason": memo.conflict_reason,
-                        "cpa_summary": memo.cpa_summary,
-                        "cfa_summary": memo.cfa_summary,
-                        "cpa_pros": memo.cpa_pros,
-                        "cpa_cons": memo.cpa_cons,
-                        "cfa_pros": memo.cfa_pros,
-                        "cfa_cons": memo.cfa_cons,
-                        "recommendation": memo.recommendation,
-                    },
-                    "message": "CPA and CFA agents disagree on valuation. Human controller must review Decision Memo before proceeding.",
-                }), 200
-
-        # Immutable log: record every LLM decision, prompt, and financial data accessed
-        if HAS_GOVERNANCE:
-            financial_data = {
-                "balance_sheet_summary": resp.balance_sheet_summary,
-                "income_statement_summary": resp.income_statement_summary,
-                "cpa_output": _serialize_router_response(resp).get("cpa_output") if resp else None,
-                "cfa_output": resp.cfa_output if resp else None,
-            }
-            log_llm_decision(
-                prompt=query,
-                decision_summary=resp.final_answer,
-                agent_type=resp.intent.value,
-                financial_data_accessed=financial_data,
-                endpoint="/api/orchestrator/route",
-            )
-
-        return jsonify(_serialize_router_response(resp))
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/orchestrator/intent", methods=["POST"])
-def api_orchestrator_intent():
-    """Detect intent only: POST body { "query": "..." } -> { "intent": "cpa"|"cfa"|"unknown" }."""
-    if not HAS_ORCHESTRATOR:
-        return jsonify({"error": "Orchestrator not available"}), 503
-    body = request.get_json(silent=True) or {}
-    query = (body.get("query") or "").strip()
-    intent = detect_intent(query)
-    return jsonify({"intent": intent.value})
 
 
 # --- Compliance Guardrail (RAG + Citation Check + Chain of Thought) ---
@@ -1270,8 +1206,6 @@ def api_tax_fx_remeasure():
     POST body: functional_currency, current_rates { EUR: rate, ... }, as_of_date,
     positions: [ { currency, amount, is_monetary, balance_date, historical_rate? } ].
     """
-    if not HAS_TAX:
-        return jsonify({"error": "Tax module not available"}), 503
     body = request.get_json(silent=True) or {}
     functional = (body.get("functional_currency") or "USD").strip().upper()
     current_rates = body.get("current_rates") or {}
@@ -1316,8 +1250,6 @@ def api_tax_fx_unrealized_gl():
     POST body: positions [ { currency, amount, is_monetary, account_code? } ], functional_currency,
     current_rates { EUR: rate }, prior_functional_amounts? { account_code: amount }.
     """
-    if not HAS_TAX:
-        return jsonify({"error": "Tax module not available"}), 503
     body = request.get_json(silent=True) or {}
     functional = (body.get("functional_currency") or "USD").strip().upper()
     current_rates = {k: Decimal(str(v)) for k, v in (body.get("current_rates") or {}).items()}
@@ -1351,8 +1283,6 @@ def api_tax_deferred():
     POST body: tax_rate, report_date?, beginning_dta?, beginning_dtl?,
     temporary_differences: [ { description, book_basis, tax_basis, is_deductible_temp?, reversal_period? } ].
     """
-    if not HAS_TAX:
-        return jsonify({"error": "Tax module not available"}), 503
     body = request.get_json(silent=True) or {}
     tax_rate = Decimal(str(body.get("tax_rate", "0.21")))
     report_date = body.get("report_date")
@@ -1395,8 +1325,6 @@ def api_tax_nexus_check():
     If new, alert to potential Sales Tax / VAT / GST nexus requirements.
     POST body: { "invoice_address": "..." } or { "invoice_addresses": [ ... ] }.
     """
-    if not HAS_TAX:
-        return jsonify({"error": "Tax module not available"}), 503
     body = request.get_json(silent=True) or {}
     single = body.get("invoice_address")
     if single is not None:
@@ -1436,8 +1364,6 @@ def api_tax_nexus_known():
     """
     GET: list known nexus jurisdictions. POST: add known nexus { "country", "state"? }.
     """
-    if not HAS_TAX:
-        return jsonify({"error": "Tax module not available"}), 503
     if request.method == "GET":
         try:
             known = get_known_nexus()

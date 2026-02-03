@@ -59,6 +59,13 @@ import {
 import * as persistence from '../../services/persistence_service.js';
 
 export type { ToolDefinition, ToolResult } from './types.js';
+export {
+  postTrialBalanceToPython,
+  callPythonMathWorker,
+  type TrialBalancePayload,
+  type TrialBalanceLinePayload,
+  type PythonTrialBalanceResponse,
+} from './pythonBridge.js';
 
 /** Entry shape used for buildFinancialStatements / Source of Truth. */
 type ValidatedEntry = { accountName: string; debit: number; credit: number; accountCode?: string };

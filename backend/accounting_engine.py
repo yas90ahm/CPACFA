@@ -10,7 +10,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
 from models import (
     AccountType,
@@ -56,15 +56,40 @@ class ChartOfAccounts:
 
 @dataclass
 class GeneralLedger:
-    """General Ledger state: entries and running balances per account."""
-    entries: list[GLEntry] = field(default_factory=list)
+    """
+    General Ledger state: approved entries (GL) and pending (staged) entries.
+    Balance sheet and trial balance use only approved entries for a clear audit trail
+    (Unadjusted → approve staged entries → Adjusted Trial Balance).
+    """
+    entries: list[GLEntry] = field(default_factory=list)  # Approved only; used for BS/TB
+    pending_entries: list[GLEntry] = field(default_factory=list)  # Staged as Pending
     coa: Optional[ChartOfAccounts] = None
 
     def post(self, entry: GLEntry) -> None:
+        """Post directly to GL (e.g. when user approves). Entry is included in balance_sheet."""
         self.entries.append(entry)
 
+    def stage_entry(self, entry: GLEntry) -> None:
+        """Save entry as Pending. Not included in balance_sheet until approved."""
+        self.pending_entries.append(entry)
+
+    def approve_entry(self, index: int) -> GLEntry:
+        """Move pending_entries[index] to the GL (approved). Returns the approved entry."""
+        if index < 0 or index >= len(self.pending_entries):
+            raise IndexError(f"approve_entry: index {index} out of range (0..{len(self.pending_entries) - 1})")
+        entry = self.pending_entries.pop(index)
+        self.entries.append(entry)
+        return entry
+
+    def approve_all(self) -> list[GLEntry]:
+        """Approve all pending entries; returns the list of approved entries."""
+        approved = list(self.pending_entries)
+        self.entries.extend(approved)
+        self.pending_entries.clear()
+        return approved
+
     def balances_by_account(self, as_of: Optional[date] = None) -> dict[str, tuple[Decimal, Decimal]]:
-        """Returns { account_code: (debits, credits) } up to as_of (inclusive)."""
+        """Returns { account_code: (debits, credits) } up to as_of (inclusive). Uses approved entries only."""
         debits: dict[str, Decimal] = defaultdict(Decimal)
         credits: dict[str, Decimal] = defaultdict(Decimal)
         for e in self.entries:
@@ -79,7 +104,7 @@ class GeneralLedger:
         return out
 
     def trial_balance(self, as_of: date, coa: ChartOfAccounts) -> TrialBalance:
-        """Build Trial Balance as of date. Zero tolerance for imbalance."""
+        """Build Trial Balance as of date from approved entries only. Zero tolerance for imbalance."""
         bal = self.balances_by_account(as_of)
         lines: list[TrialBalanceLine] = []
         total_d = Decimal("0")
@@ -421,6 +446,7 @@ def statement_of_cash_flows_indirect(
 class CPAAgent:
     """
     CPA-Agent: processes General Ledger and prepares formal financial statements.
+    Entries are staged as Pending; balance_sheet uses only Approved entries.
     Validation: Assets = Liabilities + Equity at all times.
     """
 
@@ -428,8 +454,25 @@ class CPAAgent:
         self.coa = coa
         self.gl = GeneralLedger(coa=coa)
 
+    def stage_entry(self, entry: GLEntry) -> None:
+        """Stage an entry as Pending. Not included in balance_sheet until approved."""
+        self.gl.stage_entry(entry)
+
     def post_entry(self, entry: GLEntry) -> None:
-        self.gl.post(entry)
+        """Stage entry (Pending). Use stage_entry for clarity; post_entry retained for compatibility."""
+        self.gl.stage_entry(entry)
+
+    def approve_entry(self, index: int) -> GLEntry:
+        """Approve pending entry at index; moves it to the GL. Returns the approved entry."""
+        return self.gl.approve_entry(index)
+
+    def approve_all_pending(self) -> list[GLEntry]:
+        """Approve all pending (staged) entries. Returns the list of approved entries."""
+        return self.gl.approve_all()
+
+    def pending_entries(self) -> list[GLEntry]:
+        """List entries staged as Pending (not yet included in balance_sheet)."""
+        return list(self.gl.pending_entries)
 
     def trial_balance(self, as_of: date) -> TrialBalance:
         return self.gl.trial_balance(as_of, self.coa)
@@ -441,6 +484,40 @@ class CPAAgent:
 
     def income_statement(self, period_start: date, period_end: date) -> IncomeStatement:
         return self.gl.income_statement(period_start, period_end, self.coa)
+
+    def get_historical_metrics(
+        self,
+        as_of: date,
+        period_start: Optional[date] = None,
+        period_end: Optional[date] = None,
+        dcf_explicit_years: int = 5,
+        dcf_growth_rate: float = 0.05,
+    ) -> dict[str, Any]:
+        """
+        Return CPA-derived metrics for CFA/DCF: net_income, total_revenue, total_assets,
+        total_equity, total_liabilities, free_cash_flows (FCF proxy from net income),
+        report_date. Injected into strategic_analyst DCF so CFA never has to ask for data.
+        """
+        period_end = period_end or as_of
+        period_start = period_start or period_end
+        bs = self.balance_sheet(as_of)
+        is_ = self.income_statement(period_start, period_end)
+        net_income = getattr(is_, "net_income", None)
+        total_revenue = getattr(is_, "total_revenue", None)
+        total_assets = getattr(bs, "total_assets", None)
+        total_equity = getattr(bs, "total_equity", None)
+        total_liabilities = getattr(bs, "total_liabilities", None)
+        ni_float = float(net_income) if net_income is not None else 0.0
+        free_cash_flows = [ni_float * ((1 + dcf_growth_rate) ** t) for t in range(dcf_explicit_years)]
+        return {
+            "net_income": net_income,
+            "total_revenue": total_revenue,
+            "total_assets": total_assets,
+            "total_equity": total_equity,
+            "total_liabilities": total_liabilities,
+            "free_cash_flows": free_cash_flows,
+            "report_date": str(getattr(bs, "report_date", period_end)),
+        }
 
     def statement_of_cash_flows(
         self,
