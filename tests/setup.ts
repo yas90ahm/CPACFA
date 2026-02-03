@@ -2,6 +2,7 @@
  * Jest setup file for integration tests
  */
 
+import { beforeAll, afterAll } from '@jest/globals';
 import { cleanupAllTestTenants } from './helpers/testHelpers.js';
 
 // Set test environment variables
@@ -25,4 +26,5 @@ afterAll(async () => {
 });
 
 // Increase timeout for integration tests
-jest.setTimeout(30000);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(globalThis as any).jest?.setTimeout(30000);

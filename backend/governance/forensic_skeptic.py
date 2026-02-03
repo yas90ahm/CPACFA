@@ -19,6 +19,7 @@ from .skepticism_agent import (
     _parse_date,
     JournalEntryForScan,
 )
+from errors import ForensicAuditError
 
 # Unusual time: e.g. 2:00 AM - 5:59 AM (off-hours), or Sunday 2 AM
 UNUSUAL_HOUR_START = 0   # midnight
@@ -79,8 +80,8 @@ def _parse_datetime(s: Optional[str]) -> Optional[datetime]:
         if "T" in s:
             return datetime.fromisoformat(s.replace("Z", "+00:00"))
         return datetime.fromisoformat(s[:10] + "T00:00:00+00:00")
-    except Exception:
-        return None
+    except Exception as e:
+        raise ForensicAuditError(f"Invalid datetime string for forensic scan: {s!r}") from e
 
 
 def _is_unusual_time(dt: datetime) -> bool:
@@ -231,12 +232,14 @@ def run_forensic_scan(
             created_by=None,
         ))
 
-    # Persist to Audit Dashboard
+    # Persist to Audit Dashboard (no silent green: persistence failure must surface as 500)
     try:
         from .audit_dashboard import persist_forensic_anomalies
         persisted = persist_forensic_anomalies(scan_ts, anomalies_to_persist)
-    except Exception:
-        persisted = 0
+    except ForensicAuditError:
+        raise
+    except Exception as e:
+        raise ForensicAuditError("Failed to persist forensic anomalies to Audit Dashboard") from e
 
     # Build summary
     summary_parts = []

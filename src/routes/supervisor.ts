@@ -12,6 +12,7 @@ import type { RawTrialBalanceRow } from '../services/trialBalanceParser.js';
 import * as conflictsRepo from '../db/repositories/risk_context_conflicts_repository.js';
 import { resolveConflictWithMemo } from '../services/risk_context_store.js';
 import * as persistence from '../services/persistence_service.js';
+import { handleAuditOrIntegrityError } from './audit/audit_shared.js';
 
 const router = Router();
 
@@ -85,8 +86,7 @@ router.post('/chat', async (req: Request, res: Response) => {
       ...(chatOut.consensus && { consensus: chatOut.consensus }),
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Supervisor chat failed';
-    res.status(500).json({ error: 'Supervisor error', message });
+    handleAuditOrIntegrityError(res, err, 'Supervisor error');
   }
 });
 
@@ -155,8 +155,7 @@ router.post('/chat-verified', async (req: Request, res: Response) => {
       ...(sessionId && { sessionId }),
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Supervisor (verified) failed';
-    res.status(500).json({ error: 'Supervisor error', message: msg });
+    handleAuditOrIntegrityError(res, err, 'Supervisor (verified) error');
   }
 });
 
@@ -183,8 +182,7 @@ router.get('/session/:sessionId/trace', async (req: Request, res: Response) => {
       stagingItems,
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Trace fetch failed';
-    res.status(500).json({ error: 'Supervisor error', message: msg });
+    handleAuditOrIntegrityError(res, err, 'Trace fetch failed');
   }
 });
 
@@ -235,8 +233,7 @@ router.post('/conflicts/:id/resolve', async (req: Request, res: Response) => {
     }
     res.json({ success: true, id });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Resolve conflict failed';
-    res.status(500).json({ error: 'Supervisor error', message: msg });
+    handleAuditOrIntegrityError(res, err, 'Resolve conflict failed');
   }
 });
 

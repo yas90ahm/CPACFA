@@ -6,12 +6,13 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "test:integration": "jest tests/integration"
+    "test:integration": "jest tests/integration",
+    "test:smoke": "jest --config jest.smoke.config.json"
   },
   "jest": {
     "preset": "ts-jest",
     "testEnvironment": "node",
-    "roots": ["<rootDir>/tests"],
+    "roots": ["<rootDir>"],
     "testMatch": ["**/*.test.ts"],
     "moduleNameMapper": {
       "^(\\.{1,2}/.*)\\.js$": "$1"
@@ -31,7 +32,7 @@
       "/node_modules/",
       "/tests/"
     ],
-    "setupFilesAfterEnv": ["<rootDir>/tests/setup.ts"]
+    "setupFilesAfterEnv": ["<rootDir>/setup.ts"]
   },
   "devDependencies": {
     "@jest/globals": "^29.7.0",

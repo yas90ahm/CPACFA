@@ -236,7 +236,26 @@ export async function step1CPA(
         reasoningChain: pev,
       };
     }
-    const { balanceSheet, profitAndLoss, classifiedEntries } = await buildValidatedStatements(trialBalance);
+    const res = await buildValidatedStatements(trialBalance);
+    const { balanceSheet, profitAndLoss, classifiedEntries } = res;
+    if (res.plugAlert && context) {
+      await submitToStaging(
+        {
+          proposedAction: 'Balanced but High Risk: suspicious plug accounts detected',
+          justification: `Plug accounts (${res.plugAlert.plugAccountNames.join(', ')}) absorb ${(res.plugAlert.plugShare * 100).toFixed(1)}% of ledger net activity (threshold 90%). Mandatory audit alert.`,
+          type: 'other',
+          amount: res.plugAlert.plugAmount,
+          payload: {
+            plugShare: res.plugAlert.plugShare,
+            plugAmount: res.plugAlert.plugAmount,
+            totalNetActivity: res.plugAlert.totalNetActivity,
+            plugAccountNames: res.plugAlert.plugAccountNames,
+            threshold: res.plugAlert.threshold,
+          },
+        },
+        { pool: context.pool, tenantId: context.tenantId }
+      );
+    }
     const pev = runPlanExecuteVerify({ trialBalance, balanceSheet, profitAndLoss });
     if (!pev.verification.passed) {
       throw new Error(`Verification failed: ${pev.verification.checks.join('; ')}. Statements cannot be returned.`);

@@ -21,6 +21,7 @@ import {
   runIntegrityGate,
   INTEGRITY_GATE_CRITICAL_MESSAGE,
 } from '../../services/integrity_gate_service.js';
+import { submitToStaging } from '../../services/hitl_orchestrator.js';
 import type { ToolDefinition, ToolResult } from './types.js';
 
 const GROUNDING_VIOLATION =
@@ -242,6 +243,10 @@ export async function runBuildFinancialStatements(
     return {
       success: true,
       data: {
+        ...('riskLevel' in result && result.riskLevel === 'balanced_but_high_risk' && {
+          riskLevel: 'balanced_but_high_risk' as const,
+          riskMessage: 'Balanced but High Risk: suspicious plug accounts (Miscellaneous, Suspense, Other) detected. Mandatory audit alert created.',
+        }),
         balanceSheet: {
           assets: balanceSheet.assets.map(serializeLine),
           liabilities: balanceSheet.liabilities.map(serializeLine),

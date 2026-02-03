@@ -1,15 +1,9 @@
 """
 Integrity Gate — Hard Gate middleware that runs after any Agentic adjustment.
 
-Performs deterministic checks (rules from shared/config/financial_rules.json):
-1. Sum(Debits) == Sum(Credits) (trial balance)
-2. Assets == Liabilities + Equity (balance sheet equation)
-
-If the math fails, the service intercepts the response before it reaches the user
-and returns an error to the Agent so the user never sees a Balance Sheet that doesn't balance.
-
-Rounding tolerance is read from shared/config/financial_rules.json on each call
-so changes to the JSON file are respected instantly by both Node and Python.
+Accounting Laws are defined in shared/config/financial_rules.json (equations + materiality).
+Both Node (integrity_gate_service.ts) and Python load the same JSON so gates share the exact
+same rules. Tolerance and materiality are read on each call; no cache.
 """
 
 from __future__ import annotations
@@ -27,6 +21,7 @@ INTEGRITY_GATE_CRITICAL_MESSAGE = (
 )
 
 _DEFAULT_TOLERANCE_FALLBACK = Decimal("0.01")
+_DEFAULT_MATERIALITY_FALLBACK = Decimal("0.01")
 
 
 def _get_rules_config_path() -> Path:
@@ -39,20 +34,37 @@ def _get_rules_config_path() -> Path:
     return project_root / "shared" / "config" / "financial_rules.json"
 
 
-def _get_rounding_tolerance_from_config() -> Decimal:
-    """Read roundingTolerance from shared/config/financial_rules.json. No cache — re-reads each time."""
+def _load_financial_rules() -> dict[str, Any]:
+    """Load shared/config/financial_rules.json. Same Accounting Laws as Node integrity_gate_service."""
     path = _get_rules_config_path()
     if not path.exists():
-        return _DEFAULT_TOLERANCE_FALLBACK
+        return {}
     try:
         with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        tol = data.get("roundingTolerance")
-        if tol is not None and isinstance(tol, (int, float)):
-            return Decimal(str(tol))
+            return json.load(f)
     except (json.JSONDecodeError, OSError):
-        pass
+        return {}
+
+
+def _get_tolerance_from_rules(rules: dict[str, Any], tolerance_key: str = "roundingTolerance") -> Decimal:
+    """Resolve tolerance from rules (e.g. equations.*.toleranceKey -> roundingTolerance)."""
+    if tolerance_key == "roundingTolerance":
+        val = rules.get("roundingTolerance")
+    else:
+        val = rules.get(tolerance_key)
+    if val is not None and isinstance(val, (int, float)):
+        return Decimal(str(val))
     return _DEFAULT_TOLERANCE_FALLBACK
+
+
+def _get_materiality_from_rules(rules: dict[str, Any]) -> Decimal:
+    """Default materiality threshold from financial_rules.json (materiality.defaultThreshold)."""
+    m = rules.get("materiality")
+    if isinstance(m, dict):
+        val = m.get("defaultThreshold")
+        if val is not None and isinstance(val, (int, float)):
+            return Decimal(str(val))
+    return _DEFAULT_MATERIALITY_FALLBACK
 
 
 @dataclass
@@ -72,16 +84,21 @@ def run_integrity_gate(
     tolerance: float | Decimal | None = None,
 ) -> IntegrityGateResult:
     """
-    Run the Hard Gate: deterministic check that Sum(Debits) == Sum(Credits) and
-    Assets == Liabilities + Equity. If either fails, return passed=False and the
-    CRITICAL message so the response can be intercepted before reaching the user.
-    When tolerance is not provided, uses roundingTolerance from shared/config/financial_rules.json.
+    Run the Hard Gate using Accounting Laws from shared/config/financial_rules.json.
+    Equations (debits_equal_credits, assets_equal_liabilities_plus_equity) define which checks run;
+    toleranceKey (e.g. roundingTolerance) and materiality come from the same JSON as Node.
     """
-    tol = (
-        Decimal(str(tolerance))
-        if tolerance is not None
-        else _get_rounding_tolerance_from_config()
-    )
+    rules = _load_financial_rules()
+    equations = rules.get("equations") or {}
+    tol: Decimal
+    if tolerance is not None:
+        tol = Decimal(str(tolerance))
+    else:
+        # Use tolerance from equation config (same as Node)
+        tb_eq = equations.get("debits_equal_credits") or {}
+        tol_key = tb_eq.get("toleranceKey") or "roundingTolerance"
+        tol = _get_tolerance_from_rules(rules, tol_key)
+
     d = Decimal(str(total_debits))
     c = Decimal(str(total_credits))
     a = Decimal(str(total_assets))

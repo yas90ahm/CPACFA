@@ -23,6 +23,9 @@ from accounting_engine import (
     statement_of_cash_flows_indirect,
     GeneralLedger,
     ValidationError,
+    build_validated_statements,
+    MathematicalIntegrityError,
+    get_rounding_tolerance,
 )
 from justification_engine import justify
 from models import AccountType, CodificationRef
@@ -55,6 +58,7 @@ except ImportError:
     ForensicEntryForScan = None
     get_forensic_anomalies = None
 
+from errors import ForensicAuditError, AgentOrchestratorError
 from tax.fx_engine import (
     remeasure_to_functional,
     translate_to_reporting,
@@ -229,7 +233,7 @@ def _jsonify_trial_balance_response(as_of_date: date, tb: Any, bs: Any) -> dict:
             "codification_ref": _codification_to_dict(bs.codification_ref),
         },
         "validation": {
-            "balances": abs(bs.total_assets - (bs.total_liabilities + bs.total_equity)) <= Decimal("0.02"),
+            "balances": abs(bs.total_assets - (bs.total_liabilities + bs.total_equity)) <= get_rounding_tolerance(),
             "message": "Assets = Liabilities + Equity (ASC 210-10-45)",
         },
     }
@@ -257,6 +261,18 @@ def _math_integrity_422(e: MathematicalIntegrityError) -> tuple[Any, int]:
         }),
         422,
     )
+
+
+@app.errorhandler(ForensicAuditError)
+def handle_forensic_audit_error(e: ForensicAuditError) -> tuple[Any, int]:
+    """Return 500 for forensic/audit persistence or parse failures (no silent green)."""
+    return jsonify({"error": "ForensicAuditError", "message": str(e)}), 500
+
+
+@app.errorhandler(AgentOrchestratorError)
+def handle_agent_orchestrator_error(e: AgentOrchestratorError) -> tuple[Any, int]:
+    """Return 500 for agent orchestrator (CPA/CFA) failures (no silent green)."""
+    return jsonify({"error": "AgentOrchestratorError", "message": str(e)}), 500
 
 
 @app.route("/api/math/trial-balance", methods=["POST"])
@@ -1036,10 +1052,7 @@ def api_governance_forensic_scan():
             created_at=e.get("created_at"),
             created_by=e.get("created_by"),
         ))
-    try:
-        result = run_forensic_scan(entries, requesting_user_id=requesting_user_id, options=options)
-    except Exception as ex:
-        return jsonify({"error": str(ex)}), 500
+    result = run_forensic_scan(entries, requesting_user_id=requesting_user_id, options=options)
     return jsonify({
         "scan_timestamp_utc": result.scan_timestamp_utc,
         "entries_scanned": result.entries_scanned,

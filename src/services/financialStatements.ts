@@ -4,6 +4,9 @@
  *
  * Accounting Kill Switch: buildValidatedStatements() enforces (A) Sum(Debits)==Sum(Credits)
  * and (B) Total Assets==Total Liabilities+Total Equity. If either fails, throws MathematicalIntegrityError.
+ *
+ * OWNERSHIP: This file is the CANONICAL engine for reporting and statement assembly.
+ * It consumes data from the Python Math Engine and validates it using the shared config (shared/config/financial_rules.json).
  */
 
 import type {
@@ -18,6 +21,7 @@ import { BALANCE_SHEET, COMPREHENSIVE_INCOME } from '../constants/codification.j
 import { round2, sumRound2, absLt, absGt } from '../utils/decimal.js';
 import { classifyTrialBalanceDeterministic } from './accountClassifier.js';
 import { getRoundingTolerance } from './rules_registry.js';
+import { detectSuspiciousPlugs, type SuspiciousPlugResult } from './integrity_gate_service.js';
 
 /** Thrown when trial balance or balance sheet equation fails (Kill Switch). API must return 422 with imbalanceAmount. */
 export class MathematicalIntegrityError extends Error {
@@ -200,14 +204,29 @@ export function validateTrialBalanceAndBalanceSheet(
   }
 }
 
+/** Risk level for validated statements; 'balanced_but_high_risk' when suspicious plug accounts detected. */
+export type ValidatedStatementsRiskLevel = 'normal' | 'balanced_but_high_risk';
+
+export interface BuildValidatedStatementsResult {
+  balanceSheet: BalanceSheet;
+  profitAndLoss: ProfitAndLoss;
+  classifiedEntries: TrialBalanceEntry[];
+  /** Set when plug accounts (Miscellaneous, Suspense, Other) absorb >= 90% of net activity. */
+  riskLevel?: ValidatedStatementsRiskLevel;
+  /** Present when riskLevel is 'balanced_but_high_risk'; use to create mandatory audit alert in tenant_hitl_staging. */
+  plugAlert?: SuspiciousPlugResult;
+}
+
 /**
  * Unified validated builder: (A) Sum(Debits)==Sum(Credits), (B) Total Assets==Total Liabilities+Total Equity.
  * If either check fails, throws MathematicalIntegrityError and returns no data. Use for all API paths that return financials.
+ * When plug accounts (Miscellaneous, Suspense, Other) absorb >= 90% of net activity, flags report as 'Balanced but High Risk'
+ * and returns plugAlert for mandatory audit alert in tenant_hitl_staging.
  */
 export function buildValidatedStatements(
   trialBalanceResult: TrialBalanceResult,
   options?: { preClassifiedEntries?: TrialBalanceEntry[]; materiality?: number; tolerance?: number }
-): { balanceSheet: BalanceSheet; profitAndLoss: ProfitAndLoss; classifiedEntries: TrialBalanceEntry[] } {
+): BuildValidatedStatementsResult {
   const tol = options?.tolerance ?? getRoundingTolerance();
   const entries = trialBalanceResult.entries ?? [];
   const totalDebits =
@@ -234,5 +253,19 @@ export function buildValidatedStatements(
       totalEquity: result.balanceSheet.totalEquity,
     });
   }
-  return result;
+
+  const classifiedEntries = result.classifiedEntries ?? entries;
+  const plugResult = detectSuspiciousPlugs(
+    classifiedEntries.map((e) => ({ accountName: e.accountName, debit: e.debit, credit: e.credit })),
+    totalDebits,
+    totalCredits,
+    { threshold: 0.9 }
+  );
+
+  const out: BuildValidatedStatementsResult = {
+    ...result,
+    riskLevel: plugResult.isSuspicious ? 'balanced_but_high_risk' : 'normal',
+    ...(plugResult.isSuspicious ? { plugAlert: plugResult } : {}),
+  };
+  return out;
 }

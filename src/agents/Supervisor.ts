@@ -14,6 +14,7 @@ import { toAnthropicTools, toOpenAITools, toMistralTools } from '../llm/tool_sch
 import { DATA_GROUNDING_RULE, shouldEscalateToHuman } from '../llm/guardrails.js';
 import { SUPERVISOR_TOOLS } from '../services/supervisor_tools.js';
 import type { PipelineInput } from '../services/result_generator.js';
+import { SessionPersistenceError } from '../errors.js';
 
 const MODEL = 'claude-sonnet-4-5-20250929';
 const MAX_REACT_ITERATIONS = 15;
@@ -272,27 +273,39 @@ export async function runSupervisor(
     lastCatalogResult: undefined,
   };
   let lastDissentingOpinion: unknown;
-  /** Persistence reliability: await so a crash never loses the last thought/observation. */
+  /** Persistence reliability: every failure throws SessionPersistenceError so the API returns 500 (no silent green). */
   const fireReasoningStep = async (entry: ReasoningLogEntry): Promise<void> => {
     const ts = { ...entry, timestamp: entry.timestamp || new Date().toISOString() };
     try {
       await Promise.resolve(context?.onReasoningStep?.(ts));
-    } catch {
-      // Log but do not fail the loop
+    } catch (cause) {
+      throw new SessionPersistenceError(
+        'reasoning_log',
+        `Failed to persist reasoning step (sessionId=${context?.sessionId ?? 'none'}).`,
+        cause
+      );
     }
   };
   const fireObservationPersisted = async (lastStep: string, lastResultSummary: string): Promise<void> => {
     try {
       await Promise.resolve(context?.onObservationPersisted?.(lastStep, lastResultSummary));
-    } catch {
-      // Log but do not fail the loop
+    } catch (cause) {
+      throw new SessionPersistenceError(
+        'observation',
+        `Failed to persist observation (sessionId=${context?.sessionId ?? 'none'}).`,
+        cause
+      );
     }
   };
   const fireMessageHistoryPersisted = async (providerName: string, messagesArray: unknown[]): Promise<void> => {
     try {
       await Promise.resolve(context?.onMessageHistoryPersisted?.({ provider: providerName, messages: messagesArray }));
-    } catch {
-      // Log but do not fail the loop
+    } catch (cause) {
+      throw new SessionPersistenceError(
+        'message_history',
+        `Failed to persist message history for ${providerName} (sessionId=${context?.sessionId ?? 'none'}).`,
+        cause
+      );
     }
   };
 

@@ -7,13 +7,19 @@ Verification: Assets = Liabilities + Equity at all times.
 Versioning flow: Unadjusted TB (Source) → Proposed Adjustments (pending_entries) → Adjusted TB (entries).
 Do not build Balance Sheet or P&L from raw source data if pending adjustments exist; approve or reject first,
 then build from the adjusted state so every number is traceable to the original upload or an approved adjustment.
+
+# OWNERSHIP: This file is the CANONICAL engine for complex deterministic calculations (Leases, Impairments).
+# Logic validation is handled by the shared config (shared/config/financial_rules.json).
 """
 from __future__ import annotations
 
+import json
+import os
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Optional
 
 from models import (
@@ -33,6 +39,44 @@ from models import (
     TrialBalance,
     TrialBalanceLine,
 )
+
+
+# --- Shared config: roundingTolerance from shared/config/financial_rules.json (same as Node) ---
+_DEFAULT_TOLERANCE_FALLBACK = Decimal("0.01")
+
+
+def _get_rules_config_path() -> Path:
+    """Path to financial_rules.json. Respects RULES_CONFIG_PATH env (same as Node rules_registry)."""
+    env_path = os.environ.get("RULES_CONFIG_PATH")
+    if env_path:
+        return Path(env_path)
+    # backend/accounting_engine.py -> project root = parent of backend
+    this_dir = Path(__file__).resolve().parent
+    project_root = this_dir.parent
+    return project_root / "shared" / "config" / "financial_rules.json"
+
+
+def _get_rounding_tolerance_from_config() -> Decimal:
+    """Read roundingTolerance from shared/config/financial_rules.json. No cache — re-reads each time.
+    Ensures Python math engine and Node orchestrator use the exact same constant."""
+    path = _get_rules_config_path()
+    if not path.exists():
+        return _DEFAULT_TOLERANCE_FALLBACK
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        tol = data.get("roundingTolerance")
+        if tol is not None and isinstance(tol, (int, float)):
+            return Decimal(str(tol))
+    except (json.JSONDecodeError, OSError):
+        pass
+    return _DEFAULT_TOLERANCE_FALLBACK
+
+
+def get_rounding_tolerance() -> Decimal:
+    """Public accessor for rounding tolerance from shared/config/financial_rules.json.
+    Use this in API responses (e.g. validation.balances) so the entire system uses one constant."""
+    return _get_rounding_tolerance_from_config()
 
 
 # --- Codification refs (FASB) ---
@@ -140,7 +184,7 @@ class GeneralLedger:
             lines.append(TrialBalanceLine(code, name, d, c, acc_type, ref))
             total_d += d
             total_c += c
-        tolerance = Decimal("0.01")
+        tolerance = _get_rounding_tolerance_from_config()
         balances = abs(total_d - total_c) < tolerance
         return TrialBalance(lines=lines, total_debits=total_d, total_credits=total_c, balances=balances)
 
@@ -251,27 +295,25 @@ class MathematicalIntegrityError(Exception):
         super().__init__(msg)
 
 
-DEFAULT_TOLERANCE = Decimal("0.01")
-
-
 def build_validated_statements(
     gl: GeneralLedger,
     as_of: date,
     coa: ChartOfAccounts,
     period_start: Optional[date] = None,
     period_end: Optional[date] = None,
-    tolerance: Decimal = DEFAULT_TOLERANCE,
+    tolerance: Optional[Decimal] = None,
 ) -> tuple[TrialBalance, BalanceSheet, IncomeStatement]:
     """
     Unified validated builder: (A) Sum(Debits)==Sum(Credits), (B) Total Assets==Total Liabilities+Total Equity.
     If either check fails, raises MathematicalIntegrityError and returns no data.
     Returns (trial_balance, balance_sheet, income_statement).
     """
+    tol = tolerance if tolerance is not None else _get_rounding_tolerance_from_config()
     gl.assert_no_pending_before_statements()
     tb = gl.trial_balance(as_of, coa)
 
     # Check (A): Sum(Debits) == Sum(Credits)
-    if abs(tb.total_debits - tb.total_credits) > tolerance:
+    if abs(tb.total_debits - tb.total_credits) > tol:
         imbalance = abs(tb.total_debits - tb.total_credits)
         raise MathematicalIntegrityError(
             "A",
@@ -284,7 +326,7 @@ def build_validated_statements(
 
     # Check (B): Total Assets == Total Liabilities + Total Equity
     rhs = bs.total_liabilities + bs.total_equity
-    if abs(bs.total_assets - rhs) > tolerance:
+    if abs(bs.total_assets - rhs) > tol:
         imbalance = abs(bs.total_assets - rhs)
         raise MathematicalIntegrityError(
             "B",
@@ -300,11 +342,12 @@ def build_validated_statements(
     return tb, bs, is_
 
 
-def validate_balance_sheet(bs: BalanceSheet, tolerance: Decimal = Decimal("0.02")) -> None:
-    """Raises ValidationError if Assets != Liabilities + Equity."""
+def validate_balance_sheet(bs: BalanceSheet, tolerance: Optional[Decimal] = None) -> None:
+    """Raises ValidationError if Assets != Liabilities + Equity. Uses roundingTolerance from shared/config/financial_rules.json when tolerance is omitted."""
+    tol = tolerance if tolerance is not None else _get_rounding_tolerance_from_config()
     rhs = bs.total_liabilities + bs.total_equity
     diff = abs(bs.total_assets - rhs)
-    if diff > tolerance:
+    if diff > tol:
         raise ValidationError(
             f"Balance Sheet does not balance. Assets={bs.total_assets} != Liabilities+Equity={rhs}. "
             "Under ASC 210-10-45 and IAS 1.49, Assets must equal Liabilities plus Equity."

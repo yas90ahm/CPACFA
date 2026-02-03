@@ -4,6 +4,7 @@
 
 import type { Response } from 'express';
 import { MathematicalIntegrityError } from '../../services/financialStatements.js';
+import { SessionPersistenceError } from '../../errors.js';
 
 /** Auditor Portal token: in production must be set and not the default; in dev default allowed. */
 export function getAuditorToken(): string | null {
@@ -25,6 +26,7 @@ export function handleAuditError(res: Response, err: unknown, label: string): vo
 
 /**
  * If err is MathematicalIntegrityError, send 422 Unprocessable Entity with exact imbalance (Kill Switch).
+ * If err is SessionPersistenceError, send 500 Internal Server Error (no silent green).
  * Otherwise call handleAuditError(res, err, label).
  */
 export function handleAuditOrIntegrityError(res: Response, err: unknown, label: string): void {
@@ -35,6 +37,14 @@ export function handleAuditOrIntegrityError(res: Response, err: unknown, label: 
       check: err.check,
       imbalanceAmount: err.imbalanceAmount,
       details: err.details,
+    });
+    return;
+  }
+  if (err instanceof SessionPersistenceError) {
+    res.status(500).json({
+      error: 'SessionPersistenceError',
+      message: err.message,
+      operation: err.operation,
     });
     return;
   }

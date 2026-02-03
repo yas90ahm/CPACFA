@@ -13,6 +13,8 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any, Optional
 
+from errors import AgentOrchestratorError
+
 # Optional CPA agent for live GL-based statements
 try:
     from accounting_engine import CPAAgent
@@ -214,8 +216,10 @@ def _run_cpa_agent(ctx: CPAContext) -> tuple[Optional[Any], Optional[Any], CPAOu
         try:
             balance_sheet = ctx.cpa_agent.balance_sheet(ctx.as_of)
             income_statement = ctx.cpa_agent.income_statement(period_start, ctx.period_end)
-        except Exception:
-            pass
+        except Exception as e:
+            raise AgentOrchestratorError(
+                f"CPA agent failed (balance_sheet/income_statement) as_of={ctx.as_of} period_end={ctx.period_end}"
+            ) from e
     cpa_output = _cpa_output_from_statements(balance_sheet, income_statement)
     return balance_sheet, income_statement, cpa_output
 
@@ -325,8 +329,10 @@ def route(
                     period_start=period_start,
                     period_end=period_end,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                raise AgentOrchestratorError(
+                    f"CPA get_historical_metrics failed as_of={cpa_context.as_of} period_end={period_end}"
+                ) from e
         cfa_out = _run_cfa_agent(
             query,
             cpa_output,
@@ -374,20 +380,24 @@ def route_with_precomputed_statements(
     if income_statement_summary and "net_income" in income_statement_summary:
         try:
             net_income = Decimal(str(income_statement_summary["net_income"]))
-        except Exception:
-            pass
+        except Exception as e:
+            raise AgentOrchestratorError(
+                "Failed to parse net_income from precomputed income_statement_summary"
+            ) from e
     if balance_sheet_summary and "total_equity" in balance_sheet_summary:
         try:
             total_equity = Decimal(str(balance_sheet_summary["total_equity"]))
-        except Exception:
-            pass
+        except Exception as e:
+            raise AgentOrchestratorError(
+                "Failed to parse total_equity from precomputed balance_sheet_summary"
+            ) from e
     def _dec(s: Any) -> Optional[Decimal]:
         if s is None:
             return None
         try:
             return Decimal(str(s))
-        except Exception:
-            return None
+        except Exception as e:
+            raise AgentOrchestratorError(f"Failed to parse decimal from precomputed statement value: {s!r}") from e
 
     cpa_output = CPAOutput(
         net_income=net_income,
