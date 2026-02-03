@@ -1,6 +1,7 @@
 /**
- * Tool: buildFinancialStatements — build Balance Sheet and P&L from trial balance entries.
- * Accepts optional `standard` (ASPE | IFRS): ASPE uses simplified depreciation; IFRS triggers Lease Liability calculation when lease data provided.
+ * Tool: buildFinancialStatements — build Balance Sheet and P&L from validated trial balance.
+ * Accepts only sessionId and tenantId; trial balance is loaded from the database (session snapshot).
+ * If the LLM passes entries or other invented data, the tool returns a Grounding Violation.
  */
 
 import { z } from 'zod';
@@ -11,14 +12,11 @@ import { generateStatements } from '../../services/statementGenerator.js';
 import { listContracts } from '../../db/repositories/revenue_recognition_repository.js';
 import type { IntegrityContractFact } from '../../types/integrity.js';
 import { runPlanExecuteVerify } from '../../services/planExecuteVerify.js';
+import { loadSessionSnapshot, type SessionSnapshot } from '../../services/persistence_service.js';
 import type { ToolDefinition, ToolResult } from './types.js';
 
-const trialBalanceEntrySchema = z.object({
-  accountCode: z.string().optional(),
-  accountName: z.string().min(1),
-  debit: z.number(),
-  credit: z.number(),
-});
+const GROUNDING_VIOLATION =
+  'Grounding Violation: This tool accepts only sessionId and tenantId. Trial balance must come from the database (session snapshot). Do not pass entries or invented numbers.';
 
 const leaseInputSchema = z.object({
   leasePayments: z.array(z.number()).min(1),
@@ -26,15 +24,10 @@ const leaseInputSchema = z.object({
   paymentTiming: z.enum(['beginning', 'end']).optional(),
 });
 
+/** Tool input: only session and tenant identifiers; data is loaded from DB. */
 export const buildFinancialStatementsSchema = z.object({
-  entries: z
-    .array(trialBalanceEntrySchema)
-    .min(1)
-    .describe('Trial balance rows: array of { accountName, debit, credit, accountCode? }'),
-  prior_entries: z
-    .array(trialBalanceEntrySchema)
-    .optional()
-    .describe('Optional prior-period trial balance rows for cash flow/equity roll-forward.'),
+  sessionId: z.string().min(1).describe('Session ID that holds the validated trial balance (from pipeline/session snapshot).'),
+  tenantId: z.string().min(1).describe('Tenant ID for the session.'),
   standard: z
     .enum(['ASPE', 'IFRS', 'FRS102', 'US_GAAP'])
     .optional()
@@ -54,7 +47,7 @@ export type BuildFinancialStatementsInput = z.infer<typeof buildFinancialStateme
 export const buildFinancialStatementsDefinition: ToolDefinition<BuildFinancialStatementsInput> = {
   name: 'buildFinancialStatements',
   description:
-    'Use this when you have trial balance data and need to produce a standard Balance Sheet and Profit & Loss (P&L). Use it when the user asks for financial statements, balance sheet, P&L, or income statement from raw trial balance entries. Returns Balance Sheet (assets, liabilities, equity), P&L (revenue, expenses, net income), and classified entries. Ensures Assets = Liabilities + Equity.',
+    'Build Balance Sheet and P&L from the validated trial balance stored for this session. Call with sessionId and tenantId only; data is loaded from the database. Do not pass entries or any numbers—only sessionId and tenantId. Returns Balance Sheet, P&L, and classified entries. Ensures Assets = Liabilities + Equity.',
   parameters: buildFinancialStatementsSchema as import('zod').z.ZodType<BuildFinancialStatementsInput>,
 };
 
@@ -63,15 +56,36 @@ function serializeLine(line: { accountCode?: string; label: string; amount: numb
   return { accountCode: line.accountCode, label: line.label, amount: line.amount };
 }
 
-/** Optional request context: when present, contracts are loaded and integrity gate runs. */
+/** Context must include pool so the tool can load the session snapshot from the database. */
 export interface BuildFinancialStatementsContext {
   tenantId: string;
   pool: Pool;
 }
 
+/** Extract validated entries from a session snapshot (raw_rows or statements output). */
+function entriesFromSnapshot(snapshot: SessionSnapshot): Array<{ accountName: string; debit: number; credit: number; accountCode?: string }> {
+  if (snapshot.type === 'raw_rows' && Array.isArray(snapshot.rawRows) && snapshot.rawRows.length > 0) {
+    return snapshot.rawRows.map((r) => ({
+      accountName: r.accountName ?? '',
+      debit: Number(r.debit) || 0,
+      credit: Number(r.credit) || 0,
+      accountCode: r.accountCode,
+    }));
+  }
+  if (snapshot.type === 'statements' && snapshot.output?.trialBalance?.entries?.length) {
+    return snapshot.output.trialBalance.entries.map((e) => ({
+      accountName: e.accountName ?? '',
+      debit: Number(e.debit) || 0,
+      credit: Number(e.credit) || 0,
+      accountCode: e.accountCode,
+    }));
+  }
+  return [];
+}
+
 /**
- * Run the buildFinancialStatements tool. Returns structured JSON for LLM parsing.
- * When context (tenantId + pool) is provided, loads contracts and runs the integrity gate before building statements.
+ * Run the buildFinancialStatements tool. Data is loaded from the database using sessionId and tenantId only.
+ * If the LLM passes entries or prior_entries (invented numbers), returns Grounding Violation.
  */
 export async function runBuildFinancialStatements(
   input: BuildFinancialStatementsInput,
@@ -96,8 +110,35 @@ export async function runBuildFinancialStatements(
   classifiedEntriesCount: number;
 }>> {
   try {
-    const parsed = buildFinancialStatementsSchema.parse(input);
-    const trialBalance = parseTrialBalance(parsed.entries);
+    // Reject LLM-invented data: tool accepts only sessionId and tenantId
+    const raw = input as Record<string, unknown>;
+    if (raw.entries != null && (Array.isArray(raw.entries) || typeof raw.entries === 'object')) {
+      return { success: false, error: GROUNDING_VIOLATION };
+    }
+    if (raw.prior_entries != null && (Array.isArray(raw.prior_entries) || typeof raw.prior_entries === 'object')) {
+      return { success: false, error: GROUNDING_VIOLATION };
+    }
+
+    const parsed = buildFinancialStatementsSchema.safeParse(input);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.message };
+    }
+
+    if (!context?.pool) {
+      return { success: false, error: 'Grounding Violation: pool is required to load session snapshot from the database.' };
+    }
+
+    const snapshot = await loadSessionSnapshot(context.pool, parsed.data.sessionId, parsed.data.tenantId);
+    if (!snapshot) {
+      return { success: false, error: 'Grounding Violation: No session snapshot found for this sessionId and tenantId. Upload or ingest trial balance first so the session has validated data.' };
+    }
+
+    const entries = entriesFromSnapshot(snapshot);
+    if (entries.length === 0) {
+      return { success: false, error: 'Grounding Violation: Session snapshot contains no trial balance entries. Ingest or upload trial balance first.' };
+    }
+
+    const trialBalance = parseTrialBalance(entries);
     if (!trialBalance.balances && trialBalance.errors.length > 0) {
       return {
         success: false,
@@ -105,18 +146,18 @@ export async function runBuildFinancialStatements(
       };
     }
 
-    const standard = parsed.standard;
-    const lease = parsed.lease;
-    const fullSet = parsed.fullSet ?? false;
-    const priorTrialBalance = parsed.prior_entries ? parseTrialBalance(parsed.prior_entries) : undefined;
+    const standard = parsed.data.standard;
+    const lease = parsed.data.lease;
+    const fullSet = parsed.data.fullSet ?? false;
+    const priorTrialBalance = undefined;
 
-    let stmtOpts: { lease?: typeof lease; fullSet: boolean; priorTrialBalance?: typeof priorTrialBalance; contracts?: IntegrityContractFact[] } = {
+    let stmtOpts: { lease?: typeof lease; fullSet: boolean; priorTrialBalance?: undefined; contracts?: IntegrityContractFact[] } = {
       lease,
       fullSet,
       priorTrialBalance,
     };
     if (standard && context) {
-      const rows = await listContracts(context.pool, context.tenantId);
+      const rows = await listContracts(context.pool, parsed.data.tenantId);
       stmtOpts = { ...stmtOpts, contracts: rows.map((r) => ({ id: r.id, totalContractValue: r.totalContractValue, periodRecognizedRevenue: undefined })) };
     }
     const result = standard
@@ -155,6 +196,8 @@ export async function runBuildFinancialStatements(
           netIncome: profitAndLoss.netIncome,
         },
         classifiedEntriesCount: classifiedEntries.length,
+        /** For audit: plan + deterministic verification (V1–V3b). */
+        reasoningChain: { plan: pev.plan, executedAt: pev.executedAt, verification: pev.verification },
         ...(standard ? { standard } : {}),
         ...(standardMetadata ? { standardMetadata } : {}),
         ...('cashFlow' in result && result.cashFlow ? { cashFlow: result.cashFlow } : {}),

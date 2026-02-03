@@ -1,12 +1,12 @@
 /**
- * Supervisor Agent API: ReAct loop with Claude 3.5 Sonnet and CPA/CFA tools.
- * POST /api/supervisor/chat — send a message; agent reasons, calls tools, returns answer.
- * Sessions are created and snapshot stored when pool/tenantId exist (persistence_service).
+ * Supervisor API — single Unified Orchestration Service.
+ * Strategy: Month-End Close → Deterministic Pipeline; Forensic (e.g. "Find personal expenses") → Agentic ReAct.
+ * Both paths use the same DATA_GROUNDING_RULE and Skeptic gate.
  */
 
 import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
-import { runUnifiedSupervisor } from '../services/unified_orchestrator.js';
+import { runUnifiedSupervisor, type UnifiedChatOutput, type UnifiedPipelineOutput } from '../services/unified_orchestrator.js';
 import type { PipelineInput } from '../services/result_generator.js';
 import type { RawTrialBalanceRow } from '../services/trialBalanceParser.js';
 import * as conflictsRepo from '../db/repositories/risk_context_conflicts_repository.js';
@@ -17,10 +17,9 @@ const router = Router();
 
 /**
  * POST /api/supervisor/chat
- * Body: { message: string, raw_rows?: RawTrialBalanceRow[], pipeline_input?: PipelineInput }
- * If pipeline_input is provided (e.g. { type: 'raw_rows', rawRows } or { type: 'statements', output }), the agent can call step1CPA without passing raw_rows in the tool.
- * When tenantId and pool exist, a session is created and pipeline_input_snapshot stored; sessionId is returned.
- * Returns: { response, toolCalls, stopReason, sessionId? }
+ * Body: { message: string, raw_rows?: RawTrialBalanceRow[], pipeline_input?: PipelineInput, mode?: 'chat' | 'pipeline' }
+ * Strategy is inferred from message: Month-End Close → Deterministic Pipeline; Forensic / ad-hoc → Agentic ReAct.
+ * Optional mode overrides inference. Session created when tenantId/pool exist; sessionId returned.
  */
 router.post('/chat', async (req: Request, res: Response) => {
   try {
@@ -28,6 +27,7 @@ router.post('/chat', async (req: Request, res: Response) => {
       message?: string;
       raw_rows?: RawTrialBalanceRow[];
       pipeline_input?: PipelineInput;
+      mode?: 'chat' | 'pipeline';
     };
     const message = (body?.message ?? '').trim();
     if (!message) {
@@ -51,18 +51,33 @@ router.post('/chat', async (req: Request, res: Response) => {
       sessionId = session.id;
     }
     const out = await runUnifiedSupervisor({
-      mode: 'chat',
+      ...(body.mode != null && { mode: body.mode }),
       message,
       pipelineInput,
       sessionId,
       tenantId: tenantId ?? undefined,
       pool,
     });
-    const chatOut = out as import('../services/unified_orchestrator.js').UnifiedChatOutput;
+    if ('pipelineResult' in out) {
+      const pipe = out as UnifiedPipelineOutput;
+      res.json({
+        response: pipe.finalMemo ?? pipe.executiveMemo,
+        executiveMemo: pipe.executiveMemo,
+        strategy: pipe.strategy,
+        skepticReviewed: pipe.skepticReviewed,
+        skepticFinding: pipe.skepticFinding,
+        consensus: pipe.consensus,
+        pipelineResult: pipe.pipelineResult,
+        ...(sessionId && { sessionId }),
+      });
+      return;
+    }
+    const chatOut = out as UnifiedChatOutput;
     res.json({
       response: chatOut.response,
       toolCalls: chatOut.toolCalls,
       stopReason: chatOut.stopReason,
+      strategy: chatOut.strategy,
       ...(sessionId && { sessionId }),
       ...(chatOut.dissentingOpinion && { dissentingOpinion: chatOut.dissentingOpinion }),
       ...(chatOut.skepticReviewed !== undefined && { skepticReviewed: chatOut.skepticReviewed }),
@@ -77,36 +92,27 @@ router.post('/chat', async (req: Request, res: Response) => {
 
 /**
  * POST /api/supervisor/chat-verified
- * Body: { message: string, raw_rows?: RawTrialBalanceRow[] }
- * Runs Supervisor, then the Skeptic reviews the report. If the Skeptic finds an issue, they Discuss internally.
- * When tenantId and pool exist, a session is created with pipeline_input_snapshot (raw_rows); sessionId is returned.
- * Returns only the final, verified consensus (finalReport). Optional audit fields: skepticFinding, consensus, sessionId.
+ * Body: { message: string, raw_rows?: RawTrialBalanceRow[], mode?: 'chat' | 'pipeline' }
+ * Same Unified Orchestration Service with Skeptic verification. Strategy inferred unless mode is passed.
+ * Returns final, verified consensus (finalReport). Optional: skepticFinding, consensus, sessionId, strategy.
  */
 router.post('/chat-verified', async (req: Request, res: Response) => {
   try {
-    const body = req.body as { message?: string; raw_rows?: RawTrialBalanceRow[] };
+    const body = req.body as { message?: string; raw_rows?: RawTrialBalanceRow[]; mode?: 'chat' | 'pipeline' };
     const message = (body?.message ?? '').trim();
     if (!message) {
       res.status(400).json({ error: 'Missing "message" in body' });
       return;
     }
 
-    const entries =
-      body.raw_rows && Array.isArray(body.raw_rows) && body.raw_rows.length > 0
-        ? body.raw_rows.map((r) => ({
-            accountName: r.accountName,
-            debit: Number(r.debit) || 0,
-            credit: Number(r.credit) || 0,
-            accountCode: r.accountCode,
-          }))
-        : undefined;
-
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
+    let pipelineInputForVerified: PipelineInput | undefined;
+    if (body.raw_rows && Array.isArray(body.raw_rows) && body.raw_rows.length > 0) {
+      pipelineInputForVerified = { type: 'raw_rows', rawRows: body.raw_rows };
+    }
+    const snapshot = pipelineInputForVerified ?? null;
     let sessionId: string | undefined;
-    const snapshot = entries
-      ? { type: 'raw_rows' as const, rawRows: body.raw_rows }
-      : null;
     if (pool && tenantId) {
       const session = await persistence.createSession(pool, tenantId, {
         mode: 'chat',
@@ -114,11 +120,8 @@ router.post('/chat-verified', async (req: Request, res: Response) => {
       });
       sessionId = session.id;
     }
-    const pipelineInputForVerified = entries
-      ? { type: 'raw_rows' as const, rawRows: body.raw_rows! }
-      : undefined;
     const out = await runUnifiedSupervisor({
-      mode: 'chat',
+      mode: body?.mode,
       message,
       pipelineInput: pipelineInputForVerified ?? undefined,
       sessionId,
@@ -126,14 +129,29 @@ router.post('/chat-verified', async (req: Request, res: Response) => {
       pool,
       useVerifiedPath: true,
     });
-    const chatOut = out as import('../services/unified_orchestrator.js').UnifiedChatOutput;
+    if ('pipelineResult' in out) {
+      const pipe = out as UnifiedPipelineOutput;
+      res.json({
+        response: pipe.finalMemo ?? pipe.executiveMemo,
+        finalReport: pipe.finalMemo ?? pipe.executiveMemo,
+        executiveMemo: pipe.executiveMemo,
+        strategy: pipe.strategy,
+        skepticReviewed: pipe.skepticReviewed,
+        skepticFinding: pipe.skepticFinding,
+        consensus: pipe.consensus,
+        ...(sessionId && { sessionId }),
+      });
+      return;
+    }
+    const chatOut = out as UnifiedChatOutput;
     res.json({
       response: chatOut.response,
-      finalReport: chatOut.response,
+      finalReport: chatOut.finalReport ?? chatOut.response,
       skepticReviewed: chatOut.skepticReviewed,
       skepticFinding: chatOut.skepticFinding,
       consensus: chatOut.consensus,
       supervisorResponse: chatOut.supervisorResponse,
+      strategy: chatOut.strategy,
       ...(sessionId && { sessionId }),
     });
   } catch (err) {

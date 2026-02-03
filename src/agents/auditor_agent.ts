@@ -8,6 +8,7 @@
 
 import { generateText } from '../llm/provider.js';
 import type { SupervisorOutput } from './Supervisor.js';
+import { DATA_GROUNDING_RULE } from '../llm/guardrails.js';
 
 const MODEL = 'claude-sonnet-4-5-20250929';
 

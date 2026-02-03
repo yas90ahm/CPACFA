@@ -1,13 +1,14 @@
 /**
- * Unified Orchestrator — single facade for Supervisor chat and pipeline.
- * Applies Skeptic hard gate before returning any financial result (plan §3).
+ * Unified Orchestration Service — single entry point for Supervisor flows.
+ * Strategy Pattern: Month-End Close → Deterministic Pipeline; Forensic / ad-hoc → Agentic ReAct.
+ * Both paths use the same DATA_GROUNDING_RULE (Supervisor + Skeptic prompts).
  */
 
 import type { Pool } from 'pg';
 import type { PipelineInput, ResultGeneratorOutput } from './result_generator.js';
 import { runResultPipeline } from './result_generator.js';
-import { runSupervisorChat } from './supervisor_agent.js';
 import { runSupervisor } from '../agents/Supervisor.js';
+import { appendReasoningLog, type ReasoningLogEntry } from './persistence_service.js';
 import {
   runSupervisorWithSkeptic,
   runSkepticReview,
@@ -15,23 +16,70 @@ import {
   type SupervisorReport,
 } from '../agents/auditor_agent.js';
 import type { RawTrialBalanceRow } from './trialBalanceParser.js';
+import { DATA_GROUNDING_RULE } from '../llm/guardrails.js';
+
+/** Re-export so callers can rely on a single grounding rule. */
+export { DATA_GROUNDING_RULE };
+
+export type TaskStrategy = 'month_end_close' | 'forensic';
+
+/** Month-end close keywords: standard close, trial balance, statements. */
+const MONTH_END_PATTERNS = [
+  /month\s*end\s*close/i,
+  /year\s*end\s*close/i,
+  /trial\s*balance/i,
+  /financial\s*statements/i,
+  /prepare\s*(the\s*)?(statements|close|report)/i,
+  /close\s*(the\s*)?(books|period)/i,
+  /balance\s*sheet\s*and\s*p&l/i,
+  /executive\s*memo/i,
+];
+
+/** Forensic / audit keywords: find, investigate, anomaly, personal expenses. */
+const FORENSIC_PATTERNS = [
+  /find\s*(personal\s*)?expenses/i,
+  /forensic/i,
+  /personal\s*expenses/i,
+  /anomaly|anomalies/i,
+  /investigate/i,
+  /suspicious/i,
+  /audit\s*(for|to\s*find)/i,
+  /detect\s*(fraud|expenses|issues)/i,
+  /where\s*(did|are)\s*(the\s*)?(expenses|payments)/i,
+];
+
+/**
+ * Infer task strategy from the user message (and optional pipeline input).
+ * Month-End Close → use Deterministic Pipeline when pipelineInput is available.
+ * Forensic / ad-hoc → use Agentic ReAct Loop.
+ */
+export function inferTaskStrategy(message: string, pipelineInput?: PipelineInput | null): TaskStrategy {
+  const text = message.trim().toLowerCase();
+  const hasForensic = FORENSIC_PATTERNS.some((p) => p.test(text));
+  const hasMonthEnd = MONTH_END_PATTERNS.some((p) => p.test(text));
+  if (hasForensic) return 'forensic';
+  if (hasMonthEnd && pipelineInput != null) return 'month_end_close';
+  return 'forensic';
+}
 
 export interface UnifiedSupervisorParams {
-  mode: 'chat' | 'pipeline';
+  /** If set, overrides inferred strategy. Otherwise strategy is inferred from message (and pipelineInput). */
+  mode?: 'chat' | 'pipeline';
   message: string;
   pipelineInput?: PipelineInput;
   sessionId?: string;
   tenantId?: string;
   pool?: Pool | null;
   /**
-   * When true (e.g. /chat-verified), use runSupervisorWithSkeptic (agents Supervisor + Skeptic).
-   * When false (e.g. /chat), use runSupervisorChat then apply Skeptic gate here.
+   * When true (e.g. /chat-verified), run Skeptic after the agentic path.
+   * When false, Skeptic is still run for both pipeline and agentic paths.
    */
   useVerifiedPath?: boolean;
 }
 
 export interface UnifiedChatOutput {
   response: string;
+  finalReport?: string;
   toolCalls?: Array<{ name: string; summary: string }>;
   stopReason?: string;
   sessionId?: string;
@@ -40,6 +88,8 @@ export interface UnifiedChatOutput {
   skepticFinding?: string;
   consensus?: 'no_error' | 'correction_accepted';
   supervisorResponse?: string;
+  /** Inferred or chosen strategy. */
+  strategy?: TaskStrategy;
 }
 
 export interface UnifiedPipelineOutput {
@@ -49,6 +99,7 @@ export interface UnifiedPipelineOutput {
   skepticFinding?: string;
   consensus?: 'no_error' | 'correction_accepted';
   finalMemo?: string;
+  strategy: 'month_end_close';
 }
 
 /**
@@ -78,16 +129,26 @@ async function applySkepticGate(report: SupervisorReport): Promise<{
 }
 
 /**
- * Unified Supervisor: mode 'chat' runs ReAct + Skeptic gate; mode 'pipeline' runs deterministic pipeline + Skeptic gate.
+ * Single Unified Orchestration Service.
+ * Strategy: if user task is standard Month-End Close (and pipelineInput exists), use Deterministic Pipeline.
+ * If user ask is Forensic (e.g. "Find personal expenses") or ad-hoc, use Agentic ReAct Loop (agents/Supervisor only).
+ * Both paths use the same DATA_GROUNDING_RULE and pass through the Skeptic gate.
  */
 export async function runUnifiedSupervisor(
   params: UnifiedSupervisorParams
 ): Promise<UnifiedChatOutput | UnifiedPipelineOutput> {
-  const { mode, message, pipelineInput, sessionId, tenantId, pool, useVerifiedPath } = params;
+  const { mode: modeOverride, message, pipelineInput, sessionId, tenantId, pool, useVerifiedPath } = params;
 
-  if (mode === 'pipeline') {
+  const strategy: TaskStrategy =
+    modeOverride === 'pipeline'
+      ? 'month_end_close'
+      : modeOverride === 'chat'
+        ? 'forensic'
+        : inferTaskStrategy(message, pipelineInput);
+
+  if (strategy === 'month_end_close' && pipelineInput != null) {
     const context = tenantId && pool ? { tenantId, pool } : undefined;
-    const pipelineResult = await runResultPipeline(pipelineInput!, context);
+    const pipelineResult = await runResultPipeline(pipelineInput, context);
     const report: SupervisorReport = {
       response: pipelineResult.executiveMemo,
       toolCalls: [],
@@ -100,57 +161,59 @@ export async function runUnifiedSupervisor(
       skepticFinding: gate.skepticFinding,
       consensus: gate.consensus,
       finalMemo: gate.finalResponse !== pipelineResult.executiveMemo ? gate.finalResponse : undefined,
+      strategy: 'month_end_close',
     };
   }
 
-  // mode === 'chat'
-  if (useVerifiedPath && tenantId && pool) {
-    const entries =
-      pipelineInput?.type === 'raw_rows' && pipelineInput.rawRows?.length
-        ? pipelineInput.rawRows.map((r: RawTrialBalanceRow) => ({
-            accountName: r.accountName,
-            debit: Number(r.debit) || 0,
-            credit: Number(r.credit) || 0,
-            accountCode: r.accountCode,
-          }))
+  const entries =
+    pipelineInput?.type === 'raw_rows' && pipelineInput.rawRows?.length
+      ? pipelineInput.rawRows.map((r: RawTrialBalanceRow) => ({
+          accountName: r.accountName,
+          debit: Number(r.debit) || 0,
+          credit: Number(r.credit) || 0,
+          accountCode: r.accountCode,
+        }))
+      : undefined;
+  const onReasoningStep =
+    pool && tenantId && sessionId
+      ? (entry: ReasoningLogEntry) =>
+          appendReasoningLog(pool, tenantId, sessionId, { ...entry, timestamp: entry.timestamp || new Date().toISOString() })
+      : undefined;
+  const context =
+    tenantId && pool
+      ? { tenantId, pool, sessionId, validatedEntries: entries, onReasoningStep }
+      : entries
+        ? { validatedEntries: entries, onReasoningStep }
         : undefined;
-    const context = { tenantId, pool, sessionId, validatedEntries: entries };
-    const out = await runSupervisorWithSkeptic(
-      { message, entries },
-      (inp) => runSupervisor(inp, context)
-    );
-    return {
-      response: out.finalReport,
-      finalReport: out.finalReport,
-      skepticReviewed: out.skepticReviewed,
-      skepticFinding: out.skepticFinding,
-      consensus: out.consensus,
-      supervisorResponse: out.supervisorResponse,
-      sessionId,
-    };
-  }
 
-  const out = await runSupervisorChat({
-    message,
-    pipelineInput,
-    tenantId,
-    pool,
-    sessionId,
-  });
-  const report: SupervisorReport = {
-    response: out.response,
-    toolCalls: (out.toolCalls ?? []).map((t) => ({ name: t.name, result: t.summary })),
-  };
-  const gate = await applySkepticGate(report);
+  const runAgentic = useVerifiedPath
+    ? (inp: { message: string; entries?: typeof entries }) =>
+        runSupervisorWithSkeptic(inp, (input) => runSupervisor(input, context))
+    : async (inp: { message: string; entries?: typeof entries }) => {
+        const out = await runSupervisor({ message: inp.message, entries: inp.entries }, context);
+        const report: SupervisorReport = {
+          response: out.response,
+          toolCalls: out.toolCalls,
+        };
+        const gate = await applySkepticGate(report);
+        return {
+          finalReport: gate.finalResponse,
+          skepticReviewed: true,
+          supervisorResponse: out.response,
+          skepticFinding: gate.skepticFinding,
+          consensus: gate.consensus,
+        };
+      };
+
+  const out = await runAgentic({ message, entries });
   return {
-    response: gate.finalResponse,
-    toolCalls: out.toolCalls,
-    stopReason: out.stopReason,
+    response: out.finalReport,
+    finalReport: out.finalReport,
+    supervisorResponse: out.supervisorResponse,
+    skepticReviewed: out.skepticReviewed,
+    skepticFinding: out.skepticFinding,
+    consensus: out.consensus,
     sessionId,
-    dissentingOpinion: out.dissentingOpinion,
-    skepticReviewed: gate.skepticReviewed,
-    skepticFinding: gate.skepticFinding,
-    consensus: gate.consensus,
-    supervisorResponse: out.response,
+    strategy: 'forensic',
   };
 }

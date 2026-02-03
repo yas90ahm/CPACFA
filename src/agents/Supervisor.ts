@@ -8,6 +8,7 @@ import type { MessageParam, Tool } from '@anthropic-ai/sdk/resources/messages.js
 import type { Pool } from 'pg';
 import { executeTool } from './tools/index.js';
 import { getProviderFromEnv } from '../llm/provider.js';
+import type { ReasoningLogEntry } from '../services/persistence_service.js';
 import type { LLMTool } from '../llm/tool_schema.js';
 import { toAnthropicTools, toOpenAITools, toMistralTools } from '../llm/tool_schema.js';
 import { DATA_GROUNDING_RULE } from '../llm/guardrails.js';
@@ -21,7 +22,7 @@ RULES:
 1. Before taking ANY action (including calling a tool), you MUST output a "Thought" explaining your plan. Format: "Thought: <your reasoning>". Only after the Thought may you call a tool.
 2. You have access to these tools:
    - classifyAccount: Map a single GL account name to Asset/Liability/Equity/Revenue/Expense. Use when you need to classify an account or verify classification.
-   - buildFinancialStatements: Build Balance Sheet and P&L from trial balance entries (array of { accountName, debit, credit, accountCode? }). Use when the user provides trial balance data or asks for financial statements.
+   - buildFinancialStatements: Build Balance Sheet and P&L from validated trial balance in the database. Call with sessionId and tenantId only; do not pass entries or numbers. Use when the user asks for financial statements and the session has trial balance data.
    - computeRatios: Compute Current Ratio, Quick Ratio, Debt-to-Equity, ROE, Net Margin from balance sheet and P&L totals. Use when the user asks about liquidity, risk, leverage, or ratios.
    - forensicRescan: When a tool returns an anomaly (e.g. Balance Sheet does not balance: Assets != Liabilities + Equity, or Trial Balance does not balance), do NOT fail. Autonomously decide to run a Forensic Re-scan: call forensicRescan with the same entries to re-parse, re-classify, re-build, and verify. Use the verification result to explain or correct, then continue.
    - lookupVendorMemory: When processing a new file or line item, query semantic memory: "Have I seen this vendor before? How did we categorize it last time?" Use when the user uploads data or asks about a vendor/account to check prior treatment.
@@ -54,22 +55,12 @@ function buildTools(): LLMTool[] {
       inputSchema: {
         type: 'object' as const,
         properties: {
-          entries: {
-            type: 'array',
-            description: 'Trial balance rows: { accountName, debit, credit, accountCode? }',
-            items: {
-              type: 'object',
-              properties: {
-                accountCode: { type: 'string' },
-                accountName: { type: 'string' },
-                debit: { type: 'number' },
-                credit: { type: 'number' },
-              },
-              required: ['accountName', 'debit', 'credit'],
-            },
-          },
+          sessionId: { type: 'string', description: 'Session ID that holds the validated trial balance (from pipeline/session). Do not pass entries.' },
+          tenantId: { type: 'string', description: 'Tenant ID for the session.' },
+          standard: { type: 'string', description: 'Optional: ASPE, IFRS, FRS102, or US_GAAP' },
+          fullSet: { type: 'boolean', description: 'Optional: include Cash Flow, Equity Changes, Notes' },
         },
-        required: ['entries'],
+        required: ['sessionId', 'tenantId'],
       },
     },
     {
@@ -192,7 +183,7 @@ function buildTools(): LLMTool[] {
 const classifyAccountDescription =
   'Map a single GL account name to Asset/Liability/Equity/Revenue/Expense. Use when you need to classify an account or verify classification.';
 const buildFinancialStatementsDescription =
-  'Build Balance Sheet and P&L from trial balance entries. Use when the user provides trial balance data or asks for financial statements.';
+  'Build Balance Sheet and P&L from the validated trial balance stored for this session. Pass only sessionId and tenantId; data is loaded from the database. Do not pass entries or invented numbers.';
 const computeRatiosDescription =
   'Compute Current Ratio, Quick Ratio, Debt-to-Equity, ROE, Net Margin. Use when the user asks about liquidity, risk, leverage, or ratios.';
 const forensicRescanDescription =
@@ -236,7 +227,14 @@ function getApiKey(): string {
  */
 export async function runSupervisor(
   input: SupervisorInput,
-  context?: { tenantId?: string; pool?: Pool; sessionId?: string; validatedEntries?: Array<{ accountName: string; debit: number; credit: number; accountCode?: string }> }
+  context?: {
+    tenantId?: string;
+    pool?: Pool;
+    sessionId?: string;
+    validatedEntries?: Array<{ accountName: string; debit: number; credit: number; accountCode?: string }>;
+    /** When set, each Thought or Tool step is appended to the session reasoning_logs (audit trail). */
+    onReasoningStep?: (entry: ReasoningLogEntry) => void | Promise<void>;
+  }
 ): Promise<SupervisorOutput> {
   const provider = getProviderFromEnv();
   const toolContext = {
@@ -244,9 +242,13 @@ export async function runSupervisor(
     validatedEntries: context?.validatedEntries ?? (input.entries?.length ? input.entries : undefined),
     sessionId: context?.sessionId,
   };
+  const fireReasoningStep = (entry: ReasoningLogEntry) => {
+    const ts = { ...entry, timestamp: entry.timestamp || new Date().toISOString() };
+    void Promise.resolve(context?.onReasoningStep?.(ts)).catch(() => {});
+  };
 
   const userContent = input.entries?.length
-    ? `${input.message}\n\n[Trial balance entries available: ${input.entries.length} rows. Use buildFinancialStatements with these entries when building statements, or forensicRescan with the same entries if you see an anomaly.]`
+    ? `${input.message}\n\n[Trial balance available in this session. Use buildFinancialStatements with sessionId and tenantId only (from context)—do not pass entries. Or use forensicRescan with entries if you need to re-validate.]`
     : input.message;
 
   const messages: MessageParam[] = [{ role: 'user', content: userContent }];
@@ -280,7 +282,14 @@ export async function runSupervisor(
           textBlocks.push(block.text);
           const thoughtMatch = block.text.match(/Thought:\s*([\s\S]*?)(?=Action:|$)/i);
           if (thoughtMatch) {
-            thoughts.push(thoughtMatch[1].trim());
+            const thoughtText = thoughtMatch[1].trim();
+            thoughts.push(thoughtText);
+            fireReasoningStep({
+              stepType: 'thought',
+              timestamp: new Date().toISOString(),
+              thought: thoughtText,
+              rawDataSeen: toolContext.validatedEntries?.length ? { entriesCount: toolContext.validatedEntries.length, sample: toolContext.validatedEntries.slice(0, 5) } : undefined,
+            });
           }
         }
         if (block.type === 'tool_use') {
@@ -323,10 +332,23 @@ export async function runSupervisor(
           toolResult.success
             ? JSON.stringify(toolResult.data, null, 2)
             : `Error: ${toolResult.error}`;
+        const resultSummary = contentStr.slice(0, 2000) + (contentStr.length > 2000 ? '...' : '');
         toolCalls.push({
           name: use.name,
           input: use.input,
-          result: contentStr.slice(0, 2000) + (contentStr.length > 2000 ? '...' : ''),
+          result: resultSummary,
+        });
+        const data = toolResult.success ? (toolResult.data as Record<string, unknown>) : undefined;
+        const reasoningChain = data?.reasoningChain as { plan?: string; verification?: { passed: boolean; checks: string[] } } | undefined;
+        fireReasoningStep({
+          stepType: 'tool',
+          timestamp: new Date().toISOString(),
+          toolName: use.name,
+          toolInput: use.input as Record<string, unknown>,
+          toolResult: resultSummary,
+          rawDataSeen: toolContext.validatedEntries?.length ? { entriesCount: toolContext.validatedEntries.length, sample: toolContext.validatedEntries.slice(0, 5) } : (use.name === 'buildFinancialStatements' || use.name === 'forensicRescan' ? (use.input as Record<string, unknown>) : undefined),
+          ruleApplied: reasoningChain?.plan,
+          verificationResult: reasoningChain?.verification,
         });
         toolResults.push({
           type: 'tool_result',
@@ -376,8 +398,21 @@ export async function runSupervisor(
         } catch {
           inputObj = {};
         }
-        const result = await executeTool(name, inputObj);
-        toolCalls.push({ name, input: inputObj, result: result.success ? JSON.stringify(result.data).slice(0, 2000) : `Error: ${result.error}` });
+        const result = await executeTool(name, inputObj, toolContext);
+        const resultStr = result.success ? JSON.stringify(result.data).slice(0, 2000) : `Error: ${result.error}`;
+        toolCalls.push({ name, input: inputObj, result: resultStr });
+        const data = result.success ? (result.data as Record<string, unknown>) : undefined;
+        const reasoningChain = data?.reasoningChain as { plan?: string; verification?: { passed: boolean; checks: string[] } } | undefined;
+        fireReasoningStep({
+          stepType: 'tool',
+          timestamp: new Date().toISOString(),
+          toolName: name,
+          toolInput: inputObj,
+          toolResult: resultStr,
+          rawDataSeen: toolContext.validatedEntries?.length ? { entriesCount: toolContext.validatedEntries.length, sample: toolContext.validatedEntries.slice(0, 5) } : (name === 'buildFinancialStatements' || name === 'forensicRescan' ? inputObj : undefined),
+          ruleApplied: reasoningChain?.plan,
+          verificationResult: reasoningChain?.verification,
+        });
         messagesO.push({
           role: 'tool',
           tool_call_id: call.id,
@@ -424,7 +459,20 @@ export async function runSupervisor(
           inputObj = {};
         }
         const result = await executeTool(name, inputObj, toolContext);
-        toolCalls.push({ name, input: inputObj, result: result.success ? JSON.stringify(result.data).slice(0, 2000) : `Error: ${result.error}` });
+        const resultStr = result.success ? JSON.stringify(result.data).slice(0, 2000) : `Error: ${result.error}`;
+        toolCalls.push({ name, input: inputObj, result: resultStr });
+        const data = result.success ? (result.data as Record<string, unknown>) : undefined;
+        const reasoningChain = data?.reasoningChain as { plan?: string; verification?: { passed: boolean; checks: string[] } } | undefined;
+        fireReasoningStep({
+          stepType: 'tool',
+          timestamp: new Date().toISOString(),
+          toolName: name,
+          toolInput: inputObj,
+          toolResult: resultStr,
+          rawDataSeen: toolContext.validatedEntries?.length ? { entriesCount: toolContext.validatedEntries.length, sample: toolContext.validatedEntries.slice(0, 5) } : (name === 'buildFinancialStatements' || name === 'forensicRescan' ? inputObj : undefined),
+          ruleApplied: reasoningChain?.plan,
+          verificationResult: reasoningChain?.verification,
+        });
         messagesM.push({
           role: 'tool',
           tool_call_id: call.id,

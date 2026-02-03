@@ -79,6 +79,9 @@ const upload = multer({
 /**
  * POST /api/trial-balance/ingest
  * Body: multipart/form-data with file (field name: file)
+ * Every file upload is associated with tenant_id and stored in tenant_session_uploads when tenant context exists.
+ * If the ledger is flagged as 'messy', raw CSV rows are saved to Postgres before calling the agentic parser,
+ * so the user can Pause, refresh, and see the same Action Card to approve the AI's cleanup.
  * Returns: FinancialStatementsOutput (Reasoning Chain + TB + BS + P&L)
  */
 router.post('/ingest', upload.single('file'), async (req: Request, res: Response) => {
@@ -92,6 +95,28 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
       return;
     }
 
+    const tenantIdIngest = getTenantId(req);
+    const poolIngest = getTenantPool(req);
+    const hasTenantContext = Boolean(tenantIdIngest && poolIngest);
+    const ingestSessionId = hasTenantContext
+      ? `ingest-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+      : null;
+
+    let uploadId: string | null = null;
+    if (hasTenantContext && ingestSessionId) {
+      const uploadRow = await persistence.createSessionUpload(
+        poolIngest!,
+        tenantIdIngest!,
+        ingestSessionId,
+        {
+          filename: file.originalname || 'upload.csv',
+          contentType: file.mimetype,
+          metadata: null,
+        }
+      );
+      uploadId = uploadRow.id;
+    }
+
     let rawRows = ingestTrialBalanceFile(file.buffer, file.mimetype);
     if (rawRows.length === 0) {
       res.status(400).json({
@@ -100,7 +125,14 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
       });
       return;
     }
+
     if (isMessyTrialBalance(rawRows)) {
+      if (uploadId && tenantIdIngest && poolIngest) {
+        await persistence.updateSessionUploadMetadata(poolIngest, uploadId, tenantIdIngest, {
+          rawRows,
+          status: 'pending_agentic_cleanup',
+        });
+      }
       try {
         const agenticRows = await agenticLedgerToTrialBalance(file.buffer, file.mimetype);
         if (agenticRows.length > 0) rawRows = agenticRows;
@@ -164,8 +196,6 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
           )
         : undefined;
     const explicitStandard = normalizeStandard(body?.standard);
-    const tenantIdIngest = getTenantId(req);
-    const poolIngest = getTenantPool(req);
     let standard =
       explicitStandard ??
       await inferAccountingStandard({
@@ -460,6 +490,7 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
       hitl,
       similarPrecedent,
       ...(professionalReviewIngest ? { professionalReview: professionalReviewIngest } : {}),
+      ...(uploadId && ingestSessionId ? { uploadId, sessionId: ingestSessionId } : {}),
       audit: {
         binderUrl: '/api/audit/binder',
         gaapConsistencyUrl: '/api/audit/gaap-consistency',

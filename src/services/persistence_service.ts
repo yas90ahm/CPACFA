@@ -162,6 +162,30 @@ export async function updateStagingStatus(
 
 // --- Supervisor sessions ---
 
+/** Deterministic verification result (V1–V3b from planExecuteVerify). */
+export interface ReasoningVerificationResult {
+  passed: boolean;
+  checks: string[];
+}
+
+/** Immutable audit entry for agent Thought or Tool step. */
+export interface ReasoningLogEntry {
+  stepType: 'thought' | 'tool';
+  timestamp: string;
+  /** For thought: the reasoning text. */
+  thought?: string;
+  /** For tool: name, input, result summary. */
+  toolName?: string;
+  toolInput?: Record<string, unknown>;
+  toolResult?: string | Record<string, unknown>;
+  /** (A) Raw data the agent saw (e.g. trial balance slice, tool input). */
+  rawDataSeen?: unknown;
+  /** (B) CPA/CFA rule applied (e.g. plan from Plan-Execute-Verify). */
+  ruleApplied?: string;
+  /** (C) Deterministic verification result (V1–V3b). */
+  verificationResult?: ReasoningVerificationResult;
+}
+
 export interface SupervisorSessionRow {
   id: string;
   tenantId: string;
@@ -172,6 +196,8 @@ export interface SupervisorSessionRow {
   lastStep: string | null;
   lastResultSummary: string | null;
   messageHistory: unknown;
+  /** Append-only reasoning log (Thought + Tool steps with rawDataSeen, ruleApplied, verificationResult). */
+  reasoningLogs?: ReasoningLogEntry[];
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
@@ -286,4 +312,188 @@ export async function updateSession(
     values
   );
   return getSession(pool, sessionId);
+}
+
+// --- Session snapshot (validated trial balance / pipeline input) ---
+
+/**
+ * Snapshot shape stored in pipeline_input_snapshot (JSONB).
+ * raw_rows: validated trial balance from ingest/upload.
+ * statements: output from a prior build (has balanceSheet, profitAndLoss, trialBalance.entries).
+ */
+export type SessionSnapshot =
+  | { type: 'raw_rows'; rawRows: Array<{ accountName?: string; debit?: number; credit?: number; accountCode?: string }> }
+  | { type: 'statements'; output: { trialBalance?: { entries?: Array<{ accountName?: string; debit?: number; credit?: number; accountCode?: string }> }; balanceSheet?: unknown; profitAndLoss?: unknown } };
+
+/**
+ * Save (or overwrite) the pipeline_input_snapshot for an existing session.
+ * Session must exist and tenant_id must match (ensures tenant isolation).
+ */
+export async function saveSessionSnapshot(
+  pool: Pool,
+  tenantId: string,
+  sessionId: string,
+  snapshot: SessionSnapshot
+): Promise<void> {
+  const now = new Date().toISOString();
+  const r = await pool.query(
+    `UPDATE tenant_supervisor_sessions SET pipeline_input_snapshot = $1, updated_at = $2 WHERE id = $3 AND tenant_id = $4`,
+    [JSON.stringify(snapshot), now, sessionId, tenantId]
+  );
+  if (r.rowCount === 0) {
+    throw new Error(`saveSessionSnapshot: session not found or tenant mismatch (sessionId=${sessionId}, tenantId=${tenantId})`);
+  }
+}
+
+/**
+ * Append one reasoning log entry to tenant_supervisor_sessions.reasoning_logs (immutable audit trail).
+ * Session must exist and tenant_id must match.
+ */
+export async function appendReasoningLog(
+  pool: Pool,
+  tenantId: string,
+  sessionId: string,
+  entry: ReasoningLogEntry
+): Promise<void> {
+  const now = new Date().toISOString();
+  const r = await pool.query(
+    `UPDATE tenant_supervisor_sessions
+     SET reasoning_logs = COALESCE(reasoning_logs, '[]'::jsonb) || $1::jsonb, updated_at = $2
+     WHERE id = $3 AND tenant_id = $4`,
+    [JSON.stringify([{ ...entry, timestamp: entry.timestamp || now }]), now, sessionId, tenantId]
+  );
+  if (r.rowCount === 0) {
+    throw new Error(`appendReasoningLog: session not found or tenant mismatch (sessionId=${sessionId}, tenantId=${tenantId})`);
+  }
+}
+
+/**
+ * Load the pipeline_input_snapshot for a session.
+ * If tenantId is provided, the session's tenant_id must match (ensures tenant isolation).
+ */
+export async function loadSessionSnapshot(
+  pool: Pool,
+  sessionId: string,
+  tenantId?: string
+): Promise<SessionSnapshot | undefined> {
+  const session = await getSession(pool, sessionId);
+  if (!session) return undefined;
+  if (tenantId != null && session.tenantId !== tenantId) return undefined;
+  const snap = session.pipelineInputSnapshot as SessionSnapshot | null | undefined;
+  if (snap == null || typeof snap !== 'object' || !('type' in snap)) return undefined;
+  return snap as SessionSnapshot;
+}
+
+// --- Tenant session uploads (multi-tenant, persistent file uploads for ingest) ---
+
+function nextUploadId(): string {
+  return `upload-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+export interface SessionUploadRow {
+  id: string;
+  tenantId: string;
+  sessionId: string;
+  filename: string;
+  contentType: string | null;
+  summaryText: string | null;
+  metadata: Record<string, unknown> | null;
+  uploadedAt: string;
+}
+
+export interface CreateSessionUploadParams {
+  filename: string;
+  contentType?: string | null;
+  summaryText?: string | null;
+  /** Use for raw rows (messy ingest), status (pending_agentic_cleanup), etc. */
+  metadata?: Record<string, unknown> | null;
+}
+
+export async function createSessionUpload(
+  pool: Pool,
+  tenantId: string,
+  sessionId: string,
+  params: CreateSessionUploadParams
+): Promise<SessionUploadRow> {
+  const id = nextUploadId();
+  await pool.query(
+    `INSERT INTO tenant_session_uploads (id, tenant_id, session_id, filename, content_type, summary_text, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      id,
+      tenantId,
+      sessionId,
+      params.filename,
+      params.contentType ?? null,
+      params.summaryText ?? null,
+      params.metadata != null ? JSON.stringify(params.metadata) : null,
+    ]
+  );
+  const row = await getSessionUpload(pool, id);
+  if (!row) throw new Error('createSessionUpload: insert failed');
+  return row;
+}
+
+export async function getSessionUpload(pool: Pool, uploadId: string): Promise<SessionUploadRow | undefined> {
+  const r = await pool.query(
+    `SELECT id, tenant_id, session_id, filename, content_type, summary_text, metadata, uploaded_at
+     FROM tenant_session_uploads WHERE id = $1`,
+    [uploadId]
+  );
+  const row = r.rows[0] as {
+    id: string;
+    tenant_id: string;
+    session_id: string;
+    filename: string;
+    content_type: string | null;
+    summary_text: string | null;
+    metadata: unknown;
+    uploaded_at: string;
+  } | undefined;
+  if (!row) return undefined;
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    sessionId: row.session_id,
+    filename: row.filename,
+    contentType: row.content_type,
+    summaryText: row.summary_text,
+    metadata: row.metadata != null && typeof row.metadata === 'object' ? (row.metadata as Record<string, unknown>) : null,
+    uploadedAt: row.uploaded_at,
+  };
+}
+
+export async function getSessionUploadsBySession(
+  pool: Pool,
+  tenantId: string,
+  sessionId: string
+): Promise<SessionUploadRow[]> {
+  const r = await pool.query(
+    `SELECT id, tenant_id, session_id, filename, content_type, summary_text, metadata, uploaded_at
+     FROM tenant_session_uploads WHERE tenant_id = $1 AND session_id = $2 ORDER BY uploaded_at DESC`,
+    [tenantId, sessionId]
+  );
+  return r.rows.map((row: Record<string, unknown>) => ({
+    id: row.id as string,
+    tenantId: row.tenant_id as string,
+    sessionId: row.session_id as string,
+    filename: row.filename as string,
+    contentType: (row.content_type as string | null) ?? null,
+    summaryText: (row.summary_text as string | null) ?? null,
+    metadata: row.metadata != null && typeof row.metadata === 'object' ? (row.metadata as Record<string, unknown>) : null,
+    uploadedAt: row.uploaded_at as string,
+  }));
+}
+
+export async function updateSessionUploadMetadata(
+  pool: Pool,
+  uploadId: string,
+  tenantId: string,
+  metadata: Record<string, unknown>
+): Promise<SessionUploadRow | undefined> {
+  await pool.query(
+    `UPDATE tenant_session_uploads SET metadata = $1 WHERE id = $2 AND tenant_id = $3`,
+    [JSON.stringify(metadata), uploadId, tenantId]
+  );
+  return getSessionUpload(pool, uploadId);
 }

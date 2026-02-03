@@ -208,18 +208,29 @@ export async function executeTool(
       return runClassifyAccount(input as ClassifyAccountInput);
     case 'buildFinancialStatements':
     case 'get_financial_statements': {
-      const sessionEntries = await getEntriesFromSession(context);
-      const hasSession = sessionEntries && sessionEntries.length > 0;
-      const hasContext = context?.validatedEntries && context.validatedEntries.length > 0;
-      const hasInput = hasValidEntries(context, input);
-      if (!hasSession && !hasContext && !hasInput) {
-        return { success: false, error: DATA_GROUNDING_VIOLATION };
+      const GROUNDING_MSG =
+        'Grounding Violation: buildFinancialStatements accepts only sessionId and tenantId. Do not pass entries or invented numbers. Data is loaded from the database.';
+      const raw = input as Record<string, unknown>;
+      if (raw.entries != null && (Array.isArray(raw.entries) || typeof raw.entries === 'object')) {
+        return { success: false, error: GROUNDING_MSG };
       }
-      const effectiveEntries = sessionEntries ?? context?.validatedEntries ?? (input as { entries?: Array<{ accountName: string; debit: number; credit: number; accountCode?: string }> }).entries;
-      const effectiveInput: BuildFinancialStatementsInput = effectiveEntries?.length
-        ? { ...(input as BuildFinancialStatementsInput), entries: effectiveEntries }
-        : (input as BuildFinancialStatementsInput);
-      return runBuildFinancialStatements(effectiveInput, buildContext);
+      if (raw.prior_entries != null && (Array.isArray(raw.prior_entries) || typeof raw.prior_entries === 'object')) {
+        return { success: false, error: GROUNDING_MSG };
+      }
+      if (!context?.sessionId || !context?.tenantId || !context?.pool) {
+        return {
+          success: false,
+          error: 'Grounding Violation: sessionId, tenantId, and pool are required. Start a session with trial balance data (e.g. chat-verified with raw_rows) so the tool can load validated data from the database.',
+        };
+      }
+      const effectiveInput: BuildFinancialStatementsInput = {
+        sessionId: context.sessionId,
+        tenantId: context.tenantId,
+        ...(raw.standard != null && { standard: raw.standard as BuildFinancialStatementsInput['standard'] }),
+        ...(raw.fullSet != null && { fullSet: Boolean(raw.fullSet) }),
+        ...(raw.lease != null && typeof raw.lease === 'object' && { lease: raw.lease as BuildFinancialStatementsInput['lease'] }),
+      };
+      return runBuildFinancialStatements(effectiveInput, buildContext!);
     }
     case 'computeRatios': {
       const ratioInput = input as ComputeRatiosInput & Record<string, unknown>;
