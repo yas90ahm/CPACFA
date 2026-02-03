@@ -18,9 +18,14 @@ import {
 } from '../services/approval_request_service.js';
 import { generateApprovalSummaryAgentic } from '../services/agentic_approval_summary.js';
 import { updateAdjustmentStatus } from '../services/close_adjustments_service.js';
-import type { ApprovalResourceType } from '../types/approval_workflow.js';
-import type { CloseRole } from '../types/close_and_controls.js';
 import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
+import { validateBody, validateParams } from '../middleware/validationMiddleware.js';
+import {
+  createWorkflowBodySchema,
+  submitApprovalBodySchema,
+  approveRejectBodySchema,
+  requestIdParamSchema,
+} from '../schemas/approvalSchemas.js';
 
 const router = Router();
 
@@ -41,7 +46,7 @@ router.get('/workflows', async (req: Request, res: Response) => {
 });
 
 /** POST /api/approvals/workflows — Create workflow (body: name, resourceType, steps: [{ order, requiredRole, namedApprover? }]) */
-router.post('/workflows', async (req: Request, res: Response) => {
+router.post('/workflows', validateBody(createWorkflowBodySchema), async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req) ?? 'default';
     const pool = getTenantPool(req);
@@ -49,15 +54,7 @@ router.post('/workflows', async (req: Request, res: Response) => {
       res.status(503).json({ error: 'Tenant database required' });
       return;
     }
-    const body = req.body as {
-      name: string;
-      resourceType: ApprovalResourceType;
-      steps: { order: number; requiredRole: CloseRole; namedApprover?: string }[];
-    };
-    if (!body?.name || !body?.resourceType || !Array.isArray(body?.steps) || body.steps.length === 0) {
-      res.status(400).json({ error: 'Missing name, resourceType, or steps' });
-      return;
-    }
+    const body = req.body;
     const workflow = await createWorkflowDef(pool, tenantId, {
       tenantId,
       name: body.name,
@@ -70,7 +67,7 @@ router.post('/workflows', async (req: Request, res: Response) => {
 });
 
 /** POST /api/approvals/submit — Submit resource for approval (creates approval request) */
-router.post('/submit', async (req: Request, res: Response) => {
+router.post('/submit', validateBody(submitApprovalBodySchema), async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req) ?? 'default';
     const pool = getTenantPool(req);
@@ -78,11 +75,7 @@ router.post('/submit', async (req: Request, res: Response) => {
       res.status(503).json({ error: 'Tenant database required' });
       return;
     }
-    const body = req.body as { resourceType: ApprovalResourceType; resourceId: string };
-    if (!body?.resourceType || !body?.resourceId) {
-      res.status(400).json({ error: 'Missing resourceType or resourceId' });
-      return;
-    }
+    const body = req.body;
     const workflow = await getWorkflowForResourceType(pool, tenantId, body.resourceType);
     if (!workflow) {
       res.status(404).json({ error: 'No approval workflow for this resource type' });
@@ -185,7 +178,7 @@ router.get('/requests/:id/summary', async (req: Request, res: Response) => {
 });
 
 /** PATCH /api/approvals/requests/:id — Approve or reject (body: action: 'approved' | 'rejected', actor?, comment?) */
-router.patch('/requests/:id', async (req: Request, res: Response) => {
+router.patch('/requests/:id', validateParams(requestIdParamSchema), validateBody(approveRejectBodySchema), async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req) ?? 'default';
     const pool = getTenantPool(req);
@@ -193,11 +186,7 @@ router.patch('/requests/:id', async (req: Request, res: Response) => {
       res.status(503).json({ error: 'Tenant database required' });
       return;
     }
-    const body = req.body as { action: 'approved' | 'rejected'; actor?: string; comment?: string };
-    if (!body?.action || (body.action !== 'approved' && body.action !== 'rejected')) {
-      res.status(400).json({ error: 'Missing action (approved or rejected)' });
-      return;
-    }
+    const body = req.body;
     const actor = body.actor ?? (req as Request & { userId?: string }).userId ?? 'unknown';
     const result = await approveOrReject(pool, req.params.id, tenantId, actor, body.action, body.comment);
     if (!result) {

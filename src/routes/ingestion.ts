@@ -9,6 +9,8 @@ import { runIngestionAgent } from '../services/ingestion_agent.js';
 import { buildIngestionPipeline } from '../services/ingestion_pipeline.js';
 import { runAllFetchers, runAllFetchersAndIngest } from '../services/ingestion_fetchers.js';
 import { getUsage, getQuota } from '../services/fetcher_run_tracker.js';
+import { validateBody, validateQuery } from '../middleware/validationMiddleware.js';
+import { ingestionAgentBodySchema, fetchersRunQuerySchema } from '../schemas/ingestionSchemas.js';
 
 const router = Router();
 
@@ -47,7 +49,7 @@ const upload = multer({
  * Optional: rowLimit=number to cap returned rows per sheet
  * Returns: IngestionAgentResult (fileType, classification, route, cleanedSheets, cleaningApplied)
  */
-router.post('/agent', upload.single('file'), async (req: Request, res: Response) => {
+router.post('/agent', upload.single('file'), validateBody(ingestionAgentBodySchema), async (req: Request, res: Response) => {
   try {
     const file = req.file;
     if (!file) {
@@ -57,17 +59,22 @@ router.post('/agent', upload.single('file'), async (req: Request, res: Response)
       });
       return;
     }
-    const body = req.body as {
-      dataCleaning?: { normalizeNegativeNumbers?: boolean; normalizeDates?: boolean; dateOutputFormat?: 'us' | 'uk' | 'iso' };
-      includeRows?: string;
-      rowLimit?: string;
-    };
+    const body = req.body;
+    const dc = body.dataCleaning;
+    const dateFormat = dc?.dateOutputFormat;
+    const dataCleaning = dc != null && typeof dc === 'object'
+      ? {
+          normalizeNegativeNumbers: dc.normalizeNegativeNumbers === true || dc.normalizeNegativeNumbers === 'true',
+          normalizeDates: dc.normalizeDates === true || dc.normalizeDates === 'true',
+          dateOutputFormat: dateFormat === 'us' || dateFormat === 'uk' || dateFormat === 'iso' ? dateFormat : undefined,
+        }
+      : undefined;
     const result = await runIngestionAgent(file.buffer, {
       filename: file.originalname,
-      dataCleaning: body?.dataCleaning,
+      dataCleaning,
     });
-    const includeRows = body?.includeRows === 'true';
-    const rowLimit = Number(body?.rowLimit ?? 300);
+    const includeRows = body.includeRows === true || body.includeRows === 'true' || body.includeRows === '1';
+    const rowLimit = body.rowLimit != null ? Number(body.rowLimit) : 300;
     const safeLimit = Number.isFinite(rowLimit) && rowLimit > 0 ? Math.min(rowLimit, 1000) : 300;
     res.json({
       fileType: result.fileType,
@@ -152,10 +159,10 @@ router.get('/fetchers/status', (_req: Request, res: Response) => {
  * POST /api/ingestion/fetchers/run
  * Runs all fetchers (placeholder).
  */
-router.post('/fetchers/run', async (req: Request, res: Response) => {
+router.post('/fetchers/run', validateQuery(fetchersRunQuerySchema), async (req: Request, res: Response) => {
   try {
-    const tenantId = (req.query.tenantId as string) ?? 'default-tenant';
-    const mode = (req.query.mode as string) ?? 'fetch';
+    const tenantId = req.query.tenantId ?? 'default-tenant';
+    const mode = req.query.mode ?? 'fetch';
     if (mode === 'ingest') {
       const results = await runAllFetchersAndIngest(tenantId);
       res.json({ ok: true, ...results });

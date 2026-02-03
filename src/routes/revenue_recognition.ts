@@ -15,73 +15,44 @@ import {
   suggestRecognitionScheduleAgentic,
   generateRevenueFootnoteAgentic,
 } from '../services/revenue_recognition_service.js';
+import { validateBody, validateParams } from '../middleware/validationMiddleware.js';
+import {
+  createContractBodySchema,
+  setAllocationBodySchema,
+  revenueFootnoteBodySchema,
+  contractIdParamSchema,
+  contractIdPobIdParamsSchema,
+} from '../schemas/revenueRecognitionSchemas.js';
 
 const router = Router();
 
-router.post('/contracts', async (req: Request, res: Response) => {
+router.post('/contracts', validateBody(createContractBodySchema), async (req: Request, res: Response) => {
   const tenantId = getTenantId(req);
   const pool = getTenantPool(req);
   if (!tenantId || !pool) {
     return res.status(400).json({ error: 'Tenant context required' });
   }
-  const body = req.body ?? {};
-  const {
-    contractNumber,
-    customerId,
-    customerName,
-    startDate,
-    endDate,
-    totalContractValue,
-    currency,
-    performanceObligations,
-  } = body;
-  if (
-    !contractNumber ||
-    !startDate ||
-    !endDate ||
-    totalContractValue == null ||
-    !currency ||
-    !Array.isArray(performanceObligations)
-  ) {
-    return res
-      .status(400)
-      .json({
-        error:
-          'contractNumber, startDate, endDate, totalContractValue, currency, performanceObligations required',
-      });
-  }
   try {
+    const body = req.body;
     const contract = await createContract(tenantId, pool, {
-      contractNumber,
-      customerId,
-      customerName,
-      startDate,
-      endDate,
-      totalContractValue: Number(totalContractValue),
-      currency,
-      performanceObligations: performanceObligations.map(
-        (p: {
-          name: string;
-          description?: string;
-          satisfiedOverTime: boolean;
-          allocationPercent?: number;
-          allocationAmount?: number;
-          scheduleType?: string;
-          costToCostTotalEstimated?: number;
-          costToCostCostsToDate?: number;
-          milestoneAmounts?: { date: string; amount: number }[];
-        }) => ({
-          name: p.name,
-          description: p.description,
-          satisfiedOverTime: Boolean(p.satisfiedOverTime),
-          allocationPercent: p.allocationPercent,
-          allocationAmount: p.allocationAmount,
-          scheduleType: p.scheduleType ?? 'linear',
-          costToCostTotalEstimated: p.costToCostTotalEstimated,
-          costToCostCostsToDate: p.costToCostCostsToDate,
-          milestoneAmounts: p.milestoneAmounts,
-        })
-      ),
+      contractNumber: body.contractNumber,
+      customerId: body.customerId,
+      customerName: body.customerName,
+      startDate: body.startDate,
+      endDate: body.endDate,
+      totalContractValue: body.totalContractValue,
+      currency: body.currency,
+      performanceObligations: body.performanceObligations.map((p) => ({
+        name: p.name,
+        description: p.description,
+        satisfiedOverTime: p.satisfiedOverTime,
+        allocationPercent: p.allocationPercent,
+        allocationAmount: p.allocationAmount,
+        scheduleType: p.scheduleType ?? 'linear',
+        costToCostTotalEstimated: p.costToCostTotalEstimated,
+        costToCostCostsToDate: p.costToCostCostsToDate,
+        milestoneAmounts: p.milestoneAmounts,
+      })),
     });
     res.status(201).json(contract);
   } catch (e) {
@@ -105,27 +76,27 @@ router.get('/contracts', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/contracts/:id', async (req: Request, res: Response) => {
+router.get('/contracts/:id', validateParams(contractIdParamSchema), async (req: Request, res: Response) => {
   const tenantId = getTenantId(req);
   const pool = getTenantPool(req);
   if (!tenantId || !pool) {
     return res.status(400).json({ error: 'Tenant context required' });
   }
-  const c = await getContract(tenantId, pool, req.params.id as string);
+  const c = await getContract(tenantId, pool, req.params.id);
   if (!c) return res.status(404).json({ error: 'Contract not found' });
   res.json(c);
 });
 
-router.post('/contracts/:id/suggest-allocation', async (req: Request, res: Response) => {
+router.post('/contracts/:id/suggest-allocation', validateParams(contractIdParamSchema), async (req: Request, res: Response) => {
   const tenantId = getTenantId(req);
   const pool = getTenantPool(req);
   if (!tenantId || !pool) {
     return res.status(400).json({ error: 'Tenant context required' });
   }
   try {
-    const result = await suggestAllocationAgentic(tenantId, pool, req.params.id as string);
+    const result = await suggestAllocationAgentic(tenantId, pool, req.params.id);
     if (!result) return res.status(404).json({ error: 'Contract not found' });
-    const contract = await getContract(tenantId, pool, req.params.id as string);
+    const contract = await getContract(tenantId, pool, req.params.id);
     const allocationPending = result.allocationSource === 'fallback';
     res.json({
       allocation: result.allocation,
@@ -143,20 +114,16 @@ router.post('/contracts/:id/suggest-allocation', async (req: Request, res: Respo
 });
 
 /** PUT /contracts/:id/allocation — Confirm or set allocation (e.g. after user confirms suggested allocation). Required before allocation is used for recognition when allocation was fallback. */
-router.put('/contracts/:id/allocation', async (req: Request, res: Response) => {
+router.put('/contracts/:id/allocation', validateParams(contractIdParamSchema), validateBody(setAllocationBodySchema), async (req: Request, res: Response) => {
   const tenantId = getTenantId(req);
   const pool = getTenantPool(req);
   if (!tenantId || !pool) {
     return res.status(400).json({ error: 'Tenant context required' });
   }
-  const allocation = req.body?.allocation as Record<string, number> | undefined;
-  const allocationRationale = req.body?.allocationRationale as string | undefined;
-  if (!allocation || typeof allocation !== 'object') {
-    return res.status(400).json({ error: 'Body must include allocation: { "pob-id": amount, ... }' });
-  }
   try {
-    const contract = await setContractAllocation(tenantId, pool, req.params.id as string, allocation, {
-      ...(allocationRationale != null ? { allocationRationale } : {}),
+    const body = req.body;
+    const contract = await setContractAllocation(tenantId, pool, req.params.id, body.allocation, {
+      ...(body.allocationRationale != null ? { allocationRationale: body.allocationRationale } : {}),
     });
     if (!contract) return res.status(404).json({ error: 'Contract not found' });
     res.json(contract);
@@ -168,6 +135,7 @@ router.put('/contracts/:id/allocation', async (req: Request, res: Response) => {
 
 router.post(
   '/contracts/:contractId/pob/:pobId/suggest-schedule',
+  validateParams(contractIdPobIdParamsSchema),
   async (req: Request, res: Response) => {
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
@@ -176,19 +144,14 @@ router.post(
     }
     const { contractId, pobId } = req.params;
     try {
-      const schedule = await suggestRecognitionScheduleAgentic(
-        tenantId,
-        pool,
-        contractId as string,
-        pobId as string
-      );
+      const schedule = await suggestRecognitionScheduleAgentic(tenantId, pool, contractId, pobId);
       if (!schedule)
         return res
           .status(404)
           .json({
             error: 'Contract/POB not found or POB not satisfied over time',
           });
-      const contract = await getContract(tenantId, pool, contractId as string);
+      const contract = await getContract(tenantId, pool, contractId);
       res.json({ schedule, contract: contract ?? undefined });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -198,31 +161,15 @@ router.post(
 );
 
 /** POST /revenue-recognition/footnote — Agentic: generate revenue footnote */
-router.post('/footnote', async (req: Request, res: Response) => {
-  const body = req.body ?? {};
-  const { contractCount, totalContractValue, currency, periodLabel, accountingStandard } = body as {
-    contractCount?: number;
-    totalContractValue?: number;
-    currency?: string;
-    periodLabel?: string;
-    accountingStandard?: 'ASPE' | 'IFRS' | 'FRS102' | 'US_GAAP';
-  };
-  if (
-    typeof contractCount !== 'number' ||
-    typeof totalContractValue !== 'number' ||
-    typeof currency !== 'string'
-  ) {
-    return res
-      .status(400)
-      .json({ error: 'contractCount, totalContractValue, currency required' });
-  }
+router.post('/footnote', validateBody(revenueFootnoteBodySchema), async (req: Request, res: Response) => {
   try {
-    const topicStandard = accountingStandard ? getRevenueTopicStandard(accountingStandard) : undefined;
+    const body = req.body;
+    const topicStandard = body.accountingStandard ? getRevenueTopicStandard(body.accountingStandard) : undefined;
     const result = await generateRevenueFootnoteAgentic({
-      contractCount,
-      totalContractValue,
-      currency,
-      periodLabel,
+      contractCount: body.contractCount,
+      totalContractValue: body.totalContractValue,
+      currency: body.currency,
+      periodLabel: body.periodLabel,
       topicStandard,
     });
     res.json(result);

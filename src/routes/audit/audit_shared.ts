@@ -3,7 +3,7 @@
  */
 
 import type { Response } from 'express';
-import { MathematicalIntegrityError } from '../services/financialStatements.js';
+import { MathematicalIntegrityError } from '../../services/financialStatements.js';
 
 /** Auditor Portal token: in production must be set and not the default; in dev default allowed. */
 export function getAuditorToken(): string | null {

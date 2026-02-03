@@ -13,7 +13,16 @@ import {
   importCoA,
   getSteps,
 } from '../services/onboarding_service.js';
+import { suggestCoAMappingAgentic, getFirstCloseGuideAgentic } from '../services/agentic_onboarding.js';
 import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
+import { validateBody } from '../middleware/validationMiddleware.js';
+import {
+  advanceStepBodySchema,
+  entityInfoBodySchema,
+  coaImportBodySchema,
+  suggestCoAMappingBodySchema,
+  firstCloseGuideBodySchema,
+} from '../schemas/onboardingSchemas.js';
 
 const router = Router();
 
@@ -28,41 +37,38 @@ router.get('/steps', (_req: Request, res: Response) => {
   res.json(getSteps());
 });
 
-router.post('/advance', async (req: Request, res: Response) => {
+router.post('/advance', validateBody(advanceStepBodySchema), async (req: Request, res: Response) => {
   const tenantId = getTenantId(req) ?? 'default';
   const pool = getTenantPool(req);
-  const { stepId } = req.body ?? {};
-  if (!stepId) return res.status(400).json({ error: 'stepId required' });
+  const { stepId } = req.body;
   const state = await advanceStep(tenantId, stepId, pool);
   if (!state) return res.status(404).json({ error: 'Onboarding state not found' });
   res.json(state);
 });
 
-router.post('/entity-info', async (req: Request, res: Response) => {
+router.post('/entity-info', validateBody(entityInfoBodySchema), async (req: Request, res: Response) => {
   const tenantId = getTenantId(req) ?? 'default';
   const pool = getTenantPool(req);
-  const { entityName, fiscalYearEnd, currency } = req.body ?? {};
+  const { entityName, fiscalYearEnd, currency } = req.body;
   const state = await setEntityInfo(tenantId, { entityName, fiscalYearEnd, currency }, pool);
   if (!state) return res.status(404).json({ error: 'Onboarding state not found' });
   res.json(state);
 });
 
-router.post('/coa-import', async (req: Request, res: Response) => {
+router.post('/coa-import', validateBody(coaImportBodySchema), async (req: Request, res: Response) => {
   const tenantId = getTenantId(req) ?? 'default';
   const pool = getTenantPool(req);
-  const { accounts } = req.body ?? {};
-  if (!Array.isArray(accounts)) return res.status(400).json({ error: 'accounts array required ( [{ code, name }] )' });
-  const result = importCoA(accounts.map((a: { code: string; name: string }) => ({ code: String(a.code), name: String(a.name) })));
+  const { accounts } = req.body;
+  const result = importCoA(accounts.map((a) => ({ code: String(a.code), name: String(a.name) })));
   const state = await completeCoAImport(tenantId, result, pool);
   res.json({ ...result, state: state ?? undefined });
 });
 
 /** POST /api/onboarding/suggest-coa-mapping — Agentic: suggest ASSET/LIABILITY/EQUITY/REVENUE/EXPENSE for each account. Body: { accounts: [{ code, name }] }. */
-router.post('/suggest-coa-mapping', async (req: Request, res: Response) => {
+router.post('/suggest-coa-mapping', validateBody(suggestCoAMappingBodySchema), async (req: Request, res: Response) => {
   try {
-    const { accounts } = req.body ?? {};
-    if (!Array.isArray(accounts)) return res.status(400).json({ error: 'accounts array required ( [{ code, name }] )' });
-    const result = await suggestCoAMappingAgentic(accounts.map((a: { code: string; name: string }) => ({ code: String(a.code), name: String(a.name) })));
+    const { accounts } = req.body;
+    const result = await suggestCoAMappingAgentic(accounts.map((a) => ({ code: String(a.code), name: String(a.name) })));
     res.json(result);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
@@ -82,9 +88,9 @@ router.get('/first-close-guide', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'First close guide failed', message });
   }
 });
-router.post('/first-close-guide', async (req: Request, res: Response) => {
+router.post('/first-close-guide', validateBody(firstCloseGuideBodySchema), async (req: Request, res: Response) => {
   try {
-    const { entityName, fiscalYearEnd } = req.body ?? {};
+    const { entityName, fiscalYearEnd } = req.body;
     const result = await getFirstCloseGuideAgentic({ entityName, fiscalYearEnd });
     res.json(result);
   } catch (e) {

@@ -4,9 +4,9 @@
  */
 
 import { Router } from 'express';
-import trialBalanceRouter from './trialBalance.js';
-import closeRouter from './close.js';
-import auditRouter from './audit.js';
+import trialBalanceRouter from './trial-balance/index.js';
+import closeRouter from './close/index.js';
+import auditRouter from './audit/index.js';
 import financialMemoryRouter from './financial_memory.js';
 import vectorStoreRouter from './vector_store.js';
 import pipelinesRouter from './pipelines.js';

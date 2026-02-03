@@ -129,6 +129,22 @@ export const equityChangesNarrativeBodySchema = z.object({
 });
 
 // ============================================================================
+// Period routes (GET /period/:periodLabel, /period/:periodLabel/adjusted, /period/:periodLabel/statements)
+// ============================================================================
+
+export const periodLabelParamSchema = z.object({
+  periodLabel: z.string().min(1, 'periodLabel required'),
+});
+
+export const periodStatementsQuerySchema = z.object({
+  standard: z.string().optional(),
+  fullSet: z
+    .union([z.boolean(), z.enum(['true', 'false'])])
+    .optional()
+    .transform((v) => (v === false || v === 'false' ? false : true)),
+});
+
+// ============================================================================
 // Inferred types for route handlers
 // ============================================================================
 

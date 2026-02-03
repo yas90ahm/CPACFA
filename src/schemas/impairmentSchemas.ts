@@ -23,29 +23,32 @@ export const createCGUSchema = z.object({
 export const updateCGUSchema = createCGUSchema.partial();
 
 // ============================================================================
-// Goodwill Allocation
+// Goodwill Allocation (route body: cguId, acquisitionDate?, goodwillAmount, allocationRationale?)
 // ============================================================================
 
 export const allocateGoodwillSchema = z.object({
   cguId: z.string().min(1, 'CGU ID required'),
+  acquisitionDate: isoDateSchema.optional(),
   goodwillAmount: positiveAmountSchema,
-  allocationMethod: z.string().optional(),
-  rationale: z.string().optional(),
+  allocationRationale: z.string().optional(),
 });
 
 // ============================================================================
-// Impairment Test
+// Impairment Test (route body for performImpairmentTest — matches ImpairmentTestInput)
 // ============================================================================
 
 export const performImpairmentTestSchema = z.object({
-  cguId: z.string().min(1, 'CGU ID required'),
-  testDate: isoDateSchema,
-  carryingAmount: positiveAmountSchema,
-  recoverableAmount: positiveAmountSchema,
-  valueInUse: positiveAmountSchema.optional(),
-  fairValueLessCosts: positiveAmountSchema.optional(),
-  impairmentLoss: nonNegativeAmountSchema.optional(),
-  notes: z.string().optional(),
+  cguId: z.string().optional(),
+  periodLabel: z.string().min(1, 'Period label required'),
+  assetType: z.enum(['goodwill', 'intangible', 'ppe', 'investment']),
+  assetDescription: z.string().optional(),
+  carryingAmount: amountSchema,
+  method: z.enum(['value_in_use', 'fair_value_less_costs']),
+  cashFlows: z.array(z.number().finite()).optional(),
+  discountRate: z.number().finite().optional(),
+  terminalGrowthRate: z.number().finite().optional(),
+  fairValue: z.number().finite().optional(),
+  costsToSell: z.number().finite().optional(),
 });
 
 // ============================================================================
@@ -53,25 +56,20 @@ export const performImpairmentTestSchema = z.object({
 // ============================================================================
 
 export const calculateValueInUseSchema = z.object({
-  cashFlows: z.array(z.number()).min(1, 'Cash flows required'),
-  discountRate: percentageSchema,
-  terminalValue: z.number().optional(),
+  cashFlows: z.array(z.number().finite()).min(1, 'Cash flows required'),
+  discountRate: z.number().finite(),
+  growthRate: z.number().finite().optional(),
 });
 
 // ============================================================================
-// Sensitivity Analysis
+// Sensitivity Analysis (route: carryingAmount, cashFlows, discountRate, growthRate?)
 // ============================================================================
 
 export const impairmentSensitivitySchema = z.object({
-  baseCashFlows: z.array(z.number()).min(1, 'Base cash flows required'),
-  baseDiscountRate: percentageSchema,
-  carryingAmount: positiveAmountSchema,
-  discountRateRange: z.object({
-    min: percentageSchema,
-    max: percentageSchema,
-    step: z.number().positive().optional(),
-  }).optional(),
-  cashFlowVariance: z.number().optional(),
+  carryingAmount: z.number().finite(),
+  cashFlows: z.array(z.number().finite()).min(1, 'Cash flows required'),
+  discountRate: z.number().finite(),
+  growthRate: z.number().finite().optional(),
 });
 
 // ============================================================================
@@ -80,23 +78,25 @@ export const impairmentSensitivitySchema = z.object({
 
 export const suggestCGUsSchema = z.object({
   businessDescription: z.string().min(1, 'Business description required'),
-  organizationalStructure: z.string().optional(),
+  segments: z.array(z.object({ name: z.string(), revenue: z.number().finite() })).optional(),
 });
 
 export const performQualitativeTestSchema = z.object({
-  cguId: z.string().min(1, 'CGU ID required'),
-  recentPerformance: z.object({
-    revenueChange: z.number().optional(),
-    marginChange: z.number().optional(),
-    marketShareChange: z.number().optional(),
-  }).optional(),
-  externalFactors: z.array(z.string()).optional(),
+  cguName: z.string().min(1, 'CGU name required'),
+  marketConditions: z.string().min(1, 'Market conditions required'),
+  performance: z.record(z.unknown()).optional(),
 });
 
 export const detectTriggersSchema = z.object({
-  cguId: z.string().min(1, 'CGU ID required'),
-  marketConditions: z.record(z.unknown()).optional(),
-  operatingMetrics: z.record(z.unknown()).optional(),
+  cguName: z.string().min(1, 'CGU name required'),
+  metrics: z.object({
+    currentRevenue: z.number().finite(),
+    priorRevenue: z.number().finite(),
+    currentMargin: z.number().finite(),
+    priorMargin: z.number().finite(),
+    industryGrowth: z.number().finite().optional(),
+    marketCapChange: z.number().finite().optional(),
+  }),
 });
 
 export const generateImpairmentFootnoteSchema = z.object({
@@ -110,9 +110,9 @@ export const generateImpairmentFootnoteSchema = z.object({
 });
 
 export const suggestDiscountRateSchema = z.object({
+  name: z.string().min(1, 'Name required'),
   industry: z.string().min(1, 'Industry required'),
-  riskProfile: z.enum(['low', 'medium', 'high']).optional(),
-  geography: z.string().optional(),
+  size: z.enum(['large', 'mid', 'small']).optional(),
 });
 
 // ============================================================================

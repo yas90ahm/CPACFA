@@ -2,6 +2,10 @@
  * Python Math Worker Bridge — Node (orchestrator) calls Python (math brain) over REST.
  * Sends trial balance (or GL payload) to Flask at localhost:5000; returns structured JSON.
  * Auth and session are Node's responsibility; this is a stateless worker call.
+ *
+ * Rules parity: Node uses RulesRegistry (getRoundingTolerance) in IntegrityGate and financialStatements.
+ * Python workers should read the same config via RULES_CONFIG_PATH or getConfigPath() from rules_registry
+ * so validation (e.g. trial balance balance check) uses the same tolerance.
  */
 
 const PYTHON_MATH_BASE = process.env.PYTHON_MATH_BASE ?? 'http://localhost:5000';

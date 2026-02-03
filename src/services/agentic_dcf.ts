@@ -50,7 +50,6 @@ Consider:
 - Mean reversion for high/low growth companies
 
 Return JSON: { "projectedRevenue": [year1, year2, year3, year4, year5], "growthRates": [rate1, rate2, rate3, rate4, rate5], "assumptions": "...", "confidence": 0.X }`;
-  const systemPrompt = buildSystemWithAccountingContext(baseSystem, accountingContext);
 
   const cagr = historicals.length >= 2 
     ? Math.pow(historicals[historicals.length - 1] / historicals[0], 1 / (historicals.length - 1)) - 1 

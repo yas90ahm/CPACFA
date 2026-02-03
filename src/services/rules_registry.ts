@@ -16,7 +16,10 @@ export interface FinancialRules {
 const DEFAULT_ROUNDING_TOLERANCE = 0.01;
 const DEFAULT_MATERIALITY_THRESHOLD = 0.01;
 
-function getConfigPath(): string {
+/**
+ * Path to financial_rules.json. Export so Python bridge / workers can read the same file for parity.
+ */
+export function getConfigPath(): string {
   const envPath = process.env.RULES_CONFIG_PATH;
   if (envPath) return envPath;
   return join(process.cwd(), 'shared', 'config', 'financial_rules.json');

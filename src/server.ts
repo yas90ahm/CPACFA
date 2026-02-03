@@ -14,13 +14,13 @@ import { optionalAuth, requireAuth, attachTenantPool, requireTenantContext } fro
 import { isDbConfigured, getPool, queryControl } from './db/index.js';
 import { runMigrations } from './db/migrate.js';
 import authRouter from './routes/auth.js';
-import trialBalanceRouter from './routes/trialBalance.js';
+import trialBalanceRouter from './routes/trial-balance/index.js';
 import cfaAnalystRouter from './routes/cfaAnalyst.js';
 import justificationRouter from './routes/justification.js';
 import orchestratorRouter from './routes/orchestrator.js';
 import cfaAgentRouter from './routes/cfaAgent.js';
-import cfoDashboardRouter from './routes/cfoDashboard.js';
-import auditRouter from './routes/audit.js';
+import cfoDashboardRouter from './routes/cfo-dashboard/index.js';
+import auditRouter from './routes/audit/index.js';
 import exportRouter from './routes/export.js';
 import financialMemoryRouter from './routes/financial_memory.js';
 import vectorStoreRouter from './routes/vector_store.js';

@@ -25,7 +25,7 @@ import {
   generateImpairmentFootnoteAgentic,
   suggestDiscountRateAgentic,
 } from '../services/agentic_impairment.js';
-import { validateBody, validateParams } from '../middleware/validateRequest.js';
+import { validateBody, validateParams } from '../middleware/validationMiddleware.js';
 import {
   createCGUSchema,
   updateCGUSchema,
@@ -126,17 +126,13 @@ router.delete('/cgus/:id', validateParams(cguIdParamSchema), async (req: Request
 });
 
 /** POST /api/impairment/goodwill-allocation — Allocate goodwill to CGU */
-router.post('/goodwill-allocation', async (req: Request, res: Response) => {
+router.post('/goodwill-allocation', validateBody(allocateGoodwillSchema), async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
     const body = req.body;
     if (!tenantId || !pool) {
       res.status(400).json({ error: 'Tenant context required' });
-      return;
-    }
-    if (!body?.cguId || body?.goodwillAmount == null) {
-      res.status(400).json({ error: 'Missing cguId or goodwillAmount' });
       return;
     }
     const allocation = await createGoodwillAllocation(tenantId, pool, {
@@ -233,13 +229,9 @@ router.get('/tests/:id', async (req: Request, res: Response) => {
 });
 
 /** POST /api/impairment/sensitivity — Perform sensitivity analysis */
-router.post('/sensitivity', (req: Request, res: Response) => {
+router.post('/sensitivity', validateBody(impairmentSensitivitySchema), (req: Request, res: Response) => {
   try {
     const body = req.body;
-    if (body?.carryingAmount == null || !body?.cashFlows || body?.discountRate == null) {
-      res.status(400).json({ error: 'Missing carryingAmount, cashFlows, or discountRate' });
-      return;
-    }
     const result = performSensitivityAnalysis(
       body.carryingAmount,
       body.cashFlows,
@@ -254,13 +246,9 @@ router.post('/sensitivity', (req: Request, res: Response) => {
 });
 
 /** POST /api/impairment/value-in-use — Calculate value in use */
-router.post('/value-in-use', (req: Request, res: Response) => {
+router.post('/value-in-use', validateBody(calculateValueInUseSchema), (req: Request, res: Response) => {
   try {
     const body = req.body;
-    if (!body?.cashFlows || body?.discountRate == null) {
-      res.status(400).json({ error: 'Missing cashFlows or discountRate' });
-      return;
-    }
     const valueInUse = calculateValueInUse(body.cashFlows, body.discountRate, body.growthRate ?? 0);
     res.json({ valueInUse, cashFlows: body.cashFlows, discountRate: body.discountRate, growthRate: body.growthRate ?? 0 });
   } catch (e) {
@@ -270,13 +258,9 @@ router.post('/value-in-use', (req: Request, res: Response) => {
 });
 
 /** POST /api/impairment/suggest-cgus — Agentic CGU identification */
-router.post('/suggest-cgus', async (req: Request, res: Response) => {
+router.post('/suggest-cgus', validateBody(suggestCGUsSchema), async (req: Request, res: Response) => {
   try {
     const body = req.body;
-    if (!body?.businessDescription) {
-      res.status(400).json({ error: 'Missing businessDescription' });
-      return;
-    }
     const result = await suggestCGUsAgentic(body.businessDescription, body.segments);
     res.json(result);
   } catch (e) {
@@ -286,13 +270,9 @@ router.post('/suggest-cgus', async (req: Request, res: Response) => {
 });
 
 /** POST /api/impairment/qualitative — Agentic qualitative assessment */
-router.post('/qualitative', async (req: Request, res: Response) => {
+router.post('/qualitative', validateBody(performQualitativeTestSchema), async (req: Request, res: Response) => {
   try {
     const body = req.body;
-    if (!body?.cguName || !body?.marketConditions) {
-      res.status(400).json({ error: 'Missing cguName or marketConditions' });
-      return;
-    }
     const result = await performQualitativeAssessmentAgentic(body.cguName, body.marketConditions, body.performance ?? {});
     res.json(result);
   } catch (e) {
@@ -302,13 +282,9 @@ router.post('/qualitative', async (req: Request, res: Response) => {
 });
 
 /** POST /api/impairment/detect-triggers — Agentic trigger detection */
-router.post('/detect-triggers', async (req: Request, res: Response) => {
+router.post('/detect-triggers', validateBody(detectTriggersSchema), async (req: Request, res: Response) => {
   try {
     const body = req.body;
-    if (!body?.cguName || !body?.metrics) {
-      res.status(400).json({ error: 'Missing cguName or metrics' });
-      return;
-    }
     const result = await detectImpairmentTriggersAgentic(body.cguName, body.metrics);
     res.json(result);
   } catch (e) {
@@ -318,13 +294,9 @@ router.post('/detect-triggers', async (req: Request, res: Response) => {
 });
 
 /** POST /api/impairment/footnote — Generate impairment footnote */
-router.post('/footnote', async (req: Request, res: Response) => {
+router.post('/footnote', validateBody(generateImpairmentFootnoteSchema), async (req: Request, res: Response) => {
   try {
     const body = req.body;
-    if (!body?.impairmentTest) {
-      res.status(400).json({ error: 'Missing impairmentTest data' });
-      return;
-    }
     const result = await generateImpairmentFootnoteAgentic(body.impairmentTest);
     res.json(result);
   } catch (e) {
@@ -334,13 +306,9 @@ router.post('/footnote', async (req: Request, res: Response) => {
 });
 
 /** POST /api/impairment/suggest-discount-rate — Agentic discount rate suggestion */
-router.post('/suggest-discount-rate', async (req: Request, res: Response) => {
+router.post('/suggest-discount-rate', validateBody(suggestDiscountRateSchema), async (req: Request, res: Response) => {
   try {
     const body = req.body;
-    if (!body?.name || !body?.industry) {
-      res.status(400).json({ error: 'Missing name or industry' });
-      return;
-    }
     const result = await suggestDiscountRateAgentic({
       name: body.name,
       industry: body.industry,

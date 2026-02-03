@@ -12,19 +12,23 @@ import {
 } from '../services/budget_version_service.js';
 import { buildDriverBasedPlan } from '../services/driver_based_planning_service.js';
 import { runReforecastAgentic } from '../services/agentic_reforecast_service.js';
-import type { BudgetVersionLine } from '../types/budget_forecast.js';
 import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
+import { validateBody, validateParams } from '../middleware/validationMiddleware.js';
+import {
+  createBudgetVersionSchema,
+  updateBudgetVersionSchema,
+  lockBudgetVersionSchema,
+  driverBasedPlanSchema,
+  reforecastSchema,
+  budgetVersionIdParamSchema,
+} from '../schemas/budgetSchemas.js';
 
 const router = Router();
 
 /** POST /api/budget/version — Create budget version */
-router.post('/version', async (req: Request, res: Response) => {
+router.post('/version', validateBody(createBudgetVersionSchema), async (req: Request, res: Response) => {
   try {
-    const body = req.body as { name: string; periodLabel: string; lines: BudgetVersionLine[] };
-    if (!body?.name || !body?.periodLabel || !Array.isArray(body?.lines)) {
-      res.status(400).json({ error: 'Missing name, periodLabel, or lines' });
-      return;
-    }
+    const body = req.body;
     const version = await createBudgetVersion(body, getTenantPool(req), getTenantId(req));
     res.json(version);
   } catch (e) {
@@ -67,9 +71,9 @@ router.get('/version', async (req: Request, res: Response) => {
 });
 
 /** PATCH /api/budget/version/:id — Update budget version (draft only) */
-router.patch('/version/:id', async (req: Request, res: Response) => {
+router.patch('/version/:id', validateParams(budgetVersionIdParamSchema), validateBody(updateBudgetVersionSchema), async (req: Request, res: Response) => {
   try {
-    const body = req.body as { name?: string; lines?: BudgetVersionLine[] };
+    const body = req.body;
     const updated = await updateBudgetVersion(req.params.id, body, getTenantPool(req), getTenantId(req));
     if (!updated) {
       res.status(400).json({ error: 'Version not found or locked' });
@@ -85,13 +89,9 @@ router.patch('/version/:id', async (req: Request, res: Response) => {
 });
 
 /** POST /api/budget/version/:id/lock — Lock budget version */
-router.post('/version/:id/lock', async (req: Request, res: Response) => {
+router.post('/version/:id/lock', validateParams(budgetVersionIdParamSchema), validateBody(lockBudgetVersionSchema), async (req: Request, res: Response) => {
   try {
-    const body = req.body as { lockedBy: string };
-    if (!body?.lockedBy) {
-      res.status(400).json({ error: 'Missing lockedBy' });
-      return;
-    }
+    const body = req.body;
     const version = await lockBudgetVersion(req.params.id, body.lockedBy, getTenantPool(req), getTenantId(req));
     if (!version) {
       res.status(400).json({ error: 'Version not found or already locked' });
@@ -107,13 +107,9 @@ router.post('/version/:id/lock', async (req: Request, res: Response) => {
 });
 
 /** POST /api/budget/driver-based — Driver-based plan (formulas + driver values) */
-router.post('/driver-based', (req: Request, res: Response) => {
+router.post('/driver-based', validateBody(driverBasedPlanSchema), (req: Request, res: Response) => {
   try {
-    const body = req.body as import('../types/budget_forecast.js').DriverBasedPlanInput;
-    if (!body?.drivers || !Array.isArray(body.drivers) || !body?.formulas || typeof body.formulas !== 'object') {
-      res.status(400).json({ error: 'Missing drivers or formulas' });
-      return;
-    }
+    const body = req.body;
     const result = buildDriverBasedPlan(body);
     res.json(result);
   } catch (e) {
@@ -125,13 +121,9 @@ router.post('/driver-based', (req: Request, res: Response) => {
 });
 
 /** POST /api/budget/reforecast — Agentic reforecast from actuals + prior budget */
-router.post('/reforecast', async (req: Request, res: Response) => {
+router.post('/reforecast', validateBody(reforecastSchema), async (req: Request, res: Response) => {
   try {
-    const body = req.body as import('../types/budget_forecast.js').ReforecastInput;
-    if (!body?.actualSnapshot || !body?.periodLabel) {
-      res.status(400).json({ error: 'Missing actualSnapshot or periodLabel' });
-      return;
-    }
+    const body = req.body;
     const result = await runReforecastAgentic(body);
     res.json(result);
   } catch (e) {

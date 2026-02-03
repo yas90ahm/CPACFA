@@ -423,7 +423,7 @@ export async function runSupervisor(
 
       const step1Conf = (toolContext as { step1Output?: { confidence?: number } }).step1Output?.confidence;
       if (step1Conf != null && shouldEscalateToHuman(step1Conf)) {
-        fireMessageHistoryPersisted('anthropic', messages);
+        await fireMessageHistoryPersisted('anthropic', messages);
         return {
           response: 'Low confidence in the input data. Please review the trial balance and confirm any missing bank statements or identity details before proceeding.',
           thoughts,
@@ -502,6 +502,7 @@ export async function runSupervisor(
       }
       const step1ConfO = (toolContext as { step1Output?: { confidence?: number } }).step1Output?.confidence;
       if (step1ConfO != null && shouldEscalateToHuman(step1ConfO)) {
+        await fireMessageHistoryPersisted('openai', messagesO);
         return {
           response: 'Low confidence in the input data. Please review the trial balance and confirm any missing bank statements or identity details before proceeding.',
           thoughts,
@@ -577,6 +578,7 @@ export async function runSupervisor(
       }
       const step1ConfM = (toolContext as { step1Output?: { confidence?: number } }).step1Output?.confidence;
       if (step1ConfM != null && shouldEscalateToHuman(step1ConfM)) {
+        await fireMessageHistoryPersisted('mistral', messagesM);
         return {
           response: 'Low confidence in the input data. Please review the trial balance and confirm any missing bank statements or identity details before proceeding.',
           thoughts,
