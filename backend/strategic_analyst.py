@@ -5,6 +5,10 @@ Market Intelligence module — Strategic Analyst.
 2. Benchmarking: Compare company DSO and Inventory Turnover vs industry average.
 3. Executive Narrative: 1-page Board Deck Summary (outperforming vs lagging).
 4. Valuation: DCF analysis using current market risk-free rate and company growth projections.
+
+Strict Rule: When accounting_context (CPA Historical Snapshot) is provided, the CFA Agent MUST cite
+these Accounting-Locked numbers (Revenue CAGR, EBITDA Margin, Net Debt) as the historical baseline.
+It is FORBIDDEN from inventing its own starting points for projections.
 """
 
 from __future__ import annotations
@@ -183,10 +187,14 @@ def generate_board_deck_summary(
     dcf_result: DCFResult,
     additional_outperforming: Optional[list[str]] = None,
     additional_lagging: Optional[list[str]] = None,
+    accounting_context: Optional[str] = None,
 ) -> BoardDeckSummary:
     """
     Generate a 1-page Board Deck Summary highlighting where the company
     is outperforming or lagging behind the market.
+    When accounting_context is provided (CPA Historical Snapshot), it is included as a read-only
+    Accounting-Locked Baseline section; the narrative MUST cite these numbers and MUST NOT
+    invent its own starting points for projections.
     """
     outperforming: list[str] = []
     lagging: list[str] = []
@@ -239,8 +247,21 @@ def generate_board_deck_summary(
         "",
         headline,
         "",
-        "## Outperforming",
     ]
+    if accounting_context and accounting_context.strip():
+        full_narrative_parts.extend([
+            "## Accounting-Locked Baseline (CPA Historical Snapshot)",
+            "",
+            "STRICT RULE: The following numbers are the CPA-derived historical baseline. "
+            "All projections and valuation narrative MUST cite these figures. "
+            "It is FORBIDDEN to invent your own starting points for revenue, margins, or net debt.",
+            "",
+            accounting_context.strip(),
+            "",
+        ])
+    full_narrative_parts.extend([
+        "## Outperforming",
+    ])
     for b in outperforming:
         full_narrative_parts.append(f"• {b}")
     if not outperforming:
@@ -358,13 +379,18 @@ def run_market_intelligence(
     web_search: Optional[WebSearchTool] = None,
     equity_risk_premium: float = 0.055,
     beta: float = 1.0,
+    accounting_context: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Run the full Market Intelligence pipeline:
     1. Competitor 10-K/10-Q via web search
     2. DSO and Inventory Turnover benchmarking
-    3. DCF valuation
+    3. DCF valuation (free_cash_flows must come from CPA when accounting_context is provided)
     4. Board Deck Summary
+
+    When accounting_context (CPA Historical Snapshot) is provided, the CFA Agent MUST cite these
+    Accounting-Locked numbers as the historical baseline and is FORBIDDEN from inventing
+    its own starting points for projections.
     """
     competitor_results = fetch_competitor_10k_10q(
         competitor_tickers=competitor_tickers,
@@ -389,6 +415,7 @@ def run_market_intelligence(
         competitor_results=competitor_results,
         benchmark_result=benchmark_result,
         dcf_result=dcf_result,
+        accounting_context=accounting_context,
     )
 
     return {

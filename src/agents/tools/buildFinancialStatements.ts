@@ -12,7 +12,15 @@ import { generateStatements } from '../../services/statementGenerator.js';
 import { listContracts } from '../../db/repositories/revenue_recognition_repository.js';
 import type { IntegrityContractFact } from '../../types/integrity.js';
 import { runPlanExecuteVerify } from '../../services/planExecuteVerify.js';
-import { loadSessionSnapshot, type SessionSnapshot } from '../../services/persistence_service.js';
+import { loadSessionSnapshot, listStagingItems, type SessionSnapshot } from '../../services/persistence_service.js';
+import {
+  mergeAdjustmentsIntoEntries,
+  type TrialBalanceAdjustment,
+} from '../../services/adjusted_trial_balance_service.js';
+import {
+  runIntegrityGate,
+  INTEGRITY_GATE_CRITICAL_MESSAGE,
+} from '../../services/integrity_gate_service.js';
 import type { ToolDefinition, ToolResult } from './types.js';
 
 const GROUNDING_VIOLATION =
@@ -133,10 +141,46 @@ export async function runBuildFinancialStatements(
       return { success: false, error: 'Grounding Violation: No session snapshot found for this sessionId and tenantId. Upload or ingest trial balance first so the session has validated data.' };
     }
 
-    const entries = entriesFromSnapshot(snapshot);
-    if (entries.length === 0) {
+    const unadjustedEntries = entriesFromSnapshot(snapshot);
+    if (unadjustedEntries.length === 0) {
       return { success: false, error: 'Grounding Violation: Session snapshot contains no trial balance entries. Ingest or upload trial balance first.' };
     }
+
+    // Versioning: Unadjusted TB (Source) → Proposed Adjustments (HITL) → Adjusted TB.
+    // Refuse to run on raw source data if pending adjustments exist.
+    const pendingStaging = await listStagingItems(context.pool, parsed.data.tenantId, { status: 'pending' });
+    if (pendingStaging.length > 0) {
+      return {
+        success: false,
+        error: `Cannot build financial statements on raw source data while ${pendingStaging.length} pending adjustment(s) exist. Approve or reject all pending HITL items first, then retry. Every number in the report must be traceable to the original upload or an approved agent-proposed adjustment.`,
+      };
+    }
+
+    // Merge approved HITL adjustments into a virtual Adjusted state before calculating Balance Sheet or P&L.
+    const approvedStaging = await listStagingItems(context.pool, parsed.data.tenantId, { status: 'approved' });
+    const approvedAdjustments: TrialBalanceAdjustment[] = [];
+    const appliedAdjustmentIds: string[] = [];
+    for (const item of approvedStaging) {
+      const p = item.payload;
+      if (!p || typeof p !== 'object') continue;
+      const debits = Array.isArray(p.debits) ? p.debits : [];
+      const credits = Array.isArray(p.credits) ? p.credits : [];
+      if (debits.length === 0 && credits.length === 0) continue;
+      const adj: TrialBalanceAdjustment = {
+        debits: debits.map((d: { account?: string; amount?: number }) => ({
+          account: typeof d?.account === 'string' ? d.account : 'Unknown',
+          amount: typeof d?.amount === 'number' ? d.amount : 0,
+        })),
+        credits: credits.map((c: { account?: string; amount?: number }) => ({
+          account: typeof c?.account === 'string' ? c.account : 'Unknown',
+          amount: typeof c?.amount === 'number' ? c.amount : 0,
+        })),
+      };
+      approvedAdjustments.push(adj);
+      appliedAdjustmentIds.push(item.id);
+    }
+
+    const entries = mergeAdjustmentsIntoEntries(unadjustedEntries, approvedAdjustments);
 
     const trialBalance = parseTrialBalance(entries);
     if (!trialBalance.balances && trialBalance.errors.length > 0) {
@@ -176,6 +220,25 @@ export async function runBuildFinancialStatements(
       };
     }
 
+    // Hard Gate: after any agentic adjustment, intercept if ledger is unbalanced so user never sees an invalid Balance Sheet.
+    const gate = runIntegrityGate({
+      trialBalance: {
+        totalDebits: trialBalance.totalDebits,
+        totalCredits: trialBalance.totalCredits,
+      },
+      balanceSheet: {
+        totalAssets: balanceSheet.totalAssets,
+        totalLiabilities: balanceSheet.totalLiabilities,
+        totalEquity: balanceSheet.totalEquity,
+      },
+    });
+    if (!gate.passed) {
+      return {
+        success: false,
+        error: INTEGRITY_GATE_CRITICAL_MESSAGE,
+      };
+    }
+
     return {
       success: true,
       data: {
@@ -196,6 +259,8 @@ export async function runBuildFinancialStatements(
           netIncome: profitAndLoss.netIncome,
         },
         classifiedEntriesCount: classifiedEntries.length,
+        /** IDs of approved HITL adjustments merged into this report (traceability). */
+        appliedAdjustmentIds: appliedAdjustmentIds.length ? appliedAdjustmentIds : undefined,
         /** For audit: plan + deterministic verification (V1–V3b). */
         reasoningChain: { plan: pev.plan, executedAt: pev.executedAt, verification: pev.verification },
         ...(standard ? { standard } : {}),

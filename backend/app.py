@@ -1600,6 +1600,9 @@ def api_market_intelligence():
         beta = float(body.get("beta", 1.0))
     except (TypeError, ValueError) as e:
         return jsonify({"error": "Invalid numeric field", "message": str(e)}), 400
+    accounting_context = body.get("accounting_context")
+    if accounting_context is not None and not isinstance(accounting_context, str):
+        accounting_context = str(accounting_context) if accounting_context else None
     try:
         result = run_market_intelligence(
             company_name=company_name,
@@ -1614,6 +1617,7 @@ def api_market_intelligence():
             web_search=None,
             equity_risk_premium=equity_risk_premium,
             beta=beta,
+            accounting_context=accounting_context,
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 500

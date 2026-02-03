@@ -161,6 +161,34 @@ router.post('/chat-verified', async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/supervisor/session/:sessionId/trace
+ * Returns reasoning_logs and tenant_hitl_staging items for the session's tenant (audit trail).
+ */
+router.get('/session/:sessionId/trace', async (req: Request, res: Response) => {
+  try {
+    const sessionId = req.params.sessionId;
+    const pool = getTenantPool(req);
+    if (!sessionId || !pool) {
+      res.status(400).json({ error: 'Session id and tenant context required' });
+      return;
+    }
+    const session = await persistence.getSession(pool, sessionId);
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+    const stagingItems = await persistence.listStagingItems(pool, session.tenantId);
+    res.json({
+      reasoningLogs: session.reasoningLogs ?? [],
+      stagingItems,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Trace fetch failed';
+    res.status(500).json({ error: 'Supervisor error', message: msg });
+  }
+});
+
+/**
  * GET /api/supervisor/conflicts — List unresolved CPA-CFA conflicts (Integration only).
  * Query: periodLabel (optional).
  */

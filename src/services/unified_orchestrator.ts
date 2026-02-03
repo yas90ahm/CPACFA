@@ -8,7 +8,13 @@ import type { Pool } from 'pg';
 import type { PipelineInput, ResultGeneratorOutput } from './result_generator.js';
 import { runResultPipeline } from './result_generator.js';
 import { runSupervisor } from '../agents/Supervisor.js';
-import { appendReasoningLog, type ReasoningLogEntry } from './persistence_service.js';
+import {
+  appendReasoningLog,
+  getSession,
+  isPersistedMessageHistory,
+  updateSession,
+  type ReasoningLogEntry,
+} from './persistence_service.js';
 import {
   runSupervisorWithSkeptic,
   runSkepticReview,
@@ -62,6 +68,13 @@ export function inferTaskStrategy(message: string, pipelineInput?: PipelineInput
   return 'forensic';
 }
 
+/** CFA task keywords: DCF, valuation, multiples — when present, Orchestrator fetches CPA Historical Snapshot and injects as accounting_context. */
+const CFA_TASK_PATTERNS = [
+  /dcf|discounted\s*cash\s*flow/i,
+  /valuation|enterprise\s*value|ev\s*\/\s*ebitda/i,
+  /multiples|comps|comparable\s*analysis/i,
+];
+
 export interface UnifiedSupervisorParams {
   /** If set, overrides inferred strategy. Otherwise strategy is inferred from message (and pipelineInput). */
   mode?: 'chat' | 'pipeline';
@@ -70,6 +83,8 @@ export interface UnifiedSupervisorParams {
   sessionId?: string;
   tenantId?: string;
   pool?: Pool | null;
+  /** When provided with a CFA task (DCF, Valuation, Multiples), Orchestrator fetches CPA Historical Snapshot and injects as accounting_context. */
+  periodLabel?: string;
   /**
    * When true (e.g. /chat-verified), run Skeptic after the agentic path.
    * When false, Skeptic is still run for both pipeline and agentic paths.
@@ -137,7 +152,8 @@ async function applySkepticGate(report: SupervisorReport): Promise<{
 export async function runUnifiedSupervisor(
   params: UnifiedSupervisorParams
 ): Promise<UnifiedChatOutput | UnifiedPipelineOutput> {
-  const { mode: modeOverride, message, pipelineInput, sessionId, tenantId, pool, useVerifiedPath } = params;
+  const { mode: modeOverride, message, pipelineInput, sessionId, tenantId, pool, periodLabel, useVerifiedPath } =
+    params;
 
   const strategy: TaskStrategy =
     modeOverride === 'pipeline'
@@ -174,16 +190,61 @@ export async function runUnifiedSupervisor(
           accountCode: r.accountCode,
         }))
       : undefined;
+
+  let initialMessageHistory: { provider: string; messages: unknown[] } | undefined;
+  if (pool && sessionId) {
+    const session = await getSession(pool, sessionId);
+    if (session?.messageHistory != null && isPersistedMessageHistory(session.messageHistory)) {
+      initialMessageHistory = session.messageHistory;
+    }
+  }
+
+  // When user triggers a CFA task (Valuation, DCF, Multiples), fetch CPA Historical Snapshot and inject as read-only accounting_context.
+  const isCFATask = CFA_TASK_PATTERNS.some((p) => p.test(message));
+  let accountingContext: string | undefined;
+  if (isCFATask && pool && tenantId && periodLabel) {
+    const snapshot = await getHistoricalSnapshotFromCPA(tenantId, periodLabel, pool);
+    if (snapshot) accountingContext = formatAccountingContextBlock(snapshot);
+  }
+
   const onReasoningStep =
     pool && tenantId && sessionId
       ? (entry: ReasoningLogEntry) =>
           appendReasoningLog(pool, tenantId, sessionId, { ...entry, timestamp: entry.timestamp || new Date().toISOString() })
       : undefined;
+  const onObservationPersisted =
+    pool && sessionId
+      ? (lastStep: string, lastResultSummary: string) =>
+          updateSession(pool, sessionId, { lastStep, lastResultSummary })
+      : undefined;
+  const onMessageHistoryPersisted =
+    pool && sessionId
+      ? (payload: { provider: string; messages: unknown[] }) =>
+          updateSession(pool, sessionId, { messageHistory: payload })
+      : undefined;
+
   const context =
     tenantId && pool
-      ? { tenantId, pool, sessionId, validatedEntries: entries, onReasoningStep }
+      ? {
+          tenantId,
+          pool,
+          sessionId,
+          validatedEntries: entries,
+          onReasoningStep,
+          onObservationPersisted,
+          onMessageHistoryPersisted,
+          initialMessageHistory,
+          accountingContext,
+        }
       : entries
-        ? { validatedEntries: entries, onReasoningStep }
+        ? {
+            validatedEntries: entries,
+            onReasoningStep,
+            onObservationPersisted,
+            onMessageHistoryPersisted,
+            initialMessageHistory,
+            accountingContext,
+          }
         : undefined;
 
   const runAgentic = useVerifiedPath

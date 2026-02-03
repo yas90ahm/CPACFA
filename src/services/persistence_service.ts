@@ -160,6 +160,12 @@ export async function updateStagingStatus(
   return getStagingItem(pool, id);
 }
 
+/** Delete a staging item by id. Returns true if deleted. */
+export async function deleteStagingItem(pool: Pool, id: string): Promise<boolean> {
+  const r = await pool.query(`DELETE FROM tenant_hitl_staging WHERE id = $1`, [id]);
+  return (r.rowCount ?? 0) > 0;
+}
+
 // --- Supervisor sessions ---
 
 /** Deterministic verification result (V1–V3b from planExecuteVerify). */
@@ -236,7 +242,7 @@ export async function createSession(
 
 export async function getSession(pool: Pool, sessionId: string): Promise<SupervisorSessionRow | undefined> {
   const r = await pool.query(
-    `SELECT id, tenant_id, user_id, mode, status, pipeline_input_snapshot, last_step, last_result_summary, message_history, created_at, updated_at, completed_at
+    `SELECT id, tenant_id, user_id, mode, status, pipeline_input_snapshot, last_step, last_result_summary, message_history, COALESCE(reasoning_logs, '[]'::jsonb) AS reasoning_logs, created_at, updated_at, completed_at
      FROM tenant_supervisor_sessions WHERE id = $1`,
     [sessionId]
   );
@@ -250,11 +256,17 @@ export async function getSession(pool: Pool, sessionId: string): Promise<Supervi
     last_step: string | null;
     last_result_summary: string | null;
     message_history: unknown;
+    reasoning_logs?: unknown;
     created_at: string;
     updated_at: string;
     completed_at: string | null;
   } | undefined;
   if (!row) return undefined;
+  const reasoningLogs = Array.isArray(row.reasoning_logs)
+    ? (row.reasoning_logs as ReasoningLogEntry[])
+    : typeof row.reasoning_logs === 'object' && row.reasoning_logs !== null && Array.isArray((row.reasoning_logs as { length?: number }).length)
+      ? (row.reasoning_logs as ReasoningLogEntry[])
+      : [];
   return {
     id: row.id,
     tenantId: row.tenant_id,
@@ -265,6 +277,7 @@ export async function getSession(pool: Pool, sessionId: string): Promise<Supervi
     lastStep: row.last_step ?? null,
     lastResultSummary: row.last_result_summary ?? null,
     messageHistory: row.message_history,
+    reasoningLogs: reasoningLogs.length ? reasoningLogs : undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at ?? null,
@@ -312,6 +325,96 @@ export async function updateSession(
     values
   );
   return getSession(pool, sessionId);
+}
+
+export interface ListSessionsOptions {
+  status?: SupervisorSessionRow['status'];
+  limit?: number;
+}
+
+/** List sessions for a tenant, most recent first. */
+export async function listSessions(
+  pool: Pool,
+  tenantId: string,
+  options?: ListSessionsOptions
+): Promise<SupervisorSessionRow[]> {
+  let query = `SELECT id, tenant_id, user_id, mode, status, pipeline_input_snapshot, last_step, last_result_summary, message_history, COALESCE(reasoning_logs, '[]'::jsonb) AS reasoning_logs, created_at, updated_at, completed_at
+               FROM tenant_supervisor_sessions WHERE tenant_id = $1`;
+  const args: unknown[] = [tenantId];
+  if (options?.status) {
+    args.push(options.status);
+    query += ` AND status = $${args.length}`;
+  }
+  query += ' ORDER BY updated_at DESC';
+  const limit = options?.limit ?? 50;
+  args.push(limit);
+  query += ` LIMIT $${args.length}`;
+  const r = await pool.query(query, args);
+  type SessionRow = {
+    id: string;
+    tenant_id: string;
+    user_id: string | null;
+    mode: string;
+    status: string;
+    pipeline_input_snapshot: unknown;
+    last_step: string | null;
+    last_result_summary: string | null;
+    message_history: unknown;
+    reasoning_logs?: unknown;
+    created_at: string;
+    updated_at: string;
+    completed_at: string | null;
+  };
+  return r.rows.map((row) => {
+    const rr = row as SessionRow;
+    const reasoningLogs = Array.isArray(rr.reasoning_logs) ? (rr.reasoning_logs as ReasoningLogEntry[]) : [];
+    return {
+      id: rr.id,
+      tenantId: rr.tenant_id,
+      userId: rr.user_id ?? null,
+      mode: rr.mode as 'chat' | 'pipeline',
+      status: rr.status as SupervisorSessionRow['status'],
+      pipelineInputSnapshot: rr.pipeline_input_snapshot,
+      lastStep: rr.last_step ?? null,
+      lastResultSummary: rr.last_result_summary ?? null,
+      messageHistory: rr.message_history,
+      reasoningLogs: reasoningLogs.length ? reasoningLogs : undefined,
+      createdAt: rr.created_at,
+      updatedAt: rr.updated_at,
+      completedAt: rr.completed_at ?? null,
+    };
+  });
+}
+
+/** Delete a session by id. If tenantId is provided, only deletes when tenant_id matches. Returns true if deleted. */
+export async function deleteSession(
+  pool: Pool,
+  sessionId: string,
+  tenantId?: string
+): Promise<boolean> {
+  const r = tenantId
+    ? await pool.query(`DELETE FROM tenant_supervisor_sessions WHERE id = $1 AND tenant_id = $2`, [sessionId, tenantId])
+    : await pool.query(`DELETE FROM tenant_supervisor_sessions WHERE id = $1`, [sessionId]);
+  return (r.rowCount ?? 0) > 0;
+}
+
+/**
+ * Stored in message_history (JSONB) for resume-after-restart.
+ * provider identifies the LLM (anthropic | openai | mistral); messages are provider-specific format.
+ */
+export interface PersistedMessageHistory {
+  provider: string;
+  messages: unknown[];
+}
+
+export function isPersistedMessageHistory(x: unknown): x is PersistedMessageHistory {
+  return (
+    typeof x === 'object' &&
+    x !== null &&
+    'provider' in x &&
+    'messages' in x &&
+    Array.isArray((x as PersistedMessageHistory).messages)
+  );
 }
 
 // --- Session snapshot (validated trial balance / pipeline input) ---

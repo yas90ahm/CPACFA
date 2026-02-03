@@ -104,6 +104,38 @@ export async function confirmStandardInference(payload: {
   return apiJson(API_BASE, '/api/memory/entity', { method: 'POST', body: payload });
 }
 
+/** Session trace (reasoning_logs + HITL staging) for audit trail / AgentThinkingHUD. */
+export async function fetchSessionTrace(sessionId: string): Promise<{
+  reasoningLogs: Array<{
+    stepType: 'thought' | 'tool';
+    timestamp: string;
+    thought?: string;
+    toolName?: string;
+    toolInput?: Record<string, unknown>;
+    toolResult?: string | Record<string, unknown>;
+    rawDataSeen?: unknown;
+    ruleApplied?: string;
+    verificationResult?: { passed: boolean; checks: string[] };
+  }>;
+  stagingItems: Array<{
+    id: string;
+    proposedAction: string;
+    justification: string;
+    status: string;
+    type: string;
+    amount?: number;
+    payload?: Record<string, unknown>;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+}> {
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'}/api/supervisor/session/${encodeURIComponent(sessionId)}/trace`
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 /** Supervisor chat (ReAct loop): returns response, thoughts, toolCalls for Reasoning Streams UI. */
 export async function supervisorChat(params: {
   message: string;

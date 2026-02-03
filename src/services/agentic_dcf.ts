@@ -1,9 +1,26 @@
 /**
  * Agentic DCF: revenue forecast, margin forecast, WACC calculation, valuation summary.
+ * When accountingContext is provided (from CPA Historical Snapshot), it is injected as a
+ * read-only block and the CFA Agent must cite these Accounting-Locked numbers; it is
+ * forbidden from inventing its own starting points for projections.
  */
 
 import { callLLMWithFallback } from '../llm/callWithFallback.js';
 import type { DCFResult, WACCInput } from './dcf_valuation_service.js';
+import type { AccountingContextSnapshot } from './historical_snapshot_service.js';
+import { formatAccountingContextBlock } from './historical_snapshot_service.js';
+
+/** Strict rule injected when accounting_context is provided. */
+const ACCOUNTING_LOCKED_RULE = `
+STRICT RULE — Accounting-Locked Baseline: You MUST cite the numbers in the Accounting-Locked block below as your historical baseline. You are FORBIDDEN from inventing your own starting points for revenue, margins, or net debt. Use only the CPA-derived figures provided.`;
+
+function buildSystemWithAccountingContext(
+  baseSystem: string,
+  accountingContext?: string | null
+): string {
+  if (!accountingContext?.trim()) return baseSystem;
+  return `${ACCOUNTING_LOCKED_RULE}\n\n${accountingContext}\n\n${baseSystem}`;
+}
 
 // ============================================================================
 // Revenue Forecast Agent
@@ -33,6 +50,7 @@ Consider:
 - Mean reversion for high/low growth companies
 
 Return JSON: { "projectedRevenue": [year1, year2, year3, year4, year5], "growthRates": [rate1, rate2, rate3, rate4, rate5], "assumptions": "...", "confidence": 0.X }`;
+  const systemPrompt = buildSystemWithAccountingContext(baseSystem, accountingContext);
 
   const cagr = historicals.length >= 2 
     ? Math.pow(historicals[historicals.length - 1] / historicals[0], 1 / (historicals.length - 1)) - 1 
@@ -79,13 +97,15 @@ export interface MarginForecast {
 
 /**
  * Projects margins and FCF conversion from revenue projections.
+ * When accountingContext is provided, the agent must cite those Accounting-Locked numbers as baseline.
  */
 export async function projectMarginsAgentic(
   historicalMargins: number[],
   projectedRevenue: number[],
-  industry?: string
+  industry?: string,
+  accountingContext?: string | null
 ): Promise<MarginForecast> {
-  const systemPrompt = `You are a financial analyst. Project operating margins and FCF conversion for a valuation model.
+  const baseSystem = `You are a financial analyst. Project operating margins and FCF conversion for a valuation model.
 
 Consider:
 - Historical margin trends
@@ -94,6 +114,7 @@ Consider:
 - Capex and working capital needs
 
 Return JSON: { "projectedMargins": [margin1, margin2, ...], "fcfConversion": [conv1, conv2, ...], "assumptions": "..." }`;
+  const systemPrompt = buildSystemWithAccountingContext(baseSystem, accountingContext);
 
   const avgMargin = historicalMargins.length > 0 
     ? historicalMargins.reduce((a, b) => a + b, 0) / historicalMargins.length 
@@ -196,12 +217,14 @@ export interface TerminalGrowthSuggestion {
 
 /**
  * Suggests terminal growth rate based on company and economy.
+ * When accountingContext is provided, the agent must cite those Accounting-Locked numbers as baseline.
  */
 export async function suggestTerminalGrowthAgentic(
   industry: string,
-  currentGrowthRate: number
+  currentGrowthRate: number,
+  accountingContext?: string | null
 ): Promise<TerminalGrowthSuggestion> {
-  const systemPrompt = `You are a valuation specialist. Suggest an appropriate terminal growth rate for a DCF model.
+  const baseSystem = `You are a valuation specialist. Suggest an appropriate terminal growth rate for a DCF model.
 
 Guidelines:
 - Terminal growth should not exceed long-term GDP growth (2-3% nominal)
@@ -210,6 +233,7 @@ Guidelines:
 - Inflation is a key component (~2%)
 
 Return JSON: { "terminalGrowthRate": 0.XX, "rationale": "..." }`;
+  const systemPrompt = buildSystemWithAccountingContext(baseSystem, accountingContext);
 
   const fallback: TerminalGrowthSuggestion = {
     terminalGrowthRate: 0.02,
@@ -246,11 +270,13 @@ export interface ValuationSummary {
 
 /**
  * Generates executive summary of DCF valuation.
+ * When accountingContext is provided, the agent must cite those Accounting-Locked numbers as baseline.
  */
 export async function generateValuationSummaryAgentic(
-  dcfResult: DCFResult
+  dcfResult: DCFResult,
+  accountingContext?: string | null
 ): Promise<ValuationSummary> {
-  const systemPrompt = `You are an investment banking analyst. Generate an executive summary of a DCF valuation.
+  const baseSystem = `You are an investment banking analyst. Generate an executive summary of a DCF valuation.
 
 Include:
 1. Headline valuation and implied share price
@@ -259,6 +285,7 @@ Include:
 4. Risks to the valuation
 
 Return JSON: { "summary": "...", "keyDrivers": ["..."], "risks": ["..."], "recommendation": "..." }`;
+  const systemPrompt = buildSystemWithAccountingContext(baseSystem, accountingContext);
 
   const fallback: ValuationSummary = {
     summary: 'Valuation summary pending review.',

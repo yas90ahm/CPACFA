@@ -3,6 +3,10 @@ FinOS CPA-Agent — Accounting Engine.
 Processes General Ledger; prepares formal financial statements with FASB/IASB traceability.
 Features: Depreciation (SL, DDB), ASC 606 Revenue Recognition, Statement of Cash Flows (Indirect).
 Verification: Assets = Liabilities + Equity at all times.
+
+Versioning flow: Unadjusted TB (Source) → Proposed Adjustments (pending_entries) → Adjusted TB (entries).
+Do not build Balance Sheet or P&L from raw source data if pending adjustments exist; approve or reject first,
+then build from the adjusted state so every number is traceable to the original upload or an approved adjustment.
 """
 from __future__ import annotations
 
@@ -58,12 +62,29 @@ class ChartOfAccounts:
 class GeneralLedger:
     """
     General Ledger state: approved entries (GL) and pending (staged) entries.
-    Balance sheet and trial balance use only approved entries for a clear audit trail
-    (Unadjusted → approve staged entries → Adjusted Trial Balance).
+
+    Versioning: Unadjusted TB = source entries only. Proposed Adjustments = pending_entries (HITL).
+    Adjusted TB = entries (source + approved). Statement methods use the adjusted state and refuse
+    to run if pending_entries exist, so every number is traceable to upload or an approved adjustment.
     """
-    entries: list[GLEntry] = field(default_factory=list)  # Approved only; used for BS/TB
-    pending_entries: list[GLEntry] = field(default_factory=list)  # Staged as Pending
+    entries: list[GLEntry] = field(default_factory=list)  # Approved only; used for BS/TB (adjusted state)
+    pending_entries: list[GLEntry] = field(default_factory=list)  # Proposed adjustments (staged)
     coa: Optional[ChartOfAccounts] = None
+
+    def has_pending_adjustments(self) -> bool:
+        """True if there are proposed adjustments not yet approved or rejected."""
+        return len(self.pending_entries) > 0
+
+    def assert_no_pending_before_statements(self) -> None:
+        """
+        Raise ValueError if pending adjustments exist. Call before building Balance Sheet or P&L
+        so we do not run on raw source data with unresolved proposals.
+        """
+        if self.has_pending_adjustments():
+            raise ValueError(
+                "Cannot build financial statements while pending adjustments exist. "
+                "Approve or reject all pending entries first, then build from the adjusted state."
+            )
 
     def post(self, entry: GLEntry) -> None:
         """Post directly to GL (e.g. when user approves). Entry is included in balance_sheet."""
@@ -104,7 +125,8 @@ class GeneralLedger:
         return out
 
     def trial_balance(self, as_of: date, coa: ChartOfAccounts) -> TrialBalance:
-        """Build Trial Balance as of date from approved entries only. Zero tolerance for imbalance."""
+        """Build Trial Balance as of date from approved entries only. Refuses if pending adjustments exist."""
+        self.assert_no_pending_before_statements()
         bal = self.balances_by_account(as_of)
         lines: list[TrialBalanceLine] = []
         total_d = Decimal("0")
@@ -123,7 +145,7 @@ class GeneralLedger:
         return TrialBalance(lines=lines, total_debits=total_d, total_credits=total_c, balances=balances)
 
     def balance_sheet(self, as_of: date, coa: ChartOfAccounts) -> BalanceSheet:
-        """Build Balance Sheet. Verification: Assets = Liabilities + Equity."""
+        """Build Balance Sheet. Refuses if pending adjustments exist. Verification: Assets = Liabilities + Equity."""
         tb = self.trial_balance(as_of, coa)
         assets: list[StatementLine] = []
         liabilities: list[StatementLine] = []
@@ -154,7 +176,8 @@ class GeneralLedger:
         )
 
     def income_statement(self, period_start: date, period_end: date, coa: ChartOfAccounts) -> IncomeStatement:
-        """Build P&L for period. Revenue and expenses only."""
+        """Build P&L for period. Refuses if pending adjustments exist. Revenue and expenses only."""
+        self.assert_no_pending_before_statements()
         bal_start = self.balances_by_account(period_start)
         bal_end = self.balances_by_account(period_end)
         revenue: list[StatementLine] = []

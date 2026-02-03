@@ -10,3 +10,5 @@ export type {
   AgentThoughtStreamState,
   SetAgentThoughtStream,
 } from './agent-thought-stream-context';
+export { AgentThinkingHUD } from './AgentThinkingHUD';
+export type { AgentThinkingHUDProps, ReasoningLogEntry as TraceReasoningLogEntry, StagingItemTrace } from './AgentThinkingHUD';

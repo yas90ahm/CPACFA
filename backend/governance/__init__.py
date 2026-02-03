@@ -32,6 +32,12 @@ from .audit_dashboard import (
     persist_forensic_anomalies,
     get_forensic_anomalies,
 )
+from .integrity_gate import (
+    run_integrity_gate,
+    run_integrity_gate_from_entries,
+    IntegrityGateResult,
+    INTEGRITY_GATE_CRITICAL_MESSAGE,
+)
 
 __all__ = [
     "log_llm_decision",
@@ -49,4 +55,8 @@ __all__ = [
     "ForensicAnomalyRecord",
     "persist_forensic_anomalies",
     "get_forensic_anomalies",
+    "run_integrity_gate",
+    "run_integrity_gate_from_entries",
+    "IntegrityGateResult",
+    "INTEGRITY_GATE_CRITICAL_MESSAGE",
 ]

@@ -234,6 +234,14 @@ export async function runSupervisor(
     validatedEntries?: Array<{ accountName: string; debit: number; credit: number; accountCode?: string }>;
     /** When set, each Thought or Tool step is appended to the session reasoning_logs (audit trail). */
     onReasoningStep?: (entry: ReasoningLogEntry) => void | Promise<void>;
+    /** When set, after each Observation (tool result) the session row is updated with last_step and last_result_summary. */
+    onObservationPersisted?: (lastStep: string, lastResultSummary: string) => void | Promise<void>;
+    /** When set, after each turn the full message history is saved for resume-after-restart. */
+    onMessageHistoryPersisted?: (payload: { provider: string; messages: unknown[] }) => void | Promise<void>;
+    /** When set, used as initial messages for resume (provider must match current LLM). */
+    initialMessageHistory?: { provider: string; messages: unknown[] };
+    /** Read-only CPA Historical Snapshot (Revenue CAGR, EBITDA Margin, Net Debt) for CFA tasks; must be cited, forbidden to invent starting points. */
+    accountingContext?: string;
   }
 ): Promise<SupervisorOutput> {
   const provider = getProviderFromEnv();
@@ -246,12 +254,26 @@ export async function runSupervisor(
     const ts = { ...entry, timestamp: entry.timestamp || new Date().toISOString() };
     void Promise.resolve(context?.onReasoningStep?.(ts)).catch(() => {});
   };
+  const fireObservationPersisted = (lastStep: string, lastResultSummary: string) => {
+    void Promise.resolve(context?.onObservationPersisted?.(lastStep, lastResultSummary)).catch(() => {});
+  };
+  const fireMessageHistoryPersisted = (providerName: string, messagesArray: unknown[]) => {
+    void Promise.resolve(context?.onMessageHistoryPersisted?.({ provider: providerName, messages: messagesArray })).catch(() => {});
+  };
 
   const userContent = input.entries?.length
     ? `${input.message}\n\n[Trial balance available in this session. Use buildFinancialStatements with sessionId and tenantId only (from context)—do not pass entries. Or use forensicRescan with entries if you need to re-validate.]`
     : input.message;
 
-  const messages: MessageParam[] = [{ role: 'user', content: userContent }];
+  const defaultFirstMessage: MessageParam[] = [{ role: 'user', content: userContent }];
+  const initialMessagesRaw: unknown[] =
+    context?.initialMessageHistory?.provider === provider &&
+    Array.isArray(context.initialMessageHistory.messages) &&
+    context.initialMessageHistory.messages.length > 0
+      ? context.initialMessageHistory.messages
+      : defaultFirstMessage;
+
+  const messages: MessageParam[] = initialMessagesRaw as MessageParam[];
 
   const thoughts: string[] = [];
   const toolCalls: Array<{ name: string; input: unknown; result: string }> = [];
@@ -307,6 +329,7 @@ export async function runSupervisor(
       });
 
       if (lastStopReason === 'end_turn' && toolUseBlocks.length === 0) {
+        fireMessageHistoryPersisted('anthropic', messages);
         return {
           response: textBlocks.join('\n').trim() || 'No response generated.',
           thoughts,
@@ -316,6 +339,7 @@ export async function runSupervisor(
       }
 
       if (toolUseBlocks.length === 0) {
+        fireMessageHistoryPersisted('anthropic', messages);
         return {
           response: textBlocks.join('\n').trim() || 'No response generated.',
           thoughts,
@@ -350,6 +374,7 @@ export async function runSupervisor(
           ruleApplied: reasoningChain?.plan,
           verificationResult: reasoningChain?.verification,
         });
+        fireObservationPersisted(use.name, resultSummary);
         toolResults.push({
           type: 'tool_result',
           tool_use_id: use.id,
@@ -362,6 +387,7 @@ export async function runSupervisor(
         role: 'user',
         content: toolResults,
       });
+      fireMessageHistoryPersisted('anthropic', messages);
     }
   }
 
@@ -373,7 +399,7 @@ export async function runSupervisor(
     if (!mod?.default) throw new Error('OpenAI SDK not installed. Add "openai" to dependencies.');
     const client = new mod.default({ apiKey });
     const tools = toOpenAITools(buildTools());
-    const messagesO: Array<Record<string, unknown>> = [{ role: 'user', content: userContent }];
+    const messagesO: Array<Record<string, unknown>> = initialMessagesRaw as Array<Record<string, unknown>>;
 
     for (let iter = 0; iter < MAX_REACT_ITERATIONS; iter++) {
       const response = await client.chat.completions.create({
@@ -413,6 +439,7 @@ export async function runSupervisor(
           ruleApplied: reasoningChain?.plan,
           verificationResult: reasoningChain?.verification,
         });
+        fireObservationPersisted(name, resultStr);
         messagesO.push({
           role: 'tool',
           tool_call_id: call.id,
@@ -421,7 +448,9 @@ export async function runSupervisor(
             : `Error: ${result.error}`,
         });
       }
+      fireMessageHistoryPersisted('openai', messagesO);
     }
+    fireMessageHistoryPersisted('openai', messagesO);
     return { response: 'Reached maximum iterations.', thoughts, toolCalls, stopReason: 'max_iterations' };
   }
 
@@ -433,7 +462,7 @@ export async function runSupervisor(
     if (!mod) throw new Error('Mistral SDK not installed. Add "@mistralai/mistralai" to dependencies.');
     const client = new mod.Mistral({ apiKey });
     const tools = toMistralTools(buildTools());
-    const messagesM: Array<Record<string, unknown>> = [{ role: 'user', content: userContent }];
+    const messagesM: Array<Record<string, unknown>> = initialMessagesRaw as Array<Record<string, unknown>>;
 
     for (let iter = 0; iter < MAX_REACT_ITERATIONS; iter++) {
       const response = await client.chat.complete({
@@ -448,6 +477,7 @@ export async function runSupervisor(
       messagesM.push(msg as Record<string, unknown>);
       const toolCallsResp = msg.tool_calls ?? [];
       if (!toolCallsResp.length) {
+        fireMessageHistoryPersisted('mistral', messagesM);
         return { response: msg.content?.trim() ?? '', thoughts, toolCalls, stopReason: 'end_turn' };
       }
       for (const call of toolCallsResp) {
@@ -473,6 +503,7 @@ export async function runSupervisor(
           ruleApplied: reasoningChain?.plan,
           verificationResult: reasoningChain?.verification,
         });
+        fireObservationPersisted(name, resultStr);
         messagesM.push({
           role: 'tool',
           tool_call_id: call.id,
@@ -481,7 +512,9 @@ export async function runSupervisor(
             : `Error: ${result.error}`,
         });
       }
+      fireMessageHistoryPersisted('mistral', messagesM);
     }
+    fireMessageHistoryPersisted('mistral', messagesM);
     return { response: 'Reached maximum iterations.', thoughts, toolCalls, stopReason: 'max_iterations' };
   }
 

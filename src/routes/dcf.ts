@@ -31,6 +31,10 @@ import {
   generateValuationSummaryAgentic,
   suggestBetaAgentic,
 } from '../services/agentic_dcf.js';
+import {
+  getHistoricalSnapshotFromCPA,
+  formatAccountingContextBlock,
+} from '../services/historical_snapshot_service.js';
 import { validateBody, validateParams } from '../middleware/validateRequest.js';
 import {
   createDCFModelSchema,
@@ -388,7 +392,7 @@ router.get('/dcf/:id/sensitivity', validateParams(dcfModelIdParamSchema), async 
   }
 });
 
-/** POST /api/valuation/dcf/project-revenue — Agentic revenue forecast */
+/** POST /api/valuation/dcf/project-revenue — Agentic revenue forecast. Fetches CPA Historical Snapshot when tenantId + periodLabel provided. */
 router.post('/dcf/project-revenue', async (req: Request, res: Response) => {
   try {
     const body = req.body;
@@ -396,7 +400,20 @@ router.post('/dcf/project-revenue', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Missing historicals' });
       return;
     }
-    const result = await projectRevenueAgentic(body.historicals, body.guidance, body.industry);
+    const tenantId = getTenantId(req);
+    const periodLabel = body.periodLabel ?? (req.query.periodLabel as string | undefined);
+    const pool = getTenantPool(req);
+    const snapshot =
+      tenantId && periodLabel && pool
+        ? await getHistoricalSnapshotFromCPA(tenantId, periodLabel, pool)
+        : null;
+    const accountingContext = snapshot ? formatAccountingContextBlock(snapshot) : undefined;
+    const result = await projectRevenueAgentic(
+      body.historicals,
+      body.guidance,
+      body.industry,
+      accountingContext
+    );
     res.json(result);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
@@ -404,11 +421,24 @@ router.post('/dcf/project-revenue', async (req: Request, res: Response) => {
   }
 });
 
-/** POST /api/valuation/dcf/project-margins — Agentic margin forecast */
+/** POST /api/valuation/dcf/project-margins — Agentic margin forecast. Fetches CPA Historical Snapshot when tenantId + periodLabel provided. */
 router.post('/dcf/project-margins', validateBody(projectMarginsSchema), async (req: Request, res: Response) => {
   try {
     const body = req.body;
-    const result = await projectMarginsAgentic(body.historicalMargins, body.projectedRevenue, body.industry);
+    const tenantId = getTenantId(req);
+    const periodLabel = body.periodLabel ?? (req.query.periodLabel as string | undefined);
+    const pool = getTenantPool(req);
+    const snapshot =
+      tenantId && periodLabel && pool
+        ? await getHistoricalSnapshotFromCPA(tenantId, periodLabel, pool)
+        : null;
+    const accountingContext = snapshot ? formatAccountingContextBlock(snapshot) : undefined;
+    const result = await projectMarginsAgentic(
+      body.historicalMargins,
+      body.projectedRevenue,
+      body.industry,
+      accountingContext
+    );
     res.json(result);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
@@ -437,11 +467,23 @@ router.post('/dcf/suggest-wacc', async (req: Request, res: Response) => {
   }
 });
 
-/** POST /api/valuation/dcf/suggest-growth — Agentic terminal growth suggestion */
+/** POST /api/valuation/dcf/suggest-growth — Agentic terminal growth suggestion. Fetches CPA Historical Snapshot when tenantId + periodLabel provided. */
 router.post('/dcf/suggest-growth', validateBody(suggestGrowthSchema), async (req: Request, res: Response) => {
   try {
     const body = req.body;
-    const result = await suggestTerminalGrowthAgentic(body.industry, body.currentGrowthRate ?? 0.05);
+    const tenantId = getTenantId(req);
+    const periodLabel = body.periodLabel ?? (req.query.periodLabel as string | undefined);
+    const pool = getTenantPool(req);
+    const snapshot =
+      tenantId && periodLabel && pool
+        ? await getHistoricalSnapshotFromCPA(tenantId, periodLabel, pool)
+        : null;
+    const accountingContext = snapshot ? formatAccountingContextBlock(snapshot) : undefined;
+    const result = await suggestTerminalGrowthAgentic(
+      body.industry,
+      body.currentGrowthRate ?? 0.05,
+      accountingContext
+    );
     res.json(result);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
@@ -465,11 +507,19 @@ router.post('/dcf/suggest-beta', async (req: Request, res: Response) => {
   }
 });
 
-/** POST /api/valuation/dcf/summary — Agentic valuation summary */
+/** POST /api/valuation/dcf/summary — Agentic valuation summary. Fetches CPA Historical Snapshot when tenantId + periodLabel provided. */
 router.post('/dcf/summary', validateBody(generateValuationSummarySchema), async (req: Request, res: Response) => {
   try {
     const body = req.body;
-    const result = await generateValuationSummaryAgentic(body.dcfResult);
+    const tenantId = getTenantId(req);
+    const periodLabel = body.periodLabel ?? (req.query.periodLabel as string | undefined);
+    const pool = getTenantPool(req);
+    const snapshot =
+      tenantId && periodLabel && pool
+        ? await getHistoricalSnapshotFromCPA(tenantId, periodLabel, pool)
+        : null;
+    const accountingContext = snapshot ? formatAccountingContextBlock(snapshot) : undefined;
+    const result = await generateValuationSummaryAgentic(body.dcfResult, accountingContext);
     res.json(result);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

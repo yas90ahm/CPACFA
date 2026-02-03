@@ -1,62 +1,98 @@
 /**
- * Integrity gate — Zero-variance policy: TB revenue vs contract revenue.
- * All currency math via decimal.js. Throws IntegrityGateViolation when variance exceeds tolerance.
+ * Integrity Gate — Hard Gate middleware that runs after any Agentic adjustment.
+ *
+ * Performs deterministic checks:
+ * 1. Sum(Debits) == Sum(Credits) (trial balance)
+ * 2. Assets == Liabilities + Equity (balance sheet equation)
+ *
+ * If the math fails, the service intercepts the response before it reaches the user
+ * and returns an error to the Agent so the user never sees a Balance Sheet that doesn't balance.
  */
 
-import { from } from '../utils/decimal.js';
-import type { IntegrityGateInput, IntegrityGateResult, IntegrityContractFact } from '../types/integrity.js';
-import { IntegrityGateViolation } from '../types/integrity.js';
-import type { TrialBalanceEntry } from '../types/financial.js';
+import { absGt } from '../utils/decimal.js';
 
-const DEFAULT_TOLERANCE = 0;
+/** Error returned to the Agent when the gate fails; response must not reach the user. */
+export const INTEGRITY_GATE_CRITICAL_MESSAGE =
+  'CRITICAL: Your proposed adjustment unbalances the ledger. Re-calculating.';
+
+const DEFAULT_TOLERANCE = 0.01;
+
+export interface IntegrityGateTrialBalanceInput {
+  totalDebits: number;
+  totalCredits: number;
+}
+
+export interface IntegrityGateTrialBalanceFromEntries {
+  entries: Array<{ debit?: number; credit?: number }>;
+}
+
+export interface IntegrityGateBalanceSheetInput {
+  totalAssets: number;
+  totalLiabilities: number;
+  totalEquity: number;
+}
+
+export interface IntegrityGateInput {
+  trialBalance: IntegrityGateTrialBalanceInput | IntegrityGateTrialBalanceFromEntries;
+  balanceSheet: IntegrityGateBalanceSheetInput;
+  /** Tolerance for floating-point comparison (default 0.01). */
+  tolerance?: number;
+}
+
+export interface IntegrityGateResult {
+  passed: boolean;
+  error?: string;
+  /** Check results for audit (V1: TB, V2: BS). */
+  checks?: { trialBalanceBalances: boolean; balanceSheetBalances: boolean };
+}
 
 /**
- * Compute TB revenue from classified entries (REVENUE type: credit - debit).
+ * Compute total debits and credits from entries when trial balance is given as entries.
  */
-function tbRevenueFromEntries(entries: TrialBalanceEntry[]): number {
-  let sum = from(0);
+function getTrialBalanceTotals(
+  trialBalance: IntegrityGateInput['trialBalance']
+): { totalDebits: number; totalCredits: number } {
+  if ('totalDebits' in trialBalance && 'totalCredits' in trialBalance) {
+    return {
+      totalDebits: trialBalance.totalDebits,
+      totalCredits: trialBalance.totalCredits,
+    };
+  }
+  const entries = 'entries' in trialBalance ? trialBalance.entries : [];
+  let totalDebits = 0;
+  let totalCredits = 0;
   for (const e of entries) {
-    if (e.accountType !== 'REVENUE') continue;
-    const net = from(e.credit).minus(e.debit);
-    sum = sum.plus(net);
+    totalDebits += e.debit ?? 0;
+    totalCredits += e.credit ?? 0;
   }
-  return sum.toDecimalPlaces(2).toNumber();
+  return { totalDebits, totalCredits };
 }
 
 /**
- * Compute contract revenue: sum of totalContractValue, or periodRecognizedRevenue when available.
- */
-function contractRevenueFromContracts(contracts: IntegrityContractFact[]): number {
-  let sum = from(0);
-  for (const c of contracts) {
-    const amt = c.periodRecognizedRevenue != null ? c.periodRecognizedRevenue : c.totalContractValue;
-    sum = sum.plus(amt);
-  }
-  return sum.toDecimalPlaces(2).toNumber();
-}
-
-/**
- * Run integrity gate: TB revenue vs contract revenue. Throws IntegrityGateViolation if variance > tolerance.
+ * Run the Hard Gate: deterministic check that Sum(Debits) == Sum(Credits) and
+ * Assets == Liabilities + Equity. If either fails, return passed: false and the
+ * CRITICAL message so the response can be intercepted before reaching the user.
  */
 export function runIntegrityGate(input: IntegrityGateInput): IntegrityGateResult {
   const tolerance = input.tolerance ?? DEFAULT_TOLERANCE;
-  const tbRevenue = tbRevenueFromEntries(input.trialBalanceEntries);
-  const contractRevenue = contractRevenueFromContracts(input.contracts);
-  const variance = from(tbRevenue).minus(contractRevenue).abs().toNumber();
+  const { totalDebits, totalCredits } = getTrialBalanceTotals(input.trialBalance);
+  const { totalAssets, totalLiabilities, totalEquity } = input.balanceSheet;
 
-  if (from(variance).greaterThan(tolerance)) {
-    throw new IntegrityGateViolation(
-      `Trial Balance revenue $${tbRevenue.toFixed(2)} vs Contract revenue $${contractRevenue.toFixed(2)} exceeds allowed variance (tolerance=${tolerance}).`,
-      tbRevenue,
-      contractRevenue,
-      variance
-    );
-  }
+  const trialBalanceGapExceeds = absGt(totalDebits, totalCredits, tolerance);
+  const trialBalanceBalances = !trialBalanceGapExceeds;
+
+  const rhs = totalLiabilities + totalEquity;
+  const balanceSheetGapExceeds = absGt(totalAssets, rhs, tolerance);
+  const balanceSheetBalances = !balanceSheetGapExceeds;
+
+  const passed = trialBalanceBalances && balanceSheetBalances;
 
   return {
-    passed: true,
-    tbRevenue,
-    contractRevenue,
-    variance,
+    passed,
+    error: passed ? undefined : INTEGRITY_GATE_CRITICAL_MESSAGE,
+    checks: {
+      trialBalanceBalances,
+      balanceSheetBalances,
+    },
   };
 }
