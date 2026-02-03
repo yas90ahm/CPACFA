@@ -128,7 +128,7 @@ export async function updateCloseAdjustmentStatus(
       return { error: 'Adjustment not found', statusCode: 404 };
     }
 
-    const pushResult = await pushAdjustmentToGL(existing, connectionId, pool);
+    const pushResult = await pushAdjustmentToGL(existing, connectionId, pool, tenantId);
     if (!pushResult.success) {
       return {
         error: 'Push to GL failed',

@@ -61,7 +61,7 @@ export async function create(
     resolution_memo: string | null;
     created_at: string;
     created_by: string | null;
-  }>('SELECT * FROM risk_context_conflicts WHERE id = $1', [id]);
+  }>('SELECT * FROM risk_context_conflicts WHERE id = $1 AND tenant_id = $2', [id, input.tenantId]);
   const row = r.rows[0]!;
   return {
     id: row.id,
@@ -117,6 +117,7 @@ export async function listUnresolved(
 
 export async function resolve(
   pool: Pool,
+  tenantId: string,
   id: string,
   resolutionMemo: string,
   resolvedBy?: string
@@ -124,8 +125,8 @@ export async function resolve(
   const now = new Date().toISOString();
   const r = await pool.query(
     `UPDATE risk_context_conflicts SET resolved_at = $1, resolution_memo = $2
-     WHERE id = $3 AND resolved_at IS NULL`,
-    [now, resolutionMemo, id]
+     WHERE id = $3 AND tenant_id = $4 AND resolved_at IS NULL`,
+    [now, resolutionMemo, id, tenantId]
   );
   return (r.rowCount ?? 0) > 0;
 }
@@ -143,7 +144,7 @@ export async function countResolvedByTenantPeriod(
   return Number(r.rows[0]?.count ?? 0);
 }
 
-export async function getById(pool: Pool, id: string): Promise<RiskContextConflictRow | null> {
+export async function getById(pool: Pool, tenantId: string, id: string): Promise<RiskContextConflictRow | null> {
   const r = await pool.query<{
     id: string;
     tenant_id: string;
@@ -155,7 +156,7 @@ export async function getById(pool: Pool, id: string): Promise<RiskContextConfli
     resolution_memo: string | null;
     created_at: string;
     created_by: string | null;
-  }>('SELECT * FROM risk_context_conflicts WHERE id = $1', [id]);
+  }>('SELECT * FROM risk_context_conflicts WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
   const row = r.rows[0];
   if (!row) return null;
   return {

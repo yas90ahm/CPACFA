@@ -65,7 +65,8 @@ export async function pushAdjustmentToGL(
 
   const result = await pushJournalEntry(
     { connectionId, date, memo, lines },
-    pool
+    pool,
+    tenantId
   );
 
   if (!result.success) {

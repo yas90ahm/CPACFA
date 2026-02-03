@@ -28,10 +28,11 @@ const connectionStore = createInMemoryStore<AccountingConnection>({
 
 async function getConnectionById(
   connectionId: string,
-  pool?: Pool
+  pool?: Pool,
+  tenantId?: string
 ): Promise<AccountingConnection | null> {
-  if (isDbConfigured() && pool) {
-    return connectionRepo.getConnection(pool, connectionId);
+  if (isDbConfigured() && pool && tenantId) {
+    return connectionRepo.getConnection(pool, tenantId, connectionId);
   }
   return connectionStore.get(connectionId) ?? null;
 }
@@ -110,9 +111,9 @@ export async function createConnection(
   });
 }
 
-export async function getConnection(connectionId: string, pool?: Pool): Promise<AccountingConnection | undefined> {
-  if (isDbConfigured() && pool) {
-    const conn = await connectionRepo.getConnection(pool, connectionId);
+export async function getConnection(connectionId: string, pool?: Pool, tenantId?: string): Promise<AccountingConnection | undefined> {
+  if (isDbConfigured() && pool && tenantId) {
+    const conn = await connectionRepo.getConnection(pool, tenantId, connectionId);
     return conn ?? undefined;
   }
   return connectionStore.get(connectionId);
@@ -128,30 +129,31 @@ export async function listConnections(tenantId: string, pool?: Pool): Promise<Ac
 export async function syncTrialBalance(
   connectionId: string,
   asOfDate?: string,
-  pool?: Pool
+  pool?: Pool,
+  tenantId?: string
 ): Promise<SyncTrialBalanceResult> {
-  const conn = await getConnectionById(connectionId, pool);
+  const conn = await getConnectionById(connectionId, pool, tenantId);
   if (!conn) {
     const date = asOfDate ?? new Date().toISOString().slice(0, 10);
     return { success: false, entries: [], asOfDate: date, provider: 'quickbooks', connectionId, errors: ['Connection not found'] };
   }
   const result = await getAdapter(conn.provider).syncTrialBalance(conn, connectionId, asOfDate);
-  if (isDbConfigured() && pool && result.success) {
-    await connectionRepo.updateConnection(pool, connectionId, { lastSyncAt: new Date().toISOString(), lastSyncStatus: 'success' });
+  if (isDbConfigured() && pool && tenantId && result.success) {
+    await connectionRepo.updateConnection(pool, tenantId, connectionId, { lastSyncAt: new Date().toISOString(), lastSyncStatus: 'success' });
   } else if (!pool && result.success) {
     connectionStore.update(connectionId, { lastSyncAt: new Date().toISOString(), lastSyncStatus: 'success' });
   }
   return result;
 }
 
-export async function pushJournalEntry(input: PushJournalEntryInput, pool?: Pool): Promise<PushJournalEntryResult> {
-  const conn = await getConnectionById(input.connectionId, pool);
+export async function pushJournalEntry(input: PushJournalEntryInput, pool?: Pool, tenantId?: string): Promise<PushJournalEntryResult> {
+  const conn = await getConnectionById(input.connectionId, pool, tenantId);
   if (!conn) return { success: false, errors: ['Connection not found'] };
   return getAdapter(conn.provider).pushJournalEntry(conn, input);
 }
 
-export async function pullTransactions(input: PullTransactionsInput, pool?: Pool): Promise<PullTransactionsResult> {
-  const conn = await getConnectionById(input.connectionId, pool);
+export async function pullTransactions(input: PullTransactionsInput, pool?: Pool, tenantId?: string): Promise<PullTransactionsResult> {
+  const conn = await getConnectionById(input.connectionId, pool, tenantId);
   if (!conn) return { success: false, transactions: [], errors: ['Connection not found'] };
   return getAdapter(conn.provider).pullTransactions(conn, input);
 }

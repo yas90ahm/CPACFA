@@ -27,7 +27,7 @@ export async function createConnection(
   };
 }
 
-export async function getConnection(pool: Pool, id: string): Promise<AccountingConnection | null> {
+export async function getConnection(pool: Pool, tenantId: string, id: string): Promise<AccountingConnection | null> {
   const r = await pool.query<{
     id: string;
     tenant_id: string;
@@ -39,7 +39,7 @@ export async function getConnection(pool: Pool, id: string): Promise<AccountingC
     last_sync_error: string | null;
     created_at: string;
     updated_at: string;
-  }>('SELECT * FROM accounting_connections WHERE id = $1', [id]);
+  }>('SELECT * FROM accounting_connections WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
   const row = r.rows[0];
   if (!row) return null;
   return rowToConnection(row);
@@ -63,6 +63,7 @@ export async function listConnections(pool: Pool, tenantId: string): Promise<Acc
 
 export async function updateConnection(
   pool: Pool,
+  tenantId: string,
   id: string,
   patch: Partial<Pick<AccountingConnection, 'lastSyncAt' | 'lastSyncStatus' | 'lastSyncError'>>
 ): Promise<AccountingConnection | null> {
@@ -73,16 +74,17 @@ export async function updateConnection(
        last_sync_status = COALESCE($3, last_sync_status),
        last_sync_error = COALESCE($4, last_sync_error),
        updated_at = $5
-     WHERE id = $1`,
+     WHERE id = $1 AND tenant_id = $6`,
     [
       id,
       patch.lastSyncAt ?? null,
       patch.lastSyncStatus ?? null,
       patch.lastSyncError ?? null,
       now,
+      tenantId,
     ]
   );
-  return getConnection(pool, id);
+  return getConnection(pool, tenantId, id);
 }
 
 function rowToConnection(row: {

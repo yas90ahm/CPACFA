@@ -150,10 +150,10 @@ export async function getStagingArea(
   return items.slice(0, limit).map((i) => ({ ...i }));
 }
 
-/** When opts.pool is provided, fetches from Postgres; otherwise in-memory. */
-export async function getStagingItem(id: string, opts?: { pool?: Pool }): Promise<StagingItem | undefined> {
-  if (opts?.pool) {
-    return persistence.getStagingItem(opts.pool, id);
+/** When opts.pool is provided, fetches from Postgres (tenant-scoped); otherwise in-memory. */
+export async function getStagingItem(id: string, opts?: { pool?: Pool; tenantId?: string }): Promise<StagingItem | undefined> {
+  if (opts?.pool && opts?.tenantId) {
+    return persistence.getStagingItem(opts.pool, opts.tenantId, id);
   }
   const item = stagingStore.get(id);
   return item ? { ...item } : undefined;
@@ -180,11 +180,11 @@ export async function receiveHumanApproval(
   params: { id: string; signedBy?: string; signatureToken?: string },
   opts?: { pool?: Pool; tenantId?: string }
 ): Promise<{ ok: boolean; item?: StagingItem; error?: string }> {
-  if (opts?.pool) {
-    const existing = await persistence.getStagingItem(opts.pool, params.id);
+  if (opts?.pool && opts?.tenantId) {
+    const existing = await persistence.getStagingItem(opts.pool, opts.tenantId, params.id);
     if (!existing) return { ok: false, error: 'Staging item not found' };
     if (existing.status !== 'pending') return { ok: false, error: `Item is not pending (status: ${existing.status})` };
-    const updated = await persistence.updateStagingStatus(opts.pool, params.id, {
+    const updated = await persistence.updateStagingStatus(opts.pool, opts.tenantId, params.id, {
       status: 'approved',
       approvedAt: new Date().toISOString(),
       approvedBy: params.signedBy,
@@ -211,11 +211,11 @@ export async function receiveHumanRejection(
   opts?: { pool?: Pool; tenantId?: string }
 ): Promise<{ ok: boolean; item?: StagingItem; error?: string }> {
   const reason = params.rejectionReason?.trim() || 'No reason provided';
-  if (opts?.pool) {
-    const existing = await persistence.getStagingItem(opts.pool, params.id);
+  if (opts?.pool && opts?.tenantId) {
+    const existing = await persistence.getStagingItem(opts.pool, opts.tenantId, params.id);
     if (!existing) return { ok: false, error: 'Staging item not found' };
     if (existing.status !== 'pending') return { ok: false, error: `Item is not pending (status: ${existing.status})` };
-    const updated = await persistence.updateStagingStatus(opts.pool, params.id, {
+    const updated = await persistence.updateStagingStatus(opts.pool, opts.tenantId, params.id, {
       status: 'rejected',
       rejectedAt: new Date().toISOString(),
       rejectedReason: reason,
@@ -240,7 +240,7 @@ export async function receiveHumanRejection(
  */
 export async function handleApprovalWebhook(
   payload: ApprovalWebhookPayload,
-  opts?: { pool?: Pool }
+  opts?: { pool?: Pool; tenantId?: string }
 ): Promise<{ ok: boolean; item?: StagingItem; error?: string }> {
   if (payload.signal === 'HumanApproved') {
     return receiveHumanApproval(

@@ -91,8 +91,8 @@ type ValidatedEntry = { accountName: string; debit: number; credit: number; acco
 async function getEntriesFromSession(
   context?: ToolContext
 ): Promise<ValidatedEntry[] | undefined> {
-  if (!context?.sessionId || !context?.pool) return undefined;
-  const session = await persistence.getSession(context.pool, context.sessionId);
+  if (!context?.sessionId || !context?.pool || !context?.tenantId) return undefined;
+  const session = await persistence.getSession(context.pool, context.tenantId, context.sessionId);
   const snap = session?.pipelineInputSnapshot as
     | { type: 'raw_rows'; rawRows?: Array<{ accountName?: string; debit?: number; credit?: number; accountCode?: string }> }
     | { type: 'statements'; output?: { trialBalance?: { entries?: ValidatedEntry[] } } }
@@ -127,8 +127,8 @@ interface RatioTotals {
 }
 
 async function getRatioTotalsFromSession(context?: ToolContext): Promise<RatioTotals | undefined> {
-  if (!context?.sessionId || !context?.pool) return undefined;
-  const session = await persistence.getSession(context.pool, context.sessionId);
+  if (!context?.sessionId || !context?.pool || !context?.tenantId) return undefined;
+  const session = await persistence.getSession(context.pool, context.tenantId, context.sessionId);
   const snap = session?.pipelineInputSnapshot as
     | { type: 'statements'; output?: { balanceSheet?: { totalAssets?: number; totalLiabilities?: number; totalEquity?: number }; profitAndLoss?: { totalRevenue?: number; netIncome?: number } } }
     | undefined;

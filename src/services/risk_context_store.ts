@@ -200,7 +200,7 @@ export async function resolveConflictWithMemo(
   createdBy?: string
 ): Promise<boolean> {
   if (!ENABLE_INTEGRATED_SUPERVISOR) return false;
-  const conflict = await conflictsRepo.getById(pool, conflictId);
+  const conflict = await conflictsRepo.getById(pool, tenantId, conflictId);
   if (!conflict || conflict.resolvedAt) return false;
   const eventType: AuditLedgerEventType = 'user_induced_variance';
   await recordOverride(pool, {
@@ -216,7 +216,7 @@ export async function resolveConflictWithMemo(
     userPromptRationale: resolutionMemo,
     createdBy,
   });
-  return conflictsRepo.resolve(pool, conflictId, resolutionMemo, createdBy);
+  return conflictsRepo.resolve(pool, tenantId, conflictId, resolutionMemo, createdBy);
 }
 
 function buildPromptsFromFlagsAndWarnings(flags: RiskFlag[], liquidityWarnings: LiquidityWarning[]): string[] {

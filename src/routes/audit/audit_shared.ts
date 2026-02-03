@@ -19,8 +19,16 @@ export function getAuditorToken(): string | null {
 /** Optional Python backend URL for Forensic Skeptic / Audit Dashboard (e.g. http://localhost:5000). */
 export const BACKEND_PYTHON_URL = process.env.BACKEND_PYTHON_URL ?? '';
 
+/** In production, avoid leaking system paths, table names, or stack traces to the client. */
+const SANITIZED_MESSAGE = 'An internal error occurred. Please try again or contact support.';
+
 export function handleAuditError(res: Response, err: unknown, label: string): void {
-  const message = err instanceof Error ? err.message : String(err);
+  let message: string;
+  if (process.env.NODE_ENV === 'production') {
+    message = SANITIZED_MESSAGE;
+  } else {
+    message = err instanceof Error ? err.message : String(err);
+  }
   res.status(500).json({ error: label, message });
 }
 
@@ -43,8 +51,8 @@ export function handleAuditOrIntegrityError(res: Response, err: unknown, label: 
   if (err instanceof SessionPersistenceError) {
     res.status(500).json({
       error: 'SessionPersistenceError',
-      message: err.message,
-      operation: err.operation,
+      message: process.env.NODE_ENV === 'production' ? SANITIZED_MESSAGE : err.message,
+      ...(process.env.NODE_ENV !== 'production' && { operation: err.operation }),
     });
     return;
   }

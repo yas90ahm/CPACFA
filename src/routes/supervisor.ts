@@ -166,12 +166,13 @@ router.post('/chat-verified', async (req: Request, res: Response) => {
 router.get('/session/:sessionId/trace', async (req: Request, res: Response) => {
   try {
     const sessionId = req.params.sessionId;
+    const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    if (!sessionId || !pool) {
+    if (!sessionId || !tenantId || !pool) {
       res.status(400).json({ error: 'Session id and tenant context required' });
       return;
     }
-    const session = await persistence.getSession(pool, sessionId);
+    const session = await persistence.getSession(pool, tenantId, sessionId);
     if (!session) {
       res.status(404).json({ error: 'Session not found' });
       return;

@@ -49,8 +49,9 @@ router.get('/connections', async (req: Request, res: Response) => {
 
 router.get('/connections/:id', async (req: Request, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    const conn = await getConnection(req.params.id, pool);
+    const conn = await getConnection(req.params.id, pool, tenantId);
     if (!conn) return res.status(404).json({ error: 'Connection not found' });
     res.json(conn);
   } catch (e) {
@@ -64,7 +65,7 @@ router.post('/sync-trial-balance', async (req: Request, res: Response) => {
     if (!connectionId) return res.status(400).json({ error: 'connectionId required' });
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    const result = await syncTrialBalance(connectionId, asOfDate, pool);
+    const result = await syncTrialBalance(connectionId, asOfDate, pool, tenantId);
     if (result.success && periodLabel && tenantId) {
       await saveUnadjustedFromSync(
         tenantId,
@@ -88,8 +89,9 @@ router.post('/push-journal-entry', async (req: Request, res: Response) => {
     if (!input?.connectionId || !input?.date || !Array.isArray(input?.lines)) {
       return res.status(400).json({ error: 'connectionId, date, and lines required' });
     }
+    const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    const result = await pushJournalEntry(input, pool);
+    const result = await pushJournalEntry(input, pool, tenantId);
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: String(e) });
@@ -102,8 +104,9 @@ router.post('/pull-transactions', async (req: Request, res: Response) => {
     if (!connectionId || !startDate || !endDate) {
       return res.status(400).json({ error: 'connectionId, startDate, endDate required' });
     }
+    const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    const result = await pullTransactions({ connectionId, startDate, endDate, accountCodes }, pool);
+    const result = await pullTransactions({ connectionId, startDate, endDate, accountCodes }, pool, tenantId);
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: String(e) });

@@ -57,7 +57,7 @@ router.post(
           createdBy: body.signedBy,
         });
       }
-      const result = await receiveHumanApproval({ id: body.id, signedBy: body.signedBy }, pool ? { pool } : undefined);
+      const result = await receiveHumanApproval({ id: body.id, signedBy: body.signedBy }, pool && tenantId ? { pool, tenantId } : undefined);
       if (!result.ok) {
         res.status(result.error === 'Staging item not found' ? 404 : 400).json({ error: result.error });
         return;
@@ -83,7 +83,7 @@ router.post(
           createdBy: body.signedBy,
         });
       }
-      const result = await receiveHumanRejection({ id: body.id, rejectionReason: body.reason ?? 'No reason provided' }, pool ? { pool } : undefined);
+      const result = await receiveHumanRejection({ id: body.id, rejectionReason: body.reason ?? 'No reason provided' }, pool && tenantId ? { pool, tenantId } : undefined);
       if (!result.ok) {
         res.status(result.error === 'Staging item not found' ? 404 : 400).json({ error: result.error });
         return;
@@ -176,8 +176,9 @@ router.get(
 router.get(
   '/staging/:id',
   asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    const item = await getStagingItem(req.params.id, pool ? { pool } : undefined);
+    const item = await getStagingItem(req.params.id, pool && tenantId ? { pool, tenantId } : undefined);
     if (!item) {
       res.status(404).json({ error: 'Staging item not found' });
       return;
@@ -206,8 +207,9 @@ router.post(
       res.status(400).json({ error: 'rejectionReason required when signal is HumanRejected (feedback loop: Why?)' });
       return;
     }
+    const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    const result = await handleApprovalWebhook(body, pool ? { pool } : undefined);
+    const result = await handleApprovalWebhook(body, pool && tenantId ? { pool, tenantId } : undefined);
     if (!result.ok) {
       res.status(result.error === 'Staging item not found' ? 404 : 400).json({ ok: false, error: result.error });
       return;

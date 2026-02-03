@@ -193,8 +193,8 @@ export async function runUnifiedSupervisor(
       : undefined;
 
   let initialMessageHistory: { provider: string; messages: unknown[] } | undefined;
-  if (pool && sessionId) {
-    const session = await getSession(pool, sessionId);
+  if (pool && tenantId && sessionId) {
+    const session = await getSession(pool, tenantId, sessionId);
     if (session?.messageHistory != null && isPersistedMessageHistory(session.messageHistory)) {
       initialMessageHistory = session.messageHistory;
     }
@@ -214,12 +214,12 @@ export async function runUnifiedSupervisor(
           appendReasoningLog(pool, tenantId, sessionId, { ...entry, timestamp: entry.timestamp || new Date().toISOString() })
       : undefined;
   const onObservationPersisted =
-    pool && sessionId
-      ? (lastStep: string, lastResultSummary: string) => updateSession(pool, sessionId, { lastStep, lastResultSummary })
+    pool && tenantId && sessionId
+      ? (lastStep: string, lastResultSummary: string) => updateSession(pool, tenantId, sessionId, { lastStep, lastResultSummary })
       : undefined;
   const onMessageHistoryPersisted =
-    pool && sessionId
-      ? (payload: { provider: string; messages: unknown[] }) => updateSession(pool, sessionId, { messageHistory: payload })
+    pool && tenantId && sessionId
+      ? (payload: { provider: string; messages: unknown[] }) => updateSession(pool, tenantId, sessionId, { messageHistory: payload })
       : undefined;
 
   const context =

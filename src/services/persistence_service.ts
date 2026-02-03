@@ -98,16 +98,16 @@ export async function createStagingItem(
       now,
     ]
   );
-  const got = await getStagingItem(pool, id);
+  const got = await getStagingItem(pool, tenantId, id);
   if (!got) throw new Error('createStagingItem: insert failed');
   return got;
 }
 
-export async function getStagingItem(pool: Pool, id: string): Promise<StagingItemShape | undefined> {
+export async function getStagingItem(pool: Pool, tenantId: string, id: string): Promise<StagingItemShape | undefined> {
   const r = await pool.query(
     `SELECT id, tenant_id, proposed_action, justification, status, type, amount, payload, created_at, updated_at, approved_at, approved_by, rejected_at, rejected_reason
-     FROM tenant_hitl_staging WHERE id = $1`,
-    [id]
+     FROM tenant_hitl_staging WHERE id = $1 AND tenant_id = $2`,
+    [id, tenantId]
   );
   const row = r.rows[0];
   if (!row) return undefined;
@@ -136,6 +136,7 @@ export async function listStagingItems(
 
 export async function updateStagingStatus(
   pool: Pool,
+  tenantId: string,
   id: string,
   update: {
     status: 'approved' | 'rejected';
@@ -148,21 +149,21 @@ export async function updateStagingStatus(
   const now = new Date().toISOString();
   if (update.status === 'approved') {
     await pool.query(
-      `UPDATE tenant_hitl_staging SET status = 'approved', updated_at = $1, approved_at = $1, approved_by = $2 WHERE id = $3`,
-      [now, update.approvedBy ?? null, id]
+      `UPDATE tenant_hitl_staging SET status = 'approved', updated_at = $1, approved_at = $1, approved_by = $2 WHERE id = $3 AND tenant_id = $4`,
+      [now, update.approvedBy ?? null, id, tenantId]
     );
   } else {
     await pool.query(
-      `UPDATE tenant_hitl_staging SET status = 'rejected', updated_at = $1, rejected_at = $1, rejected_reason = $2 WHERE id = $3`,
-      [now, update.rejectedReason ?? null, id]
+      `UPDATE tenant_hitl_staging SET status = 'rejected', updated_at = $1, rejected_at = $1, rejected_reason = $2 WHERE id = $3 AND tenant_id = $4`,
+      [now, update.rejectedReason ?? null, id, tenantId]
     );
   }
-  return getStagingItem(pool, id);
+  return getStagingItem(pool, tenantId, id);
 }
 
-/** Delete a staging item by id. Returns true if deleted. */
-export async function deleteStagingItem(pool: Pool, id: string): Promise<boolean> {
-  const r = await pool.query(`DELETE FROM tenant_hitl_staging WHERE id = $1`, [id]);
+/** Delete a staging item by id. Returns true if deleted. Tenant-scoped to prevent cross-tenant deletion. */
+export async function deleteStagingItem(pool: Pool, tenantId: string, id: string): Promise<boolean> {
+  const r = await pool.query(`DELETE FROM tenant_hitl_staging WHERE id = $1 AND tenant_id = $2`, [id, tenantId]);
   return (r.rowCount ?? 0) > 0;
 }
 
@@ -235,16 +236,16 @@ export async function createSession(
       now,
     ]
   );
-  const got = await getSession(pool, id);
+  const got = await getSession(pool, tenantId, id);
   if (!got) throw new Error('createSession: insert failed');
   return got;
 }
 
-export async function getSession(pool: Pool, sessionId: string): Promise<SupervisorSessionRow | undefined> {
+export async function getSession(pool: Pool, tenantId: string, sessionId: string): Promise<SupervisorSessionRow | undefined> {
   const r = await pool.query(
     `SELECT id, tenant_id, user_id, mode, status, pipeline_input_snapshot, last_step, last_result_summary, message_history, COALESCE(reasoning_logs, '[]'::jsonb) AS reasoning_logs, created_at, updated_at, completed_at
-     FROM tenant_supervisor_sessions WHERE id = $1`,
-    [sessionId]
+     FROM tenant_supervisor_sessions WHERE id = $1 AND tenant_id = $2`,
+    [sessionId, tenantId]
   );
   const row = r.rows[0] as {
     id: string;
@@ -286,6 +287,7 @@ export async function getSession(pool: Pool, sessionId: string): Promise<Supervi
 
 export async function updateSession(
   pool: Pool,
+  tenantId: string,
   sessionId: string,
   patch: Partial<{
     status: 'active' | 'paused' | 'completed' | 'failed';
@@ -319,12 +321,12 @@ export async function updateSession(
     updates.push(`completed_at = $${i++}`);
     values.push(patch.completedAt);
   }
-  values.push(sessionId);
+  values.push(sessionId, tenantId);
   await pool.query(
-    `UPDATE tenant_supervisor_sessions SET ${updates.join(', ')} WHERE id = $${i}`,
+    `UPDATE tenant_supervisor_sessions SET ${updates.join(', ')} WHERE id = $${i} AND tenant_id = $${i + 1}`,
     values
   );
-  return getSession(pool, sessionId);
+  return getSession(pool, tenantId, sessionId);
 }
 
 export interface ListSessionsOptions {
@@ -477,11 +479,10 @@ export async function appendReasoningLog(
 export async function loadSessionSnapshot(
   pool: Pool,
   sessionId: string,
-  tenantId?: string
+  tenantId: string
 ): Promise<SessionSnapshot | undefined> {
-  const session = await getSession(pool, sessionId);
+  const session = await getSession(pool, tenantId, sessionId);
   if (!session) return undefined;
-  if (tenantId != null && session.tenantId !== tenantId) return undefined;
   const snap = session.pipelineInputSnapshot as SessionSnapshot | null | undefined;
   if (snap == null || typeof snap !== 'object' || !('type' in snap)) return undefined;
   return snap as SessionSnapshot;
@@ -532,16 +533,16 @@ export async function createSessionUpload(
       params.metadata != null ? JSON.stringify(params.metadata) : null,
     ]
   );
-  const row = await getSessionUpload(pool, id);
+  const row = await getSessionUpload(pool, tenantId, id);
   if (!row) throw new Error('createSessionUpload: insert failed');
   return row;
 }
 
-export async function getSessionUpload(pool: Pool, uploadId: string): Promise<SessionUploadRow | undefined> {
+export async function getSessionUpload(pool: Pool, tenantId: string, uploadId: string): Promise<SessionUploadRow | undefined> {
   const r = await pool.query(
     `SELECT id, tenant_id, session_id, filename, content_type, summary_text, metadata, uploaded_at
-     FROM tenant_session_uploads WHERE id = $1`,
-    [uploadId]
+     FROM tenant_session_uploads WHERE id = $1 AND tenant_id = $2`,
+    [uploadId, tenantId]
   );
   const row = r.rows[0] as {
     id: string;
@@ -598,5 +599,5 @@ export async function updateSessionUploadMetadata(
     `UPDATE tenant_session_uploads SET metadata = $1 WHERE id = $2 AND tenant_id = $3`,
     [JSON.stringify(metadata), uploadId, tenantId]
   );
-  return getSessionUpload(pool, uploadId);
+  return getSessionUpload(pool, tenantId, uploadId);
 }
