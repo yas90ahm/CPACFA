@@ -20,7 +20,7 @@ export interface DepreciationScheduleLine {
   endingBookValue: number;
 }
 
-/** Full depreciation schedule for one asset (API parity with Python DepreciationSchedule). */
+/** Full depreciation schedule for one asset (ASC 360 / IAS 16). */
 export interface DepreciationSchedule {
   assetId: string;
   assetDescription: string;

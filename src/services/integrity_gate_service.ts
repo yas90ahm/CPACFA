@@ -134,7 +134,7 @@ function getTrialBalanceTotals(
 }
 
 /**
- * Resolve tolerance from financial_rules.json using equations.*.toleranceKey (same Accounting Laws as Python).
+ * Resolve tolerance from financial_rules.json using equations.*.toleranceKey (ASC/IFRS).
  */
 function getToleranceForGate(): number {
   const rules = getFinancialRules();

@@ -5,7 +5,7 @@
  */
 
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
-import type { ReasoningChainEntry } from './export_service.js';
+import type { ReasoningChainEntry, CompliancePackage } from './export_service.js';
 
 const MARGIN = 50;
 const LINE_HEIGHT = 14;
@@ -13,7 +13,7 @@ const FONT_SIZE = 11;
 const TITLE_SIZE = 16;
 const SMALL_SIZE = 9;
 
-/** Structured payload for PDF with agent narrative and Reasoning Chain appendix. */
+/** Structured payload for PDF with agent narrative, Reasoning Chain appendix, and optional Compliance Package. */
 export interface StructuredPdfPayload {
   cover: Record<string, string>;
   executive_summary: string;
@@ -25,6 +25,8 @@ export interface StructuredPdfPayload {
   reasoning_chain_appendix?: ReasoningChainEntry[];
   /** When true, show bold header: UNAUDITED NARRATIVE - PRELIMINARY ONLY (QUALITATIVE_EVIDENCE_MISSING). */
   unauditedNarrativeHeader?: boolean;
+  /** Compliance Package: balanced statements, IRAC justifications, ledger hash (audit binder). */
+  compliancePackage?: CompliancePackage;
 }
 
 function wrapLines(
@@ -236,6 +238,20 @@ export async function createPdfFromStructuredPayload(payload: StructuredPdfPaylo
       y -= LINE_HEIGHT;
       step += 1;
     }
+  }
+
+  if (payload.compliancePackage) {
+    if (y < 200) {
+      page = doc.addPage([pageWidth, pageHeight]);
+      y = pageHeight - MARGIN;
+    }
+    drawText('Compliance Package (Audit Binder)', { bold: true, size: 14 });
+    y -= LINE_HEIGHT;
+    drawText('Balanced Financial Statements: Included in this report. IRAC-grounded justification for every agentic adjustment: see Audit Trail above.', { size: SMALL_SIZE });
+    y -= LINE_HEIGHT;
+    drawText('Ledger integrity (SHA-256): ' + payload.compliancePackage.ledgerHash, { size: SMALL_SIZE });
+    drawText('This hash proves the ledger has not been tampered with since the last CPA review.', { size: SMALL_SIZE });
+    y -= LINE_HEIGHT;
   }
 
   const pdfBytes = await doc.save();

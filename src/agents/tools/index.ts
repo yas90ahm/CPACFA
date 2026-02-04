@@ -47,16 +47,6 @@ import {
   type LeaseLiabilityInput,
 } from './leaseLiability.js';
 import {
-  getPortfolioFinalizationPolicyDefinition,
-  runGetPortfolioFinalizationPolicy,
-  type GetPortfolioFinalizationPolicyInput,
-} from './portfolioPolicy.js';
-import {
-  reconcileCPAwithCFADefinition,
-  runReconcileCPAwithCFA,
-  type ReconcileCPAwithCFAInput,
-} from './reconcileCPAwithCFA.js';
-import {
   proposeTrialBalanceAdjustmentDefinition,
   runProposeTrialBalanceAdjustment,
   type ProposeTrialBalanceAdjustmentInput,
@@ -75,11 +65,9 @@ const SUPERVISOR_SERVICE_TOOL_NAMES = new Set([
   'resolve_query_intent',
   'summarize_query_result',
   'step1CPA',
-  'step2CFA',
-  'step3Supervisor',
 ]);
 
-/** Trial balance → statements: use buildFinancialStatements tool (calls financialStatements.buildValidatedStatements). Python bridge deprecated. */
+/** Trial balance → statements: use buildFinancialStatements tool (calls financialStatements.buildValidatedStatements). */
 
 /** Entry shape used for buildFinancialStatements / Source of Truth. */
 type ValidatedEntry = { accountName: string; debit: number; credit: number; accountCode?: string };
@@ -159,8 +147,6 @@ export const toolDefinitions: ToolDefinition[] = [
   lookupVendorMemoryDefinition,
   checkCategoryConsistencyDefinition,
   storeUserCorrectionDefinition,
-  getPortfolioFinalizationPolicyDefinition,
-  reconcileCPAwithCFADefinition,
 ];
 
 export { classifyAccountDefinition, runClassifyAccount };
@@ -181,12 +167,6 @@ export type { GetDataGapsInput };
 export { leaseLiabilityDefinition, runLeaseLiability };
 export type { LeaseLiabilityInput };
 
-export { getPortfolioFinalizationPolicyDefinition, runGetPortfolioFinalizationPolicy };
-export type { GetPortfolioFinalizationPolicyInput };
-
-export { reconcileCPAwithCFADefinition, runReconcileCPAwithCFA };
-export type { ReconcileCPAwithCFAInput };
-
 export { lookupVendorMemoryDefinition, checkCategoryConsistencyDefinition, storeUserCorrectionDefinition };
 export type { LookupVendorMemoryInput, CheckCategoryConsistencyInput, StoreUserCorrectionInput };
 
@@ -198,11 +178,10 @@ export interface ToolContext {
   validatedEntries?: Array<{ accountName: string; debit: number; credit: number; accountCode?: string }>;
   /** Session id for Source of Truth lookup (pipeline_input_snapshot) when present. */
   sessionId?: string;
-  /** Pipeline input for step1CPA/step2CFA/step3Supervisor and catalog tools (delegated to supervisor_tools). */
+  /** Pipeline input for step1CPA and catalog tools (delegated to supervisor_tools). */
   pipelineInput?: import('../../services/result_generator.js').PipelineInput;
-  /** Mutated by supervisor_tools when step1CPA/step2CFA/step3Supervisor or catalog tools run. */
+  /** Mutated by supervisor_tools when step1CPA or catalog tools run. */
   step1Output?: SupervisorToolContext['step1Output'];
-  step2Output?: SupervisorToolContext['step2Output'];
   lastCatalogResult?: SupervisorToolContext['lastCatalogResult'];
 }
 
@@ -236,13 +215,11 @@ export async function executeTool(
       tenantId: context?.tenantId,
       pool: context?.pool ?? null,
       step1Output: context?.step1Output,
-      step2Output: context?.step2Output,
       lastCatalogResult: context?.lastCatalogResult,
     };
     const result = await executeSupervisorServiceTool(name, input as Record<string, unknown>, ctx);
     if (context) {
       context.step1Output = ctx.step1Output;
-      context.step2Output = ctx.step2Output;
       context.lastCatalogResult = ctx.lastCatalogResult;
     }
     if (result.success) {
@@ -321,10 +298,6 @@ export async function executeTool(
       return runCheckCategoryConsistency(input as CheckCategoryConsistencyInput);
     case 'storeUserCorrection':
       return runStoreUserCorrection(input as StoreUserCorrectionInput);
-    case 'getPortfolioFinalizationPolicy':
-      return runGetPortfolioFinalizationPolicy(input as GetPortfolioFinalizationPolicyInput);
-    case 'reconcileCPAwithCFA':
-      return runReconcileCPAwithCFA(input as ReconcileCPAwithCFAInput);
     case 'proposeTrialBalanceAdjustment': {
       if (!context?.tenantId || !context?.pool) {
         return {

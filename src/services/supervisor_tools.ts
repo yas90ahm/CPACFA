@@ -1,13 +1,11 @@
 /**
- * Supervisor tools: wrap CPA/CFA/Supervisor steps as tools callable by Claude (ReAct).
- * Session context holds pipeline input and step outputs so the agent can chain step1 → step2 → step3.
- * Catalog tools (list_datasets, query_dataset) use tenantId and pool from context for ad-hoc analysis.
+ * Supervisor tools: CPA step and catalog tools callable by Claude (ReAct).
+ * Session context holds pipeline input and step outputs. Focus: CPA judgment and math verification.
  */
 
 import type { Pool } from 'pg';
-import type { PipelineInput, FiveKeyRatios, ResultGeneratorOutput } from './result_generator.js';
-import { step1CPA, step2CFA, step3Supervisor } from './result_generator.js';
-import { resolveConflict, formatConflictForSupervisor } from './lead_partner_orchestrator.js';
+import type { PipelineInput, ResultGeneratorOutput } from './result_generator.js';
+import { step1CPA } from './result_generator.js';
 import type { BalanceSheet, ProfitAndLoss } from '../types/financial.js';
 import { computeConfidence } from '../llm/guardrails.js';
 import type { LLMTool } from '../llm/tool_schema.js';
@@ -16,13 +14,6 @@ import { runCatalogQuery } from './catalog_query_service.js';
 import { resolveQueryIntentAgentic } from './agentic_query_intent.js';
 import { summarizeQueryResultAgentic } from './agentic_query_summary.js';
 import type { CatalogQueryResult } from '../types/data_catalog.js';
-import { runGetPortfolioFinalizationPolicy } from '../agents/tools/portfolioPolicy.js';
-import { assessLiquidityRisk } from './analysis_agent.js';
-import type { LiquidityInputs } from '../types/analysis.js';
-import { appendLiquidityWarnings, getFlagsForContext, setUnresolvedConflicts } from './risk_context_store.js';
-import * as lastDcfRepo from '../db/repositories/risk_context_last_dcf_repository.js';
-import { ENABLE_INTEGRATED_SUPERVISOR } from '../lib/capability_flags.js';
-import { recordObservation } from './audit_ledger_service.js';
 
 /** Run-scoped context: pipeline input and step outputs for the ReAct loop; tenantId/pool for catalog tools */
 export interface SupervisorToolContext {
@@ -34,7 +25,6 @@ export interface SupervisorToolContext {
     reasoningChain?: unknown;
     confidence?: number;
   };
-  step2Output?: FiveKeyRatios;
   tenantId?: string;
   pool?: Pool | null;
   /** Last catalog query result (for summarize_query_result) */
@@ -93,38 +83,6 @@ export const SUPERVISOR_TOOLS: LLMTool[] = [
       required: [],
     },
   },
-  {
-    name: 'step2CFA',
-    description:
-      'Run the CFA step: compute 5 key ratios (Current Ratio, Quick Ratio, Debt-to-Equity, ROE, Net Margin) from the Balance Sheet and P&L. Call this after step1CPA. No input needed; uses the balance sheet and P&L from the last step1CPA run.',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-      required: [],
-    },
-  },
-  {
-    name: 'step3Supervisor',
-    description:
-      'Run the Supervisor step: produce an Executive Memo summarizing Balance Sheet, P&L, and key ratios. Call after step2CFA. No input needed; uses outputs from step1CPA and step2CFA.',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-      required: [],
-    },
-  },
-  {
-    name: 'getPortfolioFinalizationPolicy',
-    description:
-      'Returns the policy on portfolio period finalization and corrections. Call when the user asks about changing past performance, back-dating, correcting finalized periods, or why historical data cannot be overwritten. Cite the returned policy in your answer.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        topic: { type: 'string', description: 'Optional: "finalization" or "correction". Omit for full policy.' },
-      },
-      required: [],
-    },
-  },
 ];
 
 function buildPipelineInputFromArgs(args: Record<string, unknown>, ctx: SupervisorToolContext): PipelineInput | null {
@@ -176,96 +134,6 @@ export async function executeTool(
       return { success: true, summary, output: undefined };
     }
 
-    if (name === 'step2CFA') {
-      const step1 = ctx.step1Output;
-      if (!step1) {
-        return { success: false, summary: '', error: 'Run step1CPA first to produce Balance Sheet and P&L.' };
-      }
-      const ratios = step2CFA(step1.balanceSheet, step1.profitAndLoss);
-      ctx.step2Output = ratios;
-      const currentAssets = step1.balanceSheet.assets.reduce((s, l) => s + l.amount, 0);
-      const currentLiabilities = step1.balanceSheet.liabilities.reduce((s, l) => s + l.amount, 0);
-      const inventory = step1.balanceSheet.assets.find((a) => /inventory/i.test(a.label ?? ''))?.amount ?? 0;
-      const ar = step1.balanceSheet.assets.find((a) => /receivable/i.test(a.label ?? ''))?.amount ?? 0;
-      const ap = step1.balanceSheet.liabilities.find((l) => /payable/i.test(l.label ?? ''))?.amount ?? 0;
-      const liquidityInputs: LiquidityInputs = {
-        currentAssets,
-        inventory,
-        currentLiabilities,
-        revenue: step1.profitAndLoss.totalRevenue || 1,
-        accountsReceivable: ar,
-        accountsPayable: ap,
-      };
-      const assessment = assessLiquidityRisk(liquidityInputs);
-      if (assessment.riskLevel === 'moderate' || assessment.riskLevel === 'high') {
-        const periodLabelForLiquidity = ctx.pipelineInput && 'periodLabel' in ctx.pipelineInput ? (ctx.pipelineInput as { periodLabel?: string }).periodLabel : undefined;
-        await appendLiquidityWarnings(ctx.tenantId ?? 'default', periodLabelForLiquidity, [
-          {
-            source: 'assessLiquidityRisk',
-            riskLevel: assessment.riskLevel,
-            currentRatio: assessment.metrics?.currentRatio,
-            message: assessment.summary ?? `Liquidity risk: ${assessment.riskLevel}.`,
-          },
-        ], ctx.pool ?? undefined);
-      }
-      const tenantIdForObs = ctx.tenantId ?? 'default';
-      const periodLabelForObs = ctx.pipelineInput && 'periodLabel' in ctx.pipelineInput ? (ctx.pipelineInput as { periodLabel?: string }).periodLabel : undefined;
-      if (ctx.pool && periodLabelForObs) {
-        await recordObservation(ctx.pool, {
-          tenantId: tenantIdForObs,
-          periodLabel: periodLabelForObs,
-          eventType: 'cfa_recommendation',
-          deterministicFlagSnapshot: { source: 'step2CFA', ratios },
-        });
-      }
-      const summary = `Ratios: currentRatio=${ratios.currentRatio.toFixed(2)}, quickRatio=${ratios.quickRatio.toFixed(2)}, debtToEquity=${ratios.debtToEquity.toFixed(2)}, roe=${(ratios.roe * 100).toFixed(1)}%, netMargin=${(ratios.netMargin * 100).toFixed(1)}%.`;
-      return { success: true, summary, output: undefined };
-    }
-
-    if (name === 'step3Supervisor') {
-      const step1 = ctx.step1Output;
-      const step2 = ctx.step2Output;
-      if (!step1 || !step2) {
-        return { success: false, summary: '', error: 'Run step1CPA and step2CFA first.' };
-      }
-      const tenantId = ctx.tenantId ?? 'default';
-      const periodLabel = ctx.pipelineInput?.meta && 'periodLabel' in ctx.pipelineInput.meta
-        ? (ctx.pipelineInput.meta as { periodLabel?: string }).periodLabel
-        : undefined;
-      const professionalAuditFlags = await getFlagsForContext(ctx.pool ?? null, tenantId, periodLabel);
-      let dcfInput: { terminalGrowthRate: number } | undefined;
-      if (ctx.pool && periodLabel) {
-        const lastDcf = await lastDcfRepo.getByTenantPeriod(ctx.pool, tenantId, periodLabel);
-        if (lastDcf != null) {
-          dcfInput = { terminalGrowthRate: lastDcf.terminalGrowthRate };
-        }
-      }
-      const executiveMemo = step3Supervisor(step1.balanceSheet, step1.profitAndLoss, step2);
-      const conflict = resolveConflict(
-        step1.balanceSheet,
-        step1.profitAndLoss,
-        step2,
-        undefined,
-        professionalAuditFlags.length ? professionalAuditFlags : undefined,
-        dcfInput
-      );
-      if (conflict && ENABLE_INTEGRATED_SUPERVISOR && ctx.pool) {
-        await setUnresolvedConflicts(ctx.pool, tenantId, periodLabel, [conflict], periodLabel, undefined);
-      }
-      const summary = conflict
-        ? executiveMemo.slice(0, 500) + (executiveMemo.length > 500 ? '...' : '') + '\n\nConflict detected; see Dissenting Opinion below.'
-        : executiveMemo.slice(0, 500) + (executiveMemo.length > 500 ? '...' : '');
-      const output: ResultGeneratorOutput = {
-        balanceSheet: step1.balanceSheet,
-        profitAndLoss: step1.profitAndLoss,
-        ratios: step2,
-        executiveMemo,
-        ...(conflict && { dissentingOpinion: conflict }),
-        trialBalance: step1.trialBalance as ResultGeneratorOutput['trialBalance'],
-      };
-      return { success: true, summary, output };
-    }
-
     if (name === 'list_datasets') {
       const tenantId = ctx.tenantId ?? 'default';
       const datasets = await listDatasetsForTenant(ctx.pool ?? null, tenantId);
@@ -310,15 +178,6 @@ export async function executeTool(
       if (!last) return { success: false, summary: '', error: 'No prior query result to summarize. Run query_dataset first.' };
       const narrative = await summarizeQueryResultAgentic(last);
       return { success: true, summary: narrative, output: { querySummary: narrative } as unknown as ResultGeneratorOutput };
-    }
-
-    if (name === 'getPortfolioFinalizationPolicy') {
-      const result = runGetPortfolioFinalizationPolicy(
-        (args.topic ? { topic: args.topic as 'finalization' | 'correction' } : {}) as Parameters<typeof runGetPortfolioFinalizationPolicy>[0]
-      );
-      if (!result.success) return { success: false, summary: '', error: result.error };
-      const policy = (result.data as { policy: string }).policy;
-      return { success: true, summary: policy, output: result.data as unknown as ResultGeneratorOutput };
     }
 
     return { success: false, summary: '', error: `Unknown tool: ${name}` };

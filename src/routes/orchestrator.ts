@@ -51,7 +51,7 @@ router.post('/intent', validateBody(intentBodySchema), (req: Request, res: Respo
 
 /**
  * POST /api/orchestrator/lead-partner
- * Lead Partner CoT protocol: Deconstruction (CPA/CFA sub-tasks), Capability Assessment (Python, RAG, ERP),
+ * Lead Partner CoT protocol: Deconstruction (CPA sub-tasks), Capability Assessment (RAG, ERP),
  * Conflict Resolution (e.g. Market vs. Historical Cost), Self-Correction (reasonability check).
  * Body: { query (required), rawRows?, entries?, bankStatementBalance?, periodLabel?, balanceSheet?, profitAndLoss?, dcfInputs?, cfoView? }
  * Returns: thought_process, thought_process_xml, final_answer, cpa_sub_tasks, cfa_sub_tasks, tools_used, conflict_variance?, reasonability_checks.

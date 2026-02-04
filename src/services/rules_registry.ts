@@ -1,6 +1,6 @@
 /**
  * RulesRegistry — reads shared/config/financial_rules.json.
- * Single source of truth for rounding tolerance and materiality; both Node and Python load this file.
+ * Single source of truth for rounding tolerance and materiality (ASC/IFRS accounting standards only).
  * Values are read from disk on each access so changing the JSON is respected instantly.
  */
 
@@ -17,7 +17,7 @@ const DEFAULT_ROUNDING_TOLERANCE = 0.01;
 const DEFAULT_MATERIALITY_THRESHOLD = 0.01;
 
 /**
- * Path to financial_rules.json. Export so Python bridge / workers can read the same file for parity.
+ * Path to financial_rules.json (accounting standards: rounding, materiality, equations).
  */
 export function getConfigPath(): string {
   const envPath = process.env.RULES_CONFIG_PATH;

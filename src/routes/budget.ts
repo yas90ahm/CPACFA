@@ -11,7 +11,6 @@ import {
   lockBudgetVersion,
 } from '../services/budget_version_service.js';
 import { buildDriverBasedPlan } from '../services/driver_based_planning_service.js';
-import { runReforecastAgentic } from '../services/agentic_reforecast_service.js';
 import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
 import { validateBody, validateParams } from '../middleware/validationMiddleware.js';
 import {
@@ -19,7 +18,6 @@ import {
   updateBudgetVersionSchema,
   lockBudgetVersionSchema,
   driverBasedPlanSchema,
-  reforecastSchema,
   budgetVersionIdParamSchema,
 } from '../schemas/budgetSchemas.js';
 
@@ -120,18 +118,12 @@ router.post('/driver-based', validateBody(driverBasedPlanSchema), (req: Request,
   }
 });
 
-/** POST /api/budget/reforecast — Agentic reforecast from actuals + prior budget */
-router.post('/reforecast', validateBody(reforecastSchema), async (req: Request, res: Response) => {
-  try {
-    const body = req.body;
-    const result = await runReforecastAgentic(body);
-    res.json(result);
-  } catch (e) {
-    res.status(500).json({
-      error: 'Reforecast failed',
-      message: e instanceof Error ? e.message : String(e),
-    });
-  }
+/** POST /api/budget/reforecast — Stub (CFO agentic reforecast removed); use driver-based plan. */
+router.post('/reforecast', (req: Request, res: Response) => {
+  res.status(410).json({
+    error: 'Reforecast endpoint deprecated',
+    message: 'Agentic reforecast (CFO) removed. Use POST /api/budget/driver-based for planning.',
+  });
 });
 
 export default router;

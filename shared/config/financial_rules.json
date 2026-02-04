@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Single source of truth for financial validation rules. Changes here apply to both Node (Agent) and Python (Math engine) immediately.",
+  "description": "Single source of truth for accounting validation rules (ASC/IFRS). Rounding tolerance and materiality.",
   "roundingTolerance": 0.01,
   "materiality": {
     "defaultThreshold": 0.01,

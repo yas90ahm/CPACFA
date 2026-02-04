@@ -1,6 +1,6 @@
 /**
  * Audit forensics route: dashboard/forensic-anomalies.
- * Uses internal agentic_gap_analyzer for forensic scans (no Python backend).
+ * Uses internal agentic_gap_analyzer for forensic scans.
  */
 
 import { Router, type Request, type Response } from 'express';

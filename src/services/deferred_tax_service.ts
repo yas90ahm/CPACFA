@@ -24,7 +24,7 @@ export interface TemporaryDifference {
   sourceAccount?: string;
 }
 
-/** Input for stateless deferred tax computation (API parity with Python TemporaryDifference). */
+/** Input for stateless deferred tax computation (ASC 740 / IAS 12). */
 export interface TemporaryDifferenceInput {
   description: string;
   bookBasis: number;
@@ -35,7 +35,7 @@ export interface TemporaryDifferenceInput {
   accountCode?: string;
 }
 
-/** Rollforward result from stateless compute (API parity with Python DeferredTaxRollforward). */
+/** Rollforward result from stateless compute (ASC 740 / IAS 12). */
 export interface DeferredTaxRollforward {
   reportDate: string; // ISO date
   beginningDta: number;
@@ -69,7 +69,7 @@ export interface DeferredTaxResult {
 }
 
 // ============================================================================
-// Stateless Deferred Tax Computation (API parity with Python tax_provisioning)
+// Stateless Deferred Tax Computation (ASC 740 / IAS 12)
 // ============================================================================
 
 /**

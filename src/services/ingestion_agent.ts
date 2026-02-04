@@ -4,7 +4,7 @@
  * and applies autonomous data cleaning (US/UK dates, parentheses for negatives).
  *
  * Scope: .xlsx (multi-tab), .csv, .pdf (text/OCR via pdf-parse), .json.
- * For production PDF/OCR and advanced chunking, integrate Unstructured (Python) or LlamaIndex
+ * For production PDF/OCR and advanced chunking, integrate Unstructured or LlamaIndex
  * via a backend service or MCP tool.
  */
 

@@ -9,6 +9,9 @@ import multer from 'multer';
 import { parseTrialBalance } from '../../services/trialBalanceParser.js';
 import { ingestTrialBalanceFile, type IngestTrialBalanceResult } from '../../services/fileIngestion.js';
 import { buildValidatedStatements, MathematicalIntegrityError } from '../../services/financialStatements.js';
+import { getRoundingTolerance } from '../../services/rules_registry.js';
+import { absGt } from '../../utils/decimal.js';
+import { suggestJournalEntriesForImbalance } from '../../services/agentic_gap_analyzer.js';
 import { generateStatements } from '../../services/statementGenerator.js';
 import { buildCashFlowStatement, buildCashFlowFromTransactions } from '../../services/cashFlow.js';
 import { buildEquityChangesStatement } from '../../services/equityChanges.js';
@@ -21,6 +24,7 @@ import { registerStatementGeneration, recordPolicyChange } from '../../services/
 import { createIngestionIntegrityMemo } from '../../services/justification_service.js';
 import { markUploadCompleted, runResultPipeline } from '../../services/result_generator.js';
 import * as persistence from '../../services/persistence_service.js';
+import { createStagingItem } from '../../services/persistence_service.js';
 import { assessAgenticQuality } from '../../services/agentic_quality_assessor.js';
 import { shouldEscalateToHuman, submitToStaging } from '../../services/hitl_orchestrator.js';
 import { addTodosFromGaps } from '../../services/reconciliation_todos.js';
@@ -155,6 +159,56 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
     }
 
     const trialBalance = parseTrialBalance(rawRows);
+    const totalDebits =
+      trialBalance.totalDebits != null
+        ? trialBalance.totalDebits
+        : trialBalance.entries.reduce((s, e) => s + (e.debit ?? 0), 0);
+    const totalCredits =
+      trialBalance.totalCredits != null
+        ? trialBalance.totalCredits
+        : trialBalance.entries.reduce((s, e) => s + (e.credit ?? 0), 0);
+    const tolerance = getRoundingTolerance();
+    if (absGt(totalDebits, totalCredits, tolerance)) {
+      const imbalanceAmount = Math.abs(totalDebits - totalCredits);
+      let stagedId: string | undefined;
+      if (poolIngest && tenantIdIngest) {
+        const periodLabelStaged = body.periodLabel ?? `ingest-${new Date().toISOString().slice(0, 10)}`;
+        const item = await createStagingItem(poolIngest, tenantIdIngest, {
+          proposedAction: `Trial balance upload out of balance by ${imbalanceAmount}. Fix via HITL resolve-ingest.`,
+          justification: `Debits ${totalDebits} != Credits ${totalCredits}. Raw records staged; no save to main ledger.`,
+          type: 'journal_entry',
+          amount: imbalanceAmount,
+          payload: {
+            kind: 'trial_balance_ingest',
+            rawRows,
+            periodLabel: periodLabelStaged,
+            imbalanceAmount,
+            fileName: file.originalname ?? 'upload.csv',
+            totalDebits,
+            totalCredits,
+          },
+        });
+        stagedId = item.id;
+      }
+      const suggestions = await suggestJournalEntriesForImbalance({
+        imbalanceAmount,
+        totalDebits,
+        totalCredits,
+        unmappedRows: trialBalance.entries.slice(0, 30).map((e) => ({
+          accountName: e.accountName ?? '',
+          debit: e.debit,
+          credit: e.credit,
+        })),
+      });
+      return res.status(200).json({
+        status: 'staged',
+        stagedId,
+        imbalanceAmount,
+        suggestions,
+        message: 'Trial balance does not balance. Data staged for HITL fix; not saved to main ledger.',
+      });
+    }
+
     const fullSetIngest = body.fullSet === false ? false : true;
     const comparativeIngest = body.comparative === true;
     let priorTrialBalanceIngest: import('../../types/financial.js').TrialBalanceResult | undefined;

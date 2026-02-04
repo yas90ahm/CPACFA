@@ -253,6 +253,22 @@ function normalizeScheduleToTotal(entries: RecognitionScheduleEntry[], total: nu
   return out;
 }
 
+/**
+ * Deterministic: build straight-line recognition schedule (amount over N periods from start_date).
+ * Used by CPA bridge for agentic → deterministic execution. ASC 606 / IFRS 15.
+ */
+export function buildLinearRecognitionSchedule(
+  amount: number,
+  periods: number,
+  startDate: string
+): RecognitionScheduleEntry[] {
+  const start = new Date(startDate);
+  const end = new Date(start);
+  end.setMonth(end.getMonth() + Math.max(1, periods));
+  const endStr = end.toISOString().slice(0, 10);
+  return linearSchedule(startDate, endStr, amount);
+}
+
 function linearSchedule(start: string, end: string, total: number): RecognitionScheduleEntry[] {
   const entries: RecognitionScheduleEntry[] = [];
   const startDate = new Date(start);

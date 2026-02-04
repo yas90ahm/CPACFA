@@ -1,5 +1,5 @@
 /**
- * FinOS CFA Analyst — Types for audit, valuation, liquidity, and tools.
+ * FinOS analysis — Types for audit, liquidity, and tools.
  */
 
 /** Single entry for audit (e.g. GL line or time-series point) */
@@ -116,10 +116,3 @@ export interface LiquidityAssessment {
   bulletPoints: string[];
 }
 
-/** Python/MCP interpreter tool for regressions */
-export interface PythonInterpreterTool {
-  /** Execute Python code (e.g. for regression). Returns stdout + result. */
-  execute(code: string, timeoutMs?: number): Promise<{ stdout: string; stderr: string; result?: unknown }>;
-  /** Run a predefined regression on historical series. */
-  runRegression?(x: number[], y: number[]): Promise<{ slope: number; intercept: number; rSquared: number }>;
-}

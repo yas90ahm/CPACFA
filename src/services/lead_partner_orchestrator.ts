@@ -2,7 +2,7 @@
  * Lead Partner orchestrator — Chain of Thought (CoT) protocol.
  *
  * 1. Deconstruction: Break request into CPA and CFA sub-tasks.
- * 2. Capability Assessment: Identify tools (Python, RAG, ERP).
+ * 2. Capability Assessment: Identify tools (RAG, ERP).
  * 3. Conflict Resolution: Document variance when CFA contradicts CPA (e.g. Market vs. Historical Cost).
  * 4. Self-Correction Loop: Reasonability check after major calculations; re-trace data if not reasonable.
  * 5. Output: Internal reasoning in <thought_process> block before final answer.

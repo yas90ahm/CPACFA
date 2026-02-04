@@ -1,7 +1,7 @@
 /**
- * FinOS CFA Analyst — Pointed financial interrogation.
+ * FinOS analysis — Pointed financial interrogation.
  * Auditor Mode (YoY variances, round-sum, Benford); DCF & Sensitivity;
- * Liquidity risk (Current/Quick Ratio, CCC); Python/MCP tool for regressions.
+ * Liquidity risk (Current/Quick Ratio, CCC); built-in OLS regression.
  */
 
 import type {
@@ -17,7 +17,6 @@ import type {
   LiquidityInputs,
   LiquidityMetrics,
   LiquidityAssessment,
-  PythonInterpreterTool,
 } from '../types/analysis.js';
 import { BENFORD_EXPECTED } from '../types/analysis.js';
 
@@ -403,60 +402,17 @@ export function answerPointedQuestion(
   };
 }
 
-// --- Python / MCP tool for regressions ---
-
-let pythonTool: PythonInterpreterTool | null = null;
-
 /**
- * Register the Python interpreter tool (e.g. via MCP). When set, the CFA Analyst can run
- * complex statistical regressions on historical data. Wire your MCP Python server to
- * implement PythonInterpreterTool: execute(code) and optionally runRegression(x, y).
- */
-export function setPythonInterpreterTool(tool: PythonInterpreterTool | null): void {
-  pythonTool = tool;
-}
-
-/**
- * Run a simple linear regression on historical data. Uses built-in OLS if no Python tool; otherwise delegates to Python/MCP.
+ * Run a simple linear regression on historical data (built-in OLS).
  */
 export async function runRegression(
   x: number[],
   y: number[]
 ): Promise<{ slope: number; intercept: number; rSquared: number }> {
-  if (pythonTool?.runRegression) {
-    return pythonTool.runRegression(x, y);
-  }
-  if (pythonTool?.execute) {
-    const code = `
-import json
-n = len(x)
-if n < 2:
-    print(json.dumps({"slope": 0, "intercept": 0, "rSquared": 0}))
-else:
-    x_mean = sum(x)/n
-    y_mean = sum(y)/n
-    num = sum((x[i]-x_mean)*(y[i]-y_mean) for i in range(n))
-    den = sum((x[i]-x_mean)**2 for i in range(n))
-    slope = num/den if den else 0
-    intercept = y_mean - slope*x_mean
-    ss_res = sum((y[i] - (intercept+slope*x[i]))**2 for i in range(n))
-    ss_tot = sum((y[i]-y_mean)**2 for i in range(n))
-    r_sq = 1 - ss_res/ss_tot if ss_tot else 0
-    print(json.dumps({"slope": slope, "intercept": intercept, "rSquared": r_sq}))
-`;
-    const payload = `x = ${JSON.stringify(x)}\ny = ${JSON.stringify(y)}\n${code}`;
-    const out = await pythonTool.execute(payload);
-    try {
-      const line = (out.stdout || '').trim().split('\n').pop() || '{}';
-      return JSON.parse(line) as { slope: number; intercept: number; rSquared: number };
-    } catch {
-      return builtInRegression(x, y);
-    }
-  }
-  return builtInRegression(x, y);
+  return Promise.resolve(builtInRegression(x, y));
 }
 
-/** Built-in OLS regression (no Python required). */
+/** Built-in OLS regression. */
 function builtInRegression(x: number[], y: number[]): { slope: number; intercept: number; rSquared: number } {
   const n = x.length;
   if (n < 2) return { slope: 0, intercept: 0, rSquared: 0 };
@@ -481,9 +437,3 @@ function builtInRegression(x: number[], y: number[]): { slope: number; intercept
   return { slope, intercept, rSquared };
 }
 
-/**
- * Check whether the Python/MCP tool is available for complex regressions.
- */
-export function hasPythonTool(): boolean {
-  return pythonTool != null;
-}

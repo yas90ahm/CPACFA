@@ -310,6 +310,36 @@ export function registerJustificationForPeriod(
 }
 
 /**
+ * Create a "Bridge Adjustment Justification" memo for audit: CPA Brain adjustment executed via deterministic engine.
+ * Cites the specific ASC/IFRS paragraph and explains why the math (deterministic output) is correct.
+ * Call after every successful executeAgentRecommendation so the adjustment is accompanied by a justification.
+ */
+export function createBridgeAdjustmentJustification(
+  standardKey: string,
+  standardName: string,
+  params: Record<string, unknown>,
+  resultSummary: string
+): JustificationResponse {
+  const citations: Record<string, string> = {
+    Lease: 'FASB ASC 842-20-25-1; IFRS 16.22',
+    Revenue: 'FASB ASC 606-10-25-1; IFRS 15.31',
+    FixedAsset: 'FASB ASC 360-10-35-4; IAS 16.50',
+    Tax: 'FASB ASC 740-10-25-2; IAS 12.24',
+  };
+  const citation = citations[standardKey] ?? 'FASB ASC (General)';
+  const issue = `Whether the ${standardName} deterministic output is correct given the provided inputs.`;
+  const rule = `Under ${citation}, the accounting treatment is determined by the stated inputs; the deterministic engine computes the result in accordance with the standard.`;
+  const analysis = `Inputs: ${JSON.stringify(params).slice(0, 300)}. Deterministic output: ${resultSummary.slice(0, 200)}.`;
+  const conclusion = `The adjustment is supported by ${citation}. The math (deterministic output) is correct for the given inputs.`;
+  const sourceTag = `[Source: ${citation}]`;
+  const irac: IRACJustification = { issue, rule, analysis, conclusion, source: citation };
+  const formatted = formatJustificationText(irac, sourceTag);
+  const response: JustificationResponse = { irac, sourceTag, formatted };
+  registerJustificationForPeriod(`Bridge: ${standardName}`, response);
+  return response;
+}
+
+/**
  * Create an "Ingestion Integrity Memo" for audit: trial balance ingested and validated; debits equal credits; balance sheet equation satisfied.
  * Call immediately after every successful TB ingest so audit routes (e.g. Export Audit Defense) include it.
  */

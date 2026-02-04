@@ -17,6 +17,18 @@ import { DATA_GROUNDING_RULE, shouldEscalateToHuman } from '../llm/guardrails.js
 import { SUPERVISOR_TOOLS } from '../services/supervisor_tools.js';
 import type { PipelineInput } from '../services/result_generator.js';
 import { SessionPersistenceError } from '../errors.js';
+import {
+  detectIntegrityConflicts as runIntegrityConflictCheck,
+  type IntegrityConflictInput,
+  type DetectIntegrityConflictsResult,
+} from '../services/integrity_conflict_service.js';
+import {
+  runIntegrityGate,
+  detectSuspiciousPlugs,
+  type IntegrityGateInput,
+  type IntegrityGateResult,
+  type SuspiciousPlugResult,
+} from '../services/integrity_gate_service.js';
 
 const MODEL = 'claude-sonnet-4-5-20250929';
 const MAX_REACT_ITERATIONS = 15;
@@ -58,15 +70,11 @@ RULES:
    - lookupVendorMemory: When processing a new file or line item, query semantic memory: "Have I seen this vendor before? How did we categorize it last time?" Use when the user uploads data or asks about a vendor/account to check prior treatment.
    - checkCategoryConsistency: Before applying a category to a vendor/account, call this with (vendor, currentCategory). If it returns consistent: false and promptForUser, you MUST pause and ask the user exactly that prompt (e.g. "Last month you categorized 'Stripe' as 'Software'; should I continue doing that or use the new 'Merchant Services' category?"). Do not override a previous user correction without asking.
    - storeUserCorrection: When the user explicitly confirms or corrects a category (e.g. "Yes, keep Stripe as Software"), call this to store the correction so future runs are consistent.
-   - getPortfolioFinalizationPolicy: When the user asks about changing past performance, back-dating, or correcting finalized periods, call this and cite the returned policy in your answer.
-   - reconcileCPAwithCFA: When you have called both buildFinancialStatements and computeRatios, you MUST call this with those results before giving your final answer; if it returns a conflict, include that in your response.
    - list_datasets: List available datasets for ad-hoc query. Call when the user asks about data you can query.
    - query_dataset: Run a query on a dataset (datasetId required; optional periodLabel, entityId, limit). Call after list_datasets or resolve_query_intent.
-   - resolve_query_intent: Resolve a natural-language question to suggested datasetId and filters. Call when the user asks in plain language (e.g. "What was our runway?").
+   - resolve_query_intent: Resolve a natural-language question to suggested datasetId and filters. Call when the user asks in plain language.
    - summarize_query_result: Produce a short narrative summary of the last query_dataset result. Call after query_dataset when the user wants a summary.
    - step1CPA: Build Balance Sheet and P&L from trial balance. Input: optional raw_rows; or omit to use pipeline data from session.
-   - step2CFA: Compute 5 key ratios from the last step1CPA output. Call after step1CPA.
-   - step3Supervisor: Produce Executive Memo from step1CPA and step2CFA. Call after step2CFA.
 3. When buildFinancialStatements returns a math/balance error (imbalance amount, Assets != L+E, or trial balance does not balance), you MUST use proposeTrialBalanceAdjustment to propose a correcting debit/credit for the account(s) you identified in the ledger, then call buildFinancialStatements again. Do not exit until buildFinancialStatements returns success.
 4. After each Observation (tool result), output a Thought about what you observed and what you will do next (e.g. call another tool, or answer the user). Only stop when you have fully answered the user's core intent.
 5. When you have enough information to answer the user, provide a clear, complete response. Do not stop mid-flow; ensure the user's question is fully addressed.
@@ -186,35 +194,6 @@ function buildTools(): LLMTool[] {
         required: ['vendor', 'category'],
       },
     },
-    {
-      name: 'getPortfolioFinalizationPolicy',
-      description: getPortfolioFinalizationPolicyDescription,
-      inputSchema: {
-        type: 'object' as const,
-        properties: {
-          topic: { type: 'string', description: 'Optional: "finalization" or "correction". Omit for full policy.' },
-        },
-        required: [],
-      },
-    },
-    {
-      name: 'reconcileCPAwithCFA',
-      description: reconcileCPAwithCFADescription,
-      inputSchema: {
-        type: 'object' as const,
-        properties: {
-          totalAssets: { type: 'number', description: 'From buildFinancialStatements balanceSheet' },
-          totalLiabilities: { type: 'number', description: 'From buildFinancialStatements balanceSheet' },
-          totalEquity: { type: 'number', description: 'From buildFinancialStatements balanceSheet' },
-          totalRevenue: { type: 'number', description: 'From buildFinancialStatements profitAndLoss' },
-          netIncome: { type: 'number', description: 'From buildFinancialStatements profitAndLoss' },
-          currentRatio: { type: 'number', description: 'From computeRatios' },
-          quickRatio: { type: 'number', description: 'From computeRatios' },
-          roe: { type: 'number', description: 'From computeRatios' },
-        },
-        required: [],
-      },
-    },
   ];
   return [...masterTools, ...CATALOG_STEP_TOOLS];
 }
@@ -235,13 +214,90 @@ const checkCategoryConsistencyDescription =
   'Check if your proposed category contradicts a previous user correction. If consistent is false, you MUST pause and ask the user the returned promptForUser.';
 const storeUserCorrectionDescription =
   'Store a user correction (e.g. user confirmed Stripe -> Software) so future runs are consistent.';
-const getPortfolioFinalizationPolicyDescription =
-  'Returns the policy on portfolio period finalization and corrections. Call when the user asks about changing past performance, back-dating, or correcting finalized periods. Cite the returned policy in your answer.';
-const reconcileCPAwithCFADescription =
-  'Compare CPA (Balance Sheet / P&L) and CFA (ratios) outputs for conflicts. Call after both buildFinancialStatements and computeRatios; pass those results. If a conflict is returned, include it in your final response.';
 
-/** Catalog and step tools (from supervisor_tools); getPortfolioFinalizationPolicy is already in buildTools above. */
-const CATALOG_STEP_TOOLS = SUPERVISOR_TOOLS.filter((t) => t.name !== 'getPortfolioFinalizationPolicy');
+/**
+ * Internal method: cross-check between CPA (Accounting Standards) and covenant thresholds.
+ * Example: If CPA capitalizes a lease (adding debt to BS), checks whether new debt level violates hard-coded debt covenants.
+ * Returns conflicts with severity Fatal when covenant breach would block export.
+ */
+function detectIntegrityConflicts(input: IntegrityConflictInput): DetectIntegrityConflictsResult {
+  return runIntegrityConflictCheck(input);
+}
+
+/** Input for final integrity check before export (trial balance + balance sheet + optional entries for plug detection). */
+export interface FinalIntegrityCheckInput {
+  trialBalance: IntegrityGateInput['trialBalance'];
+  balanceSheet: IntegrityGateInput['balanceSheet'];
+  /** Optional entries for plug/Suspense detection (e.g. clean_ledger). If provided, export fails when Suspense/Misc/Other absorb too much. */
+  entriesForPlugDetection?: Array<{ accountName: string; debit: number; credit: number }>;
+  tolerance?: number;
+}
+
+/** Result of final integrity check. Export must fail (422) when passed is false. */
+export interface FinalIntegrityCheckResult {
+  passed: boolean;
+  error?: string;
+  checks?: IntegrityGateResult['checks'];
+  /** Account names classified as plug/Suspense (Miscellaneous, Suspense, Other). */
+  suspenseAccounts?: string[];
+  plugSuspicious?: boolean;
+}
+
+/**
+ * Final integrity check before allowing export. Runs integrity_gate_service one last time
+ * (trial balance + balance sheet) and optionally detects unclassified Suspense/plug accounts.
+ * Call from export route; if passed is false, return 422 Unprocessable Entity.
+ */
+export function finalIntegrityCheck(input: FinalIntegrityCheckInput): FinalIntegrityCheckResult {
+  const gateInput: IntegrityGateInput = {
+    trialBalance: input.trialBalance,
+    balanceSheet: input.balanceSheet,
+    tolerance: input.tolerance,
+  };
+  const gateResult = runIntegrityGate(gateInput);
+  if (!gateResult.passed) {
+    return {
+      passed: false,
+      error: gateResult.error,
+      checks: gateResult.checks,
+    };
+  }
+  const entries = input.entriesForPlugDetection;
+  if (entries && entries.length > 0) {
+    const { totalDebits, totalCredits } =
+      'totalDebits' in input.trialBalance && 'totalCredits' in input.trialBalance
+        ? input.trialBalance
+        : { totalDebits: 0, totalCredits: 0 };
+    let totalDebits_ = totalDebits;
+    let totalCredits_ = totalCredits;
+    if (totalDebits_ === 0 && totalCredits_ === 0) {
+      for (const e of entries) {
+        totalDebits_ += e.debit ?? 0;
+        totalCredits_ += e.credit ?? 0;
+      }
+    }
+    const plugResult: SuspiciousPlugResult = detectSuspiciousPlugs(
+      entries.map((e) => ({ accountName: e.accountName, debit: e.debit, credit: e.credit })),
+      totalDebits_,
+      totalCredits_,
+      { threshold: 0.9 }
+    );
+    if (plugResult.isSuspicious) {
+      return {
+        passed: false,
+        error: 'Export blocked: ledger contains unclassified Suspense/Miscellaneous/Other accounts that absorb material activity.',
+        suspenseAccounts: plugResult.plugAccountNames ?? [],
+        plugSuspicious: true,
+      };
+    }
+  }
+  return { passed: true, checks: gateResult.checks };
+}
+
+/** Catalog and step tools (from supervisor_tools); CPA + math only — no step2CFA, step3Supervisor, getPortfolioFinalizationPolicy. */
+const CATALOG_STEP_TOOLS = SUPERVISOR_TOOLS.filter(
+  (t) => t.name !== 'step2CFA' && t.name !== 'step3Supervisor' && t.name !== 'getPortfolioFinalizationPolicy'
+);
 
 export interface SupervisorInput {
   message: string;
@@ -254,7 +310,7 @@ export interface SupervisorOutput {
   thoughts: string[];
   toolCalls: Array<{ name: string; input: unknown; result: string }>;
   stopReason: string;
-  /** When step3Supervisor (or reconcile) detected CPA vs CFA conflict. */
+  /** When integrity conflict check (e.g. covenant breach) was detected. */
   dissentingOpinion?: unknown;
 }
 
@@ -278,7 +334,7 @@ export async function runSupervisor(
     pool?: Pool;
     sessionId?: string;
     validatedEntries?: Array<{ accountName: string; debit: number; credit: number; accountCode?: string }>;
-    /** Pipeline input for step1CPA/step2CFA/step3Supervisor and catalog tools. */
+    /** Pipeline input for step1CPA and catalog tools. */
     pipelineInput?: PipelineInput;
     /** When set, each Thought or Tool step is appended to the session reasoning_logs (audit trail). */
     onReasoningStep?: (entry: ReasoningLogEntry) => void | Promise<void>;
@@ -288,7 +344,7 @@ export async function runSupervisor(
     onMessageHistoryPersisted?: (payload: { provider: string; messages: unknown[] }) => void | Promise<void>;
     /** When set, used as initial messages for resume (provider must match current LLM). */
     initialMessageHistory?: { provider: string; messages: unknown[] };
-    /** Read-only CPA Historical Snapshot (Revenue CAGR, EBITDA Margin, Net Debt) for CFA tasks; must be cited, forbidden to invent starting points. */
+    /** Optional read-only context (e.g. prior period snapshot) for CPA judgment. */
     accountingContext?: string;
   }
 ): Promise<SupervisorOutput> {
@@ -300,10 +356,10 @@ export async function runSupervisor(
     sessionId: context?.sessionId,
     pipelineInput: context?.pipelineInput,
     step1Output: undefined,
-    step2Output: undefined,
     lastCatalogResult: undefined,
   };
   let lastDissentingOpinion: unknown;
+  let mathFailureRecoveryIterations = 0;
   /** Persistence reliability: every failure throws SessionPersistenceError so the API returns 500 (no silent green). */
   const fireReasoningStep = async (entry: ReasoningLogEntry): Promise<void> => {
     console.log('TRACE 4: fireReasoningStep', entry.stepType, entry.thought?.substring(0, 100));

@@ -20,6 +20,15 @@ import {
 } from '../services/hitl_orchestrator.js';
 import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
 import { recordOverride } from '../services/audit_ledger_service.js';
+import { parseTrialBalance } from '../services/trialBalanceParser.js';
+import { getRoundingTolerance } from '../services/rules_registry.js';
+import { absGt } from '../utils/decimal.js';
+import { saveUnadjustedFromUpload } from '../services/trial_balance_store_service.js';
+import { appendAuditLog } from '../services/audit_log_service.js';
+import * as persistence from '../services/persistence_service.js';
+import type { JournalEntryProposal } from '../services/agentic_gap_analyzer.js';
+import type { AuthRequest } from '../auth/middleware.js';
+import type { TrialBalanceEntry } from '../types/financial.js';
 
 const router = Router();
 
@@ -92,6 +101,99 @@ router.post(
       return;
     }
     res.status(400).json({ error: 'action must be approve or reject' });
+  })
+);
+
+/** POST /api/hitl/resolve-ingest — Apply adjustment to staged imbalanced upload; re-verify math; save to period_trial_balance. */
+router.post(
+  '/resolve-ingest',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = req.body as { stagedId: string; adjustment: JournalEntryProposal[] };
+    if (!body?.stagedId || !Array.isArray(body.adjustment)) {
+      res.status(400).json({ error: 'stagedId and adjustment (array) required' });
+      return;
+    }
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!pool || !tenantId) {
+      res.status(400).json({ error: 'Tenant context (pool, tenantId) required for resolve-ingest' });
+      return;
+    }
+    const item = await getStagingItem(body.stagedId, { pool, tenantId });
+    if (!item) {
+      res.status(404).json({ error: 'Staging item not found' });
+      return;
+    }
+    const payload = item.payload as Record<string, unknown> | undefined;
+    if (payload?.kind !== 'trial_balance_ingest') {
+      res.status(400).json({ error: 'Staging item is not a trial_balance_ingest; use /resolve for approve/reject' });
+      return;
+    }
+    const rawRows = payload.rawRows as Array<{ accountName: string; debit?: number; credit?: number }> | undefined;
+    const periodLabel = payload.periodLabel as string | undefined;
+    const fileName = (payload.fileName as string) ?? 'upload.csv';
+    const originalImbalance = (payload.imbalanceAmount as number) ?? 0;
+    if (!rawRows || !Array.isArray(rawRows) || !periodLabel) {
+      res.status(400).json({ error: 'Staging payload missing rawRows or periodLabel' });
+      return;
+    }
+
+    const base = parseTrialBalance(rawRows);
+    const adjustmentEntries: TrialBalanceEntry[] = body.adjustment.map((p) => ({
+      accountName: p.accountName,
+      debit: p.debit ?? 0,
+      credit: p.credit ?? 0,
+    }));
+    const combinedEntries = [...base.entries, ...adjustmentEntries];
+    const totalDebits = combinedEntries.reduce((s, e) => s + (e.debit ?? 0), 0);
+    const totalCredits = combinedEntries.reduce((s, e) => s + (e.credit ?? 0), 0);
+    const tolerance = getRoundingTolerance();
+    if (absGt(totalDebits, totalCredits, tolerance)) {
+      res.status(422).json({
+        error: 'MathematicalIntegrityError',
+        message: 'Adjustment still does not balance. Sum(Debits) != Sum(Credits).',
+        totalDebits,
+        totalCredits,
+        imbalanceAmount: Math.abs(totalDebits - totalCredits),
+      });
+      return;
+    }
+
+    const authReq = req as AuthRequest;
+    await saveUnadjustedFromUpload(
+      tenantId,
+      periodLabel,
+      combinedEntries,
+      { uploadedBy: authReq.userId, fileName },
+      pool
+    );
+
+    appendAuditLog(
+      {
+        action: 'hitl_ingest_fix',
+        resource: `staged:${body.stagedId}`,
+        detail: JSON.stringify({
+          originalImbalance,
+          adjustmentApplied: body.adjustment,
+          periodLabel,
+          totalDebits,
+          totalCredits,
+        }),
+        actor: authReq.userId ?? 'anonymous',
+      },
+      { pool, tenantId }
+    );
+
+    await persistence.updateStagingStatus(pool, tenantId, body.stagedId, {
+      status: 'approved',
+      approvedBy: authReq.userId ?? undefined,
+    });
+
+    res.json({
+      ok: true,
+      periodLabel,
+      message: 'Staged data fixed and saved to period_trial_balance.',
+    });
   })
 );
 

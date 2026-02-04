@@ -2,7 +2,28 @@
  * CPA Agent — Gap Analysis rule engine.
  * After parsing bank/ledger data, checks for Missing Liabilities, Missing Assets, Missing Identity.
  * Used by get_data_gaps() tool to return an "Urgent To-Do" list for the UI.
+ *
+ * CPA Bridge: When producing a recommendation for deterministic execution, use CPA_BRIDGE_INSTRUCTION.
+ * Output must be a JSON object mapping to cpa_bridge_manifest (Lease, Revenue, FixedAsset, Tax).
  */
+
+import { CPA_BRIDGE_MANIFEST, type BridgeStandardKey } from '../services/cpa_bridge_manifest.js';
+
+/** Purely functional instruction for agents that produce recommendations for the CPA bridge. */
+export const CPA_BRIDGE_INSTRUCTION =
+  'You are a Senior CPA. Your ONLY output must be a JSON object mapping to the cpa_bridge_manifest. ' +
+  'Use exactly one of these keys: Lease, Revenue, FixedAsset, Tax. ' +
+  'Each key must have a "params" object with the required mathematical inputs for that standard. ' +
+  'Do not provide narratives unless requested separately. ' +
+  'Example: { "standard": "Lease", "params": { "term": 36, "rate": 0.05, "payment": 1000, "standard": "asc842" } }';
+
+/** Valid standard keys for the bridge (for prompt injection). */
+export const CPA_BRIDGE_STANDARDS: BridgeStandardKey[] = ['Lease', 'Revenue', 'FixedAsset', 'Tax'];
+
+/** Required params per standard (for prompt injection). */
+export function getCpaBridgeRequiredParams(standard: BridgeStandardKey): string[] {
+  return CPA_BRIDGE_MANIFEST[standard].required;
+}
 
 export interface LedgerEntry {
   accountName: string;

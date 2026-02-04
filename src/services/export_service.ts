@@ -4,8 +4,10 @@
  * 1. Dynamic Generation: Agent drafts narrative sections of the PDF (executive summary, overview).
  * 2. Inclusion: Reasoning Chain (Thoughts + Actions from ReAct loop) included as appendix in PDF.
  * 3. Format: CSV includes Agent_Confidence_Score column for every line item.
+ * 4. Compliance Package: Balanced financial statements, IRAC-grounded justifications, ledger hash (tamper evidence).
  */
 
+import { createHash } from 'crypto';
 import { generateText } from '../llm/provider.js';
 import { round2 } from '../utils/decimal.js';
 
@@ -50,7 +52,20 @@ export interface DraftedNarrative {
   highlights?: string[];
 }
 
-/** Report payload for PDF with agent-drafted narrative and Reasoning Chain appendix. */
+/** Compliance Package: proof of balanced statements, IRAC justifications, and ledger integrity (hash). */
+export interface CompliancePackage {
+  /** Balanced financial statements (BS/P&L) included in the export. */
+  balancedFinancialStatements: Record<string, unknown>;
+  /** IRAC-grounded justification for every agentic adjustment (audit trail + rules cited). */
+  iracJustifications: {
+    audit_trail: Array<{ timestamp_utc: string; event_type: string; reasoning: string; citations: string; outcome: string }>;
+    rules_cited: string[];
+  };
+  /** SHA-256 hash of canonical ledger to prove it has not been tampered with since last CPA review. */
+  ledgerHash: string;
+}
+
+/** Report payload for PDF with agent-drafted narrative, Reasoning Chain appendix, and Compliance Package. */
 export interface ReportPayloadWithAgent {
   cover: Record<string, string>;
   financial_statements: Record<string, unknown>;
@@ -62,6 +77,8 @@ export interface ReportPayloadWithAgent {
   /** Reasoning Chain: Thoughts and Actions from ReAct loop (for PDF appendix). */
   reasoning_chain_appendix: ReasoningChainEntry[];
   clean_ledger: CleanLedgerRowWithConfidence[];
+  /** Compliance Package: statements + IRAC justifications + ledger hash (audit binder). */
+  compliancePackage: CompliancePackage;
 }
 
 /** Clean ledger row with Agent_Confidence_Score for CSV. */
@@ -226,6 +243,15 @@ export async function buildReportPayloadWithAgent(params: {
 
   const reasoning_chain_appendix = agentContext ? buildReasoningChainAppendix(agentContext) : [];
   const clean_ledger_with_confidence = buildCleanLedgerWithConfidence(clean_ledger, confidenceByKey);
+  const ledgerHash = computeLedgerHash(clean_ledger);
+  const compliancePackage: CompliancePackage = {
+    balancedFinancialStatements: financial_statements,
+    iracJustifications: {
+      audit_trail,
+      rules_cited: audit_trail_rules_cited,
+    },
+    ledgerHash,
+  };
 
   return {
     cover,
@@ -237,7 +263,27 @@ export async function buildReportPayloadWithAgent(params: {
     audit_trail_rules_cited,
     reasoning_chain_appendix,
     clean_ledger: clean_ledger_with_confidence,
+    compliancePackage,
   };
+}
+
+/**
+ * Compute SHA-256 hash of canonical ledger representation (sorted by account_code then account_name, stable string).
+ * Used in Compliance Package to prove ledger has not been tampered with since last CPA review.
+ */
+export function computeLedgerHash(
+  cleanLedger: Array<{ account_code?: string; account_name: string; debit: number; credit: number; account_type?: string }>
+): string {
+  const rows = [...cleanLedger].sort((a, b) => {
+    const codeA = (a.account_code ?? '').trim();
+    const codeB = (b.account_code ?? '').trim();
+    if (codeA !== codeB) return codeA.localeCompare(codeB);
+    return (a.account_name ?? '').trim().localeCompare((b.account_name ?? '').trim());
+  });
+  const canonical = rows
+    .map((r) => `${r.account_code ?? ''}|${r.account_name ?? ''}|${r.debit}|${r.credit}|${r.account_type ?? ''}`)
+    .join('\n');
+  return createHash('sha256').update(canonical, 'utf8').digest('hex');
 }
 
 const CSV_HEADER = 'account_code,account_name,debit,credit,account_type,Agent_Confidence_Score';

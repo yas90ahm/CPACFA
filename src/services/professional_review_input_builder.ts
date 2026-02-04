@@ -8,7 +8,6 @@ import type { ProfessionalReviewInput } from '../types/professional_review.js';
 import { ENABLE_INTEGRATED_SUPERVISOR } from '../lib/capability_flags.js';
 import { setQualitativeEvidenceMissing } from './risk_context_store.js';
 import { listContracts } from './revenue_recognition_service.js';
-import { listPerformance } from '../db/repositories/portfolio_repository.js';
 
 export interface RawProfessionalReviewBody {
   runId: string;
@@ -71,14 +70,7 @@ export async function buildProfessionalReviewInput(params: {
     leaseDocuments: body.leaseDocuments,
   };
 
-  if (body.portfolioIds?.length && pool) {
-    const byPortfolio: Record<string, { periodLabel: string; totalReturn?: number }[]> = {};
-    for (const pid of body.portfolioIds) {
-      const rows = await listPerformance(pool, tenantId, pid);
-      byPortfolio[pid] = rows.map((r) => ({ periodLabel: r.periodLabel, totalReturn: r.totalReturn }));
-    }
-    input.portfolioPerformanceByPortfolio = byPortfolio;
-  }
+  // Portfolio analytics removed (CFO/CFA scope); portfolioPerformanceByPortfolio left undefined.
 
   return input;
 }
