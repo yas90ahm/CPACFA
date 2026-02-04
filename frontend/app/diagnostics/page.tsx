@@ -9,6 +9,7 @@ type IntegrityState =
   | { status: 'idle' }
   | { status: 'loading' }
   | { status: 'ready'; balanceSheet?: unknown; profitAndLoss?: unknown }
+  | { status: 'self_healing'; imbalanceAmount?: number; message?: string; sessionId?: string | null }
   | { status: 'kill_switch'; message: string; imbalanceAmount?: number; check?: string; details?: unknown };
 
 interface TrialBalanceEntryLike {
@@ -27,6 +28,24 @@ export default function DiagnosticsPage() {
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
+  // After self-healing window (60s), show final Red Alert if imbalance still exists. Keeps polling active until then.
+  React.useEffect(() => {
+    if (integrity.status !== 'self_healing') return;
+    const t = setTimeout(() => {
+      setIntegrity((prev) => {
+        if (prev.status !== 'self_healing') return prev;
+        return {
+          status: 'kill_switch',
+          message: prev.message ?? 'Mathematical integrity error',
+          imbalanceAmount: prev.imbalanceAmount,
+          check: undefined,
+          details: undefined,
+        };
+      });
+    }, 60_000);
+    return () => clearTimeout(t);
+  }, [integrity.status]);
+
   const triggerIngestThenSupervisor = React.useCallback(async (selectedFile: File) => {
     setUploadStatus('uploading');
     setUploadError(null);
@@ -36,6 +55,8 @@ export default function DiagnosticsPage() {
     try {
       const form = new FormData();
       form.append('file', selectedFile);
+      form.append('tenantId', 'test-tenant-uuid');
+      form.append('sessionId', 'lab-session-uuid');
 
       const ingestRes = await fetch(`${API_BASE}/api/trial-balance/ingest`, {
         method: 'POST',
@@ -46,14 +67,13 @@ export default function DiagnosticsPage() {
       const ingestJson = await ingestRes.json().catch(() => ({}));
 
       if (ingestRes.status === 422) {
-        setUploadStatus('error');
-        setUploadError(ingestJson.message ?? 'Mathematical integrity error');
+        setUploadStatus('ok');
+        setUploadError(null);
         setIntegrity({
-          status: 'kill_switch',
-          message: ingestJson.message ?? 'Trial balance does not balance',
+          status: 'self_healing',
           imbalanceAmount: ingestJson.imbalanceAmount,
-          check: ingestJson.check,
-          details: ingestJson.details,
+          message: ingestJson.message ?? 'Trial balance does not balance',
+          sessionId: null,
         });
         return;
       }
@@ -88,14 +108,13 @@ export default function DiagnosticsPage() {
       const chatJson = await chatRes.json().catch(() => ({}));
 
       if (chatRes.status === 422) {
-        setIntegrity({
-          status: 'kill_switch',
-          message: chatJson.message ?? 'Mathematical integrity error',
-          imbalanceAmount: chatJson.imbalanceAmount,
-          check: chatJson.check,
-          details: chatJson.details,
-        });
         if (chatJson.sessionId) setSupervisorSessionId(chatJson.sessionId);
+        setIntegrity({
+          status: 'self_healing',
+          imbalanceAmount: chatJson.imbalanceAmount,
+          message: chatJson.message ?? 'Mathematical integrity error',
+          sessionId: chatJson.sessionId ?? null,
+        });
         return;
       }
 
@@ -191,6 +210,25 @@ export default function DiagnosticsPage() {
         {integrity.status === 'loading' && (
           <div style={{ padding: 12, border: '1px solid #e2e8f0', borderRadius: 6, color: '#64748b', fontSize: 13 }}>
             Running…
+          </div>
+        )}
+        {integrity.status === 'self_healing' && (
+          <div
+            style={{
+              padding: 16,
+              border: '2px solid #ca8a04',
+              borderRadius: 6,
+              backgroundColor: '#fefce8',
+              color: '#854d0e',
+            }}
+          >
+            <strong>Self-Healing</strong>
+            <p style={{ margin: '8px 0 0', fontSize: 13 }}>
+              Math imbalance of {integrity.imbalanceAmount != null ? integrity.imbalanceAmount.toLocaleString() : '—'} detected. The Agent is now attempting to re-analyze the ledger per ASC 842 and Forensic rules.
+            </p>
+            <p style={{ marginTop: 6, fontSize: 12, color: '#a16207' }}>
+              Watch the reasoning stream below for new Thought cards. Red Alert will only appear if the imbalance persists after the agent&apos;s extra iterations (60s).
+            </p>
           </div>
         )}
         {integrity.status === 'kill_switch' && (

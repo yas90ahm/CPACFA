@@ -1,0 +1,16 @@
+Account,AccountNumber,Debit,Credit,Description
+Cash Operating,1000,14500.50,0,Bank balance as of month end
+Accounts Receivable,1100,5200.00,0,Outstanding customer invoices
+Office Equipment,1500,12000.00,0,New laptops and server rack
+Exotic Auto Lease,1800,2500.00,0,Monthly payment for CEO Ferrari
+Accounts Payable,2000,0,3200.00,Vendor liabilities
+Tenant Security Deposit,2100,0,1500.00,Liability for office sub-lease
+Long-Term Office Lease,2500,0,45000.00,10-year property lease
+Common Stock,3000,0,1000.00,Initial equity
+Retained Earnings,3100,0,12500.00,Opening balance
+Revenue - Consulting,4000,0,18500.00,Monthly service fees
+Revenue - Unidentified,4999,0,500.00,Last day wire transfer - no invoice
+Rent Expense,5000,4500.00,0,Monthly office rent
+Payroll Expense,5100,8000.00,0,Staff salaries
+Marketing Expense,5200,1500.00,0,Social media ad spend
+Miscellaneous Plug,5999,40.00,0,Imbalance correction

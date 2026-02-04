@@ -3,7 +3,7 @@
  * Replaces in-memory Maps for HITL and supervisor session state (Pause/Resume, multi-instance).
  */
 
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 
 /** Shape matching hitl_orchestrator.StagingItem to avoid circular import. */
 export interface StagingItemShape {
@@ -469,6 +469,28 @@ export async function appendReasoningLog(
   );
   if (r.rowCount === 0) {
     throw new Error(`appendReasoningLog: session not found or tenant mismatch (sessionId=${sessionId}, tenantId=${tenantId})`);
+  }
+}
+
+/**
+ * Same as appendReasoningLog but uses a dedicated client so the write commits independently.
+ * Use when the main flow may throw (e.g. 422); ensures the log is committed before any error propagates.
+ */
+export async function appendReasoningLogWithClient(
+  client: PoolClient,
+  tenantId: string,
+  sessionId: string,
+  entry: ReasoningLogEntry
+): Promise<void> {
+  const now = new Date().toISOString();
+  const r = await client.query(
+    `UPDATE tenant_supervisor_sessions
+     SET reasoning_logs = COALESCE(reasoning_logs, '[]'::jsonb) || $1::jsonb, updated_at = $2
+     WHERE id = $3 AND tenant_id = $4`,
+    [JSON.stringify([{ ...entry, timestamp: entry.timestamp || now }]), now, sessionId, tenantId]
+  );
+  if (r.rowCount === 0) {
+    throw new Error(`appendReasoningLogWithClient: session not found or tenant mismatch (sessionId=${sessionId}, tenantId=${tenantId})`);
   }
 }
 

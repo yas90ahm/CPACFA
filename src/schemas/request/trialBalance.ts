@@ -28,6 +28,8 @@ const optionalBooleanOrString = z
   .transform((v) => (v === true || v === 'true' || v === '1' ? true : v === false || v === 'false' || v === '0' ? false : undefined));
 
 export const ingestBodySchema = z.object({
+  tenantId: z.string().min(1).optional(),
+  sessionId: z.string().min(1).optional(),
   standard: accountingStandardSchema.optional(),
   fullSet: optionalBooleanOrString,
   comparative: optionalBooleanOrString,

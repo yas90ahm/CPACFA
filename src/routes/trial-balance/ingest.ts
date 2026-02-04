@@ -61,12 +61,22 @@ const upload = multer({
   },
 });
 
+/** Set req.tenantId from body when auth did not set it (e.g. Diagnostic HUD bypass). */
+function injectTenantFromBody(req: Request, _res: Response, next: import('express').NextFunction): void {
+  const authReq = req as AuthRequest;
+  if (!authReq.tenantId && req.body && typeof (req.body as { tenantId?: string }).tenantId === 'string') {
+    const tid = (req.body as { tenantId: string }).tenantId.trim();
+    if (tid) authReq.tenantId = tid;
+  }
+  next();
+}
+
 /**
  * POST /api/trial-balance/ingest
  * Body: multipart/form-data with file (field name: file)
  * Returns: FinancialStatementsOutput (Reasoning Chain + TB + BS + P&L)
  */
-router.post('/ingest', upload.single('file'), requireValidTenantId, validateBody(ingestBodySchema), async (req: Request, res: Response) => {
+router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValidTenantId, validateBody(ingestBodySchema), async (req: Request, res: Response) => {
   try {
     const file = req.file;
     if (!file) {

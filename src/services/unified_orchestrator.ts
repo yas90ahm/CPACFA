@@ -9,7 +9,7 @@ import type { PipelineInput, ResultGeneratorOutput } from './result_generator.js
 import { runResultPipeline } from './result_generator.js';
 import { runSupervisor } from '../agents/Supervisor.js';
 import {
-  appendReasoningLog,
+  appendReasoningLogWithClient,
   getSession,
   isPersistedMessageHistory,
   updateSession,
@@ -55,15 +55,25 @@ const FORENSIC_PATTERNS = [
   /where\s*(did|are)\s*(the\s*)?(expenses|payments)/i,
 ];
 
+/** Audit or Statement Build intent: force agentic path so Supervisor runs and can self-correct. */
+const AUDIT_OR_STATEMENT_BUILD_PATTERNS = [
+  /audit/i,
+  /statement\s*build/i,
+  /full\s*audit/i,
+  /balance\s*sheet\s*and\s*p&l/i,
+];
+
 /**
  * Infer task strategy from the user message (and optional pipeline input).
- * Month-End Close → use Deterministic Pipeline when pipelineInput is available.
- * Forensic / ad-hoc → use Agentic ReAct Loop.
+ * Audit/Statement Build → forensic so Supervisor is primary. Month-End Close → Deterministic Pipeline when pipelineInput exists.
+ * Forensic / ad-hoc → Agentic ReAct Loop.
  */
 export function inferTaskStrategy(message: string, pipelineInput?: PipelineInput | null): TaskStrategy {
-  const text = message.trim().toLowerCase();
+  const text = message.trim();
+  const hasAuditOrStatementBuild = AUDIT_OR_STATEMENT_BUILD_PATTERNS.some((p) => p.test(text));
   const hasForensic = FORENSIC_PATTERNS.some((p) => p.test(text));
   const hasMonthEnd = MONTH_END_PATTERNS.some((p) => p.test(text));
+  if (hasAuditOrStatementBuild) return 'forensic';
   if (hasForensic) return 'forensic';
   if (hasMonthEnd && pipelineInput != null) return 'month_end_close';
   return 'forensic';
@@ -210,8 +220,17 @@ export async function runUnifiedSupervisor(
 
   const onReasoningStep =
     pool && tenantId && sessionId
-      ? (entry: ReasoningLogEntry) =>
-          appendReasoningLog(pool, tenantId, sessionId, { ...entry, timestamp: entry.timestamp || new Date().toISOString() })
+      ? async (entry: ReasoningLogEntry) => {
+          const client = await pool.connect();
+          try {
+            await appendReasoningLogWithClient(client, tenantId, sessionId, {
+              ...entry,
+              timestamp: entry.timestamp || new Date().toISOString(),
+            });
+          } finally {
+            client.release();
+          }
+        }
       : undefined;
   const onObservationPersisted =
     pool && tenantId && sessionId

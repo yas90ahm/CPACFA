@@ -151,6 +151,7 @@ async function getRatioTotalsFromSession(context?: ToolContext): Promise<RatioTo
 export const toolDefinitions: ToolDefinition[] = [
   classifyAccountDefinition,
   buildFinancialStatementsDefinition,
+  proposeTrialBalanceAdjustmentDefinition,
   computeRatiosDefinition,
   forensicRescanDefinition,
   getDataGapsDefinition,
@@ -319,6 +320,18 @@ export async function executeTool(
       return runGetPortfolioFinalizationPolicy(input as GetPortfolioFinalizationPolicyInput);
     case 'reconcileCPAwithCFA':
       return runReconcileCPAwithCFA(input as ReconcileCPAwithCFAInput);
+    case 'proposeTrialBalanceAdjustment': {
+      if (!context?.tenantId || !context?.pool) {
+        return {
+          success: false,
+          error: 'Grounding Violation: tenantId and pool are required. Use this tool in a session with trial balance data.',
+        };
+      }
+      return runProposeTrialBalanceAdjustment(input as ProposeTrialBalanceAdjustmentInput, {
+        tenantId: context.tenantId,
+        pool: context.pool,
+      });
+    }
     default:
       return { success: false, error: `Unknown tool: ${name}` };
   }

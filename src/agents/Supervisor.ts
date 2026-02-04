@@ -9,6 +9,8 @@ import type { Pool } from 'pg';
 import { executeTool, type ToolContext } from './tools/index.js';
 import { getProviderFromEnv } from '../llm/provider.js';
 import type { ReasoningLogEntry } from '../services/persistence_service.js';
+import { loadSessionSnapshot } from '../services/persistence_service.js';
+import { formatLedgerForContext, getEntriesFromSessionSnapshot } from '../services/trial-balance/helpers.js';
 import type { LLMTool } from '../llm/tool_schema.js';
 import { toAnthropicTools, toOpenAITools, toMistralTools } from '../llm/tool_schema.js';
 import { DATA_GROUNDING_RULE, shouldEscalateToHuman } from '../llm/guardrails.js';
@@ -18,6 +20,31 @@ import { SessionPersistenceError } from '../errors.js';
 
 const MODEL = 'claude-sonnet-4-5-20250929';
 const MAX_REACT_ITERATIONS = 15;
+
+/** Build recovery observation with dynamic ledger injection (no hardcoded accounts/amounts). Logs ledger table to terminal when math fails. */
+async function buildMathIntegrityRecoveryContent(
+  imbalanceAmount: number,
+  context: { pool?: Pool; tenantId?: string; sessionId?: string } | undefined
+): Promise<string> {
+  let formattedLedger = '(No ledger data available for this session)';
+  const pool = context?.pool;
+  const tenantId = context?.tenantId;
+  const sessionId = context?.sessionId;
+  if (pool && tenantId && sessionId) {
+    try {
+      const snapshot = await loadSessionSnapshot(pool, sessionId, tenantId);
+      const entries = getEntriesFromSessionSnapshot(snapshot);
+      formattedLedger = formatLedgerForContext(entries);
+      // eslint-disable-next-line no-console
+      console.log('[Self-Correction] Ledger table sent to Claude:\n' + formattedLedger);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // eslint-disable-next-line no-console
+      console.error('[Self-Correction] Failed to load session snapshot for ledger:', msg);
+    }
+  }
+  return `CRITICAL ERROR: Ledger imbalance of ${imbalanceAmount}. Current Ledger State:\n${formattedLedger}\n\nProfessional Task: Analyze the data above. Identify the account(s) causing this mismatch (look for missing offsets, ASC 842 lease errors, or personal expenses). Use the proposeTrialBalanceAdjustment tool to fix the error and do not exit until buildFinancialStatements returns success.`;
+}
 
 const SYSTEM_PROMPT = `You are a financial Supervisor. You use a ReAct loop: Thought → Action → Observation.
 
@@ -40,8 +67,9 @@ RULES:
    - step1CPA: Build Balance Sheet and P&L from trial balance. Input: optional raw_rows; or omit to use pipeline data from session.
    - step2CFA: Compute 5 key ratios from the last step1CPA output. Call after step1CPA.
    - step3Supervisor: Produce Executive Memo from step1CPA and step2CFA. Call after step2CFA.
-3. After each Observation (tool result), output a Thought about what you observed and what you will do next (e.g. call another tool, or answer the user). Only stop when you have fully answered the user's core intent.
-4. When you have enough information to answer the user, provide a clear, complete response. Do not stop mid-flow; ensure the user's question is fully addressed.
+3. When buildFinancialStatements returns a math/balance error (imbalance amount, Assets != L+E, or trial balance does not balance), you MUST use proposeTrialBalanceAdjustment to propose a correcting debit/credit for the account(s) you identified in the ledger, then call buildFinancialStatements again. Do not exit until buildFinancialStatements returns success.
+4. After each Observation (tool result), output a Thought about what you observed and what you will do next (e.g. call another tool, or answer the user). Only stop when you have fully answered the user's core intent.
+5. When you have enough information to answer the user, provide a clear, complete response. Do not stop mid-flow; ensure the user's question is fully addressed.
 
 ${DATA_GROUNDING_RULE}`;
 
@@ -195,6 +223,8 @@ const classifyAccountDescription =
   'Map a single GL account name to Asset/Liability/Equity/Revenue/Expense. Use when you need to classify an account or verify classification.';
 const buildFinancialStatementsDescription =
   'Build Balance Sheet and P&L from the validated trial balance stored for this session. Pass only sessionId and tenantId; data is loaded from the database. Do not pass entries or invented numbers.';
+const proposeTrialBalanceAdjustmentDescription =
+  'Propose a trial balance adjustment (debits and credits) to fix a ledger imbalance. Submit to Staging; when approved, the adjustment is merged before building statements. Call when buildFinancialStatements returns a math/balance error; then call buildFinancialStatements again after the adjustment is approved.';
 const computeRatiosDescription =
   'Compute Current Ratio, Quick Ratio, Debt-to-Equity, ROE, Net Margin. Use when the user asks about liquidity, risk, leverage, or ratios.';
 const forensicRescanDescription =
@@ -309,8 +339,10 @@ export async function runSupervisor(
     }
   };
 
+  const ledgerTable =
+    input.entries?.length ? formatLedgerForContext(input.entries) : '';
   const userContent = input.entries?.length
-    ? `${input.message}\n\n[Trial balance available in this session. Use buildFinancialStatements with sessionId and tenantId only (from context)—do not pass entries. Or use forensicRescan with entries if you need to re-validate.]`
+    ? `${ledgerTable}\n\n${input.message}\n\n[Trial balance available in this session. Use buildFinancialStatements with sessionId and tenantId only (from context)—do not pass entries. Or use forensicRescan with entries if you need to re-validate.]`
     : input.message;
 
   const defaultFirstMessage: MessageParam[] = [{ role: 'user', content: userContent }];
@@ -377,6 +409,16 @@ export async function runSupervisor(
       });
 
       if (lastStopReason === 'end_turn' && toolUseBlocks.length === 0) {
+        if (mathFailureRecoveryIterations > 0) {
+          mathFailureRecoveryIterations--;
+          messages.push({
+            role: 'user',
+            content:
+              'You have not yet fixed the ledger imbalance. Analyze the trial balance, identify trapped entries (e.g. leases or missing offsets), and propose a correcting TrialBalanceAdjustment. Do not give up until the Kill Switch passes.',
+          });
+          await fireMessageHistoryPersisted('anthropic', messages);
+          continue;
+        }
         await fireMessageHistoryPersisted('anthropic', messages);
         return {
           response: textBlocks.join('\n').trim() || 'No response generated.',
@@ -400,12 +442,43 @@ export async function runSupervisor(
 
       const toolResults: Array<{ type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }> = [];
 
+      // Thought-First: persist "Executing tool(s): ..." before any tool runs so the HUD shows reasoning before Kill Switch.
+      const toolNames = toolUseBlocks.map((u) => u.name).join(', ');
+      await fireReasoningStep({
+        stepType: 'thought',
+        timestamp: new Date().toISOString(),
+        thought: `Executing tool(s): ${toolNames}.`,
+        rawDataSeen: { toolCount: toolUseBlocks.length, tools: toolUseBlocks.map((u) => u.name) },
+      });
+
       for (const use of toolUseBlocks) {
         const toolResult = await executeTool(use.name, use.input, toolContext as ToolContext);
-        const contentStr =
-          toolResult.success
+        const dataOrError = toolResult.success ? (toolResult.data as Record<string, unknown>) : (toolResult.data as Record<string, unknown> | undefined);
+        const isMathIntegrityError =
+          use.name === 'buildFinancialStatements' &&
+          !toolResult.success &&
+          dataOrError != null &&
+          typeof dataOrError.imbalanceAmount === 'number';
+        const imbalanceAmount = isMathIntegrityError ? Number(dataOrError.imbalanceAmount) : undefined;
+
+        if (isMathIntegrityError && imbalanceAmount != null) {
+          await fireReasoningStep({
+            stepType: 'thought',
+            timestamp: new Date().toISOString(),
+            thought: `INTEGRITY GATE TRIGGERED: Imbalance of ${imbalanceAmount}. Initiating Self-Correction Loop 1 of 5.`,
+            rawDataSeen: { type: 'system_observation', imbalanceAmount, check: dataOrError.check },
+          });
+        }
+
+        let contentStr: string;
+        if (isMathIntegrityError && imbalanceAmount != null) {
+          mathFailureRecoveryIterations = 2;
+          contentStr = await buildMathIntegrityRecoveryContent(imbalanceAmount, context);
+        } else {
+          contentStr = toolResult.success
             ? JSON.stringify(toolResult.data, null, 2)
             : `Error: ${toolResult.error}`;
+        }
         const resultSummary = contentStr.slice(0, 2000) + (contentStr.length > 2000 ? '...' : '');
         toolCalls.push({
           name: use.name,
@@ -425,6 +498,15 @@ export async function runSupervisor(
           ruleApplied: reasoningChain?.plan,
           verificationResult: reasoningChain?.verification,
         });
+        if (isMathIntegrityError && imbalanceAmount != null) {
+          const selfHealThought = `Self-healing: Ledger out of balance by ${imbalanceAmount}. Analyzing trial balance to identify trapped entries (e.g. leases or missing offsets) and propose a correcting TrialBalanceAdjustment to restore Assets = L+E. Do not give up until the Kill Switch passes.`;
+          await fireReasoningStep({
+            stepType: 'thought',
+            timestamp: new Date().toISOString(),
+            thought: selfHealThought,
+            rawDataSeen: { imbalanceAmount, trigger: 'buildFinancialStatements' },
+          });
+        }
         await fireObservationPersisted(use.name, resultSummary);
         toolResults.push({
           type: 'tool_result',
@@ -477,9 +559,27 @@ export async function runSupervisor(
       messagesO.push(msg as Record<string, unknown>);
       const toolCallsResp = msg.tool_calls ?? [];
       if (!toolCallsResp.length) {
+        if (mathFailureRecoveryIterations > 0) {
+          mathFailureRecoveryIterations--;
+          messagesO.push({
+            role: 'user',
+            content:
+              'You have not yet fixed the ledger imbalance. Analyze the trial balance, identify trapped entries (e.g. leases or missing offsets), and propose a correcting TrialBalanceAdjustment. Do not give up until the Kill Switch passes.',
+          });
+          await fireMessageHistoryPersisted('openai', messagesO);
+          continue;
+        }
         await fireMessageHistoryPersisted('openai', messagesO);
         return { response: msg.content?.trim() ?? '', thoughts, toolCalls, stopReason: 'end_turn', dissentingOpinion: lastDissentingOpinion };
       }
+      const toolNamesO = (toolCallsResp as Array<{ function?: { name?: string } }>).map((c) => c.function?.name ?? '').filter(Boolean).join(', ');
+      await fireReasoningStep({
+        stepType: 'thought',
+        timestamp: new Date().toISOString(),
+        thought: `Executing tool(s): ${toolNamesO}.`,
+        rawDataSeen: { toolCount: toolCallsResp.length, tools: (toolCallsResp as Array<{ function?: { name?: string } }>).map((c) => c.function?.name) },
+      });
+
       for (const call of toolCallsResp) {
         const name = call.function?.name;
         let inputObj: Record<string, unknown> = {};
@@ -489,7 +589,25 @@ export async function runSupervisor(
           inputObj = {};
         }
         const result = await executeTool(name, inputObj, toolContext as ToolContext);
-        const resultStr = result.success ? JSON.stringify(result.data).slice(0, 2000) : `Error: ${result.error}`;
+        const dataOrErrorO = result.success ? (result.data as Record<string, unknown>) : (result.data as Record<string, unknown> | undefined);
+        const isMathIntegrityO =
+          name === 'buildFinancialStatements' &&
+          !result.success &&
+          dataOrErrorO != null &&
+          typeof dataOrErrorO.imbalanceAmount === 'number';
+        const imbalanceO = isMathIntegrityO ? Number(dataOrErrorO.imbalanceAmount) : undefined;
+        if (isMathIntegrityO && imbalanceO != null) {
+          await fireReasoningStep({
+            stepType: 'thought',
+            timestamp: new Date().toISOString(),
+            thought: `INTEGRITY GATE TRIGGERED: Imbalance of ${imbalanceO}. Initiating Self-Correction Loop 1 of 5.`,
+            rawDataSeen: { type: 'system_observation', imbalanceAmount: imbalanceO, check: dataOrErrorO?.check },
+          });
+        }
+        if (isMathIntegrityO && imbalanceO != null) mathFailureRecoveryIterations = 2;
+        const resultStr = isMathIntegrityO && imbalanceO != null
+          ? `CRITICAL ERROR: The ledger is currently out of balance by ${imbalanceO}. Your professional task is to analyze the trial balance, identify the 'trapped' entries (e.g., leases or missing offsets), and propose a correcting TrialBalanceAdjustment to restore $Assets = L+E$. Do not give up until the Kill Switch passes.`
+          : result.success ? JSON.stringify(result.data).slice(0, 2000) : `Error: ${result.error}`;
         toolCalls.push({ name, input: inputObj, result: resultStr });
         const data = result.success ? (result.data as Record<string, unknown>) : undefined;
         if (data?.dissentingOpinion != null) lastDissentingOpinion = data.dissentingOpinion;
@@ -504,13 +622,23 @@ export async function runSupervisor(
           ruleApplied: reasoningChain?.plan,
           verificationResult: reasoningChain?.verification,
         });
+        if (isMathIntegrityO && imbalanceO != null) {
+          const selfHealThoughtO = `Self-healing: Ledger out of balance by ${imbalanceO}. Analyzing trial balance to identify trapped entries (e.g. leases or missing offsets) and propose a correcting TrialBalanceAdjustment to restore Assets = L+E. Do not give up until the Kill Switch passes.`;
+          await fireReasoningStep({
+            stepType: 'thought',
+            timestamp: new Date().toISOString(),
+            thought: selfHealThoughtO,
+            rawDataSeen: { imbalanceAmount: imbalanceO, trigger: 'buildFinancialStatements' },
+          });
+        }
         await fireObservationPersisted(name, resultStr);
+        const contentToPush = isMathIntegrityO && imbalanceO != null
+          ? await buildMathIntegrityRecoveryContent(imbalanceO, context)
+          : result.success ? JSON.stringify(result.data) : `Error: ${result.error}`;
         messagesO.push({
           role: 'tool',
           tool_call_id: call.id,
-          content: result.success
-            ? JSON.stringify(result.data)
-            : `Error: ${result.error}`,
+          content: contentToPush,
         });
       }
       const step1ConfO = (toolContext as { step1Output?: { confidence?: number } }).step1Output?.confidence;
@@ -553,9 +681,27 @@ export async function runSupervisor(
       messagesM.push(msg as Record<string, unknown>);
       const toolCallsResp = msg.tool_calls ?? [];
       if (!toolCallsResp.length) {
+        if (mathFailureRecoveryIterations > 0) {
+          mathFailureRecoveryIterations--;
+          messagesM.push({
+            role: 'user',
+            content:
+              'You have not yet fixed the ledger imbalance. Analyze the trial balance, identify trapped entries (e.g. leases or missing offsets), and propose a correcting TrialBalanceAdjustment. Do not give up until the Kill Switch passes.',
+          });
+          await fireMessageHistoryPersisted('mistral', messagesM);
+          continue;
+        }
         await fireMessageHistoryPersisted('mistral', messagesM);
         return { response: msg.content?.trim() ?? '', thoughts, toolCalls, stopReason: 'end_turn', dissentingOpinion: lastDissentingOpinion };
       }
+      const toolNamesM = (toolCallsResp as Array<{ function?: { name?: string } }>).map((c) => c.function?.name ?? '').filter(Boolean).join(', ');
+      await fireReasoningStep({
+        stepType: 'thought',
+        timestamp: new Date().toISOString(),
+        thought: `Executing tool(s): ${toolNamesM}.`,
+        rawDataSeen: { toolCount: toolCallsResp.length, tools: (toolCallsResp as Array<{ function?: { name?: string } }>).map((c) => c.function?.name) },
+      });
+
       for (const call of toolCallsResp) {
         const name = call.function?.name;
         let inputObj: Record<string, unknown> = {};
@@ -565,7 +711,25 @@ export async function runSupervisor(
           inputObj = {};
         }
         const result = await executeTool(name, inputObj, toolContext as ToolContext);
-        const resultStr = result.success ? JSON.stringify(result.data).slice(0, 2000) : `Error: ${result.error}`;
+        const dataOrErrorM = result.success ? (result.data as Record<string, unknown>) : (result.data as Record<string, unknown> | undefined);
+        const isMathIntegrityM =
+          name === 'buildFinancialStatements' &&
+          !result.success &&
+          dataOrErrorM != null &&
+          typeof dataOrErrorM.imbalanceAmount === 'number';
+        const imbalanceM = isMathIntegrityM ? Number(dataOrErrorM.imbalanceAmount) : undefined;
+        if (isMathIntegrityM && imbalanceM != null) {
+          await fireReasoningStep({
+            stepType: 'thought',
+            timestamp: new Date().toISOString(),
+            thought: `INTEGRITY GATE TRIGGERED: Imbalance of ${imbalanceM}. Initiating Self-Correction Loop 1 of 5.`,
+            rawDataSeen: { type: 'system_observation', imbalanceAmount: imbalanceM, check: dataOrErrorM?.check },
+          });
+        }
+        if (isMathIntegrityM && imbalanceM != null) mathFailureRecoveryIterations = 2;
+        const resultStr = isMathIntegrityM && imbalanceM != null
+          ? `CRITICAL ERROR: The ledger is currently out of balance by ${imbalanceM}. Your professional task is to analyze the trial balance, identify the 'trapped' entries (e.g., leases or missing offsets), and propose a correcting TrialBalanceAdjustment to restore $Assets = L+E$. Do not give up until the Kill Switch passes.`
+          : result.success ? JSON.stringify(result.data).slice(0, 2000) : `Error: ${result.error}`;
         toolCalls.push({ name, input: inputObj, result: resultStr });
         const data = result.success ? (result.data as Record<string, unknown>) : undefined;
         if (data?.dissentingOpinion != null) lastDissentingOpinion = data.dissentingOpinion;
@@ -580,13 +744,23 @@ export async function runSupervisor(
           ruleApplied: reasoningChain?.plan,
           verificationResult: reasoningChain?.verification,
         });
+        if (isMathIntegrityM && imbalanceM != null) {
+          const selfHealThoughtM = `Self-healing: Ledger out of balance by ${imbalanceM}. Analyzing trial balance to identify trapped entries (e.g. leases or missing offsets) and propose a correcting TrialBalanceAdjustment to restore Assets = L+E. Do not give up until the Kill Switch passes.`;
+          await fireReasoningStep({
+            stepType: 'thought',
+            timestamp: new Date().toISOString(),
+            thought: selfHealThoughtM,
+            rawDataSeen: { imbalanceAmount: imbalanceM, trigger: 'buildFinancialStatements' },
+          });
+        }
         await fireObservationPersisted(name, resultStr);
+        const contentToPushM = isMathIntegrityM && imbalanceM != null
+          ? await buildMathIntegrityRecoveryContent(imbalanceM, context)
+          : result.success ? JSON.stringify(result.data) : `Error: ${result.error}`;
         messagesM.push({
           role: 'tool',
           tool_call_id: call.id,
-          content: result.success
-            ? JSON.stringify(result.data)
-            : `Error: ${result.error}`,
+          content: contentToPushM,
         });
       }
       const step1ConfM = (toolContext as { step1Output?: { confidence?: number } }).step1Output?.confidence;
