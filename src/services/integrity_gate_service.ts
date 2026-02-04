@@ -1,13 +1,14 @@
 /**
  * Integrity Gate — Hard Gate middleware that runs after any Agentic adjustment.
+ * MathematicalIntegrityError is the primary gatekeeper: if totalDebits !== totalCredits or
+ * Assets !== Liabilities + Equity, the system MUST throw MathematicalIntegrityError (422).
  *
  * Accounting Laws are defined in shared/config/financial_rules.json (equations + materiality).
- * Both Node and Python (backend/governance/integrity_gate.py) load the same JSON so gates share
- * the exact same rules. Tolerance is resolved from equations.*.toleranceKey (e.g. roundingTolerance).
  */
 
 import { absGt } from '../utils/decimal.js';
 import { getFinancialRules } from './rules_registry.js';
+import { MathematicalIntegrityError } from '../errors.js';
 
 /** Account name patterns that indicate a potential 'plug' used to force balance. */
 const PLUG_ACCOUNT_PATTERN = /^(Miscellaneous|Suspense|Other)(\s|$|\s*[-–—])/i;
@@ -171,4 +172,31 @@ export function runIntegrityGate(input: IntegrityGateInput): IntegrityGateResult
       balanceSheetBalances,
     },
   };
+}
+
+/**
+ * Run the integrity gate and throw MathematicalIntegrityError if it fails (primary gatekeeper).
+ * Use this so any ingestion or adjustment path enforces the same 422 on imbalance.
+ */
+export function assertIntegrityGateOrThrow(input: IntegrityGateInput): void {
+  const result = runIntegrityGate(input);
+  if (!result.passed) {
+    const tolerance = input.tolerance ?? getToleranceForGate();
+    const { totalDebits, totalCredits } = getTrialBalanceTotals(input.trialBalance);
+    const { totalAssets, totalLiabilities, totalEquity } = input.balanceSheet;
+    if (!result.checks?.trialBalanceBalances) {
+      const imbalanceAmount = Math.abs(totalDebits - totalCredits);
+      throw new MathematicalIntegrityError('A', imbalanceAmount, { totalDebits, totalCredits });
+    }
+    if (!result.checks?.balanceSheetBalances) {
+      const rhs = totalLiabilities + totalEquity;
+      const imbalanceAmount = Math.abs(totalAssets - rhs);
+      throw new MathematicalIntegrityError('B', imbalanceAmount, {
+        totalAssets,
+        totalLiabilities,
+        totalEquity,
+      });
+    }
+    throw new MathematicalIntegrityError('A', 0, { totalDebits, totalCredits });
+  }
 }

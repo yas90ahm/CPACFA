@@ -47,7 +47,10 @@ export const ingestBodySchema = z.object({
   useAgenticClassification: optionalBooleanOrString,
   contractText: z.union([z.string(), z.array(z.string())]).optional(),
   leaseDocuments: z.union([z.string(), z.array(z.string())]).optional(),
-  allowImbalance: optionalBooleanOrString,
+  /** When true, body.confirmedEntries is used as the trial balance (after agentic column confirmation). */
+  confirmMapping: optionalBooleanOrString,
+  /** Entries from agentic column guess; required when confirmMapping is true. */
+  confirmedEntries: z.array(trialBalanceEntrySchema).optional(),
 });
 
 export type IngestBody = z.infer<typeof ingestBodySchema>;

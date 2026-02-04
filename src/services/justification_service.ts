@@ -308,3 +308,24 @@ export function registerJustificationForPeriod(
     periodEnd,
   });
 }
+
+/**
+ * Create an "Ingestion Integrity Memo" for audit: trial balance ingested and validated; debits equal credits; balance sheet equation satisfied.
+ * Call immediately after every successful TB ingest so audit routes (e.g. Export Audit Defense) include it.
+ */
+export function createIngestionIntegrityMemo(
+  periodLabel: string,
+  summary: string
+): void {
+  const issue = 'Whether the trial balance and balance sheet are mathematically correct after ingestion.';
+  const rule = 'ASC 210-10-45, IAS 1.49: Assets = Liabilities + Equity. Trial balance: Sum(Debits) = Sum(Credits).';
+  const analysis = summary || 'Trial balance ingested; column mapping applied; debits equal credits; balance sheet equation satisfied.';
+  const conclusion = 'Ingestion integrity confirmed. Data is suitable for financial statement preparation and audit.';
+  const sourceTag = '[Source: FASB ASC 210-10-45; IAS 1.49]';
+  const irac: IRACJustification = { issue, rule, analysis, conclusion, source: 'FASB ASC 210-10-45; IAS 1.49' };
+  const formatted = formatJustificationText(irac, sourceTag);
+  const response: JustificationResponse = { irac, sourceTag, formatted };
+  const periodStart = periodLabel.startsWith('ingest-') ? new Date().toISOString().slice(0, 10) : `${periodLabel.slice(0, 4)}-01-01`;
+  const periodEnd = periodLabel.startsWith('ingest-') ? new Date().toISOString().slice(0, 10) : `${periodLabel.slice(0, 4)}-12-31`;
+  registerJustificationForPeriod('Ingestion Integrity Memo', response, periodStart, periodEnd);
+}

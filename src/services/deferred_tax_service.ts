@@ -1,5 +1,6 @@
 /**
  * Deferred tax service — temporary differences, DTA/DTL, valuation allowance, rate changes (IAS 12 / ASC 740).
+ * computeDeferredTaxesStateless ported from backend/tax/tax_provisioning.compute_deferred_taxes for API parity.
  */
 
 import type { Pool } from 'pg';
@@ -23,6 +24,39 @@ export interface TemporaryDifference {
   sourceAccount?: string;
 }
 
+/** Input for stateless deferred tax computation (API parity with Python TemporaryDifference). */
+export interface TemporaryDifferenceInput {
+  description: string;
+  bookBasis: number;
+  taxBasis: number;
+  difference?: number; // book - tax; if omitted, computed as bookBasis - taxBasis
+  isDeductibleTemp: boolean; // true = future deductible (DTA), false = future taxable (DTL)
+  reversalPeriod?: string;
+  accountCode?: string;
+}
+
+/** Rollforward result from stateless compute (API parity with Python DeferredTaxRollforward). */
+export interface DeferredTaxRollforward {
+  reportDate: string; // ISO date
+  beginningDta: number;
+  beginningDtl: number;
+  increasesDta: number;
+  increasesDtl: number;
+  decreasesDta: number;
+  decreasesDtl: number;
+  endingDta: number;
+  endingDtl: number;
+  netDta: number; // endingDta - endingDtl
+  taxRate: number;
+  details: Array<{
+    description: string;
+    difference: number;
+    deferredTaxAsset: number;
+    deferredTaxLiability: number;
+    reversalPeriod?: string;
+  }>;
+}
+
 export interface DeferredTaxResult {
   periodLabel: string;
   temporaryDifferences: TemporaryDifference[];
@@ -35,7 +69,72 @@ export interface DeferredTaxResult {
 }
 
 // ============================================================================
-// Calculate Deferred Tax Position
+// Stateless Deferred Tax Computation (API parity with Python tax_provisioning)
+// ============================================================================
+
+/**
+ * Compute deferred tax assets and liabilities from temporary differences per ASC 740 (pure function).
+ * Ported from backend/tax/tax_provisioning.compute_deferred_taxes.
+ * Deductible temporary differences → DTA; taxable → DTL. DTA/DTL = temporary difference × enacted tax rate.
+ */
+export function computeDeferredTaxesStateless(
+  temporaryDifferences: TemporaryDifferenceInput[],
+  taxRate: number,
+  reportDate?: string,
+  beginningDta = 0,
+  beginningDtl = 0
+): DeferredTaxRollforward {
+  const reportDateStr = reportDate ?? new Date().toISOString().slice(0, 10);
+  let dtaFromPeriod = 0;
+  let dtlFromPeriod = 0;
+  const details: DeferredTaxRollforward['details'] = [];
+
+  for (const td of temporaryDifferences) {
+    const diff = td.difference ?? td.bookBasis - td.taxBasis;
+    const deferredAmount = round2(diff * taxRate);
+    if (td.isDeductibleTemp) {
+      dtaFromPeriod += deferredAmount;
+      details.push({
+        description: td.description,
+        difference: diff,
+        deferredTaxAsset: deferredAmount,
+        deferredTaxLiability: 0,
+        reversalPeriod: td.reversalPeriod,
+      });
+    } else {
+      dtlFromPeriod += deferredAmount;
+      details.push({
+        description: td.description,
+        difference: diff,
+        deferredTaxAsset: 0,
+        deferredTaxLiability: deferredAmount,
+        reversalPeriod: td.reversalPeriod,
+      });
+    }
+  }
+
+  const endingDta = beginningDta + dtaFromPeriod;
+  const endingDtl = beginningDtl + dtlFromPeriod;
+  const netDta = endingDta - endingDtl;
+
+  return {
+    reportDate: reportDateStr,
+    beginningDta,
+    beginningDtl,
+    increasesDta: dtaFromPeriod,
+    increasesDtl: dtlFromPeriod,
+    decreasesDta: 0,
+    decreasesDtl: 0,
+    endingDta,
+    endingDtl,
+    netDta: round2(netDta),
+    taxRate,
+    details,
+  };
+}
+
+// ============================================================================
+// Calculate Deferred Tax Position (DB-backed)
 // ============================================================================
 
 /**

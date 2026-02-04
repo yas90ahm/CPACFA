@@ -1,7 +1,7 @@
 /**
  * Document Generation Service — PDF/CSV export with Agent reasoning.
- * When agent_context (thoughts, toolCalls, response) is provided: agent drafts narrative, Reasoning Chain included as PDF appendix, CSV includes Agent_Confidence_Score.
- * Otherwise proxies to Python backend when configured.
+ * When agent_context is provided: agent drafts narrative, Reasoning Chain included as PDF appendix.
+ * Otherwise builds PDF from request body in TypeScript (no Python proxy).
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -17,12 +17,6 @@ import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
 import { ENABLE_INTEGRATED_SUPERVISOR } from '../lib/capability_flags.js';
 
 const router = Router();
-const BACKEND_PYTHON_URL = process.env.BACKEND_PYTHON_URL ?? '';
-
-function getPythonBase(): string {
-  const base = BACKEND_PYTHON_URL.replace(/\/$/, '');
-  return base || 'http://localhost:5000';
-}
 
 function hasAgentContext(body: Record<string, unknown>): body is Record<string, unknown> & { agent_context: AgentExportContext } {
   const ac = (body as { agent_context?: unknown }).agent_context;
@@ -33,7 +27,7 @@ function hasAgentContext(body: Record<string, unknown>): body is Record<string, 
  * POST /api/export/pdf
  * Body: ReportPayload + pdf_type? + optional agent_context?: { response, thoughts?, toolCalls? }
  * When agent_context is provided: agent drafts narrative, Reasoning Chain included as appendix (Node PDF).
- * Otherwise proxies to Python; returns PDF file.
+ * Otherwise builds PDF from request body in TypeScript (no Python proxy).
  */
 router.post('/pdf', async (req: Request, res: Response) => {
   try {
@@ -116,19 +110,18 @@ router.post('/pdf', async (req: Request, res: Response) => {
       return res.send(buf);
     }
 
-    const url = `${getPythonBase()}/api/export/pdf`;
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ error: resp.statusText }));
-      res.status(resp.status).json(err);
-      return;
-    }
-    const blob = await resp.blob();
-    const buf = Buffer.from(await blob.arrayBuffer());
+    const cover = (body.cover as Record<string, string>) ?? {};
+    const pdfPayload = {
+      cover,
+      executive_summary: (body.executive_summary as string) ?? `Financial report. Period: ${(body.periodStart as string) ?? ''} to ${(body.periodEnd as string) ?? ''}. Entity: ${cover.entity_name ?? 'Entity'}.`,
+      overview: (body.overview as string) | undefined,
+      highlights: Array.isArray(body.highlights) ? (body.highlights as string[]) : undefined,
+      financial_statements: (body.financial_statements as Record<string, unknown>) ?? {},
+      audit_trail: (body.audit_trail as Array<{ timestamp_utc: string; event_type: string; reasoning: string; citations: string; outcome: string }>) ?? [],
+      reasoning_chain_appendix: [],
+      unauditedNarrativeHeader: qualitativeEvidenceMissing,
+    };
+    const buf = await createPdfFromStructuredPayload(pdfPayload);
     const name = pdfType === 'summary' ? 'financial_report_summary.pdf' : 'financial_report.pdf';
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${name}"`);

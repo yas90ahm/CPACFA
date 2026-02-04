@@ -16,8 +16,6 @@ import {
 import type { CFOFinancialSnapshot } from '../../types/cfo-dashboard.js';
 
 const router = Router();
-const BACKEND_PYTHON_URL = process.env.BACKEND_PYTHON_URL ?? '';
-const PYTHON_BASE = BACKEND_PYTHON_URL.replace(/\/$/, '') || 'http://localhost:5000';
 
 /** Build adjusted snapshot for Strategic Sandbox: revenue change % and new hires (annual salary each). */
 function buildScenarioSnapshot(
@@ -43,36 +41,10 @@ function buildScenarioSnapshot(
   };
 }
 
-/** POST /api/cfo-dashboard/scenario — Strategic Sandbox: recalc Cash Runway & Break-even via Python sandbox */
+/** POST /api/cfo-dashboard/scenario — Strategic Sandbox: recalc Cash Runway & Break-even (TypeScript; computeCFOKPIs) */
 router.post('/scenario', validateBody(scenarioBodySchema), async (req: Request, res: Response) => {
   try {
     const { snapshot, revenueChangePercent, newEmployeeCount, newEmployeeSalary } = req.body;
-    try {
-      const pyResp = await fetch(`${PYTHON_BASE}/api/cfa/scenario-analysis`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          snapshot,
-          revenueChangePercent,
-          newEmployeeCount,
-          newEmployeeSalary,
-        }),
-      });
-      if (pyResp.ok) {
-        const r = (await pyResp.json()) as { burn_rate?: number; runway_months?: number; break_even_revenue?: number };
-        if (typeof r.burn_rate === 'number' || typeof r.runway_months === 'number') {
-          return res.json({
-            kpis: {
-              burnRate: Number(r.burn_rate) ?? 0,
-              runwayMonths: Number(r.runway_months) ?? 0,
-              breakEvenRevenue: Number(r.break_even_revenue) ?? 0,
-            },
-          });
-        }
-      }
-    } catch {
-      /* Python backend unavailable; fall back to Node */
-    }
     const adjusted = buildScenarioSnapshot(snapshot, {
       revenueChangePercent,
       newEmployeeCount,

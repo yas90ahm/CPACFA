@@ -78,13 +78,8 @@ const SUPERVISOR_SERVICE_TOOL_NAMES = new Set([
   'step2CFA',
   'step3Supervisor',
 ]);
-export {
-  postTrialBalanceToPython,
-  callPythonMathWorker,
-  type TrialBalancePayload,
-  type TrialBalanceLinePayload,
-  type PythonTrialBalanceResponse,
-} from './pythonBridge.js';
+
+/** Trial balance → statements: use buildFinancialStatements tool (calls financialStatements.buildValidatedStatements). Python bridge deprecated. */
 
 /** Entry shape used for buildFinancialStatements / Source of Truth. */
 type ValidatedEntry = { accountName: string; debit: number; credit: number; accountCode?: string };

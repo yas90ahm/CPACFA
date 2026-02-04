@@ -1,11 +1,13 @@
 /**
  * Trial Balance ingest — POST /ingest (file upload → TB + BS + P&L via buildValidatedStatements).
+ * Uses TypeScript-only pipeline: fileIngestion (parser_utils) → trialBalanceParser → buildValidatedStatements.
+ * No Python backend calls. MathematicalIntegrityError always returns 422 (Provable Correctness).
  */
 
 import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import { parseTrialBalance } from '../../services/trialBalanceParser.js';
-import { ingestTrialBalanceFile } from '../../services/fileIngestion.js';
+import { ingestTrialBalanceFile, type IngestTrialBalanceResult } from '../../services/fileIngestion.js';
 import { buildValidatedStatements, MathematicalIntegrityError } from '../../services/financialStatements.js';
 import { generateStatements } from '../../services/statementGenerator.js';
 import { buildCashFlowStatement, buildCashFlowFromTransactions } from '../../services/cashFlow.js';
@@ -16,6 +18,7 @@ import { updatePolicyMemory } from '../../memory/index.js';
 import { classifyTransactionsAgentic } from '../../services/transaction_classifier.js';
 import { runPlanExecuteVerifyAgentic } from '../../services/agentic_plan_execute_verify.js';
 import { registerStatementGeneration, recordPolicyChange } from '../../services/audit_export_service.js';
+import { createIngestionIntegrityMemo } from '../../services/justification_service.js';
 import { markUploadCompleted, runResultPipeline } from '../../services/result_generator.js';
 import * as persistence from '../../services/persistence_service.js';
 import { assessAgenticQuality } from '../../services/agentic_quality_assessor.js';
@@ -110,7 +113,9 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       uploadId = uploadRow.id;
     }
 
-    let rawRows = ingestTrialBalanceFile(file.buffer, file.mimetype);
+    const body = req.body as IngestBody;
+    const ingestResult = ingestTrialBalanceFile(file.buffer, file.mimetype);
+    let rawRows = ingestResult.rows;
     if (rawRows.length === 0) {
       res.status(400).json({
         error: 'Empty or invalid file',
@@ -119,7 +124,22 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       return;
     }
 
-    if (isMessyTrialBalance(rawRows)) {
+    if (body.confirmMapping && Array.isArray(body.confirmedEntries) && body.confirmedEntries.length > 0) {
+      rawRows = body.confirmedEntries as RawTrialBalanceRow[];
+    } else if (ingestResult.needsAgenticMapping) {
+      try {
+        const suggestedEntries = await agenticLedgerToTrialBalance(file.buffer, file.mimetype);
+        if (suggestedEntries.length > 0) {
+          return res.status(200).json({
+            requiresColumnConfirmation: true,
+            message: 'Column mapping could not be determined. Please confirm the suggested mapping before saving.',
+            suggestedEntries,
+          });
+        }
+      } catch {
+        // fall through to parse with all-zero amounts; buildValidatedStatements will fail with 422 if unbalanced
+      }
+    } else if (isMessyTrialBalance(rawRows)) {
       if (uploadId && tenantIdIngest && poolIngest) {
         await persistence.updateSessionUploadMetadata(poolIngest, uploadId, tenantIdIngest, {
           rawRows,
@@ -135,7 +155,6 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
     }
 
     const trialBalance = parseTrialBalance(rawRows);
-    const body: IngestBody = req.body;
     const fullSetIngest = body.fullSet === false ? false : true;
     const comparativeIngest = body.comparative === true;
     let priorTrialBalanceIngest: import('../../types/financial.js').TrialBalanceResult | undefined;
@@ -282,29 +301,16 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
     }
 
     let base: Awaited<ReturnType<typeof buildValidatedStatements>> | Awaited<ReturnType<typeof generateStatements>>;
-    try {
-      base = standard
-        ? await generateStatements(
-            trialBalanceForBuild,
-            standard,
-            body.periodLabel && tenantIdIngest ? { ...stmtOpts, preClassifiedEntries: undefined } : stmtOpts
-          )
-        : await buildValidatedStatements(
-            trialBalanceForBuild,
-            body.periodLabel && tenantIdIngest ? undefined : buildOpts
-          );
-    } catch (buildErr) {
-      if (body.allowImbalance && buildErr instanceof MathematicalIntegrityError) {
-        return res.status(200).json({
-          success: true,
-          imbalanceAmount: buildErr.imbalanceAmount,
-          check: buildErr.check,
-          message: buildErr.message,
-          trialBalance: { entries: trialBalanceForBuild.entries },
-        });
-      }
-      throw buildErr;
-    }
+    base = standard
+      ? await generateStatements(
+          trialBalanceForBuild,
+          standard,
+          body.periodLabel && tenantIdIngest ? { ...stmtOpts, preClassifiedEntries: undefined } : stmtOpts
+        )
+      : await buildValidatedStatements(
+          trialBalanceForBuild,
+          body.periodLabel && tenantIdIngest ? undefined : buildOpts
+        );
     const { balanceSheet, profitAndLoss } = base;
     const classifiedEntries = base.classifiedEntries;
     const standardMetadata = 'standardMetadata' in base ? base.standardMetadata : undefined;
@@ -357,6 +363,11 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       tenantId: authReq.tenantId,
       pool: authReq.tenantPool,
     });
+
+    createIngestionIntegrityMemo(
+      body.periodLabel ?? `ingest-${new Date().toISOString().slice(0, 10)}`,
+      `Trial balance ingested; ${output.trialBalance?.entries?.length ?? 0} entries; debits equal credits; balance sheet equation satisfied.`
+    );
 
     if (authReq.tenantId && authReq.tenantPool) {
       const periodLabel = body.periodLabel ?? `ingest-${new Date().toISOString().slice(0, 10)}`;

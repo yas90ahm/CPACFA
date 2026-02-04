@@ -1,6 +1,7 @@
 /**
  * Full OCR pipeline — retries, backoff, and structured output for agentic ingestion.
- * Uses external OCR endpoint (PYTHON_OCR_URL or OCR_SERVICE_URL). Supports page-level and region-level text.
+ * Uses direct cloud/service OCR: set OCR_SERVICE_URL to your OCR endpoint (e.g. AWS Textract, Google Document AI,
+ * or a Tesseract-based service). Supports page-level and region-level text.
  */
 
 export interface OcrPage {
@@ -36,9 +37,9 @@ export async function runOcr(
   buffer: Buffer,
   options: { maxRetries?: number } = {}
 ): Promise<OcrResult> {
-  const url = process.env.OCR_SERVICE_URL ?? process.env.PYTHON_OCR_URL;
+  const url = process.env.OCR_SERVICE_URL;
   if (!url) {
-    return { text: '', error: 'No OCR_SERVICE_URL or PYTHON_OCR_URL configured' };
+    return { text: '', error: 'No OCR_SERVICE_URL configured. Set to AWS Textract, Google Document AI, or Tesseract service URL.' };
   }
 
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;

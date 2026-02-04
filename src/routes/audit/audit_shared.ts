@@ -1,5 +1,5 @@
 /**
- * Shared utilities for audit routes: auditor token, Python backend URL, error handling.
+ * Shared utilities for audit routes: auditor token, error handling.
  */
 
 import type { Response } from 'express';
@@ -15,9 +15,6 @@ export function getAuditorToken(): string | null {
   }
   return raw ?? 'auditor-readonly-2025';
 }
-
-/** Optional Python backend URL for Forensic Skeptic / Audit Dashboard (e.g. http://localhost:5000). */
-export const BACKEND_PYTHON_URL = process.env.BACKEND_PYTHON_URL ?? '';
 
 /** In production, avoid leaking system paths, table names, or stack traces to the client. */
 const SANITIZED_MESSAGE = 'An internal error occurred. Please try again or contact support.';

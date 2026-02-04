@@ -4,9 +4,10 @@
  *
  * Accounting Kill Switch: buildValidatedStatements() enforces (A) Sum(Debits)==Sum(Credits)
  * and (B) Total Assets==Total Liabilities+Total Equity. If either fails, throws MathematicalIntegrityError.
+ * MathematicalIntegrityError is the primary gatekeeper: if totalDebits !== totalCredits, the system MUST throw (422).
  *
- * OWNERSHIP: This file is the CANONICAL engine for reporting and statement assembly.
- * It consumes data from the Python Math Engine and validates it using the shared config (shared/config/financial_rules.json).
+ * OWNERSHIP: This file is the CANONICAL engine for reporting and statement assembly (TypeScript-only).
+ * Uses shared config (shared/config/financial_rules.json) for rounding tolerance.
  */
 
 import type {
@@ -21,29 +22,11 @@ import { BALANCE_SHEET, COMPREHENSIVE_INCOME } from '../constants/codification.j
 import { round2, sumRound2, absLt, absGt } from '../utils/decimal.js';
 import { classifyTrialBalanceDeterministic } from './accountClassifier.js';
 import { getRoundingTolerance } from './rules_registry.js';
+import { MathematicalIntegrityError } from '../errors.js';
 import { detectSuspiciousPlugs, type SuspiciousPlugResult } from './integrity_gate_service.js';
 
-/** Thrown when trial balance or balance sheet equation fails (Kill Switch). API must return 422 with imbalanceAmount. */
-export class MathematicalIntegrityError extends Error {
-  /** 'A' = Sum(Debits) != Sum(Credits); 'B' = Total Assets != Total Liabilities + Total Equity */
-  readonly check: 'A' | 'B';
-  /** Exact imbalance amount (absolute difference). */
-  readonly imbalanceAmount: number;
-  readonly details?: { totalDebits?: number; totalCredits?: number; totalAssets?: number; totalLiabilities?: number; totalEquity?: number };
-
-  constructor(check: 'A' | 'B', imbalanceAmount: number, details?: MathematicalIntegrityError['details']) {
-    const msg =
-      check === 'A'
-        ? `Trial balance does not balance: Sum(Debits) != Sum(Credits). Imbalance: ${imbalanceAmount}. Data is illegal for a CPA.`
-        : `Balance sheet equation violated: Total Assets != Total Liabilities + Total Equity. Imbalance: ${imbalanceAmount}. Data is illegal for a CPA.`;
-    super(msg);
-    this.name = 'MathematicalIntegrityError';
-    this.check = check;
-    this.imbalanceAmount = imbalanceAmount;
-    this.details = details;
-    Object.setPrototypeOf(this, MathematicalIntegrityError.prototype);
-  }
-}
+/** Re-export for backward compatibility. Primary gatekeeper: totalDebits !== totalCredits → MUST throw this (422). */
+export { MathematicalIntegrityError };
 
 /** Net amount for an account (debit − credit). Assets/Expenses: positive = debit. Liabilities/Equity/Revenue: positive = credit. Uses decimal round for display. */
 function netAmount(entry: TrialBalanceEntry): number {

@@ -1,5 +1,6 @@
 /**
  * Fixed asset service — CRUD, depreciation run (straight-line, declining balance), summary.
+ * Pure schedule functions (depreciationScheduleSl, depreciationScheduleDdb) ported from backend/accounting_engine.py for API parity.
  */
 
 import type { Pool } from 'pg';
@@ -8,6 +9,29 @@ import type { FixedAssetRow, DepreciationMethod, DepreciationRunRow, Depreciatio
 import { minus as decMinus, round2 } from '../utils/decimal.js';
 
 export type { FixedAssetRow, DepreciationRunRow, DepreciationRunDetailRow, DepreciationMethod };
+
+/** Single period line in a depreciation schedule (ASC 360-10-35). */
+export interface DepreciationScheduleLine {
+  period: number;
+  periodEndDate: string; // ISO date
+  beginningBookValue: number;
+  depreciationExpense: number;
+  accumulatedDepreciation: number;
+  endingBookValue: number;
+}
+
+/** Full depreciation schedule for one asset (API parity with Python DepreciationSchedule). */
+export interface DepreciationSchedule {
+  assetId: string;
+  assetDescription: string;
+  method: 'straight_line' | 'declining_balance';
+  cost: number;
+  salvageValue: number;
+  usefulLifeYears: number;
+  placedInServiceDate: string; // ISO date
+  lines: DepreciationScheduleLine[];
+  codificationRef?: { standard: string; reference: string; title: string };
+}
 
 export interface DepreciationPeriodEntry {
   periodStart: string;
@@ -136,6 +160,104 @@ function buildDepreciationEntriesForAsset(
     fixedAssetId: asset.id,
     depreciationAmount: finalAmount,
     accumulatedDepreciation: accumulatedEnd,
+  };
+}
+
+const ASC_360_35 = { standard: 'FASB', reference: 'ASC 360-10-35', title: 'Property, Plant & Equipment—Subsequent Measurement' };
+
+/**
+ * Straight-line depreciation schedule (pure function). API parity with backend/accounting_engine.depreciation_schedule_sl.
+ * ASC 360-10-35. Returns one line per year of useful life.
+ */
+export function depreciationScheduleSl(
+  cost: number,
+  salvageValue: number,
+  usefulLifeYears: number,
+  placedInServiceDate: string,
+  assetId = '',
+  assetDescription = ''
+): DepreciationSchedule {
+  if (usefulLifeYears <= 0) throw new Error('Useful life must be positive');
+  const depreciable = Math.max(0, cost - salvageValue);
+  const annual = depreciable / usefulLifeYears;
+  const placed = new Date(placedInServiceDate);
+  const lines: DepreciationScheduleLine[] = [];
+  let accDep = 0;
+  for (let year = 1; year <= usefulLifeYears; year++) {
+    const periodEnd = new Date(placed.getFullYear() + year, placed.getMonth(), placed.getDate());
+    const periodEndStr = periodEnd.toISOString().slice(0, 10);
+    const remaining = Math.max(0, cost - salvageValue - accDep);
+    const exp = round2(Math.min(annual, remaining));
+    accDep += exp;
+    const bv = round2(cost - accDep);
+    lines.push({
+      period: year,
+      periodEndDate: periodEndStr,
+      beginningBookValue: round2(bv + exp),
+      depreciationExpense: exp,
+      accumulatedDepreciation: round2(accDep),
+      endingBookValue: bv,
+    });
+  }
+  return {
+    assetId,
+    assetDescription,
+    method: 'straight_line',
+    cost,
+    salvageValue,
+    usefulLifeYears,
+    placedInServiceDate,
+    lines,
+    codificationRef: ASC_360_35,
+  };
+}
+
+/**
+ * Double-declining balance depreciation schedule (pure function). API parity with backend/accounting_engine.depreciation_schedule_ddb.
+ * ASC 360-10-35. Switch to SL when SL > DDB not implemented for simplicity.
+ */
+export function depreciationScheduleDdb(
+  cost: number,
+  salvageValue: number,
+  usefulLifeYears: number,
+  placedInServiceDate: string,
+  assetId = '',
+  assetDescription = ''
+): DepreciationSchedule {
+  if (usefulLifeYears <= 0) throw new Error('Useful life must be positive');
+  const rate = 2 / usefulLifeYears;
+  const placed = new Date(placedInServiceDate);
+  const lines: DepreciationScheduleLine[] = [];
+  let accDep = 0;
+  let bv = cost;
+  for (let year = 1; year <= usefulLifeYears; year++) {
+    const periodEnd = new Date(placed.getFullYear() + year, placed.getMonth(), placed.getDate());
+    const periodEndStr = periodEnd.toISOString().slice(0, 10);
+    let exp = bv * rate;
+    const remaining = Math.max(0, cost - salvageValue - accDep);
+    if (exp > remaining || year === usefulLifeYears) exp = remaining;
+    exp = round2(Math.max(0, exp));
+    accDep += exp;
+    bv = round2(cost - accDep);
+    lines.push({
+      period: year,
+      periodEndDate: periodEndStr,
+      beginningBookValue: round2(bv + exp),
+      depreciationExpense: exp,
+      accumulatedDepreciation: round2(accDep),
+      endingBookValue: bv,
+    });
+  }
+  return {
+    assetId,
+    assetDescription,
+    method: 'declining_balance',
+    cost,
+    salvageValue,
+    usefulLifeYears,
+    placedInServiceDate,
+    lines,
+    codificationRef: ASC_360_35,
   };
 }
 

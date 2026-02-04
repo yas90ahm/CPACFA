@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 System Integrity check for FinOS Agent.
-Verifies CPA Brain, CFA Brain, Supervisor, Python Sandbox, and Export Engine
-respond within < 2-second latency. Runs edge-case ingestion tests (10MB PDF, 0-byte CSV).
+Verifies CPA Brain, CFA Brain, Supervisor, and Export Engine (Node-only; Python backend removed).
+Runs edge-case ingestion tests (10MB PDF, 0-byte CSV).
 """
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ except ImportError:
     sys.exit(1)
 
 NODE_BASE = os.environ.get("NODE_API_URL", "http://localhost:3001").rstrip("/")
-PYTHON_BASE = os.environ.get("BACKEND_PYTHON_URL", "http://localhost:5000").rstrip("/")
 MAX_LATENCY_SEC = 2.0
 REQUEST_TIMEOUT = 15  # overall timeout so we don't hang
 
@@ -77,14 +76,14 @@ def check_supervisor() -> Tuple[float, bool, str]:
     )
 
 
-def check_python_sandbox() -> Tuple[float, bool, str]:
-    """Python Sandbox: quantitative execute or scenario-analysis."""
+def check_scenario_node() -> Tuple[float, bool, str]:
+    """Scenario analysis: Node /api/cfo-dashboard/scenario (TypeScript; no Python)."""
     return measure(
-        "Python Sandbox",
+        "Scenario (Node)",
         lambda: requests.post(
-            f"{PYTHON_BASE}/api/cfa/scenario-analysis",
+            f"{NODE_BASE}/api/cfo-dashboard/scenario",
             json={
-                "snapshot": {"revenue": 100, "cash": 50, "costOfGoodsSold": 20, "operatingExpenses": 30},
+                "snapshot": {"revenue": 100, "cash": 50, "costOfGoodsSold": 20, "operatingExpenses": 30, "netIncome": 0},
                 "revenueChangePercent": 0,
                 "newEmployeeCount": 0,
                 "newEmployeeSalary": 0,
@@ -96,7 +95,7 @@ def check_python_sandbox() -> Tuple[float, bool, str]:
 
 
 def check_export_engine() -> Tuple[float, bool, str]:
-    """Export Engine: PDF export (Node proxies to Python)."""
+    """Export Engine: PDF export (Node builds PDF; no Python)."""
     return measure(
         "Export Engine",
         lambda: requests.post(
@@ -158,15 +157,15 @@ def edge_0byte_csv() -> Tuple[float, bool, str]:
 
 
 def main() -> int:
-    print("System Integrity Check")
-    print(f"  NODE_BASE={NODE_BASE}  PYTHON_BASE={PYTHON_BASE}  MAX_LATENCY={MAX_LATENCY_SEC}s")
+    print("System Integrity Check (Node-only; Python backend removed)")
+    print(f"  NODE_BASE={NODE_BASE}  MAX_LATENCY={MAX_LATENCY_SEC}s")
     print()
 
     checks = [
-        ("CPA Brain", check_cpa_brain, True),   # require < 2s
+        ("CPA Brain", check_cpa_brain, True),
         ("CFA Brain", check_cfa_brain, True),
         ("Supervisor", check_supervisor, True),
-        ("Python Sandbox", check_python_sandbox, True),
+        ("Scenario (Node)", check_scenario_node, True),
         ("Export Engine", check_export_engine, True),
     ]
     edge_cases = [

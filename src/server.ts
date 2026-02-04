@@ -166,6 +166,9 @@ app.use('/api/cfo-dashboard', cfoDashboardRouter);
 // API: Audit Binder (statements + justification chain + line-level deep links), GAAP Consistency Report
 app.use('/api/audit', auditRouter);
 
+// API: Export — PDF document package, Clean Ledger CSV (TypeScript-only; no Python proxy)
+app.use('/api/export', exportRouter);
+
 // API: Financial Memory (three-tier: Global/Firm/Session, hybrid search, CPA invoice consistency)
 app.use('/api/knowledge-base', financialMemoryRouter);
 

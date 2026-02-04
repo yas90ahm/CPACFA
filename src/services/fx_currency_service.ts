@@ -1,6 +1,7 @@
 /**
  * FX currency service — current-rate translation (CTA), temporal remeasurement (ASC 830 / IAS 21).
  * Uses decimal.js for currency math.
+ * computeUnrealizedFxGainLoss ported from backend/tax/fx_engine.py for API parity.
  */
 
 import type {
@@ -9,6 +10,17 @@ import type {
   RemeasurementResult,
 } from '../types/fx_currency.js';
 import { from, round2, minus, plus, sumRound2 } from '../utils/decimal.js';
+
+/** Single FX position for unrealized G/L (ASC 830-20-35). */
+export interface FxPosition {
+  currency: string;
+  amount: number;
+  isMonetary: boolean;
+  balanceDate: string; // ISO date
+  historicalRate?: number;
+  accountCode?: string;
+  description?: string;
+}
 
 export interface FxRates {
   /** Closing rate: local -> reporting (e.g. CAD: 0.74 for USD) */
@@ -132,4 +144,32 @@ export function remeasureToFunctionalCurrency(
     reportingCurrency: functionalCurrency,
     lines: resultLines,
   };
+}
+
+/**
+ * Compute unrealized FX gain/loss for monetary items per ASC 830-20-35.
+ * Ported from backend/tax/fx_engine.compute_unrealized_fx_gain_loss.
+ * Remeasure monetary items at current rate; unrealized G/L = current functional value minus prior period functional value.
+ * If priorFunctionalAmounts not provided, prior is taken as current (no change).
+ */
+export function computeUnrealizedFxGainLoss(
+  positions: FxPosition[],
+  functionalCurrency: string,
+  currentRates: Record<string, number>,
+  priorFunctionalAmounts?: Record<string, number>,
+  asOfDate?: string
+): number {
+  const prior = priorFunctionalAmounts ?? {};
+  let totalUnrealized = 0;
+  positions.forEach((pos, i) => {
+    if (pos.currency === functionalCurrency) return;
+    const rate = currentRates[pos.currency];
+    if (rate == null) return;
+    if (!pos.isMonetary) return;
+    const currentFunctional = from(pos.amount).times(rate).toDecimalPlaces(2).toNumber();
+    const key = pos.accountCode ?? String(i);
+    const priorFunctional = prior[key] ?? currentFunctional;
+    totalUnrealized += from(currentFunctional).minus(priorFunctional).toNumber();
+  });
+  return round2(totalUnrealized);
 }
