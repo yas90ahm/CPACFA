@@ -86,9 +86,23 @@ const CFA_TASK_PATTERNS = [
   /multiples|comps|comparable\s*analysis/i,
 ];
 
+/** Full Audit / Diagnostic HUD intent: force Supervisor (forensic) so Thought Stream runs and self-correction can happen. */
+const FULL_AUDIT_INTENT_PATTERNS = [
+  /full\s*audit\s*&\s*statement\s*build/i,
+  /full\s*audit/i,
+  /statement\s*build/i,
+];
+
+function isFullAuditOrDiagnosticIntent(message: string): boolean {
+  const text = message.trim();
+  return FULL_AUDIT_INTENT_PATTERNS.some((p) => p.test(text));
+}
+
 export interface UnifiedSupervisorParams {
   /** If set, overrides inferred strategy. Otherwise strategy is inferred from message (and pipelineInput). */
   mode?: 'chat' | 'pipeline';
+  /** When true, force forensic (Supervisor Agent) so month_end_close pipeline never runs. Use from Diagnostic HUD. */
+  forceForensic?: boolean;
   message: string;
   pipelineInput?: PipelineInput;
   sessionId?: string;
@@ -163,15 +177,25 @@ async function applySkepticGate(report: SupervisorReport): Promise<{
 export async function runUnifiedSupervisor(
   params: UnifiedSupervisorParams
 ): Promise<UnifiedChatOutput | UnifiedPipelineOutput> {
-  const { mode: modeOverride, message, pipelineInput, sessionId, tenantId, pool, periodLabel, useVerifiedPath } =
+  const { mode: modeOverride, forceForensic, message, pipelineInput, sessionId, tenantId, pool, periodLabel, useVerifiedPath } =
     params;
 
-  const strategy: TaskStrategy =
-    modeOverride === 'pipeline'
-      ? 'month_end_close'
-      : modeOverride === 'chat'
-        ? 'forensic'
-        : inferTaskStrategy(message, pipelineInput);
+  // DEBUG: Hard-code forensic to prove routing. Comment back in the block below to restore inference.
+  // const mustUseForensic = forceForensic === true || isFullAuditOrDiagnosticIntent(message);
+  // const strategy: TaskStrategy =
+  //   mustUseForensic
+  //     ? 'forensic'
+  //     : modeOverride === 'pipeline'
+  //       ? 'month_end_close'
+  //       : modeOverride === 'chat'
+  //         ? 'forensic'
+  //         : inferTaskStrategy(message, pipelineInput);
+  const strategy: TaskStrategy = 'forensic';
+
+  console.log('STRATEGY TRACE: incoming message:', message, '| strategy (forced for debug):', strategy);
+  // DEBUG: throw removed so you can see --- SUPERVISOR ACTIVATED --- in terminal. Uncomment to force-fail and prove this path is hit:
+  // if (message.includes('Audit')) { throw new Error('STRATEGY TRACE: I am about to select ' + strategy); }
+  console.log('TRACE 1: Orchestrator received request with strategy:', strategy);
 
   if (strategy === 'month_end_close' && pipelineInput != null) {
     const context = tenantId && pool ? { tenantId, pool } : undefined;

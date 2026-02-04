@@ -56,6 +56,11 @@ import {
   runReconcileCPAwithCFA,
   type ReconcileCPAwithCFAInput,
 } from './reconcileCPAwithCFA.js';
+import {
+  proposeTrialBalanceAdjustmentDefinition,
+  runProposeTrialBalanceAdjustment,
+  type ProposeTrialBalanceAdjustmentInput,
+} from './proposeTrialBalanceAdjustment.js';
 import * as persistence from '../../services/persistence_service.js';
 import {
   executeTool as executeSupervisorServiceTool,
@@ -279,7 +284,12 @@ export async function executeTool(
         ...(raw.fullSet != null && { fullSet: Boolean(raw.fullSet) }),
         ...(raw.lease != null && typeof raw.lease === 'object' && { lease: raw.lease as BuildFinancialStatementsInput['lease'] }),
       };
-      return runBuildFinancialStatements(effectiveInput, buildContext!);
+      try {
+        return await runBuildFinancialStatements(effectiveInput, buildContext!);
+      } catch (e) {
+        console.log('TRACE 2: Hard Crash in Tool Execution:', e instanceof Error ? e.message : String(e));
+        throw e;
+      }
     }
     case 'computeRatios': {
       const ratioInput = input as ComputeRatiosInput & Record<string, unknown>;

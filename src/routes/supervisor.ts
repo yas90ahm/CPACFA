@@ -6,6 +6,8 @@
 
 import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
+import { getTenantPoolWithMigrations } from '../db/index.js';
+import type { AuthRequest } from '../auth/middleware.js';
 import { runUnifiedSupervisor, type UnifiedChatOutput, type UnifiedPipelineOutput } from '../services/unified_orchestrator.js';
 import type { PipelineInput } from '../services/result_generator.js';
 import type { RawTrialBalanceRow } from '../services/trialBalanceParser.js';
@@ -23,14 +25,17 @@ const router = Router();
  * Optional mode overrides inference. Session created when tenantId/pool exist; sessionId returned.
  */
 router.post('/chat', async (req: Request, res: Response) => {
+  console.log('CRITICAL TRACE: Supervisor API reached by HUD');
   try {
     const body = req.body as {
       message?: string;
       raw_rows?: RawTrialBalanceRow[];
       pipeline_input?: PipelineInput;
       mode?: 'chat' | 'pipeline';
+      tenantId?: string;
     };
     const message = (body?.message ?? '').trim();
+    console.log('POST /api/supervisor/chat received, message:', message.substring(0, 80), '| raw_rows:', Array.isArray(body?.raw_rows) ? body.raw_rows.length : 0);
     if (!message) {
       res.status(400).json({ error: 'Missing "message" in body' });
       return;
@@ -41,8 +46,14 @@ router.post('/chat', async (req: Request, res: Response) => {
       pipelineInput = { type: 'raw_rows', rawRows: body.raw_rows };
     }
 
-    const tenantId = getTenantId(req) ?? 'default';
-    const pool = getTenantPool(req) ?? null;
+    // Resolve tenant (HUD sends tenantId e.g. test-tenant-uuid; ensure session is always created for trace)
+    let tenantId = getTenantId(req) ?? body?.tenantId ?? 'test-tenant-uuid';
+    let pool = getTenantPool(req) ?? null;
+    if (!pool && tenantId) {
+      pool = await getTenantPoolWithMigrations(tenantId);
+      (req as AuthRequest).tenantId = tenantId;
+      (req as AuthRequest).tenantPool = pool;
+    }
     let sessionId: string | undefined;
     if (pool && tenantId) {
       const session = await persistence.createSession(pool, tenantId, {
@@ -53,6 +64,7 @@ router.post('/chat', async (req: Request, res: Response) => {
     }
     const out = await runUnifiedSupervisor({
       ...(body.mode != null && { mode: body.mode }),
+      ...(body.forceForensic === true && { forceForensic: true }),
       message,
       pipelineInput,
       sessionId,
@@ -162,14 +174,22 @@ router.post('/chat-verified', async (req: Request, res: Response) => {
 /**
  * GET /api/supervisor/session/:sessionId/trace
  * Returns reasoning_logs and tenant_hitl_staging items for the session's tenant (audit trail).
+ * For HUD: tenantId may be passed as query (?tenantId=test-tenant-uuid) when no auth.
  */
 router.get('/session/:sessionId/trace', async (req: Request, res: Response) => {
   try {
     const sessionId = req.params.sessionId;
-    const tenantId = getTenantId(req);
-    const pool = getTenantPool(req);
-    if (!sessionId || !tenantId || !pool) {
+    let tenantId = getTenantId(req) ?? (req.query.tenantId as string | undefined);
+    let pool = getTenantPool(req) ?? null;
+    if (!sessionId || !tenantId) {
       res.status(400).json({ error: 'Session id and tenant context required' });
+      return;
+    }
+    if (!pool && tenantId) {
+      pool = await getTenantPoolWithMigrations(tenantId);
+    }
+    if (!pool) {
+      res.status(400).json({ error: 'Tenant context required' });
       return;
     }
     const session = await persistence.getSession(pool, tenantId, sessionId);

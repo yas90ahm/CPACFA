@@ -146,6 +146,8 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 59, file: '059_close_adjustments_posted_external_id.sql' },
   { version: 60, file: '060_period_trial_balance.sql' },
   { version: 61, file: '061_tenant_close_calendar_entries.sql' },
+  { version: 62, file: '062_tenant_hitl_staging_and_supervisor_sessions.sql' },
+  { version: 63, file: '063_tenant_supervisor_sessions_reasoning_logs.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 

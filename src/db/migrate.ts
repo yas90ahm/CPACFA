@@ -1,7 +1,9 @@
 /**
  * Migrations: control DB only on startup; tenant DB via script or lazy.
+ * Loads .env so MIGRATE_TENANT_URL or DATABASE_URL can be used from .env.
  */
 
+import 'dotenv/config';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import pg from 'pg';
@@ -54,7 +56,11 @@ export async function runMigrations(): Promise<void> {
   console.log('Control migrations complete.');
 }
 
-/** Run tenant schema (003) on a given database URL. Use: npm run migrate:tenant -- <URL> */
+/**
+ * Run tenant schema (003–063) on a given database URL.
+ * URL is read from (in order): MIGRATE_TENANT_URL, DATABASE_URL (.env), or last CLI arg.
+ * With Supabase URL in .env: set DATABASE_URL (or MIGRATE_TENANT_URL) then run: npx tsx src/db/migrate.ts --tenant
+ */
 export async function runTenantMigrationsForUrl(url: string): Promise<void> {
   const pool = new pg.Pool({ connectionString: url, max: 5 });
   try {
@@ -70,9 +76,9 @@ const isTenantMigrate = process.argv.includes('--tenant') || process.env.MIGRATE
 
 if (isRunDirectly) {
   if (isTenantMigrate) {
-    const url = process.env.MIGRATE_TENANT_URL || process.argv[process.argv.length - 1];
+    const url = process.env.MIGRATE_TENANT_URL || process.env.DATABASE_URL || process.argv[process.argv.length - 1];
     if (!url || url.startsWith('-')) {
-      console.error('Usage: MIGRATE_TENANT_URL=<url> tsx src/db/migrate.ts --tenant');
+      console.error('Usage: Set MIGRATE_TENANT_URL or DATABASE_URL in .env, or run: MIGRATE_TENANT_URL=<url> tsx src/db/migrate.ts --tenant');
       process.exit(1);
     }
     runTenantMigrationsForUrl(url).catch((err) => {

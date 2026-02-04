@@ -292,6 +292,7 @@ export async function runSupervisor(
     accountingContext?: string;
   }
 ): Promise<SupervisorOutput> {
+  console.log('--- SUPERVISOR ACTIVATED ---');
   const provider = getProviderFromEnv();
   const toolContext = {
     ...context,
@@ -305,6 +306,7 @@ export async function runSupervisor(
   let lastDissentingOpinion: unknown;
   /** Persistence reliability: every failure throws SessionPersistenceError so the API returns 500 (no silent green). */
   const fireReasoningStep = async (entry: ReasoningLogEntry): Promise<void> => {
+    console.log('TRACE 4: fireReasoningStep', entry.stepType, entry.thought?.substring(0, 100));
     const ts = { ...entry, timestamp: entry.timestamp || new Date().toISOString() };
     try {
       await Promise.resolve(context?.onReasoningStep?.(ts));
@@ -342,7 +344,7 @@ export async function runSupervisor(
   const ledgerTable =
     input.entries?.length ? formatLedgerForContext(input.entries) : '';
   const userContent = input.entries?.length
-    ? `${ledgerTable}\n\n${input.message}\n\n[Trial balance available in this session. Use buildFinancialStatements with sessionId and tenantId only (from context)—do not pass entries. Or use forensicRescan with entries if you need to re-validate.]`
+    ? `Current Ledger (first 40 rows — analyze for traps e.g. Ferrari, Lease, Plug):\n${ledgerTable}\n\n${input.message}\n\n[Trial balance available in this session. Use buildFinancialStatements with sessionId and tenantId only (from context)—do not pass entries. Or use forensicRescan with entries if you need to re-validate.]`
     : input.message;
 
   const defaultFirstMessage: MessageParam[] = [{ role: 'user', content: userContent }];
@@ -364,6 +366,8 @@ export async function runSupervisor(
     const tools: Tool[] = toAnthropicTools(buildTools()) as Tool[];
 
     for (let iter = 0; iter < MAX_REACT_ITERATIONS; iter++) {
+      const firstMessageContent = messages.length ? JSON.stringify(messages[0]) : '[]';
+      console.log('TRACE 3: Sending the following data to Claude:', firstMessageContent.substring(0, 500));
       const response = await client.messages.create({
         model: MODEL,
         max_tokens: 4096,

@@ -57,6 +57,7 @@ export default function DiagnosticsPage() {
       form.append('file', selectedFile);
       form.append('tenantId', 'test-tenant-uuid');
       form.append('sessionId', 'lab-session-uuid');
+      form.append('allowImbalance', 'true');
 
       const ingestRes = await fetch(`${API_BASE}/api/trial-balance/ingest`, {
         method: 'POST',
@@ -65,18 +66,6 @@ export default function DiagnosticsPage() {
       });
 
       const ingestJson = await ingestRes.json().catch(() => ({}));
-
-      if (ingestRes.status === 422) {
-        setUploadStatus('ok');
-        setUploadError(null);
-        setIntegrity({
-          status: 'self_healing',
-          imbalanceAmount: ingestJson.imbalanceAmount,
-          message: ingestJson.message ?? 'Trial balance does not balance',
-          sessionId: null,
-        });
-        return;
-      }
 
       if (!ingestRes.ok) {
         setUploadStatus('error');
@@ -94,14 +83,35 @@ export default function DiagnosticsPage() {
         accountCode: e.accountCode,
       }));
 
+      if (ingestJson.success === true && ingestJson.imbalanceAmount != null) {
+        setIntegrity({
+          status: 'self_healing',
+          imbalanceAmount: ingestJson.imbalanceAmount,
+          message: ingestJson.message ?? 'Trial balance does not balance',
+          sessionId: null,
+        });
+      }
       setUploadStatus('ok');
+
+      // Match ingest headers (Golden Key); add Content-Type for JSON and Authorization when key is set
+      const ingestHeaders: Record<string, string> = { Accept: 'application/json' };
+      const chatHeaders: Record<string, string> = {
+        ...ingestHeaders,
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + (process.env.NEXT_PUBLIC_API_KEY ?? ''),
+      };
+      if (process.env.NODE_ENV === 'development') {
+        console.log('DEBUG: Sending Auth Header:', chatHeaders.Authorization === 'Bearer ' ? '(empty — auth bypass on server)' : chatHeaders.Authorization ? 'Bearer ***' : '(none)');
+      }
 
       const chatRes = await fetch(`${API_BASE}/api/supervisor/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        headers: chatHeaders,
         body: JSON.stringify({
           message: 'Full Audit & Statement Build',
           raw_rows,
+          forceForensic: true,
+          tenantId: 'test-tenant-uuid',
         }),
       });
 
@@ -290,7 +300,7 @@ export default function DiagnosticsPage() {
       {/* Reasoning stream */}
       <section>
         <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>3. Reasoning stream</h2>
-        <DiagnosticThoughtStream sessionId={supervisorSessionId} />
+        <DiagnosticThoughtStream sessionId={supervisorSessionId} tenantId="test-tenant-uuid" />
       </section>
     </div>
   );

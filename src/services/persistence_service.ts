@@ -475,6 +475,7 @@ export async function appendReasoningLog(
 /**
  * Same as appendReasoningLog but uses a dedicated client so the write commits independently.
  * Use when the main flow may throw (e.g. 422); ensures the log is committed before any error propagates.
+ * Test tenants (e.g. test-tenant-uuid) are not excluded; reasoning logs are written to tenant_supervisor_sessions for any tenant_id when the session exists.
  */
 export async function appendReasoningLogWithClient(
   client: PoolClient,

@@ -125,12 +125,16 @@ const isProduction = process.env.NODE_ENV === 'production';
 const requireAuthByDefault = process.env.REQUIRE_AUTH !== 'false';
 const useRequireAuth = isProduction || requireAuthByDefault;
 
-// BYPASS AUTH FOR DIAGNOSTICS ONLY - REMOVE BEFORE PRODUCTION
+// Auth bypass for diagnostics: only when NOT production and explicitly enabled (DIAGNOSTICS_AUTH_BYPASS=true).
+// In production these paths always require auth.
 const authBypassPaths: (string | RegExp)[] = [
   '/trial-balance/ingest',
+  '/supervisor/chat',
   /^\/supervisor\/session\/[^/]+\/trace$/,
 ];
 function shouldBypassAuth(path: string): boolean {
+  if (isProduction) return false;
+  if (process.env.DIAGNOSTICS_AUTH_BYPASS !== 'true') return false;
   return authBypassPaths.some((p) => (typeof p === 'string' ? path === p : p.test(path)));
 }
 app.use('/api', apiLimiter, (req, res, next) => {
@@ -286,6 +290,11 @@ app.use('/api/eps', epsRouter);
 
 // API: FX currency (ASC 830 / IAS 21) — translation, remeasurement, agentic
 app.use('/api/fx', fxCurrencyRouter);
+
+// API: Supervisor Agent (ReAct + Claude); HUD / Full Audit & Statement Build
+app.use('/api/supervisor', supervisorRouter);
+// API: HITL staging and webhook
+app.use('/api/hitl', hitlRouter);
 
 // CPA module: optional grouping under /api/cpa when CPA_ENABLED=true (same handlers as above)
 const cpaEnabled = process.env.CPA_ENABLED === 'true';

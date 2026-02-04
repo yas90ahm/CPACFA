@@ -78,6 +78,7 @@ function injectTenantFromBody(req: Request, _res: Response, next: import('expres
  */
 router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValidTenantId, validateBody(ingestBodySchema), async (req: Request, res: Response) => {
   try {
+    console.log('POST /api/trial-balance/ingest received, file:', req.file?.originalname ?? 'none');
     const file = req.file;
     if (!file) {
       res.status(400).json({
@@ -280,16 +281,30 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       }
     }
 
-    const base = standard
-      ? await generateStatements(
-          trialBalanceForBuild,
-          standard,
-          body.periodLabel && tenantIdIngest ? { ...stmtOpts, preClassifiedEntries: undefined } : stmtOpts
-        )
-      : await buildValidatedStatements(
-          trialBalanceForBuild,
-          body.periodLabel && tenantIdIngest ? undefined : buildOpts
-        );
+    let base: Awaited<ReturnType<typeof buildValidatedStatements>> | Awaited<ReturnType<typeof generateStatements>>;
+    try {
+      base = standard
+        ? await generateStatements(
+            trialBalanceForBuild,
+            standard,
+            body.periodLabel && tenantIdIngest ? { ...stmtOpts, preClassifiedEntries: undefined } : stmtOpts
+          )
+        : await buildValidatedStatements(
+            trialBalanceForBuild,
+            body.periodLabel && tenantIdIngest ? undefined : buildOpts
+          );
+    } catch (buildErr) {
+      if (body.allowImbalance && buildErr instanceof MathematicalIntegrityError) {
+        return res.status(200).json({
+          success: true,
+          imbalanceAmount: buildErr.imbalanceAmount,
+          check: buildErr.check,
+          message: buildErr.message,
+          trialBalance: { entries: trialBalanceForBuild.entries },
+        });
+      }
+      throw buildErr;
+    }
     const { balanceSheet, profitAndLoss } = base;
     const classifiedEntries = base.classifiedEntries;
     const standardMetadata = 'standardMetadata' in base ? base.standardMetadata : undefined;

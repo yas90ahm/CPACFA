@@ -47,6 +47,7 @@ export const ingestBodySchema = z.object({
   useAgenticClassification: optionalBooleanOrString,
   contractText: z.union([z.string(), z.array(z.string())]).optional(),
   leaseDocuments: z.union([z.string(), z.array(z.string())]).optional(),
+  allowImbalance: optionalBooleanOrString,
 });
 
 export type IngestBody = z.infer<typeof ingestBodySchema>;

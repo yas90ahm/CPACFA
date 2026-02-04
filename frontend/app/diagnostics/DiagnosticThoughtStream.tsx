@@ -44,17 +44,24 @@ function highlightCitations(text: string): React.ReactNode {
   return parts.length > 0 ? <>{parts}</> : text;
 }
 
-export function DiagnosticThoughtStream({ sessionId }: { sessionId: string | null }) {
+export function DiagnosticThoughtStream({
+  sessionId,
+  tenantId,
+}: {
+  sessionId: string | null;
+  tenantId?: string;
+}) {
   const [logs, setLogs] = React.useState<ReasoningLogEntry[]>([]);
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!sessionId) return;
     let cancelled = false;
+    const traceUrl = `${API_BASE}/api/supervisor/session/${encodeURIComponent(sessionId)}/trace${tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : ''}`;
 
     const poll = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/supervisor/session/${encodeURIComponent(sessionId)}/trace`, {
+        const res = await fetch(traceUrl, {
           headers: { Accept: 'application/json' },
         });
         if (cancelled) return;
@@ -76,7 +83,7 @@ export function DiagnosticThoughtStream({ sessionId }: { sessionId: string | nul
       cancelled = true;
       clearInterval(interval);
     };
-  }, [sessionId]);
+  }, [sessionId, tenantId]);
 
   if (!sessionId) {
     return (
