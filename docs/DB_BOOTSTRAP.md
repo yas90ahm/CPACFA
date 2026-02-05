@@ -11,7 +11,7 @@ This document describes how to reset, migrate, verify, and seed the backend data
 
 | Script | Purpose |
 |--------|---------|
-| `npm run db:reset` | **Destructive.** Wipe `public` schema, recreate extensions, run all migrations, optionally seed test data, then verify schema. Requires `ALLOW_DB_RESET=true` (set automatically by the script when run via npm). |
+| `npm run db:reset` | **Destructive.** Wipe `public` schema, recreate extensions, run all migrations, optionally seed test data, then verify schema. Refuses unless `NODE_ENV=test` or `ALLOW_DB_RESET=true`; refuses prod-like `DATABASE_URL`. Run with: `ALLOW_DB_RESET=true npm run db:reset`. |
 | `npm run db:migrate` | Run control + tenant migrations only (idempotent; skips already-applied migrations). |
 | `npm run db:verify` | Run schema verification only. Exits non-zero if any required table/column is missing. |
 | `npm run db:seed:test` | Insert minimal test tenant data (e.g. `certification-pipeline-tenant`). Idempotent. |
@@ -46,20 +46,21 @@ The script tries full reset first. On success it logs `Reset mode: full`. On fai
 To reset a **non-production** database (e.g. local or CI):
 
 ```bash
-# From project root; .env must contain DATABASE_URL
-npm run db:reset
+# From project root; .env must contain DATABASE_URL. Explicit allow required.
+ALLOW_DB_RESET=true npm run db:reset
+# or: NODE_ENV=test npm run db:reset
 ```
 
 To include test seed data:
 
 ```bash
-SEED_FOR_TESTS=true npm run db:reset
+SEED_FOR_TESTS=true ALLOW_DB_RESET=true npm run db:reset
 ```
 
 Or run reset then seed separately:
 
 ```bash
-npm run db:reset
+ALLOW_DB_RESET=true npm run db:reset
 npm run db:seed:test
 ```
 
@@ -103,17 +104,17 @@ Missing tables or columns are reported; the process exits non-zero.
 With a brand-new empty Supabase (or Postgres) database:
 
 1. Put the database URL in `.env` as `DATABASE_URL`.
-2. Reset and optionally seed:
+2. Reset and optionally seed (explicit allow required):
 
    ```bash
-   npm run db:reset
+   ALLOW_DB_RESET=true npm run db:reset
    npm run db:seed:test
    ```
 
    Or with seed in one step:
 
    ```bash
-   SEED_FOR_TESTS=true npm run db:reset
+   SEED_FOR_TESTS=true ALLOW_DB_RESET=true npm run db:reset
    ```
 
 3. Run integration tests from the **tests** directory:
@@ -144,7 +145,7 @@ The test harness runs schema verification before tests when `DATABASE_URL` is se
   Or reset once then test:
 
   ```yaml
-  - run: npm run db:reset
+  - run: ALLOW_DB_RESET=true npm run db:reset
   - run: cd tests && npm test -- integration/
   ```
 

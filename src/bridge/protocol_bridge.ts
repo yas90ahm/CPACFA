@@ -129,7 +129,7 @@ export type BridgeResult =
   | { ok: true; commandType: 'CreateDraftJE'; journalEntry: { id: string; status: string } }
   | { ok: true; commandType: 'ProposeJE'; journalEntry: { id: string; status: string } }
   | { ok: true; commandType: 'ApproveJE'; journalEntry: { id: string; status: string } }
-  | { ok: true; commandType: 'PostJE'; journalEntry: { id: string; status: string } }
+  | { ok: true; commandType: 'PostJE'; journalEntry: { id: string; status: string }; aiWarnings?: Array<{ ai_status: string; reason: string; pillar: string }> }
   | { ok: true; commandType: 'ApplyHitlAdjustmentToTrialBalance'; periodLabel: string; stagedId: string }
   | { ok: true; commandType: 'LockPeriod'; periodLabel: string; lockedAt: string }
   | { ok: false; error: string; code: string };
@@ -290,12 +290,17 @@ export async function executeBridgeCommand(
         if (periodLabel) {
           await assertPeriodNotLocked(periodLabel, ctx.tenantId, ctx.pool);
         }
-        const updated = await postJE(ctx.pool, ctx.tenantId, cmd.journalEntryId);
+        const result = await postJE(ctx.pool, ctx.tenantId, cmd.journalEntryId);
         await recordBridgeMutation(ctx, 'PostJE', {
           periodLabel: periodLabel ?? undefined,
           journalEntryId: cmd.journalEntryId,
         });
-        return { ok: true, commandType: 'PostJE', journalEntry: { id: updated.id, status: updated.status } };
+        return {
+          ok: true,
+          commandType: 'PostJE',
+          journalEntry: { id: result.journalEntry.id, status: result.journalEntry.status },
+          ...(result.aiWarnings?.length && { aiWarnings: result.aiWarnings }),
+        };
       }
 
       case 'ApplyHitlAdjustmentToTrialBalance': {
@@ -396,7 +401,7 @@ export async function executeBridgeCommand(
       };
     }
     if (err instanceof JournalEntryError) {
-      return { ok: false, error: err.message, code: 'SERVICE' };
+      return { ok: false, error: err.message, code: err.code };
     }
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, error: message, code: 'SERVICE' };

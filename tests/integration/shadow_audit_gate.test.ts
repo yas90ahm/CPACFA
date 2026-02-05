@@ -82,6 +82,7 @@ describe('Shadow Auditor gate', () => {
 
       expect(postRes.status).toBe(403);
       expect(postRes.body?.error).toBeDefined();
+      expect(postRes.body?.code).toBe('SHADOW_AUDIT_BLOCK');
 
       const pool = await getTenantPool(TEST_TENANT_ID);
       const row = await pool.query(

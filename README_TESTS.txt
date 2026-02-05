@@ -61,7 +61,7 @@ Scenario: Upload imbalanced CSV TB → tenant_hitl_staging created (no period_tr
 
 Run: From tests/ directory, npm test -- integration/certification_pipeline.test.ts. Set DATABASE_URL for full run; without DB the test skips (no failure). CI: one test file, reliable skip when DB not configured.
 
-Sovereign CPA Engine AI (Justifier): The certification pipeline includes a JE create → propose → approve → post step; after post, runJustifier runs (use AI_MOCK=true in CI for deterministic mock JSON). Assertions: tenant_justifications row for the posted JE (created_by_type=agent) and ai_call_log row (pillar=justifier). Run db:reset or tenant migration including 080_ai_call_log so schema verification and tests pass.
+Sovereign CPA Engine AI (Justifier): The certification pipeline includes a JE create → propose → approve → post step; after post, runJustifier runs (use AI_MOCK=true in CI for deterministic mock JSON). Assertions: tenant_justifications row for the posted JE (created_by_type=agent) and ai_call_log row (pillar=justifier). Run ALLOW_DB_RESET=true npm run db:reset (or tenant migration) including 080_ai_call_log so schema verification and tests pass.
 
 Shadow Auditor (Milestone 2): Pre-post gate runs deterministic + AI shadow audit; block only when severity=block (403 on JE post and on resolve-ingest). AI_MOCK=true with AI_SHADOW_SEVERITY=ok|warn|block; AI_SHADOW_FINDINGS_JSON optional. Fail-open on AI failure (warn, do not block). Tests: unit shadow_auditor_schema.test.ts; integration shadow_audit_gate.test.ts (block→403, ok→200); certification_pipeline asserts tenant_shadow_audit_findings row and ai_call_log pillar=shadow_auditor. Migration 081 adds confidence, prompt_version, model to tenant_shadow_audit_findings.
 

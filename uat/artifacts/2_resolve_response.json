@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "periodLabel": "2025-01",
+  "message": "Staged data fixed and saved to period_trial_balance.",
+  "ai_warning": {
+    "ai_status": "unavailable",
+    "reason": "Unexpected token '`', \"```json\n{\n\"... is not valid JSON",
+    "pillar": "shadow_auditor"
+  }
+}

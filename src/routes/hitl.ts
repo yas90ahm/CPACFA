@@ -271,6 +271,13 @@ router.post(
       ok: true,
       periodLabel,
       message: 'Staged data fixed and saved to period_trial_balance.',
+      ...(!shadowResult.ok && {
+        ai_warning: {
+          ai_status: 'unavailable',
+          reason: shadowResult.error ?? 'Shadow Auditor AI failed',
+          pillar: 'shadow_auditor',
+        },
+      }),
     });
   })
 );

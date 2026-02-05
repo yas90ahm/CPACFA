@@ -65,8 +65,9 @@ npm run dev            # or: npm run start (node dist/server.js)
 Reset DB (destructive, use with care):
 
 ```bash
-npm run db:reset       # ALLOW_DB_RESET=true; runs reset_and_bootstrap
+ALLOW_DB_RESET=true npm run db:reset   # or NODE_ENV=test npm run db:reset
 ```
+Without `ALLOW_DB_RESET=true` or `NODE_ENV=test`, `db:reset` refuses to run.
 
 **Tests:** See “Running tests” below. Certification pipeline and other integration tests require `DATABASE_URL`; when missing they skip (CI guard).
 

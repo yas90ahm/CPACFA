@@ -1,0 +1,25 @@
+{
+  "status": "staged",
+  "stagedId": "hitl-1770330276537-kcvcqmm",
+  "imbalanceAmount": 600,
+  "totalDebits": 1000,
+  "totalCredits": 400,
+  "message": "Trial balance does not balance. Data staged for HITL fix. Use POST /api/hitl/resolve-ingest with human-supplied adjustment; not saved to main ledger.",
+  "ai_warnings": [
+    {
+      "ai_status": "unavailable",
+      "reason": "Unexpected token '`', \"```json\n{\n\"... is not valid JSON",
+      "pillar": "classifier"
+    },
+    {
+      "ai_status": "unavailable",
+      "reason": "Unexpected token '`', \"```json\n{\n\"... is not valid JSON",
+      "pillar": "advisor"
+    }
+  ],
+  "ingest_metadata": {
+    "source_type": "csv_upload",
+    "source_hash": "f051d0f7bbc73ca753fb4224a924bbe1a51682c8b188231ed6761c63b6c14e77",
+    "ingestion_timestamp": "2026-02-05T22:24:36.537Z"
+  }
+}

@@ -161,17 +161,24 @@ export async function updateStagingStatus(
   return getStagingItem(pool, tenantId, id);
 }
 
-/** Merge patch into staging item payload (e.g. classification_results). Does not replace entire payload. */
+/** Trust-boundary metadata keys: immutable once set on staging item. */
+const IMMUTABLE_PAYLOAD_KEYS = ['source_type', 'source_hash', 'ingestion_timestamp'];
+
+/** Merge patch into staging item payload (e.g. classification_results). Does not replace entire payload. Immutable keys (source_type, source_hash, ingestion_timestamp) are never overwritten. */
 export async function updateStagingPayload(
   pool: Pool,
   tenantId: string,
   id: string,
   payloadPatch: Record<string, unknown>
 ): Promise<StagingItemShape | undefined> {
+  const filtered = { ...payloadPatch };
+  for (const key of IMMUTABLE_PAYLOAD_KEYS) {
+    delete filtered[key];
+  }
   const now = new Date().toISOString();
   await pool.query(
     `UPDATE tenant_hitl_staging SET payload = COALESCE(payload, '{}'::jsonb) || $1::jsonb, updated_at = $2 WHERE id = $3 AND tenant_id = $4`,
-    [JSON.stringify(payloadPatch), now, id, tenantId]
+    [JSON.stringify(filtered), now, id, tenantId]
   );
   return getStagingItem(pool, tenantId, id);
 }

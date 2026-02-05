@@ -12,6 +12,7 @@ import pg from 'pg';
 import { runMigrations } from './migrate.js';
 import { getControlPool, runTenantMigrations } from './index.js';
 import { verifySchema } from './schema_verify.js';
+import { isAllowedForDestructive, looksLikeProduction } from './destructive_guards.js';
 
 const { Pool } = pg;
 
@@ -40,18 +41,6 @@ function parseDatabaseUrl(url: string): { host: string; database: string; user: 
   }
 }
 
-function isAllowed(): boolean {
-  if (process.env.NODE_ENV === 'test') return true;
-  if (process.env.ALLOW_DB_RESET === 'true') return true;
-  return false;
-}
-
-function looksLikeProduction(url: string): boolean {
-  const lower = url.toLowerCase();
-  if (lower.includes('prod') || lower.includes('production')) return true;
-  if (/\bprod[-.]?\w*\.(supabase|aws|azure|gcp)/i.test(url)) return true;
-  return false;
-}
 
 /** Reset mode: full (DROP SCHEMA) or soft (drop tables/types/functions only). */
 export type ResetMode = 'full' | 'soft';
@@ -152,19 +141,20 @@ async function main(): Promise<void> {
 
   const identity = parseDatabaseUrl(url);
 
-  if (!isAllowed()) {
+  if (!isAllowedForDestructive()) {
     console.error(
-      'Refusing to run: set NODE_ENV=test or ALLOW_DB_RESET=true to allow reset. Destructive actions are guarded.'
+      'Refusing to reset DB. Set ALLOW_DB_RESET=true or run with NODE_ENV=test.'
     );
     process.exit(1);
   }
 
   if (looksLikeProduction(url)) {
-    console.error('Refusing to run: DATABASE_URL looks like production. Aborting.');
+    console.error('[FATAL] Refusing to run: DATABASE_URL looks like production. Aborting to prevent data loss.');
     process.exit(1);
   }
 
   console.log('=== DB RESET START ===');
+  console.log('Confirmed: ALLOW_DB_RESET or NODE_ENV=test set; URL does not look like production.');
   console.log(
     'Target:',
     [identity.host || '?', identity.database || '?', identity.user || '?'].join(' / ')

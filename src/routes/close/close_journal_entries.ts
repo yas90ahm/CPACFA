@@ -255,13 +255,13 @@ router.post('/journal-entries/:id/reject', async (req: Request, res: Response) =
   }
 });
 
-/** POST /api/close/journal-entries/:id/post (via bridge) */
+/** POST /api/close/journal-entries/:id/post (via bridge). All error responses include { error, code }. */
 router.post('/journal-entries/:id/post', async (req: Request, res: Response) => {
   try {
     const pool = getTenantPool(req);
     const tenantId = getTenantId(req);
     if (!pool || !tenantId) {
-      res.status(400).json({ error: 'Tenant context required' });
+      res.status(400).json({ error: 'Tenant context required', code: 'VALIDATION' });
       return;
     }
     const id = req.params.id ?? '';
@@ -270,24 +270,31 @@ router.post('/journal-entries/:id/post', async (req: Request, res: Response) => 
       { commandType: 'PostJE', journalEntryId: id }
     );
     if (!result.ok) {
-      const status = result.code === 'PERIOD_LOCKED' ? 409 : 400;
-      res.status(status).json({ error: result.error, code: result.code });
+      const status = result.code === 'PERIOD_LOCKED' ? 409 : result.code === 'SHADOW_AUDIT_BLOCK' ? 403 : 400;
+      res.status(status).json({ error: result.error, code: result.code ?? 'SERVICE' });
       return;
     }
     if (result.commandType !== 'PostJE') throw new Error('Unexpected result');
     const je = await getJournalEntry(pool, tenantId, result.journalEntry.id);
     if (!je) {
-      res.status(404).json({ error: 'Journal entry not found' });
+      res.status(404).json({ error: 'Journal entry not found', code: 'NOT_FOUND' });
       return;
     }
-    res.json(je);
+    res.json({
+      ...je,
+      ...(result.aiWarnings?.length && { ai_warnings: result.aiWarnings }),
+    });
   } catch (e) {
     if (e instanceof JournalEntryError) {
       const status = e.code === 'NOT_FOUND' ? 404 : e.code === 'SHADOW_AUDIT_BLOCK' ? 403 : 400;
-      res.status(status).json({ error: e.message });
+      res.status(status).json({ error: e.message, code: e.code });
       return;
     }
-    send500(res, e, 'Post JE failed');
+    const { log } = await import('../../lib/logger.js');
+    const message = e instanceof Error ? e.message : String(e);
+    const stack = e instanceof Error ? e.stack : undefined;
+    log('error', 'Post JE failed', { message, stack });
+    res.status(500).json({ error: 'Post JE failed', code: 'SERVICE' });
   }
 });
 

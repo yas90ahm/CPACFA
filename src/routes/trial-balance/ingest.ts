@@ -4,6 +4,7 @@
  * No Python backend calls. MathematicalIntegrityError always returns 422 (Provable Correctness).
  */
 
+import { createHash } from 'crypto';
 import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import { parseTrialBalance } from '../../services/trialBalanceParser.js';
@@ -167,6 +168,9 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
     if (absGt(totalDebits, totalCredits, tolerance)) {
       const imbalanceAmount = Math.abs(totalDebits - totalCredits);
       let stagedId: string | undefined;
+      const ingestionTimestamp = new Date().toISOString();
+      const sourceHash = createHash('sha256').update(file.buffer).digest('hex');
+      const aiWarnings: Array<{ ai_status: string; reason: string; pillar: string }> = [];
       if (poolIngest && tenantIdIngest) {
         const periodLabelStaged = body.periodLabel ?? `ingest-${new Date().toISOString().slice(0, 10)}`;
         const item = await createStagingItem(poolIngest, tenantIdIngest, {
@@ -182,62 +186,75 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
             fileName: file.originalname ?? 'upload.csv',
             totalDebits,
             totalCredits,
+            source_type: 'csv_upload',
+            source_hash: sourceHash,
+            ingestion_timestamp: ingestionTimestamp,
           },
         });
         stagedId = item.id;
-        try {
-          const sourceLines = rawRows.map((r, i) => ({
-            source_id: `row-${i}`,
-            accountName: r.accountName ?? '',
-            debit: r.debit ?? 0,
-            credit: r.credit ?? 0,
-          }));
-          const classifierResult = await runClassifier({
-            pool: poolIngest,
+        const sourceLines = rawRows.map((r, i) => ({
+          source_id: `row-${i}`,
+          accountName: r.accountName ?? '',
+          debit: r.debit ?? 0,
+          credit: r.credit ?? 0,
+        }));
+        const classifierResult = await runClassifier({
+          pool: poolIngest,
+          tenantId: tenantIdIngest,
+          periodLabel: periodLabelStaged ?? `ingest-${new Date().toISOString().slice(0, 10)}`,
+          sourceLines,
+        });
+        if (!classifierResult.ok) {
+          aiWarnings.push({
+            ai_status: 'unavailable',
+            reason: classifierResult.error ?? 'Classifier failed',
+            pillar: 'classifier',
+          });
+        }
+        if (classifierResult.results.length > 0) {
+          await updateStagingPayload(poolIngest, tenantIdIngest, item.id, {
+            classification_results: classifierResult.results,
+            classification_prompt_version: classifierResult.prompt_version,
+            classification_model: process.env.AI_MODEL ?? undefined,
+          });
+        }
+        const classifiedSourceLines = rawRows.map((r, i) => ({
+          source_id: `row-${i}`,
+          accountName: r.accountName ?? '',
+          debit: r.debit ?? 0,
+          credit: r.credit ?? 0,
+          ...(classifierResult.results[i]
+            ? {
+                object_type: classifierResult.results[i].object_type,
+                fs_placement: classifierResult.results[i].fs_placement,
+                suggested_accounts: classifierResult.results[i].suggested_accounts,
+                rule_tags: classifierResult.results[i].rule_tags,
+              }
+            : {}),
+        }));
+        const advisorResult = await runAdvisor({
+          pool: poolIngest,
+          tenantId: tenantIdIngest,
+          periodLabel: periodLabelStaged ?? `ingest-${new Date().toISOString().slice(0, 10)}`,
+          sourceLines: classifiedSourceLines,
+          tbSummary: { totalDebits, totalCredits, rowCount: rawRows.length },
+        });
+        if (!advisorResult.ok) {
+          aiWarnings.push({
+            ai_status: 'unavailable',
+            reason: advisorResult.error ?? 'Advisor failed',
+            pillar: 'advisor',
+          });
+        }
+        if (advisorResult.proposals.length > 0) {
+          await aiProposalsRepo.saveProposals(poolIngest, {
             tenantId: tenantIdIngest,
             periodLabel: periodLabelStaged ?? `ingest-${new Date().toISOString().slice(0, 10)}`,
-            sourceLines,
+            stagingId: item.id,
+            proposal: { prompt_version: advisorResult.prompt_version, proposals: advisorResult.proposals },
+            promptVersion: advisorResult.prompt_version,
+            model: process.env.AI_MODEL ?? undefined,
           });
-          if (classifierResult.results.length > 0) {
-            await updateStagingPayload(poolIngest, tenantIdIngest, item.id, {
-              classification_results: classifierResult.results,
-              classification_prompt_version: classifierResult.prompt_version,
-              classification_model: process.env.AI_MODEL ?? undefined,
-            });
-          }
-          const classifiedSourceLines = rawRows.map((r, i) => ({
-            source_id: `row-${i}`,
-            accountName: r.accountName ?? '',
-            debit: r.debit ?? 0,
-            credit: r.credit ?? 0,
-            ...(classifierResult.results[i]
-              ? {
-                  object_type: classifierResult.results[i].object_type,
-                  fs_placement: classifierResult.results[i].fs_placement,
-                  suggested_accounts: classifierResult.results[i].suggested_accounts,
-                  rule_tags: classifierResult.results[i].rule_tags,
-                }
-              : {}),
-          }));
-          const advisorResult = await runAdvisor({
-            pool: poolIngest,
-            tenantId: tenantIdIngest,
-            periodLabel: periodLabelStaged ?? `ingest-${new Date().toISOString().slice(0, 10)}`,
-            sourceLines: classifiedSourceLines,
-            tbSummary: { totalDebits, totalCredits, rowCount: rawRows.length },
-          });
-          if (advisorResult.proposals.length > 0) {
-            await aiProposalsRepo.saveProposals(poolIngest, {
-              tenantId: tenantIdIngest,
-              periodLabel: periodLabelStaged ?? `ingest-${new Date().toISOString().slice(0, 10)}`,
-              stagingId: item.id,
-              proposal: { prompt_version: advisorResult.prompt_version, proposals: advisorResult.proposals },
-              promptVersion: advisorResult.prompt_version,
-              model: process.env.AI_MODEL ?? undefined,
-            });
-          }
-        } catch {
-          // Fail-open: do not block ingestion if classifier or advisor fails
         }
       }
       // Scope: no AI-generated amounts. Staging only; human supplies correction via resolve-ingest.
@@ -248,6 +265,8 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
         totalDebits,
         totalCredits,
         message: 'Trial balance does not balance. Data staged for HITL fix. Use POST /api/hitl/resolve-ingest with human-supplied adjustment; not saved to main ledger.',
+        ...(aiWarnings.length > 0 && { ai_warnings: aiWarnings }),
+        ingest_metadata: { source_type: 'csv_upload', source_hash: sourceHash, ingestion_timestamp: ingestionTimestamp },
       });
     }
 

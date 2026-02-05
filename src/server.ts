@@ -5,6 +5,7 @@
  */
 
 import 'dotenv/config';
+import { assertNoDestructiveInStagingOrProduction } from './db/destructive_guards.js';
 
 import express from 'express';
 import helmet from 'helmet';
@@ -38,6 +39,8 @@ import { startIngestionScheduler } from './services/ingestion_scheduler.js';
 import { runWorkerLoop } from './services/job_worker.js';
 import { send500 } from './lib/errorHandler.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
+
+assertNoDestructiveInStagingOrProduction();
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -183,7 +186,16 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 /** Exported for headless/integration tests (e.g. sovereign_validator). */
 export { app };
 
+/** Fail fast when running in production without DB. Exported for tests. */
+export function ensureProductionHasDatabase(): void {
+  if (process.env.NODE_ENV === 'production' && !isDbConfigured()) {
+    console.error('[FATAL] NODE_ENV is production but DATABASE_URL is not set. Refusing to start.');
+    process.exit(1);
+  }
+}
+
 async function start(): Promise<void> {
+  ensureProductionHasDatabase();
   if (isDbConfigured()) {
     try {
       await runMigrations();

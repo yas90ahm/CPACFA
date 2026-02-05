@@ -109,6 +109,8 @@ export interface AuditBinder {
   cleanLedger?: CleanLedgerRow[];
   /** Audit ledger chain verification: enables third party to verify chain integrity from binder output */
   chainVerification?: ChainVerificationSummary;
+  /** Trust boundary: ingest source metadata (source_type, source_hash, ingestion_timestamp) for staged data in period */
+  ingestMetadata?: Array<{ source_type: string; source_hash: string; ingestion_timestamp: string }>;
 }
 
 /** Single accounting policy change during the fiscal year (GAAP consistency) */

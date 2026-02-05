@@ -203,6 +203,8 @@ export interface BuildAuditBinderOptions {
   /** When provided, fetch last statement from tenant DB */
   tenantId?: string;
   pool?: Pool | null;
+  /** Trust boundary: ingest metadata for staged items in period (included in binder for auditability) */
+  ingestMetadata?: Array<{ source_type: string; source_hash: string; ingestion_timestamp: string }>;
 }
 
 /**
@@ -219,6 +221,7 @@ export async function buildAuditBinder(options: BuildAuditBinderOptions): Promis
     baseReasoningUrl = BASE_REASONING_URL,
     tenantId,
     pool,
+    ingestMetadata,
   } = options;
 
   const stored = await getLastStatementGeneration(tenantId, pool);
@@ -233,6 +236,7 @@ export async function buildAuditBinder(options: BuildAuditBinderOptions): Promis
     periodEnd,
     generatedAt,
     justifications,
+    ...(ingestMetadata?.length && { ingestMetadata }),
   };
 
   if (tenantId && pool) {

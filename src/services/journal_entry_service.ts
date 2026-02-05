@@ -120,8 +120,13 @@ export async function rejectJE(pool: Pool, tenantId: string, id: string): Promis
   return updated!;
 }
 
+export interface PostJEResult {
+  journalEntry: JournalEntry;
+  aiWarnings?: Array<{ ai_status: string; reason: string; pillar: string }>;
+}
+
 /** Post an approved JE (approved → posted). Shadow Auditor runs first; blocks on severity=block. */
-export async function postJE(pool: Pool, tenantId: string, id: string): Promise<JournalEntry> {
+export async function postJE(pool: Pool, tenantId: string, id: string): Promise<PostJEResult> {
   const je = await repo.getJournalEntryById(pool, id, tenantId);
   if (!je) throw new JournalEntryError('Journal entry not found', 'NOT_FOUND');
   if (je.status !== 'approved') {
@@ -192,7 +197,11 @@ export async function postJE(pool: Pool, tenantId: string, id: string): Promise<
     model: process.env.AI_MODEL ?? undefined,
     inputs_hash: inputsHash,
   });
-  return updated!;
+  const aiWarnings =
+    !justifierResult.ok
+      ? [{ ai_status: 'unavailable' as const, reason: justifierResult.error ?? 'Justifier failed', pillar: 'justifier' as const }]
+      : undefined;
+  return { journalEntry: updated!, aiWarnings };
 }
 
 /** Mark a posted JE as exported (posted → exported). */

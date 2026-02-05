@@ -16,11 +16,29 @@ import {
 } from '../../services/audit_binder_export_service.js';
 import { checkExportGate } from '../../services/export_gate_service.js';
 import { finalIntegrityCheck } from '../../services/integrity_check.js';
+import { listStagingItems } from '../../services/persistence_service.js';
 import { validateBody } from '../../middleware/validationMiddleware.js';
 import { registerStatementsBodySchema } from '../../schemas/auditSchemas.js';
 import { handleAuditError, handleAuditOrIntegrityError } from './audit_shared.js';
 
 const router = Router();
+
+/** Build ingest metadata for binder from staging items in period (trust boundary). */
+async function getIngestMetadataForPeriod(
+  pool: NonNullable<ReturnType<typeof getTenantPool>>,
+  tenantId: string,
+  periodLabel: string
+): Promise<Array<{ source_type: string; source_hash: string; ingestion_timestamp: string }>> {
+  const items = await listStagingItems(pool, tenantId, { limit: 500 });
+  const out: Array<{ source_type: string; source_hash: string; ingestion_timestamp: string }> = [];
+  for (const item of items) {
+    const p = item.payload as Record<string, unknown> | undefined;
+    if (p?.kind !== 'trial_balance_ingest' || p?.periodLabel !== periodLabel) continue;
+    const st = p.source_type; const sh = p.source_hash; const it = p.ingestion_timestamp;
+    if (typeof st === 'string' && typeof sh === 'string' && typeof it === 'string') out.push({ source_type: st, source_hash: sh, ingestion_timestamp: it });
+  }
+  return out;
+}
 
 /** Require closeSessionId (query) and session.status === 'certified'. Returns 403 if not. Binder is certified-only. */
 async function requireCertifiedSession(
@@ -148,9 +166,11 @@ router.get('/binder', async (req: Request, res: Response) => {
     if (!(await runBinderExportGates(req, res, { pool: auth.pool, tenantId: auth.tenantId }))) return;
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
+    const periodLabel = periodEnd.slice(0, 7);
     const entityName = (req.query.entityName as string) ?? 'Entity';
     const host = req.get('host');
     const baseUrl = req.protocol + '://' + (host ?? '');
+    const ingestMetadata = await getIngestMetadataForPeriod(auth.pool, auth.tenantId, periodLabel);
     const binder = await buildAuditBinder({
       periodStart,
       periodEnd,
@@ -159,6 +179,7 @@ router.get('/binder', async (req: Request, res: Response) => {
       baseReasoningUrl: `${baseUrl}/api/audit/reasoning`,
       tenantId: auth.tenantId,
       pool: auth.pool,
+      ingestMetadata: ingestMetadata.length ? ingestMetadata : undefined,
     });
     res.json(binder);
   } catch (err) {
@@ -174,9 +195,11 @@ router.get('/binder/export/pdf', async (req: Request, res: Response) => {
     if (!(await runBinderExportGates(req, res, { pool: auth.pool, tenantId: auth.tenantId }))) return;
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
+    const periodLabel = periodEnd.slice(0, 7);
     const entityName = (req.query.entityName as string) ?? 'Entity';
     const host = req.get('host');
     const baseUrl = req.protocol + '://' + (host ?? '');
+    const ingestMetadata = await getIngestMetadataForPeriod(auth.pool, auth.tenantId, periodLabel);
     const binder = await buildAuditBinder({
       periodStart,
       periodEnd,
@@ -185,6 +208,7 @@ router.get('/binder/export/pdf', async (req: Request, res: Response) => {
       baseReasoningUrl: `${baseUrl}/api/audit/reasoning`,
       tenantId: auth.tenantId,
       pool: auth.pool,
+      ingestMetadata: ingestMetadata.length ? ingestMetadata : undefined,
     });
     const buffer = await exportAuditBinderToPdf(binder);
     res.setHeader('Content-Type', 'application/pdf');
@@ -203,9 +227,11 @@ router.get('/binder/export/csv', async (req: Request, res: Response) => {
     if (!(await runBinderExportGates(req, res, { pool: auth.pool, tenantId: auth.tenantId }))) return;
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
+    const periodLabel = periodEnd.slice(0, 7);
     const entityName = (req.query.entityName as string) ?? 'Entity';
     const host = req.get('host');
     const baseUrl = req.protocol + '://' + (host ?? '');
+    const ingestMetadata = await getIngestMetadataForPeriod(auth.pool, auth.tenantId, periodLabel);
     const binder = await buildAuditBinder({
       periodStart,
       periodEnd,
@@ -214,6 +240,7 @@ router.get('/binder/export/csv', async (req: Request, res: Response) => {
       baseReasoningUrl: `${baseUrl}/api/audit/reasoning`,
       tenantId: auth.tenantId,
       pool: auth.pool,
+      ingestMetadata: ingestMetadata.length ? ingestMetadata : undefined,
     });
     const buffer = exportAuditBinderToCsv(binder);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
