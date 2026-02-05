@@ -283,7 +283,8 @@ router.post('/journal-entries/:id/post', async (req: Request, res: Response) => 
     res.json(je);
   } catch (e) {
     if (e instanceof JournalEntryError) {
-      res.status(e.code === 'NOT_FOUND' ? 404 : 400).json({ error: e.message });
+      const status = e.code === 'NOT_FOUND' ? 404 : e.code === 'SHADOW_AUDIT_BLOCK' ? 403 : 400;
+      res.status(status).json({ error: e.message });
       return;
     }
     send500(res, e, 'Post JE failed');

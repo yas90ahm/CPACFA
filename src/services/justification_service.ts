@@ -20,6 +20,20 @@ import { disallowMemoryStoreInProduction } from '../lib/env.js';
 import * as justificationsRepo from '../db/repositories/tenant_justifications_repository.js';
 import type { JustificationRelatedType, CreatedByType } from '../db/repositories/tenant_justifications_repository.js';
 
+export interface CreateJustificationFromAIParams {
+  tenantId: string;
+  pool: Pool;
+  periodLabel: string;
+  relatedType: JustificationRelatedType;
+  relatedId: string;
+  memo_markdown: string;
+  irac_json?: { issue: string; rule: string; analysis: string; conclusion: string };
+  rule_ids?: string[];
+  prompt_version: string;
+  model?: string;
+  inputs_hash: string;
+}
+
 // --- In-memory store (fallback when no DB/tenant; production disallows) ---
 const justificationStore: StoredJustification[] = [];
 
@@ -258,6 +272,48 @@ export async function createJustification(params: CreateJustificationParams): Pr
     promptVersion,
     model,
     inputsHash,
+  });
+}
+
+/**
+ * Persist AI-generated justification (Justifier pillar) to tenant_justifications.
+ * Call after runJustifier; use placeholder memo when AI fails (ok: false).
+ */
+export async function createJustificationFromAI(
+  params: CreateJustificationFromAIParams
+): Promise<{ id: string; createdAt: string }> {
+  const {
+    tenantId,
+    pool,
+    periodLabel,
+    relatedType,
+    relatedId,
+    memo_markdown,
+    irac_json,
+    prompt_version,
+    model,
+    inputs_hash,
+  } = params;
+  if (!isDbConfigured() || !pool) {
+    disallowMemoryStoreInProduction({ storeName: 'justification (createFromAI)', hasDurableContext: false });
+    const id = `j-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    return { id, createdAt: new Date().toISOString() };
+  }
+  const iracJson = irac_json
+    ? { irac: { ...irac_json, source: '' }, sourceTag: '', formatted: memo_markdown }
+    : { irac: { issue: memo_markdown, rule: '', analysis: '', conclusion: memo_markdown, source: '' }, sourceTag: '', formatted: memo_markdown };
+  return justificationsRepo.createJustification(pool, {
+    tenantId,
+    periodLabel,
+    relatedType,
+    relatedId,
+    createdBy: 'justifier',
+    createdByType: 'agent',
+    iracJson,
+    memoMarkdown: memo_markdown,
+    promptVersion: prompt_version,
+    model: model ?? undefined,
+    inputsHash: inputs_hash,
   });
 }
 

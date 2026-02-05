@@ -16,8 +16,10 @@ import * as repo from '../db/repositories/journal_entry_repository.js';
 import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
 import { getLatestTriage } from './triage_service.js';
 import { recordMaterialEvent } from './audit_ledger_service.js';
-import { ensureJustificationForPostedJE } from './justification_service.js';
+import { createJustificationFromAI } from './justification_service.js';
 import { runPrePostChecksAndStore } from './shadow_auditor_service.js';
+import { runJustifier, hashJustifierInputs } from '../ai/ai_orchestrator.js';
+import { JUSTIFIER_PROMPT_VERSION } from '../ai/prompts/justifier.prompt.js';
 
 const ALLOW_SAME_USER_APPROVE =
   process.env.ALLOW_SAME_USER_APPROVE === '1' || process.env.ALLOW_SAME_USER_APPROVE === 'true';
@@ -159,7 +161,37 @@ export async function postJE(pool: Pool, tenantId: string, id: string): Promise<
       postedAt: now,
     },
   });
-  await ensureJustificationForPostedJE(pool, tenantId, id, periodLabel ?? id, je.approvedBy);
+  const pl = periodLabel ?? id;
+  const facts = {
+    jeId: id,
+    closeSessionId: je.closeSessionId,
+    memo: je.memo,
+    source: je.source,
+    approvedBy: je.approvedBy,
+    postedAt: now,
+    lines: lines.map((l) => ({ accountRef: l.accountRef, debit: l.debit, credit: l.credit, description: l.description })),
+  };
+  const justifierResult = await runJustifier({
+    pool,
+    tenantId,
+    periodLabel: pl,
+    relatedType: 'journal_entry',
+    relatedId: id,
+    facts,
+  });
+  const inputsHash = hashJustifierInputs(facts, JUSTIFIER_PROMPT_VERSION);
+  await createJustificationFromAI({
+    tenantId,
+    pool,
+    periodLabel: pl,
+    relatedType: 'journal_entry',
+    relatedId: id,
+    memo_markdown: justifierResult.memo_markdown,
+    irac_json: justifierResult.irac_json,
+    prompt_version: justifierResult.prompt_version,
+    model: process.env.AI_MODEL ?? undefined,
+    inputs_hash: inputsHash,
+  });
   return updated!;
 }
 

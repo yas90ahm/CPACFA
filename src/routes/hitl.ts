@@ -39,6 +39,8 @@ import {
   deleteDraft,
   type DraftPayload,
 } from '../services/draft_service.js';
+import { runShadowAudit } from '../ai/ai_orchestrator.js';
+import * as findingsRepo from '../db/repositories/tenant_shadow_audit_findings_repository.js';
 
 const router = Router();
 
@@ -192,6 +194,48 @@ router.post(
     }
 
     const authReq = req as AuthRequest;
+    const facts = {
+      stagedId: body.stagedId,
+      periodLabel,
+      adjustment: body.adjustment,
+      rawRowsCount: rawRows?.length ?? 0,
+      actor: authReq.userId ?? 'anonymous',
+    };
+    const shadowResult = await runShadowAudit({
+      pool,
+      tenantId,
+      periodLabel,
+      subjectType: 'tb_adjustment',
+      subjectId: body.stagedId,
+      facts,
+    });
+    const tbJournalId = `tb-${body.stagedId}`;
+    const shadowFindings: findingsRepo.ShadowAuditFindingItem[] = shadowResult.findings.map((f) => ({
+      code: f.code,
+      message: f.message,
+      rule_ids: f.rule_ids,
+      refs: f.refs,
+    }));
+    await findingsRepo.createFinding(pool, {
+      tenantId,
+      periodLabel,
+      journalEntryId: tbJournalId,
+      severity: shadowResult.severity,
+      findings: shadowFindings,
+      actorUserId: authReq.userId ?? undefined,
+      confidence: shadowResult.ok ? shadowResult.confidence : undefined,
+      promptVersion: shadowResult.prompt_version,
+      model: process.env.AI_MODEL,
+    });
+    if (shadowResult.severity === 'block') {
+      res.status(403).json({
+        error: 'SHADOW_AUDIT_BLOCK',
+        message: 'Shadow Auditor blocked apply. ' + shadowResult.findings.map((f) => f.message).join('; '),
+        findings: shadowResult.findings.map((f) => ({ code: f.code, message: f.message })),
+      });
+      return;
+    }
+
     const result = await executeBridgeCommand(
       {
         pool,

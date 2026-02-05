@@ -172,6 +172,9 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 77, file: '077_tenant_shadow_audit_findings.sql' },
   { version: 78, file: '078_close_sessions_certified.sql' },
   { version: 79, file: '079_audit_ledger_hash_version.sql' },
+  { version: 80, file: '080_ai_call_log.sql' },
+  { version: 81, file: '081_shadow_audit_ai_metadata.sql' },
+  { version: 82, file: '082_tenant_ai_proposals.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 

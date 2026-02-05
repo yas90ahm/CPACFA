@@ -53,14 +53,11 @@ import {
   type ProposeTrialBalanceAdjustmentInput,
 } from './proposeTrialBalanceAdjustment.js';
 import * as persistence from '../../services/persistence_service.js';
-import {
-  executeTool as executeSupervisorServiceTool,
-  type SupervisorToolContext,
-} from '../../services/supervisor_tools.js';
 
 export type { ToolDefinition, ToolResult } from './types.js';
 
-const SUPERVISOR_SERVICE_TOOL_NAMES = new Set([
+/** Tool names that were delegated to supervisor_tools (removed per DEAD_CODE_AND_PURGE_PLAN). Return clear error if invoked. */
+const QUARANTINED_TOOL_NAMES = new Set([
   'list_datasets',
   'query_dataset',
   'resolve_query_intent',
@@ -179,11 +176,8 @@ export interface ToolContext {
   validatedEntries?: Array<{ accountName: string; debit: number; credit: number; accountCode?: string }>;
   /** Session id for Source of Truth lookup (pipeline_input_snapshot) when present. */
   sessionId?: string;
-  /** Pipeline input for step1CPA and catalog tools (delegated to supervisor_tools). */
+  /** Pipeline input (optional; supervisor_tools removed per purge plan). */
   pipelineInput?: import('../../services/result_generator.js').PipelineInput;
-  /** Mutated by supervisor_tools when step1CPA or catalog tools run. */
-  step1Output?: SupervisorToolContext['step1Output'];
-  lastCatalogResult?: SupervisorToolContext['lastCatalogResult'];
   /** Uncommitted Save for Later drafts (hydrated workspace). Never used by buildFinancialStatements or export; only committed data is exported. */
   draftAdjustments?: Array<{ kind: string; [k: string]: unknown }>;
 }
@@ -212,23 +206,8 @@ export async function executeTool(
   input: unknown,
   context?: ToolContext
 ): Promise<{ success: true; data: unknown } | { success: false; error: string }> {
-  if (SUPERVISOR_SERVICE_TOOL_NAMES.has(name)) {
-    const ctx: SupervisorToolContext = {
-      pipelineInput: context?.pipelineInput,
-      tenantId: context?.tenantId,
-      pool: context?.pool ?? null,
-      step1Output: context?.step1Output,
-      lastCatalogResult: context?.lastCatalogResult,
-    };
-    const result = await executeSupervisorServiceTool(name, input as Record<string, unknown>, ctx);
-    if (context) {
-      context.step1Output = ctx.step1Output;
-      context.lastCatalogResult = ctx.lastCatalogResult;
-    }
-    if (result.success) {
-      return { success: true, data: result.output ?? { summary: result.summary } };
-    }
-    return { success: false, error: result.error ?? result.summary ?? 'Unknown error' };
+  if (QUARANTINED_TOOL_NAMES.has(name)) {
+    return { success: false, error: `Tool "${name}" is not available (Supervisor/catalog quarantined per purge plan).` };
   }
 
   const buildContext = context?.tenantId && context?.pool ? { tenantId: context.tenantId, pool: context.pool } : undefined;

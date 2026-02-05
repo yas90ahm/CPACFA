@@ -15,7 +15,7 @@ import {
 import { suggestJournalEntriesForImbalance } from '../src/services/agentic_gap_analyzer.js';
 import { executeAgentRecommendation } from '../src/services/cpa_decision_handler.js';
 import { justifyWithRAG } from '../src/services/justification_service.js';
-import { finalIntegrityCheck } from '../src/agents/Supervisor.js';
+import { finalIntegrityCheck } from '../src/services/integrity_check.js';
 import { queryAuditLog } from '../src/services/audit_log_service.js';
 import * as persistence from '../src/services/persistence_service.js';
 import type { TrialBalanceEntry, TrialBalanceResult } from '../src/types/financial.js';

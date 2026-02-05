@@ -9,7 +9,9 @@ export type ShadowAuditSeverity = 'ok' | 'warn' | 'block';
 export interface ShadowAuditFindingItem {
   code: string;
   message: string;
-  severity: 'warn' | 'block';
+  severity?: 'warn' | 'block';
+  rule_ids?: string[];
+  refs?: string[];
 }
 
 export interface ShadowAuditFindingRow {
@@ -22,6 +24,9 @@ export interface ShadowAuditFindingRow {
   findings_json: ShadowAuditFindingItem[];
   actor_user_id: string | null;
   created_at: string;
+  confidence?: number | null;
+  prompt_version?: string | null;
+  model?: string | null;
 }
 
 export async function createFinding(
@@ -33,11 +38,14 @@ export async function createFinding(
     severity: ShadowAuditSeverity;
     findings: ShadowAuditFindingItem[];
     actorUserId?: string;
+    confidence?: number;
+    promptVersion?: string;
+    model?: string;
   }
 ): Promise<{ id: string; createdAt: string }> {
   const r = await pool.query<{ id: string; created_at: string }>(
-    `INSERT INTO tenant_shadow_audit_findings (tenant_id, period_label, journal_entry_id, severity, findings_json, actor_user_id)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO tenant_shadow_audit_findings (tenant_id, period_label, journal_entry_id, severity, findings_json, actor_user_id, confidence, prompt_version, model)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING id, created_at`,
     [
       params.tenantId,
@@ -46,6 +54,9 @@ export async function createFinding(
       params.severity,
       JSON.stringify(params.findings),
       params.actorUserId ?? null,
+      params.confidence ?? null,
+      params.promptVersion ?? null,
+      params.model ?? null,
     ]
   );
   const row = r.rows[0];

@@ -71,4 +71,3 @@ export function assertNoNumericAmountsInAgentOutput(output: unknown, context?: s
     throw new Error(msg);
   }
 }
-

@@ -23,7 +23,9 @@ import { registerStatementGeneration, recordPolicyChange } from '../../services/
 import { createIngestionIntegrityMemo } from '../../services/justification_service.js';
 import { markUploadCompleted, runResultPipeline } from '../../services/result_generator.js';
 import * as persistence from '../../services/persistence_service.js';
-import { createStagingItem } from '../../services/persistence_service.js';
+import { createStagingItem, updateStagingPayload } from '../../services/persistence_service.js';
+import { runClassifier, runAdvisor } from '../../ai/ai_orchestrator.js';
+import * as aiProposalsRepo from '../../db/repositories/tenant_ai_proposals_repository.js';
 import { assessAgenticQuality } from '../../services/agentic_quality_assessor.js';
 import { shouldEscalateToHuman, submitToStaging } from '../../services/hitl_orchestrator.js';
 import { addTodosFromGaps } from '../../services/reconciliation_todos.js';
@@ -183,6 +185,60 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
           },
         });
         stagedId = item.id;
+        try {
+          const sourceLines = rawRows.map((r, i) => ({
+            source_id: `row-${i}`,
+            accountName: r.accountName ?? '',
+            debit: r.debit ?? 0,
+            credit: r.credit ?? 0,
+          }));
+          const classifierResult = await runClassifier({
+            pool: poolIngest,
+            tenantId: tenantIdIngest,
+            periodLabel: periodLabelStaged ?? `ingest-${new Date().toISOString().slice(0, 10)}`,
+            sourceLines,
+          });
+          if (classifierResult.results.length > 0) {
+            await updateStagingPayload(poolIngest, tenantIdIngest, item.id, {
+              classification_results: classifierResult.results,
+              classification_prompt_version: classifierResult.prompt_version,
+              classification_model: process.env.AI_MODEL ?? undefined,
+            });
+          }
+          const classifiedSourceLines = rawRows.map((r, i) => ({
+            source_id: `row-${i}`,
+            accountName: r.accountName ?? '',
+            debit: r.debit ?? 0,
+            credit: r.credit ?? 0,
+            ...(classifierResult.results[i]
+              ? {
+                  object_type: classifierResult.results[i].object_type,
+                  fs_placement: classifierResult.results[i].fs_placement,
+                  suggested_accounts: classifierResult.results[i].suggested_accounts,
+                  rule_tags: classifierResult.results[i].rule_tags,
+                }
+              : {}),
+          }));
+          const advisorResult = await runAdvisor({
+            pool: poolIngest,
+            tenantId: tenantIdIngest,
+            periodLabel: periodLabelStaged ?? `ingest-${new Date().toISOString().slice(0, 10)}`,
+            sourceLines: classifiedSourceLines,
+            tbSummary: { totalDebits, totalCredits, rowCount: rawRows.length },
+          });
+          if (advisorResult.proposals.length > 0) {
+            await aiProposalsRepo.saveProposals(poolIngest, {
+              tenantId: tenantIdIngest,
+              periodLabel: periodLabelStaged ?? `ingest-${new Date().toISOString().slice(0, 10)}`,
+              stagingId: item.id,
+              proposal: { prompt_version: advisorResult.prompt_version, proposals: advisorResult.proposals },
+              promptVersion: advisorResult.prompt_version,
+              model: process.env.AI_MODEL ?? undefined,
+            });
+          }
+        } catch {
+          // Fail-open: do not block ingestion if classifier or advisor fails
+        }
       }
       // Scope: no AI-generated amounts. Staging only; human supplies correction via resolve-ingest.
       return res.status(200).json({

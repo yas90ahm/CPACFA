@@ -1,6 +1,8 @@
 /**
- * Shadow Auditor — deterministic pre-post checks for manual entries.
+ * Shadow Auditor — deterministic + AI pre-post checks for manual entries.
  * Flags and blocks; does not mutate amounts. Results stored for audit and binder.
+ * AI shadow audit runs and merges with deterministic; block only when severity='block'.
+ * On AI failure: fail-open (do not block), AI result recorded as warn (AI_FAILED).
  */
 
 import type { Pool } from 'pg';
@@ -8,6 +10,7 @@ import type { JournalEntry } from '../types/journal_entry.js';
 import type { JournalEntryLine } from '../types/journal_entry.js';
 import * as findingsRepo from '../db/repositories/tenant_shadow_audit_findings_repository.js';
 import type { ShadowAuditFindingItem } from '../db/repositories/tenant_shadow_audit_findings_repository.js';
+import { runShadowAudit } from '../ai/ai_orchestrator.js';
 
 export type ShadowAuditSeverity = 'ok' | 'warn' | 'block';
 
@@ -114,24 +117,73 @@ export function runPrePostChecks(input: PrePostCheckInput): PrePostCheckResult {
   return { flags, severity };
 }
 
+/** Map deterministic flags to items with rule_ids/refs for merged storage. */
+function toFindingItems(flags: ShadowAuditFindingItem[], jeId: string): ShadowAuditFindingItem[] {
+  return flags.map((f) => ({
+    ...f,
+    rule_ids: f.rule_ids ?? [],
+    refs: f.refs ?? [jeId],
+  }));
+}
+
 /**
- * Run pre-post checks and persist the result. Returns result; caller must block post when severity === 'block'.
+ * Run pre-post checks (deterministic + AI) and persist one merged result.
+ * Caller must block post when severity === 'block'. AI failure is fail-open (warn only).
  */
 export async function runPrePostChecksAndStore(input: PrePostCheckInput): Promise<PrePostCheckResult> {
-  const result = runPrePostChecks(input);
-  const { pool, tenantId, periodLabel, journalEntryId, actorUserId } = input;
+  const deterministicResult = runPrePostChecks(input);
+  const { pool, tenantId, periodLabel, journalEntryId, actorUserId, journalEntry, lines } = input;
+
+  const facts = {
+    jeId: journalEntryId,
+    closeSessionId: journalEntry.closeSessionId,
+    memo: journalEntry.memo,
+    source: journalEntry.source,
+    approvedBy: journalEntry.approvedBy,
+    lines: lines.map((l) => ({ accountRef: l.accountRef, debit: l.debit, credit: l.credit, description: l.description })),
+  };
+
+  const aiResult = await runShadowAudit({
+    pool,
+    tenantId,
+    periodLabel,
+    subjectType: 'journal_entry',
+    subjectId: journalEntryId,
+    facts,
+    materialityThreshold: getMaterialityThreshold() ?? undefined,
+  });
+
+  const mergedSeverity: ShadowAuditSeverity =
+    deterministicResult.severity === 'block' || aiResult.severity === 'block'
+      ? 'block'
+      : deterministicResult.severity === 'warn' || aiResult.severity === 'warn'
+        ? 'warn'
+        : 'ok';
+
+  const deterministicItems = toFindingItems(deterministicResult.flags, journalEntryId);
+  const aiItems: ShadowAuditFindingItem[] = aiResult.findings.map((f) => ({
+    code: f.code,
+    message: f.message,
+    rule_ids: f.rule_ids,
+    refs: f.refs,
+  }));
+  const mergedFindings = [...deterministicItems, ...aiItems];
 
   const created = await findingsRepo.createFinding(pool, {
     tenantId,
     periodLabel,
     journalEntryId,
-    severity: result.severity,
-    findings: result.flags,
+    severity: mergedSeverity,
+    findings: mergedFindings,
     actorUserId,
+    confidence: aiResult.ok ? aiResult.confidence : undefined,
+    promptVersion: aiResult.prompt_version,
+    model: process.env.AI_MODEL,
   });
 
   return {
-    ...result,
+    flags: mergedFindings,
+    severity: mergedSeverity,
     findingId: created.id,
   };
 }

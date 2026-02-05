@@ -194,31 +194,25 @@ async function start(): Promise<void> {
   }
   app.listen(PORT, () => {
     console.log(`FinOS Agent API listening on http://localhost:${PORT}`);
-  console.log('  POST /api/trial-balance/ingest — upload CSV/XLSX Trial Balance');
-  console.log('  POST /api/trial-balance/statements — JSON Trial Balance → BS + P&L');
-  console.log('  GET  /api/trial-balance/supported — supported formats & codification');
-  console.log('  POST /api/justification/chat — IRAC justification with RAG + [Source]');
-  console.log('  GET  /api/justification/audit-defense/export — Export Audit Defense PDF');
-  console.log('  POST /api/orchestrator/prepare-q4 — Task Decomposition: Q4 Financials');
-  console.log('  POST /api/orchestrator/intent — Detect "Prepare Q4 Financials" intent');
-  console.log('  POST /api/orchestrator/lead-partner — Lead Partner CoT');
-  console.log('  GET  /api/audit/binder — Audit Binder (statements + CF + equity + line-level deep links)');
-  console.log('  GET  /api/audit/reconciliation-summary — Reconciliation summary (TB/BS/CF/equity + failed checks)');
-  console.log('  GET  /api/audit/todos — Urgent To-Dos; PATCH /api/audit/todos/:id to mark done');
-  console.log('  GET  /api/audit/gaap-consistency — GAAP Consistency Report');
-  console.log('  POST /api/audit/auditor/verify — Auditor Portal login; POST /api/audit/auditor/internal-controls-chat — Internal Controls Q&A');
-  console.log('  POST /api/export/pdf — Document package PDF; POST /api/export/csv — Clean Ledger CSV');
-  console.log('  GET  /api/knowledge-base/tier1/entries — Global (FASB, IFRS, Tax); POST /api/knowledge-base/search — Hybrid search');
-  console.log('  POST /api/vector-store/ingest — Ingest docs; POST /api/vector-store/query — RAG query; POST /api/vector-store/precedent — CPA precedent');
-  console.log('  POST /api/ingestion/agent — Ingestion Agent: .xlsx/.csv/.pdf/.json → classify & route');
-  console.log('  POST /api/pipelines/bank — Bank tx; ap-aging, ar-aging, payroll-accrual, bank-rec, cash-position');
-  console.log('  POST /api/close/je-suggestions, accrual-suggestions, checklist, period-lock, audit-log, can-perform, perform-action');
-  console.log('  POST /api/forecasting/13-week-cash, quarterly-annual; POST /api/capital/project-metrics — ROI + payback');
-  console.log('  POST /api/budget/version, driver-based, reforecast; POST /api/entities/consolidation, fx-translation');
-  console.log('  GET  /api/reporting/pack-templates; POST /api/reporting/pack; GET /api/reporting/commentary');
-  console.log('  POST /api/audit/drl, sampling, prior-period-comparison; GET /api/access/dashboards, alerts');
-  console.log('  POST /api/supervisor/chat — Supervisor Agent (ReAct + Claude); GET /api/supervisor/conflicts — CPA vs CFA conflicts');
-  console.log('  GET  /api/hitl/staging — Staging; POST /api/hitl/resolve-ingest — fix imbalanced ingest; POST /api/hitl/webhook — Approve/Reject');
+    console.log('  POST /api/trial-balance/ingest — upload CSV/XLSX Trial Balance');
+    console.log('  POST /api/trial-balance/statements — JSON Trial Balance → BS + P&L');
+    console.log('  GET  /api/trial-balance/supported — supported formats & codification');
+    console.log('  POST /api/justification/chat — IRAC justification with RAG + [Source]');
+    console.log('  GET  /api/justification/audit-defense/export — Export Audit Defense PDF');
+    console.log('  GET  /api/audit/binder — Audit Binder (certified-only); GET /api/audit/draft-package — draft PDF');
+    console.log('  GET  /api/audit/reconciliation-summary — Reconciliation summary');
+    console.log('  GET  /api/audit/todos — Urgent To-Dos; PATCH /api/audit/todos/:id to mark done');
+    console.log('  GET  /api/audit/gaap-consistency — GAAP Consistency Report');
+    console.log('  POST /api/audit/auditor/verify — Auditor Portal; POST /api/audit/auditor/internal-controls-chat');
+    console.log('  POST /api/audit/professional-review — Professional review (judgment layer)');
+    console.log('  POST /api/export/pdf — Document package PDF; POST /api/export/csv — Clean Ledger CSV');
+    console.log('  GET  /api/knowledge-base/tier1/entries — Global (FASB, IFRS, Tax); POST /api/knowledge-base/search — Hybrid search');
+    console.log('  POST /api/vector-store/ingest — Ingest docs; POST /api/vector-store/query — RAG query; POST /api/vector-store/precedent — CPA precedent');
+    console.log('  POST /api/ingestion/agent — Ingestion Agent: .xlsx/.csv/.pdf/.json → classify & route');
+    console.log('  POST /api/pipelines/bank — Bank tx; ap-aging, ar-aging, payroll-accrual, bank-rec, cash-position');
+    console.log('  POST /api/close/sessions, /close/sessions/:id/certify — Close sessions; POST /api/close/journal-entries — JE lifecycle');
+    console.log('  GET  /api/hitl/staging — Staging; POST /api/hitl/resolve-ingest — fix imbalanced ingest; POST /api/hitl/webhook — Approve/Reject');
+    console.log('  (Supervisor quarantined: /api-dev/supervisor returns 410 when NODE_ENV !== production)');
   });
 }
 

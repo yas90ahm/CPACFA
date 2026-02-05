@@ -27,6 +27,9 @@ import {
 import * as persistence from '../../src/services/persistence_service.js';
 import { verifyChain } from '../../src/services/audit_ledger_service.js';
 import { getUnadjustedMeta } from '../../src/services/trial_balance_store_service.js';
+import * as justificationsRepo from '../../src/db/repositories/tenant_justifications_repository.js';
+import * as shadowFindingsRepo from '../../src/db/repositories/tenant_shadow_audit_findings_repository.js';
+import * as aiProposalsRepo from '../../src/db/repositories/tenant_ai_proposals_repository.js';
 
 const PERIOD_LABEL = '2025-01';
 const PERIOD_START = '2025-01-01';
@@ -43,6 +46,7 @@ describe('Certification pipeline E2E', () => {
   let stagedId: string;
   let closeSessionId: string;
   let testTenantId: string;
+  let postedJeId: string | undefined;
 
   beforeAll(async () => {
     if (!isDbConfigured()) {
@@ -67,7 +71,11 @@ describe('Certification pipeline E2E', () => {
         ? '/api/trial-balance/ingest'
         : '/api-dev/trial-balance/ingest';
 
-    // 1. Upload imbalanced CSV → staged, no period_trial_balance (use temp file so multipart sends correct CSV)
+    // 1. Upload imbalanced CSV → staged (Classifier + Advisor run when mock on; fail-open)
+    const prevClassifierMock = process.env.AI_MOCK_CLASSIFIER;
+    const prevAdvisorMock = process.env.AI_MOCK_ADVISOR;
+    process.env.AI_MOCK_CLASSIFIER = 'true';
+    process.env.AI_MOCK_ADVISOR = 'true';
     const tmpCsv = path.join(os.tmpdir(), `cert-pipeline-${Date.now()}.csv`);
     fs.writeFileSync(tmpCsv, IMBALANCED_TB_CSV, 'utf8');
     let ingestRes: { status: number; body?: { status?: string; stagedId?: string; imbalanceAmount?: number } };
@@ -80,6 +88,10 @@ describe('Certification pipeline E2E', () => {
         .attach('file', tmpCsv);
     } finally {
       fs.unlinkSync(tmpCsv);
+      if (prevClassifierMock !== undefined) process.env.AI_MOCK_CLASSIFIER = prevClassifierMock;
+      else delete process.env.AI_MOCK_CLASSIFIER;
+      if (prevAdvisorMock !== undefined) process.env.AI_MOCK_ADVISOR = prevAdvisorMock;
+      else delete process.env.AI_MOCK_ADVISOR;
     }
 
     expect(ingestRes.status).toBe(200);
@@ -93,6 +105,21 @@ describe('Certification pipeline E2E', () => {
     expect(stagingItem).toBeDefined();
     expect(stagingItem?.status).toBe('pending');
     expect((stagingItem?.payload as Record<string, unknown>)?.kind).toBe('trial_balance_ingest');
+    if ((stagingItem?.payload as Record<string, unknown>)?.classification_results != null) {
+      expect(Array.isArray((stagingItem?.payload as Record<string, unknown>).classification_results)).toBe(true);
+    }
+    const classifierLogRows = await pool.query<{ id: string }>(
+      'SELECT id FROM ai_call_log WHERE tenant_id = $1 AND pillar = $2',
+      [testTenantId, 'classifier']
+    );
+    expect(classifierLogRows.rows.length).toBeGreaterThanOrEqual(1);
+    const advisorLogRows = await pool.query<{ id: string }>(
+      'SELECT id FROM ai_call_log WHERE tenant_id = $1 AND pillar = $2',
+      [testTenantId, 'advisor']
+    );
+    expect(advisorLogRows.rows.length).toBeGreaterThanOrEqual(1);
+    const advisorProposals = await aiProposalsRepo.listProposalsByStaging(pool, testTenantId, stagedId);
+    expect(advisorProposals.length).toBeGreaterThanOrEqual(1);
 
     // Before resolve: no period_trial_balance for this period (optional assertion; may exist from prior run)
     // We proceed to resolve.
@@ -135,6 +162,44 @@ describe('Certification pipeline E2E', () => {
     expect([200, 201]).toContain(createSessionRes.status);
     expect(createSessionRes.body?.id).toBeDefined();
     closeSessionId = createSessionRes.body.id;
+
+    // 3b. Create JE, propose, approve, post → Justifier runs (AI_MOCK=true in CI); assert justification + ai_call_log
+    const prevAiMock = process.env.AI_MOCK;
+    process.env.AI_MOCK = 'true';
+    try {
+      const createJeRes = await request(app)
+        .post('/api/close/journal-entries')
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('Content-Type', 'application/json')
+        .send({
+          closeSessionId,
+          source: 'manual',
+          lines: [
+            { accountRef: 'Cash', debit: 0, credit: 0 },
+            { accountRef: 'Revenue', debit: 0, credit: 0 },
+          ],
+        });
+      expect([200, 201]).toContain(createJeRes.status);
+      const jeId = createJeRes.body?.id;
+      if (jeId) {
+        await request(app)
+          .post(`/api/close/journal-entries/${jeId}/propose`)
+          .set('Authorization', `Bearer ${authToken}`);
+        await request(app)
+          .post(`/api/close/journal-entries/${jeId}/approve`)
+          .set('Authorization', `Bearer ${authToken}`)
+          .set('Content-Type', 'application/json')
+          .send({ approvedBy: 'test-approver' });
+        const postRes = await request(app)
+          .post(`/api/close/journal-entries/${jeId}/post`)
+          .set('Authorization', `Bearer ${authToken}`);
+        expect([200]).toContain(postRes.status);
+        postedJeId = jeId;
+      }
+    } finally {
+      if (prevAiMock !== undefined) process.env.AI_MOCK = prevAiMock;
+      else delete process.env.AI_MOCK;
+    }
 
     // 4. Initialize checklist and complete required items so readiness passes (201 created, 200 idempotent)
     const initChecklistRes = await request(app)
@@ -265,6 +330,32 @@ describe('Certification pipeline E2E', () => {
     expect(chainResult.valid).toBe(true);
     expect(chainResult.latestEntryHash).toBeDefined();
     expect(chainResult.entryCount).toBeGreaterThanOrEqual(0);
+
+    // 11. Assert Justifier + Shadow Auditor: tenant_justifications, tenant_shadow_audit_findings, ai_call_log
+    if (postedJeId) {
+      const just = await justificationsRepo.getJustificationByRelated(
+        pool,
+        testTenantId,
+        'journal_entry',
+        postedJeId
+      );
+      expect(just).toBeDefined();
+      expect(just?.related_id).toBe(postedJeId);
+      expect(just?.created_by_type).toBe('agent');
+      const shadowFinding = await shadowFindingsRepo.getFindingByJE(pool, testTenantId, postedJeId);
+      expect(shadowFinding).toBeDefined();
+      expect(shadowFinding?.journal_entry_id).toBe(postedJeId);
+      const logRowsJustifier = await pool.query<{ id: string }>(
+        'SELECT id FROM ai_call_log WHERE tenant_id = $1 AND pillar = $2',
+        [testTenantId, 'justifier']
+      );
+      const logRowsShadow = await pool.query<{ id: string }>(
+        'SELECT id FROM ai_call_log WHERE tenant_id = $1 AND pillar = $2',
+        [testTenantId, 'shadow_auditor']
+      );
+      expect(logRowsJustifier.rows.length).toBeGreaterThanOrEqual(1);
+      expect(logRowsShadow.rows.length).toBeGreaterThanOrEqual(1);
+    }
     },
     30_000
   );

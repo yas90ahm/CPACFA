@@ -161,6 +161,21 @@ export async function updateStagingStatus(
   return getStagingItem(pool, tenantId, id);
 }
 
+/** Merge patch into staging item payload (e.g. classification_results). Does not replace entire payload. */
+export async function updateStagingPayload(
+  pool: Pool,
+  tenantId: string,
+  id: string,
+  payloadPatch: Record<string, unknown>
+): Promise<StagingItemShape | undefined> {
+  const now = new Date().toISOString();
+  await pool.query(
+    `UPDATE tenant_hitl_staging SET payload = COALESCE(payload, '{}'::jsonb) || $1::jsonb, updated_at = $2 WHERE id = $3 AND tenant_id = $4`,
+    [JSON.stringify(payloadPatch), now, id, tenantId]
+  );
+  return getStagingItem(pool, tenantId, id);
+}
+
 /** Delete a staging item by id. Returns true if deleted. Tenant-scoped to prevent cross-tenant deletion. */
 export async function deleteStagingItem(pool: Pool, tenantId: string, id: string): Promise<boolean> {
   const r = await pool.query(`DELETE FROM tenant_hitl_staging WHERE id = $1 AND tenant_id = $2`, [id, tenantId]);
