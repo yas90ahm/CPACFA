@@ -1,6 +1,6 @@
 /**
  * Document request list (DRL): track auditor requests, link to binder/source.
- * When pool and tenantId are provided, uses tenant DB; otherwise in-memory (dev fallback).
+ * When pool and tenantId are provided, uses tenant DB; in production no in-memory fallback.
  */
 
 import type { Pool } from 'pg';
@@ -12,6 +12,7 @@ import {
   updateDocumentRequest as updateRepo,
   fulfillDocumentRequest as fulfillRepo,
 } from '../db/repositories/document_request_repository.js';
+import { disallowMemoryStoreInProduction } from '../lib/env.js';
 
 const store = new Map<string, DocumentRequest>();
 
@@ -56,6 +57,7 @@ export async function updateDocumentRequest(
     const r = await updateRepo(pool, id, tenantId, patch);
     return r ?? undefined;
   }
+  disallowMemoryStoreInProduction({ storeName: 'document requests (DRL)', hasDurableContext: false });
   const r = store.get(id);
   if (!r) return undefined;
   if (patch.assignee !== undefined) r.assignee = patch.assignee;
@@ -85,6 +87,7 @@ export async function fulfillDocumentRequest(
     const r = await fulfillRepo(pool, id, tenantId, documentId);
     return r ?? undefined;
   }
+  disallowMemoryStoreInProduction({ storeName: 'document requests (DRL)', hasDurableContext: false });
   const r = store.get(id);
   if (!r) return undefined;
   r.documentId = documentId;

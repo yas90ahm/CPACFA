@@ -7,13 +7,121 @@ import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import {
   buildAuditBinder,
   registerStatementGeneration,
+  getLastStatementGeneration,
 } from '../../services/audit_export_service.js';
-import { exportAuditBinderToPdf, exportAuditBinderToCsv } from '../../services/audit_binder_export_service.js';
+import {
+  exportAuditBinderToPdf,
+  exportAuditBinderToCsv,
+  exportDraftPackageToPdf,
+} from '../../services/audit_binder_export_service.js';
+import { checkExportGate } from '../../services/export_gate_service.js';
+import { finalIntegrityCheck } from '../../services/integrity_check.js';
 import { validateBody } from '../../middleware/validationMiddleware.js';
 import { registerStatementsBodySchema } from '../../schemas/auditSchemas.js';
 import { handleAuditError, handleAuditOrIntegrityError } from './audit_shared.js';
 
 const router = Router();
+
+/** Require closeSessionId (query) and session.status === 'certified'. Returns 403 if not. Binder is certified-only. */
+async function requireCertifiedSession(
+  req: Request,
+  res: Response
+): Promise<{ allowed: boolean; pool: ReturnType<typeof getTenantPool>; tenantId: string | undefined } | null> {
+  const tenantId = getTenantId(req);
+  const pool = getTenantPool(req);
+  if (!tenantId || !pool) {
+    res.status(403).json({
+      error: 'Tenant context required',
+      code: 'TENANT_REQUIRED',
+      message: 'Binder endpoints require tenant context.',
+    });
+    return null;
+  }
+  const closeSessionId = (req.query.closeSessionId as string) ?? '';
+  if (!closeSessionId) {
+    res.status(400).json({
+      error: 'closeSessionId required',
+      code: 'CLOSE_SESSION_REQUIRED',
+      message: 'Binder requires closeSessionId as query parameter. Session must be certified.',
+    });
+    return null;
+  }
+  const { getSession } = await import('../../services/close_session_service.js');
+  const session = await getSession(pool, tenantId, closeSessionId);
+  if (!session) {
+    res.status(403).json({
+      error: 'Close session not found',
+      code: 'CLOSE_SESSION_NOT_FOUND',
+      message: 'Binder requires an existing close session.',
+    });
+    return null;
+  }
+  if (session.status !== 'certified') {
+    res.status(403).json({
+      error: 'Close not certified',
+      code: 'CLOSE_NOT_CERTIFIED',
+      message: 'Binder is certified-only. Session must have status certified. Use /api/audit/draft-package for draft.',
+    });
+    return null;
+  }
+  return { allowed: true, pool, tenantId };
+}
+
+/** Run checkExportGate and finalIntegrityCheck (Truth Gate) before binder. Returns false and sends 403/422 if gate fails. */
+async function runBinderExportGates(
+  req: Request,
+  res: Response,
+  auth: { pool: NonNullable<ReturnType<typeof getTenantPool>>; tenantId: string }
+): Promise<boolean> {
+  const periodLabel =
+    (req.query.periodEnd as string)?.trim()?.slice(0, 7) ??
+    (req.query.periodStart as string)?.trim()?.slice(0, 7) ??
+    undefined;
+  const gateResult = await checkExportGate({
+    tenantId: auth.tenantId,
+    pool: auth.pool,
+    periodLabel,
+  });
+  if (!gateResult.allowed) {
+    res.status(403).json({
+      error: gateResult.alert ?? 'Export blocked',
+      code: gateResult.alert,
+      message: gateResult.message ?? 'Binder export blocked. Truth Gate or audit chain check failed.',
+    });
+    return false;
+  }
+  const stored = await getLastStatementGeneration(auth.tenantId, auth.pool);
+  const statements = stored?.statements;
+  if (statements?.trialBalance != null && statements?.balanceSheet != null) {
+    const tb = statements.trialBalance as { totalDebits: number; totalCredits: number; entries?: Array<{ accountName: string; debit: number; credit: number }> };
+    const bs = statements.balanceSheet as { totalAssets: number; totalLiabilities: number; totalEquity: number };
+    const finalCheck = finalIntegrityCheck({
+      trialBalance: { totalDebits: tb.totalDebits ?? 0, totalCredits: tb.totalCredits ?? 0 },
+      balanceSheet: {
+        totalAssets: bs.totalAssets ?? 0,
+        totalLiabilities: bs.totalLiabilities ?? 0,
+        totalEquity: bs.totalEquity ?? 0,
+      },
+      entriesForPlugDetection: tb.entries?.map((e) => ({
+        accountName: e.accountName ?? '',
+        debit: e.debit ?? 0,
+        credit: e.credit ?? 0,
+      })),
+    });
+    if (!finalCheck.passed) {
+      res.status(422).json({
+        error: 'Unprocessable Entity',
+        code: 'FINAL_INTEGRITY_CHECK_FAILED',
+        message: finalCheck.error ?? 'Binder export blocked: imbalance or unclassified Suspense accounts.',
+        checks: finalCheck.checks,
+        suspenseAccounts: finalCheck.suspenseAccounts,
+        plugSuspicious: finalCheck.plugSuspicious,
+      });
+      return false;
+    }
+  }
+  return true;
+}
 
 /** POST /api/audit/register-statements */
 router.post('/register-statements', validateBody(registerStatementsBodySchema), async (req: Request, res: Response) => {
@@ -32,9 +140,12 @@ router.post('/register-statements', validateBody(registerStatementsBodySchema), 
   }
 });
 
-/** GET /api/audit/binder */
+/** GET /api/audit/binder — certified only; requires closeSessionId, session.status === 'certified', checkExportGate, and finalIntegrityCheck. */
 router.get('/binder', async (req: Request, res: Response) => {
   try {
+    const auth = await requireCertifiedSession(req, res);
+    if (!auth || !auth.pool || auth.tenantId == null) return;
+    if (!(await runBinderExportGates(req, res, { pool: auth.pool, tenantId: auth.tenantId }))) return;
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
     const entityName = (req.query.entityName as string) ?? 'Entity';
@@ -46,8 +157,8 @@ router.get('/binder', async (req: Request, res: Response) => {
       entityName,
       baseSourceDocumentUrl: `${baseUrl}/api/audit/source-document`,
       baseReasoningUrl: `${baseUrl}/api/audit/reasoning`,
-      tenantId: getTenantId(req),
-      pool: getTenantPool(req),
+      tenantId: auth.tenantId,
+      pool: auth.pool,
     });
     res.json(binder);
   } catch (err) {
@@ -55,9 +166,12 @@ router.get('/binder', async (req: Request, res: Response) => {
   }
 });
 
-/** GET /api/audit/binder/export/pdf */
+/** GET /api/audit/binder/export/pdf — certified only; requires closeSessionId, session.status === 'certified', checkExportGate, and finalIntegrityCheck. */
 router.get('/binder/export/pdf', async (req: Request, res: Response) => {
   try {
+    const auth = await requireCertifiedSession(req, res);
+    if (!auth || !auth.pool || auth.tenantId == null) return;
+    if (!(await runBinderExportGates(req, res, { pool: auth.pool, tenantId: auth.tenantId }))) return;
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
     const entityName = (req.query.entityName as string) ?? 'Entity';
@@ -69,21 +183,24 @@ router.get('/binder/export/pdf', async (req: Request, res: Response) => {
       entityName,
       baseSourceDocumentUrl: `${baseUrl}/api/audit/source-document`,
       baseReasoningUrl: `${baseUrl}/api/audit/reasoning`,
-      tenantId: getTenantId(req),
-      pool: getTenantPool(req),
+      tenantId: auth.tenantId,
+      pool: auth.pool,
     });
     const buffer = await exportAuditBinderToPdf(binder);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="audit-binder-${periodStart}-${periodEnd}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="Audit_Binder-${periodStart}-${periodEnd}.pdf"`);
     res.send(buffer);
   } catch (err) {
     handleAuditOrIntegrityError(res, err, 'Binder export error');
   }
 });
 
-/** GET /api/audit/binder/export/csv */
+/** GET /api/audit/binder/export/csv — certified only; requires closeSessionId, session.status === 'certified', checkExportGate, and finalIntegrityCheck. */
 router.get('/binder/export/csv', async (req: Request, res: Response) => {
   try {
+    const auth = await requireCertifiedSession(req, res);
+    if (!auth || !auth.pool || auth.tenantId == null) return;
+    if (!(await runBinderExportGates(req, res, { pool: auth.pool, tenantId: auth.tenantId }))) return;
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
     const entityName = (req.query.entityName as string) ?? 'Entity';
@@ -95,15 +212,43 @@ router.get('/binder/export/csv', async (req: Request, res: Response) => {
       entityName,
       baseSourceDocumentUrl: `${baseUrl}/api/audit/source-document`,
       baseReasoningUrl: `${baseUrl}/api/audit/reasoning`,
-      tenantId: getTenantId(req),
-      pool: getTenantPool(req),
+      tenantId: auth.tenantId,
+      pool: auth.pool,
     });
     const buffer = exportAuditBinderToCsv(binder);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="audit-binder-${periodStart}-${periodEnd}.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename="Audit_Binder-${periodStart}-${periodEnd}.csv"`);
     res.send(buffer);
   } catch (err) {
     handleAuditOrIntegrityError(res, err, 'Binder export error');
+  }
+});
+
+/** GET /api/audit/draft-package — draft only; explicitly NOT the Audit Binder. Same content shape with DRAFT watermark and disclaimer. */
+router.get('/draft-package', async (req: Request, res: Response) => {
+  try {
+    const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
+    const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
+    const entityName = (req.query.entityName as string) ?? 'Entity';
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    const host = req.get('host');
+    const baseUrl = req.protocol + '://' + (host ?? '');
+    const binder = await buildAuditBinder({
+      periodStart,
+      periodEnd,
+      entityName,
+      baseSourceDocumentUrl: `${baseUrl}/api/audit/source-document`,
+      baseReasoningUrl: `${baseUrl}/api/audit/reasoning`,
+      tenantId,
+      pool,
+    });
+    const buffer = await exportDraftPackageToPdf(binder);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="Draft_Package_NOT_CERTIFIED.pdf"');
+    res.send(buffer);
+  } catch (err) {
+    handleAuditOrIntegrityError(res, err, 'Draft package export error');
   }
 });
 

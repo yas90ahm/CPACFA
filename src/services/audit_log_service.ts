@@ -1,6 +1,7 @@
 /**
  * Immutable audit log (append-only) for core app — who did what when.
- * In-memory store; when context (pool, tenantId) is provided, also persists to tenant DB.
+ * When REQUIRE_AUDIT_DB_CONTEXT is set or NODE_ENV=production: context (pool, tenantId) is required;
+ * in-memory-only paths are disabled for accounting-grade immutability.
  */
 
 import type { Pool } from 'pg';
@@ -11,6 +12,11 @@ import {
   deleteAuditLogOlderThan,
 } from '../db/repositories/audit_log_repository.js';
 import { log as logMessage } from '../lib/logger.js';
+
+const REQUIRE_AUDIT_DB_CONTEXT =
+  process.env.REQUIRE_AUDIT_DB_CONTEXT === '1' ||
+  process.env.REQUIRE_AUDIT_DB_CONTEXT === 'true' ||
+  process.env.NODE_ENV === 'production';
 
 const inMemoryLog: AuditLogEntry[] = [];
 const MAX_ENTRIES = 50_000;
@@ -24,20 +30,25 @@ function nextId(): string {
 }
 
 /**
- * Append an audit log entry (immutable). When context is provided, also writes to tenant DB.
- * Returns the created entry.
+ * Append an audit log entry (immutable). When context is provided, writes to tenant DB.
+ * In production (or when REQUIRE_AUDIT_DB_CONTEXT), context is required; in-memory-only is disabled.
  */
 export function appendAuditLog(
   entry: Omit<AuditLogEntry, 'id' | 'timestamp'>,
   context?: AuditLogContext
 ): AuditLogEntry {
+  if (REQUIRE_AUDIT_DB_CONTEXT && !context) {
+    throw new Error('Audit log requires DB context (pool, tenantId) in production; in-memory-only disabled.');
+  }
   const full: AuditLogEntry = {
     ...entry,
     id: nextId(),
     timestamp: new Date().toISOString(),
   };
-  inMemoryLog.push(full);
-  if (inMemoryLog.length > MAX_ENTRIES) inMemoryLog.splice(0, inMemoryLog.length - MAX_ENTRIES);
+  if (!REQUIRE_AUDIT_DB_CONTEXT) {
+    inMemoryLog.push(full);
+    if (inMemoryLog.length > MAX_ENTRIES) inMemoryLog.splice(0, inMemoryLog.length - MAX_ENTRIES);
+  }
   if (context) {
     insertAuditLogDb(context.pool, context.tenantId, entry).catch((err) =>
       logMessage('error', 'Audit log DB insert failed', { err: String(err) })
@@ -48,7 +59,7 @@ export function appendAuditLog(
 
 /**
  * Query audit log by actor, action, or resource (optional filters). Returns recent first.
- * When context is provided and DB is used, returns from tenant DB; otherwise in-memory.
+ * In production (or when REQUIRE_AUDIT_DB_CONTEXT), context is required; in-memory fallback disabled.
  */
 export async function queryAuditLog(
   filters: {
@@ -60,12 +71,16 @@ export async function queryAuditLog(
   },
   context?: AuditLogContext
 ): Promise<AuditLogEntry[]> {
+  if (REQUIRE_AUDIT_DB_CONTEXT && !context) {
+    throw new Error('Audit log query requires DB context (pool, tenantId) in production; in-memory-only disabled.');
+  }
   if (context) {
     try {
       return await queryAuditLogDb(context.pool, context.tenantId, filters);
     } catch (err) {
       logMessage('error', 'Audit log DB query failed', { err: String(err) });
-      // fall through to in-memory
+      if (REQUIRE_AUDIT_DB_CONTEXT) throw err;
+      // fall through to in-memory only when not in production
     }
   }
   let result = [...inMemoryLog].reverse();

@@ -22,6 +22,11 @@ export interface TrialBalanceEntry {
   credit: number;
   /** Set during classification */
   accountType?: AccountType;
+  /** FS line from COA mapping (statement-line taxonomy); when set, statement builder groups by this. */
+  fsLineId?: string;
+  fsLineCode?: string;
+  mappingExplanation?: string;
+  ruleVersion?: number;
   /** Codification reference for this line (compliance) */
   codificationRef?: CodificationRef;
   /** Line-item evidence: link to source row/chunk for audit */
@@ -72,6 +77,9 @@ export interface FinancialStatementLine {
   accountCode?: string;
   label: string;
   amount: number;
+  /** FS taxonomy line id/code when built from COA mapping */
+  fsLineId?: string;
+  fsLineCode?: string;
   codificationRef?: CodificationRef;
   /** Source of classification (deterministic, agentic, or user_confirmed) */
   classificationSource?: ClassificationSource;

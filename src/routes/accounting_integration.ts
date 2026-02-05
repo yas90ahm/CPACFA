@@ -12,6 +12,8 @@ import {
   pushJournalEntry,
   pullTransactions,
 } from '../services/accounting_integration_service.js';
+import { saveUnadjustedFromSync } from '../services/trial_balance_store_service.js';
+import type { AuthRequest } from '../auth/middleware.js';
 
 const router = Router();
 

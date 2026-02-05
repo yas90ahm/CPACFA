@@ -3,6 +3,7 @@
  */
 
 import type { Pool } from 'pg';
+import { round2 } from '../utils/decimal.js';
 import * as repo from '../db/repositories/business_combination_repository.js';
 import type { AcquisitionRow, PPALineItemRow, ContingentConsiderationRow } from '../db/repositories/business_combination_repository.js';
 

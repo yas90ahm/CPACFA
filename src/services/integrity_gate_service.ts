@@ -175,6 +175,18 @@ export function runIntegrityGate(input: IntegrityGateInput): IntegrityGateResult
 }
 
 /**
+ * Validate trial balance and balance sheet (throw if gate fails). Used by audit_export_service.
+ */
+export function validateTrialBalanceAndBalanceSheet(
+  trialBalance: IntegrityGateInput['trialBalance'],
+  balanceSheet: IntegrityGateInput['balanceSheet'],
+  tolerance?: number
+): void {
+  const result = runIntegrityGate({ trialBalance, balanceSheet, tolerance });
+  if (!result.passed) throw new Error(result.error ?? INTEGRITY_GATE_CRITICAL_MESSAGE);
+}
+
+/**
  * Run the integrity gate and throw MathematicalIntegrityError if it fails (primary gatekeeper).
  * Use this so any ingestion or adjustment path enforces the same 422 on imbalance.
  */

@@ -11,6 +11,8 @@ export interface PushAdjustmentToGLResult {
   success: boolean;
   externalId?: string;
   errors?: string[];
+  /** When true, GL post-back is disabled (ENABLE_GL_POSTBACK !== 'true'); caller should return 501. */
+  notImplemented?: boolean;
 }
 
 /**
@@ -31,12 +33,21 @@ export function periodLabelToDate(periodLabel: string, fallbackDate?: string): s
 
 /**
  * Push a close adjustment to the GL. Validates balance, builds lines, calls pushJournalEntry.
+ * When ENABLE_GL_POSTBACK is not 'true', returns notImplemented so caller can respond 501.
  */
 export async function pushAdjustmentToGL(
   adjustment: CloseAdjustment,
   connectionId: string,
-  pool?: Pool
+  pool?: Pool,
+  tenantId?: string
 ): Promise<PushAdjustmentToGLResult> {
+  if (process.env.ENABLE_GL_POSTBACK !== 'true') {
+    return {
+      success: false,
+      notImplemented: true,
+      errors: ['GL post-back is disabled; set ENABLE_GL_POSTBACK=true to enable.'],
+    };
+  }
   const debits = adjustment.debits ?? [];
   const credits = adjustment.credits ?? [];
   const debitTotal = debits.reduce((s, d) => s + d.amount, 0);

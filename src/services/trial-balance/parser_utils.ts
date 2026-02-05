@@ -44,16 +44,17 @@ const ACCOUNT_CODE_VARIANTS = [
 const DEBIT_VARIANTS = ['debit', 'debits', 'dr', 'debit_amount', 'debit_balance'];
 const CREDIT_VARIANTS = ['credit', 'credits', 'cr', 'credit_amount', 'credit_balance'];
 
+// Order matters: trial-balance columns (AccountName, Debit, Credit) before Vendor/Amount so "AccountName" matches ACCOUNT_NAME not VENDOR (name).
 const CANONICAL_MAP: Record<string, readonly string[]> = {
   [CANONICAL_DATE]: DATE_VARIANTS,
-  [CANONICAL_VENDOR]: VENDOR_VARIANTS,
-  [CANONICAL_PRICE]: PRICE_AMOUNT_VARIANTS,
-  [CANONICAL_AMOUNT]: PRICE_AMOUNT_VARIANTS,
-  [CANONICAL_DESCRIPTION]: DESCRIPTION_VARIANTS,
   [CANONICAL_ACCOUNT_NAME]: ACCOUNT_NAME_VARIANTS,
   [CANONICAL_ACCOUNT_CODE]: ACCOUNT_CODE_VARIANTS,
   [CANONICAL_DEBIT]: DEBIT_VARIANTS,
   [CANONICAL_CREDIT]: CREDIT_VARIANTS,
+  [CANONICAL_VENDOR]: VENDOR_VARIANTS,
+  [CANONICAL_PRICE]: PRICE_AMOUNT_VARIANTS,
+  [CANONICAL_AMOUNT]: PRICE_AMOUNT_VARIANTS,
+  [CANONICAL_DESCRIPTION]: DESCRIPTION_VARIANTS,
 };
 
 function normalizeHeader(h: string): string {

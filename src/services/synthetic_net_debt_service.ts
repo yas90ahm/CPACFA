@@ -5,8 +5,12 @@
 
 import type { Pool } from 'pg';
 import { getLeasePosition } from './lease_service.js';
-import { getFlags, getFlagsForContext } from './risk_context_store.js';
+import { getFlags, getFlagsForContext, getQualitativeEvidenceMissing } from './risk_context_store.js';
 import { ENABLE_CPA_MODULE } from '../lib/capability_flags.js';
+
+/** Shown when qualitative evidence is missing for the period (pilot-safe placeholder). */
+const PROFESSIONAL_DISCLAIMER =
+  'Qualitative evidence for this period is incomplete; consider obtaining management representation or additional support.';
 
 export interface SyntheticNetDebtInput {
   tenantId: string;

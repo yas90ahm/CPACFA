@@ -1,9 +1,10 @@
 /**
  * Stage 3 — Gap → actionable to-dos with status (open/done).
- * When pool and tenantId are provided, uses tenant DB; else in-memory (dev fallback).
+ * When pool and tenantId are provided, uses tenant DB; in production no in-memory fallback.
  */
 
 import type { Pool } from 'pg';
+import { disallowMemoryStoreInProduction } from '../lib/env.js';
 import type { DataGap } from '../agents/cpa_brain.js';
 import * as reconciliationTodoRepo from '../db/repositories/reconciliation_todo_repository.js';
 import type { ReconciliationTodo, ReconciliationTodoStatus } from '../types/reconciliation_todos.js';
@@ -122,6 +123,7 @@ export async function markTodoDone(
   if (pool && tenantId) {
     return reconciliationTodoRepo.updateStatus(pool, id, tenantId, status);
   }
+  disallowMemoryStoreInProduction({ storeName: 'reconciliation todos', hasDurableContext: false });
   const todo = todoStore.get(id);
   if (!todo) return null;
   const now = new Date().toISOString();

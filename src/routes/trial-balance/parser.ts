@@ -438,7 +438,7 @@ router.get(
         errors: Math.abs(totalDebits - totalCredits) >= 0.01 ? ['Adjusted trial balance does not balance'] : [],
       };
       const standard = (req.query.standard as string) || 'US_GAAP';
-      const fullSet = req.query.fullSet !== false;
+      const fullSet = (req.query.fullSet as string | undefined) !== 'false' && req.query.fullSet !== undefined;
       const stmtOpts: StatementGeneratorOptions = { fullSet, tenantId: tenantId ?? undefined };
       if (pool && tenantId) {
         stmtOpts.loadContracts = async (tid: string) => {

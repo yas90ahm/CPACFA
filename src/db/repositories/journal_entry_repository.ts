@@ -1,0 +1,226 @@
+/**
+ * Journal Entry — DB repository (tenant-scoped).
+ * journal_entries, journal_entry_lines, je_attachments.
+ */
+
+import type { Pool } from 'pg';
+import type {
+  JournalEntry,
+  JournalEntryLine,
+  JournalEntryAttachment,
+  JournalEntryStatus,
+  JournalEntrySource,
+} from '../../types/journal_entry.js';
+
+interface JournalEntryRow {
+  id: string;
+  close_session_id: string;
+  tenant_id: string;
+  status: string;
+  memo: string | null;
+  source: string;
+  created_by: string | null;
+  approved_by: string | null;
+  posted_at: string | null;
+  reversal_date: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface JournalEntryLineRow {
+  je_id: string;
+  line_index: number;
+  account_ref: string;
+  debit: string;
+  credit: string;
+  description: string | null;
+}
+
+function rowToJE(row: JournalEntryRow): JournalEntry {
+  return {
+    id: row.id,
+    closeSessionId: row.close_session_id,
+    tenantId: row.tenant_id,
+    status: row.status as JournalEntryStatus,
+    memo: row.memo ?? undefined,
+    source: row.source as JournalEntrySource,
+    createdBy: row.created_by ?? undefined,
+    approvedBy: row.approved_by ?? undefined,
+    postedAt: row.posted_at ?? undefined,
+    reversalDate: row.reversal_date ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function rowToLine(row: JournalEntryLineRow): JournalEntryLine {
+  return {
+    jeId: row.je_id,
+    lineIndex: row.line_index,
+    accountRef: row.account_ref,
+    debit: Number(row.debit),
+    credit: Number(row.credit),
+    description: row.description ?? undefined,
+  };
+}
+
+const JE_COLS = `id, close_session_id, tenant_id, status, memo, source, created_by, approved_by, posted_at, reversal_date, created_at, updated_at`;
+const LINE_COLS = `je_id, line_index, account_ref, debit, credit, description`;
+
+export async function insertJournalEntry(
+  pool: Pool,
+  id: string,
+  input: {
+    closeSessionId: string;
+    tenantId: string;
+    status: JournalEntryStatus;
+    memo?: string;
+    source: JournalEntrySource;
+    createdBy?: string;
+  }
+): Promise<JournalEntry> {
+  const now = new Date().toISOString();
+  await pool.query(
+    `INSERT INTO journal_entries (id, close_session_id, tenant_id, status, memo, source, created_by, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)`,
+    [
+      id,
+      input.closeSessionId,
+      input.tenantId,
+      input.status,
+      input.memo ?? null,
+      input.source,
+      input.createdBy ?? null,
+      now,
+    ]
+  );
+  const r = await pool.query<JournalEntryRow>(`SELECT ${JE_COLS} FROM journal_entries WHERE id = $1`, [id]);
+  return rowToJE(r.rows[0]);
+}
+
+export async function getJournalEntryById(pool: Pool, id: string, tenantId: string): Promise<JournalEntry | null> {
+  const r = await pool.query<JournalEntryRow>(
+    `SELECT ${JE_COLS} FROM journal_entries WHERE id = $1 AND tenant_id = $2`,
+    [id, tenantId]
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  return rowToJE(row);
+}
+
+export async function listJournalEntries(
+  pool: Pool,
+  tenantId: string,
+  filters: { closeSessionId?: string; status?: JournalEntryStatus; limit?: number }
+): Promise<JournalEntry[]> {
+  let sql = `SELECT ${JE_COLS} FROM journal_entries WHERE tenant_id = $1`;
+  const params: unknown[] = [tenantId];
+  let i = 2;
+  if (filters.closeSessionId) {
+    sql += ` AND close_session_id = $${i}`;
+    params.push(filters.closeSessionId);
+    i += 1;
+  }
+  if (filters.status) {
+    sql += ` AND status = $${i}`;
+    params.push(filters.status);
+    i += 1;
+  }
+  sql += ' ORDER BY created_at DESC';
+  if (filters.limit != null && filters.limit > 0) {
+    sql += ` LIMIT $${i}`;
+    params.push(filters.limit);
+  }
+  const r = await pool.query<JournalEntryRow>(sql, params);
+  return r.rows.map(rowToJE);
+}
+
+export async function updateJournalEntryStatus(
+  pool: Pool,
+  id: string,
+  tenantId: string,
+  status: JournalEntryStatus,
+  patch?: {
+    approvedBy?: string;
+    postedAt?: string;
+    reversalDate?: string | null;
+  }
+): Promise<JournalEntry | null> {
+  const now = new Date().toISOString();
+  const approvedBy = patch?.approvedBy ?? null;
+  const postedAt = patch?.postedAt ?? null;
+  const reversalDate = patch?.reversalDate !== undefined ? patch.reversalDate : undefined;
+  const setReversal = reversalDate !== undefined;
+  await pool.query(
+    `UPDATE journal_entries SET status = $3, updated_at = $4,
+       approved_by = COALESCE($5, approved_by), posted_at = COALESCE($6, posted_at),
+       reversal_date = CASE WHEN $8 THEN $7::date ELSE reversal_date END
+     WHERE id = $1 AND tenant_id = $2`,
+    [id, tenantId, status, now, approvedBy, postedAt, reversalDate ?? null, setReversal]
+  );
+  return getJournalEntryById(pool, id, tenantId);
+}
+
+export async function insertJournalEntryLines(
+  pool: Pool,
+  jeId: string,
+  lines: { accountRef: string; debit?: number; credit?: number; description?: string }[]
+): Promise<JournalEntryLine[]> {
+  const result: JournalEntryLine[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    const debit = l.debit ?? 0;
+    const credit = l.credit ?? 0;
+    await pool.query(
+      `INSERT INTO journal_entry_lines (je_id, line_index, account_ref, debit, credit, description)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [jeId, i, l.accountRef, debit, credit, l.description ?? null]
+    );
+    result.push({ jeId, lineIndex: i, accountRef: l.accountRef, debit, credit, description: l.description });
+  }
+  return result;
+}
+
+export async function listJournalEntryLines(pool: Pool, jeId: string): Promise<JournalEntryLine[]> {
+  const r = await pool.query<JournalEntryLineRow>(
+    `SELECT ${LINE_COLS} FROM journal_entry_lines WHERE je_id = $1 ORDER BY line_index`,
+    [jeId]
+  );
+  return r.rows.map(rowToLine);
+}
+
+export async function insertJEAttachment(
+  pool: Pool,
+  id: string,
+  jeId: string,
+  fileRef: string
+): Promise<JournalEntryAttachment> {
+  await pool.query(
+    `INSERT INTO je_attachments (id, je_id, file_ref) VALUES ($1, $2, $3)`,
+    [id, jeId, fileRef]
+  );
+  const r = await pool.query<{ id: string; je_id: string; file_ref: string; uploaded_at: string }>(
+    `SELECT id, je_id, file_ref, uploaded_at FROM je_attachments WHERE id = $1`,
+    [id]
+  );
+  const row = r.rows[0];
+  return { id: row.id, jeId: row.je_id, fileRef: row.file_ref, uploadedAt: row.uploaded_at };
+}
+
+export async function getJEAttachmentById(pool: Pool, attachmentId: string): Promise<JournalEntryAttachment | null> {
+  const r = await pool.query<{ id: string; je_id: string; file_ref: string; uploaded_at: string }>(
+    `SELECT id, je_id, file_ref, uploaded_at FROM je_attachments WHERE id = $1`,
+    [attachmentId]
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  return { id: row.id, jeId: row.je_id, fileRef: row.file_ref, uploadedAt: row.uploaded_at };
+}
+
+export async function listJEAttachments(pool: Pool, jeId: string): Promise<JournalEntryAttachment[]> {
+  const r = await pool.query<{ id: string; je_id: string; file_ref: string; uploaded_at: string }>(
+    `SELECT id, je_id, file_ref, uploaded_at FROM je_attachments WHERE je_id = $1 ORDER BY uploaded_at`,
+    [jeId]
+  );
+  return r.rows.map((row) => ({ id: row.id, jeId: row.je_id, fileRef: row.file_ref, uploadedAt: row.uploaded_at }));
+}

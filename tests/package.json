@@ -7,7 +7,8 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:integration": "jest tests/integration",
-    "test:smoke": "jest --config jest.smoke.config.json"
+    "test:smoke": "jest --config jest.smoke.config.json",
+    "test:auth-production": "TEST_AUTH_PRODUCTION=1 NODE_ENV=production jest unit/auth_bypass_production.test.ts --runInBand"
   },
   "jest": {
     "preset": "ts-jest",
@@ -32,15 +33,18 @@
       "/node_modules/",
       "/tests/"
     ],
+    "setupFiles": ["<rootDir>/env.ts"],
     "setupFilesAfterEnv": ["<rootDir>/setup.ts"]
   },
   "devDependencies": {
     "@jest/globals": "^29.7.0",
     "@types/jest": "^29.5.11",
     "@types/supertest": "^6.0.2",
+    "@types/uuid": "^9.0.0",
     "jest": "^29.7.0",
     "supertest": "^6.3.3",
     "ts-jest": "^29.1.1",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "uuid": "^9.0.0"
   }
 }

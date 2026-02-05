@@ -6,7 +6,6 @@ import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { getOrCreatePeriodClose, setPeriodCloseStatus, setReviewerSignOff } from '../../services/period_close_service.js';
 import { buildCloseReadiness } from '../../services/close_readiness_service.js';
-import { getCloseCoach } from '../../services/agentic_close_coach.js';
 import { buildCloseStatus } from '../../services/close_status_service.js';
 import { appendAuditLog } from '../../services/audit_log_service.js';
 import { send500 } from '../../lib/errorHandler.js';
@@ -87,21 +86,12 @@ router.get('/readiness', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/coach', async (req: Request, res: Response) => {
-  try {
-    const periodLabel = req.query.periodLabel as string;
-    const tenantId = getTenantId(req) ?? 'default';
-    const pool = getTenantPool(req);
-    if (!periodLabel) {
-      res.status(400).json({ error: 'Missing periodLabel query' });
-      return;
-    }
-    const result = await getCloseCoach(tenantId, periodLabel, pool ?? undefined);
-    res.json(result);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'Close coach failed', message });
-  }
+/** Coach endpoint quarantined (advisory out of scope). Use readiness and status only. */
+router.get('/coach', (_req: Request, res: Response) => {
+  res.status(410).json({
+    error: 'Out of scope',
+    message: 'Close coach is quarantined. Use GET /readiness and GET /status for sovereign scope.',
+  });
 });
 
 router.get('/status', async (req: Request, res: Response) => {

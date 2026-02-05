@@ -161,8 +161,8 @@ router.get('/fetchers/status', (_req: Request, res: Response) => {
  */
 router.post('/fetchers/run', validateQuery(fetchersRunQuerySchema), async (req: Request, res: Response) => {
   try {
-    const tenantId = req.query.tenantId ?? 'default-tenant';
-    const mode = req.query.mode ?? 'fetch';
+    const tenantId = String(req.query.tenantId ?? 'default-tenant');
+    const mode = String(req.query.mode ?? 'fetch');
     if (mode === 'ingest') {
       const results = await runAllFetchersAndIngest(tenantId);
       res.json({ ok: true, ...results });
@@ -181,7 +181,7 @@ router.post('/fetchers/run', validateQuery(fetchersRunQuerySchema), async (req: 
  * Returns daily usage for tenant.
  */
 router.get('/fetchers/usage', (req: Request, res: Response) => {
-  const tenantId = (req.query.tenantId as string) ?? 'default-tenant';
+  const tenantId = String(req.query.tenantId ?? 'default-tenant');
   res.json({ ok: true, usage: getUsage(tenantId), quota: getQuota(tenantId) });
 });
 

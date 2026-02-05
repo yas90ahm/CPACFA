@@ -23,12 +23,22 @@ import { recordOverride } from '../services/audit_ledger_service.js';
 import { parseTrialBalance } from '../services/trialBalanceParser.js';
 import { getRoundingTolerance } from '../services/rules_registry.js';
 import { absGt } from '../utils/decimal.js';
-import { saveUnadjustedFromUpload } from '../services/trial_balance_store_service.js';
 import { appendAuditLog } from '../services/audit_log_service.js';
 import * as persistence from '../services/persistence_service.js';
-import type { JournalEntryProposal } from '../services/agentic_gap_analyzer.js';
+import { executeBridgeCommand } from '../bridge/index.js';
+import type { JournalEntryProposal } from '../types/hitl.js';
+import { validateAdjustmentProposals } from '../types/amount_provenance.js';
+import { createJustification } from '../services/justification_service.js';
 import type { AuthRequest } from '../auth/middleware.js';
 import type { TrialBalanceEntry } from '../types/financial.js';
+import {
+  saveDraft,
+  listDrafts,
+  getDraft,
+  updateDraft,
+  deleteDraft,
+  type DraftPayload,
+} from '../services/draft_service.js';
 
 const router = Router();
 
@@ -70,6 +80,19 @@ router.post(
       if (!result.ok) {
         res.status(result.error === 'Staging item not found' ? 404 : 400).json({ error: result.error });
         return;
+      }
+      if (result.item && pool && tenantId) {
+        const periodLabel = (result.item.payload as { periodLabel?: string })?.periodLabel ?? result.item.createdAt.slice(0, 7);
+        await createJustification({
+          tenantId,
+          pool,
+          periodLabel,
+          relatedType: 'hitl_staging',
+          relatedId: result.item.id,
+          memoMarkdown: result.item.justification,
+          createdBy: body.signedBy,
+          createdByType: 'user',
+        });
       }
       res.json({ ok: true, item: result.item });
       return;
@@ -113,6 +136,15 @@ router.post(
       res.status(400).json({ error: 'stagedId and adjustment (array) required' });
       return;
     }
+    const provenanceResult = validateAdjustmentProposals(body.adjustment);
+    if (!provenanceResult.valid) {
+      res.status(400).json({
+        error: 'AMOUNT_PROVENANCE_REQUIRED',
+        message: 'Every non-zero amount must have valid amountProvenance (ledger_exact | engine_calculation | human_entered). Advisor may not invent or estimate amounts.',
+        errors: provenanceResult.errors,
+      });
+      return;
+    }
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
     if (!pool || !tenantId) {
@@ -137,8 +169,8 @@ router.post(
       res.status(400).json({ error: 'Staging payload missing rawRows or periodLabel' });
       return;
     }
-
-    const base = parseTrialBalance(rawRows);
+    const normalizedRows = rawRows.map((r) => ({ accountName: r.accountName, debit: r.debit ?? 0, credit: r.credit ?? 0 }));
+    const base = parseTrialBalance(normalizedRows);
     const adjustmentEntries: TrialBalanceEntry[] = body.adjustment.map((p) => ({
       accountName: p.accountName,
       debit: p.debit ?? 0,
@@ -160,34 +192,36 @@ router.post(
     }
 
     const authReq = req as AuthRequest;
-    await saveUnadjustedFromUpload(
-      tenantId,
-      periodLabel,
-      combinedEntries,
-      { uploadedBy: authReq.userId, fileName },
-      pool
-    );
-
-    appendAuditLog(
+    const result = await executeBridgeCommand(
       {
-        action: 'hitl_ingest_fix',
-        resource: `staged:${body.stagedId}`,
-        detail: JSON.stringify({
-          originalImbalance,
-          adjustmentApplied: body.adjustment,
-          periodLabel,
-          totalDebits,
-          totalCredits,
-        }),
+        pool,
+        tenantId,
         actor: authReq.userId ?? 'anonymous',
       },
-      { pool, tenantId }
+      {
+        commandType: 'ApplyHitlAdjustmentToTrialBalance',
+        stagedId: body.stagedId,
+        periodLabel,
+        adjustment: body.adjustment.map((p) => ({
+          accountName: p.accountName,
+          debit: p.debit,
+          credit: p.credit,
+        })),
+        fileName,
+      }
     );
 
-    await persistence.updateStagingStatus(pool, tenantId, body.stagedId, {
-      status: 'approved',
-      approvedBy: authReq.userId ?? undefined,
-    });
+    if (!result.ok) {
+      if (result.code === 'PERIOD_LOCKED') {
+        res.status(409).json({ error: 'Period locked', message: result.error });
+        return;
+      }
+      res.status(result.code === 'VALIDATION' ? 422 : 400).json({
+        error: result.error,
+        code: result.code,
+      });
+      return;
+    }
 
     res.json({
       ok: true,
@@ -327,6 +361,120 @@ router.get(
     const limit = req.query.limit != null ? Math.min(500, Math.max(1, Number(req.query.limit))) : 100;
     const feedback = getContextMemory({ limit });
     res.json({ feedback, count: feedback.length });
+  })
+);
+
+// --- Save for Later (drafts) — uncommitted CPA Bridge / manual adjustments; never included in export ---
+
+/** POST /api/hitl/drafts — Save uncommitted JSON adjustments (CPA Bridge or journal lines) for later. */
+router.post(
+  '/drafts',
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!pool || !tenantId) {
+      res.status(400).json({ error: 'Tenant context (pool, tenantId) required for Save for Later' });
+      return;
+    }
+    const body = req.body as {
+      periodLabel?: string | null;
+      sessionId?: string | null;
+      label?: string | null;
+      payload: DraftPayload;
+    };
+    if (!body?.payload?.adjustments || !Array.isArray(body.payload.adjustments)) {
+      res.status(400).json({ error: 'payload.adjustments (array) required' });
+      return;
+    }
+    const authReq = req as AuthRequest;
+    const draft = await saveDraft(pool, {
+      tenantId,
+      periodLabel: body.periodLabel ?? null,
+      sessionId: body.sessionId ?? null,
+      label: body.label ?? null,
+      payload: body.payload,
+      createdBy: authReq.userId ?? null,
+    });
+    res.status(201).json({ ok: true, draft });
+  })
+);
+
+/** GET /api/hitl/drafts — List Save for Later drafts (optional periodLabel, sessionId). */
+router.get(
+  '/drafts',
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!pool || !tenantId) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const periodLabel = (req.query.periodLabel as string) || undefined;
+    const sessionId = (req.query.sessionId as string) || undefined;
+    const limit = req.query.limit != null ? Math.min(100, Math.max(1, Number(req.query.limit))) : 50;
+    const rows = await listDrafts(pool, { tenantId, periodLabel: periodLabel || null, sessionId: sessionId || null, limit });
+    res.json({ drafts: rows, count: rows.length });
+  })
+);
+
+/** GET /api/hitl/drafts/:id — Get one draft. */
+router.get(
+  '/drafts/:id',
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!pool || !tenantId) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const draft = await getDraft(pool, tenantId, req.params.id);
+    if (!draft) {
+      res.status(404).json({ error: 'Draft not found' });
+      return;
+    }
+    res.json(draft);
+  })
+);
+
+/** PATCH /api/hitl/drafts/:id — Update draft payload or label. */
+router.patch(
+  '/drafts/:id',
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!pool || !tenantId) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const body = req.body as { payload?: DraftPayload; label?: string | null };
+    const updated = await updateDraft(pool, tenantId, req.params.id, {
+      ...(body.payload != null && { payload: body.payload }),
+      ...(body.label !== undefined && { label: body.label }),
+    });
+    if (!updated) {
+      res.status(404).json({ error: 'Draft not found' });
+      return;
+    }
+    res.json({ ok: true, draft: updated });
+  })
+);
+
+/** DELETE /api/hitl/drafts/:id — Delete a draft. */
+router.delete(
+  '/drafts/:id',
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!pool || !tenantId) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const deleted = await deleteDraft(pool, tenantId, req.params.id);
+    if (!deleted) {
+      res.status(404).json({ error: 'Draft not found' });
+      return;
+    }
+    res.json({ ok: true, deleted: true });
   })
 );
 

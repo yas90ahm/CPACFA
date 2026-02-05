@@ -68,6 +68,7 @@ export function createContract(
 ): Promise<RevenueContract> {
   return (async () => {
     const contractRow = await repo.createContract(pool, tenantId, {
+      tenantId,
       contractNumber: input.contractNumber,
       customerId: input.customerId,
       customerName: input.customerName,

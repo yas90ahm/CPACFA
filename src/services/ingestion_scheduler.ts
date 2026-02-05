@@ -1,18 +1,20 @@
 /**
- * Background ingestion scheduler (poll fetchers on interval).
- * Uses a control-DB distributed lock so only one API instance runs the job per interval.
+ * Background ingestion scheduler: enqueues ingestion_pipeline jobs per tenant on an interval.
+ * Uses a control-DB distributed lock so only one instance enqueues per interval.
+ * Workers run the actual pipeline (see job_worker + job_handlers).
  */
 
 import { hostname } from 'os';
 import { getControlPool, isDbConfigured } from '../db/index.js';
-import { runAllFetchersAndIngest } from './ingestion_fetchers.js';
 import { listTenantIds } from './integration_store.js';
+import { enqueueJob } from './job_service.js';
+import { log } from '../lib/logger.js';
 
 const LOCK_JOB_ID = 'ingestion_scheduler';
 
 let timer: NodeJS.Timeout | null = null;
 
-/** Try to acquire the scheduler lock. Returns true if we acquired it, false if another instance holds it or lock not expired. */
+/** Try to acquire the scheduler lock. Returns true if we acquired it. */
 async function tryAcquireLock(intervalMs: number): Promise<boolean> {
   if (!isDbConfigured()) return true;
   const pool = getControlPool();
@@ -37,8 +39,17 @@ export function startIngestionScheduler(): void {
     const acquired = await tryAcquireLock(intervalMs);
     if (!acquired) return;
     const tenants = listTenantIds();
+    const slot = Math.floor(Date.now() / intervalMs);
     for (const tenantId of tenants) {
-      await runAllFetchersAndIngest(tenantId);
+      try {
+        await enqueueJob({
+          type: 'ingestion_pipeline',
+          payload: { tenantId },
+          idempotencyKey: `ingestion:${tenantId}:${slot}`,
+        });
+      } catch (e) {
+        log('error', 'Ingestion scheduler: failed to enqueue job for tenant', { tenantId, error: e instanceof Error ? e.message : String(e) });
+      }
     }
   }, intervalMs);
 }

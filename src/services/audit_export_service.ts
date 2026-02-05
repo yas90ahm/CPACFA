@@ -21,11 +21,14 @@ import type {
 } from '../types/audit.js';
 import type { StoredJustification } from '../types/justification.js';
 import { getJustificationsForPeriod } from './justification_service.js';
+import { validateTrialBalanceAndBalanceSheet } from './integrity_gate_service.js';
+import { verifyChain } from './audit_ledger_service.js';
 import * as statementRegistry from '../db/repositories/statement_registry_repository.js';
 import * as closeAuditTrail from '../db/repositories/close_audit_trail_repository.js';
+import { disallowMemoryStoreInProduction } from '../lib/env.js';
 import type { Pool } from 'pg';
 
-// --- Last statement generation: tenant DB when pool/tenantId provided; else in-memory (dev only, not multi-tenant safe) ---
+// --- Last statement generation: tenant DB when pool/tenantId provided; else in-memory (dev only; production disallows) ---
 
 const BASE_SOURCE_DOC_URL = '/api/audit/source-document';
 const BASE_REASONING_URL = '/api/audit/reasoning';
@@ -110,6 +113,7 @@ export async function registerStatementGeneration(
       });
     }
   } else {
+    disallowMemoryStoreInProduction({ storeName: 'statement generation (audit export)', hasDurableContext: false });
     lastStatementGeneration = payload;
   }
 }
@@ -131,6 +135,7 @@ export async function getLastStatementGeneration(
       registeredAt: row.registered_at,
     };
   }
+  disallowMemoryStoreInProduction({ storeName: 'statement generation (audit export)', hasDurableContext: false });
   return lastStatementGeneration;
 }
 
@@ -219,7 +224,7 @@ export async function buildAuditBinder(options: BuildAuditBinderOptions): Promis
   const stored = await getLastStatementGeneration(tenantId, pool);
   const statements = providedStatements ?? stored?.statements ?? null;
 
-  const justifications = getJustificationsForPeriod(periodStart, periodEnd);
+  const justifications = await getJustificationsForPeriod(periodStart, periodEnd, tenantId ?? undefined, pool);
   const generatedAt = new Date().toISOString();
 
   const binder: AuditBinder = {
@@ -229,6 +234,19 @@ export async function buildAuditBinder(options: BuildAuditBinderOptions): Promis
     generatedAt,
     justifications,
   };
+
+  if (tenantId && pool) {
+    const chainResult = await verifyChain(pool, tenantId);
+    binder.chainVerification = {
+      valid: chainResult.valid,
+      entryCount: chainResult.entryCount,
+      verifiedAt: chainResult.verifiedAt,
+      ...(chainResult.latestEntryHash != null && { latestEntryHash: chainResult.latestEntryHash }),
+      ...(chainResult.latestEntryId != null && { latestEntryId: chainResult.latestEntryId }),
+      ...(chainResult.brokenAtEntryId != null && { brokenAtEntryId: chainResult.brokenAtEntryId }),
+      ...(chainResult.message != null && { message: chainResult.message }),
+    };
+  }
 
   if (!statements) {
     return binder;

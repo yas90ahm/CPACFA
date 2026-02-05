@@ -51,7 +51,7 @@ describe('Persistence resume — multi-day enterprise workflows', () => {
       const _dropped = session; // "process" ends; no other reference to session
 
       // ——— 4. New "process": initialize a new Supervisor instance with the same SessionID ———
-      const resumedSession = await persistence.getSession(pool, savedSessionId);
+      const resumedSession = await persistence.getSession(pool, TEST_TENANT_ID, savedSessionId);
 
       // ——— 5. Assert: Agent successfully pulls the previous Thought from Postgres and knows where it left off ———
       expect(resumedSession).toBeDefined();

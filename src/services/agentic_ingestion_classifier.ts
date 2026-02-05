@@ -3,6 +3,7 @@
  */
 
 import { callLLMWithFallback } from '../llm/callWithFallback.js';
+import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import type {
   DocumentClassification,
   ParsedSheet,
@@ -45,13 +46,15 @@ export async function classifyIngestionAgentic(input: {
     `sampleRow=${JSON.stringify(input.sampleRow)}`,
     'Return JSON only.',
   ].join('\n');
-  return callLLMWithFallback({
+  const result = await callLLMWithFallback({
     system: SYSTEM,
     prompt,
     maxTokens: 400,
     parse: parseResult,
     fallback: null,
   });
+  if (result) assertNoNumericAmountsInAgentOutput(result, 'agentic_ingestion_classifier');
+  return result;
 }
 
 function parseResult(raw: string): AgenticIngestionResult | null {

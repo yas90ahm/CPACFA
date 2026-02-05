@@ -11,7 +11,14 @@
  */
 
 import type { Pool } from 'pg';
+import { disallowMemoryStoreInProduction } from '../lib/env.js';
 import * as persistence from './persistence_service.js';
+import type { StagingItemShape } from './persistence_service.js';
+
+/** Map persistence shape (type: string) to StagingItem (type: StagingItemType). */
+function toStagingItem(shape: StagingItemShape): StagingItem {
+  return { ...shape, type: shape.type as StagingItemType };
+}
 
 // --- Default threshold (configurable) ---
 
@@ -114,8 +121,9 @@ export function submitToStaging(
     payload: params.payload,
   };
   if (opts?.pool && opts?.tenantId) {
-    return persistence.createStagingItem(opts.pool, opts.tenantId, itemParams);
+    return persistence.createStagingItem(opts.pool, opts.tenantId, itemParams).then(toStagingItem);
   }
+  disallowMemoryStoreInProduction({ storeName: 'HITL staging', hasDurableContext: false });
   const id = nextId();
   const now = new Date().toISOString();
   const item: StagingItem = {
@@ -141,8 +149,9 @@ export async function getStagingArea(
     return persistence.listStagingItems(options.pool, options.tenantId, {
       status: options.status,
       limit: options.limit,
-    });
+    }).then((items) => items.map(toStagingItem));
   }
+  disallowMemoryStoreInProduction({ storeName: 'HITL staging', hasDurableContext: false });
   let items = Array.from(stagingStore.values());
   if (options?.status) items = items.filter((i) => i.status === options.status);
   items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -153,8 +162,9 @@ export async function getStagingArea(
 /** When opts.pool is provided, fetches from Postgres (tenant-scoped); otherwise in-memory. */
 export async function getStagingItem(id: string, opts?: { pool?: Pool; tenantId?: string }): Promise<StagingItem | undefined> {
   if (opts?.pool && opts?.tenantId) {
-    return persistence.getStagingItem(opts.pool, opts.tenantId, id);
+    return persistence.getStagingItem(opts.pool, opts.tenantId, id).then((item) => item ? toStagingItem(item) : undefined);
   }
+  disallowMemoryStoreInProduction({ storeName: 'HITL staging', hasDurableContext: false });
   const item = stagingStore.get(id);
   return item ? { ...item } : undefined;
 }
@@ -189,8 +199,9 @@ export async function receiveHumanApproval(
       approvedAt: new Date().toISOString(),
       approvedBy: params.signedBy,
     });
-    return { ok: true, item: updated };
+    return { ok: true, item: updated ? toStagingItem(updated) : undefined };
   }
+  disallowMemoryStoreInProduction({ storeName: 'HITL staging', hasDurableContext: false });
   const item = stagingStore.get(params.id);
   if (!item) return { ok: false, error: 'Staging item not found' };
   if (item.status !== 'pending') return { ok: false, error: `Item is not pending (status: ${item.status})` };
@@ -220,9 +231,10 @@ export async function receiveHumanRejection(
       rejectedAt: new Date().toISOString(),
       rejectedReason: reason,
     });
-    recordRejectionFeedback(params.id, reason, existing);
-    return { ok: true, item: updated };
+    recordRejectionFeedback(params.id, reason, toStagingItem(existing));
+    return { ok: true, item: updated ? toStagingItem(updated) : undefined };
   }
+  disallowMemoryStoreInProduction({ storeName: 'HITL staging', hasDurableContext: false });
   const item = stagingStore.get(params.id);
   if (!item) return { ok: false, error: 'Staging item not found' };
   if (item.status !== 'pending') return { ok: false, error: `Item is not pending (status: ${item.status})` };
@@ -231,7 +243,7 @@ export async function receiveHumanRejection(
   item.updatedAt = now;
   item.rejectedAt = now;
   item.rejectedReason = reason;
-  recordRejectionFeedback(params.id, item.rejectedReason, item);
+  recordRejectionFeedback(params.id, item.rejectedReason ?? reason, item);
   return { ok: true, item: { ...item } };
 }
 

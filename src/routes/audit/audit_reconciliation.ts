@@ -77,7 +77,7 @@ router.post('/reconciliation-summary', validateBody(reconciliationSummaryBodySch
     const statements = req.body.statements as Parameters<typeof buildReconciliationSummary>[0];
     if (statements?.balanceSheet && statements?.trialBalance != null) {
       validateTrialBalanceAndBalanceSheet(
-        statements.trialBalance as { entries: unknown[]; totalDebits?: number; totalCredits?: number },
+        statements.trialBalance as { entries: import('../../types/financial.js').TrialBalanceEntry[]; totalDebits?: number; totalCredits?: number },
         statements.balanceSheet
       );
     }

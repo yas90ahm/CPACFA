@@ -8,8 +8,18 @@ import type { Pool } from 'pg';
 import type { CloseAdjustment, CloseAdjustmentStatus } from '../types/close_and_controls.js';
 import type { JournalEntrySuggestion } from '../types/close_and_controls.js';
 import type { AccrualSuggestion } from '../types/accrual_deferral.js';
+import { validateJEProvenance } from '../types/amount_provenance.js';
 import { isDbConfigured } from '../db/index.js';
 import * as adjRepo from '../db/repositories/close_adjustment_repository.js';
+
+/** Thrown when a JE suggestion has non-zero amounts without valid amountProvenance (Advisor scope). */
+export class ProvenanceValidationError extends Error {
+  constructor(public readonly errors: string[]) {
+    super(errors.join('; '));
+    this.name = 'ProvenanceValidationError';
+    Object.setPrototypeOf(this, ProvenanceValidationError.prototype);
+  }
+}
 
 const store = new Map<string, CloseAdjustment>();
 let idCounter = 0;
@@ -29,6 +39,10 @@ export async function addJEAsAdjustments(
   tenantId?: string,
   pool?: Pool
 ): Promise<CloseAdjustment[]> {
+  for (const s of suggestions) {
+    const result = validateJEProvenance(s);
+    if (!result.valid) throw new ProvenanceValidationError(result.errors);
+  }
   if (isDbConfigured() && tenantId && pool) {
     const added: CloseAdjustment[] = [];
     for (const s of suggestions) {

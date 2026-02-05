@@ -5,13 +5,12 @@
 import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { getPeriodEndDate } from '../../services/close_context.js';
-import { lockPeriod, isPeriodLocked, getPeriodLock, listLockedPeriods } from '../../services/period_lock_service.js';
+import { isPeriodLocked, getPeriodLock, listLockedPeriods } from '../../services/period_lock_service.js';
 import { getCloseCalendarConfig, setCloseCalendarConfig } from '../../services/close_calendar_config_service.js';
 import { setCloseDueDate, getPeriodEntry, listPeriods } from '../../services/close_calendar_service.js';
 import { getCloseRoleFromReq } from '../../lib/closeRole.js';
-import { canPerform } from '../../services/segregation_service.js';
-import { appendAuditLog } from '../../services/audit_log_service.js';
 import { periodLockBodySchema } from '../../schemas/closeSchemas.js';
+import { executeBridgeCommand } from '../../bridge/index.js';
 import { send500 } from '../../lib/errorHandler.js';
 import type { AuthRequest } from '../../auth/middleware.js';
 import { listAdjustments } from '../../services/close_adjustments_service.js';
@@ -32,13 +31,9 @@ router.get('/period-end', (req: Request, res: Response) => {
   }
 });
 
-/** POST /api/close/period-lock */
+/** POST /api/close/period-lock (via bridge) */
 router.post('/period-lock', async (req: Request, res: Response) => {
   try {
-    const actorRole = getCloseRoleFromReq(req as AuthRequest);
-    if (!canPerform(actorRole, 'period_lock')) {
-      return res.status(403).json({ error: 'Insufficient role for this action' });
-    }
     const parsed = periodLockBodySchema.safeParse(req.body);
     if (!parsed.success) {
       const flat = parsed.error.flatten();
@@ -49,17 +44,39 @@ router.post('/period-lock', async (req: Request, res: Response) => {
     const body = parsed.data;
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    const lock = await lockPeriod(body.periodLabel, body.lockedBy, body.reason, tenantId, pool);
-    const auditContext = pool && tenantId ? { pool, tenantId } : undefined;
-    appendAuditLog(
-      { action: 'period_lock', resource: `period:${lock.periodLabel}`, actor: body.lockedBy, detail: body.reason },
-      auditContext
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const actorRole = getCloseRoleFromReq(req as AuthRequest);
+    const result = await executeBridgeCommand(
+      {
+        pool,
+        tenantId,
+        actor: (req as AuthRequest).userId ?? body.lockedBy,
+        actorRole,
+      },
+      {
+        commandType: 'LockPeriod',
+        periodLabel: body.periodLabel,
+        lockedBy: body.lockedBy,
+        reason: body.reason,
+      }
     );
+    if (!result.ok) {
+      if (result.code === 'VALIDATION') {
+        return res.status(403).json({ error: result.error });
+      }
+      return res.status(400).json({ error: result.error, code: result.code });
+    }
+    if (result.commandType !== 'LockPeriod') throw new Error('Unexpected result');
     res.json({
-      ...lock,
+      periodLabel: result.periodLabel,
+      lockedAt: result.lockedAt,
+      lockedBy: body.lockedBy,
+      reason: body.reason,
       suggestPackGeneration: true,
       packUrl: '/api/reporting/pack',
-      periodLabel: lock.periodLabel,
     });
   } catch (e: unknown) {
     send500(res, e, 'Period lock failed');

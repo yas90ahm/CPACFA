@@ -1,9 +1,10 @@
 /**
  * Onboarding: guided setup, CoA import, first close wizard.
- * When pool and tenantId are provided, uses tenant DB; else in-memory (dev fallback).
+ * When pool and tenantId are provided, uses tenant DB; in production no in-memory fallback.
  */
 
 import type { Pool } from 'pg';
+import { disallowMemoryStoreInProduction } from '../lib/env.js';
 import { createInMemoryStore } from '../lib/inMemoryStore.js';
 import * as onboardingRepo from '../db/repositories/onboarding_repository.js';
 import type { OnboardingState, OnboardingStepId, CoAImportResult } from '../types/onboarding.js';
@@ -71,6 +72,7 @@ export async function getOnboarding(
     const row = await onboardingRepo.getOnboarding(pool, tenantId);
     return row ?? undefined;
   }
+  disallowMemoryStoreInProduction({ storeName: 'onboarding', hasDurableContext: false });
   const list = store.list().filter((s) => s.tenantId === tenantId);
   return list[0] ? toState(list[0]) : undefined;
 }
@@ -90,6 +92,7 @@ export async function advanceStep(
     const nextStep = idx < STEP_ORDER.length - 1 ? STEP_ORDER[idx + 1] : stepId;
     return (await onboardingRepo.updateOnboardingStep(pool, tenantId, completed, nextStep)) ?? undefined;
   }
+  disallowMemoryStoreInProduction({ storeName: 'onboarding', hasDurableContext: false });
   const list = store.list().filter((s) => s.tenantId === tenantId);
   const record = list[0];
   if (!record) return undefined;
@@ -123,6 +126,7 @@ export async function completeCoAImport(
   pool?: Pool | null
 ): Promise<OnboardingState | undefined> {
   if (pool) return (await onboardingRepo.completeOnboardingCoA(pool, tenantId, result)) ?? undefined;
+  disallowMemoryStoreInProduction({ storeName: 'onboarding', hasDurableContext: false });
   const list = store.list().filter((s) => s.tenantId === tenantId);
   const record = list[0];
   if (!record) return undefined;
@@ -151,6 +155,7 @@ export async function setFirstCloseCompleted(
   pool?: Pool | null
 ): Promise<OnboardingState | undefined> {
   if (pool) return (await onboardingRepo.setOnboardingFirstCloseCompleted(pool, tenantId)) ?? undefined;
+  disallowMemoryStoreInProduction({ storeName: 'onboarding', hasDurableContext: false });
   const list = store.list().filter((s) => s.tenantId === tenantId);
   const record = list[0];
   if (!record) return undefined;

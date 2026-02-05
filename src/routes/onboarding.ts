@@ -59,7 +59,7 @@ router.post('/coa-import', validateBody(coaImportBodySchema), async (req: Reques
   const tenantId = getTenantId(req) ?? 'default';
   const pool = getTenantPool(req);
   const { accounts } = req.body;
-  const result = importCoA(accounts.map((a) => ({ code: String(a.code), name: String(a.name) })));
+  const result = importCoA(accounts.map((a: { code?: unknown; name?: unknown }) => ({ code: String(a.code), name: String(a.name) })));
   const state = await completeCoAImport(tenantId, result, pool);
   res.json({ ...result, state: state ?? undefined });
 });
@@ -68,7 +68,7 @@ router.post('/coa-import', validateBody(coaImportBodySchema), async (req: Reques
 router.post('/suggest-coa-mapping', validateBody(suggestCoAMappingBodySchema), async (req: Request, res: Response) => {
   try {
     const { accounts } = req.body;
-    const result = await suggestCoAMappingAgentic(accounts.map((a) => ({ code: String(a.code), name: String(a.name) })));
+    const result = await suggestCoAMappingAgentic(accounts.map((a: { code?: unknown; name?: unknown }) => ({ code: String(a.code), name: String(a.name) })));
     res.json(result);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

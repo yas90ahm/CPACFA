@@ -9,6 +9,7 @@ import {
   exportAuditDefensePDF,
   getJustificationsForPeriod,
 } from '../services/justification_service.js';
+import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
 
 const router = Router();
 
@@ -42,17 +43,21 @@ router.post('/chat', async (req: Request, res: Response) => {
  * Query: periodStart (ISO date), periodEnd (ISO date), title?, entityName?
  * Returns: HTML summary of all justifications for the period (for preview or PDF).
  */
-router.get('/audit-defense/summary', (req: Request, res: Response) => {
+router.get('/audit-defense/summary', async (req: Request, res: Response) => {
   try {
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
     const title = (req.query.title as string) ?? 'Audit Defense — Justifications';
     const entityName = (req.query.entityName as string) ?? 'Entity';
-    const { html } = buildAuditDefenseSummary({
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    const { html } = await buildAuditDefenseSummary({
       periodStart,
       periodEnd,
       title,
       entityName,
+      tenantId: tenantId ?? undefined,
+      pool: pool ?? undefined,
     });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
@@ -95,13 +100,15 @@ router.get('/audit-defense/export', async (req: Request, res: Response) => {
  * Query: periodStart?, periodEnd?
  * Returns: list of stored justifications (optionally filtered by period).
  */
-router.get('/list', (req: Request, res: Response) => {
+router.get('/list', async (req: Request, res: Response) => {
   try {
     const periodStart = req.query.periodStart as string | undefined;
     const periodEnd = req.query.periodEnd as string | undefined;
-    const list = periodStart && periodEnd
-      ? getJustificationsForPeriod(periodStart, periodEnd)
-      : getJustificationsForPeriod('1970-01-01', '2100-01-01');
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    const list = await (periodStart && periodEnd
+      ? getJustificationsForPeriod(periodStart, periodEnd, tenantId ?? undefined, pool ?? undefined)
+      : getJustificationsForPeriod('1970-01-01', '2100-01-01', tenantId ?? undefined, pool ?? undefined));
     res.json({ justifications: list });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'List failed';

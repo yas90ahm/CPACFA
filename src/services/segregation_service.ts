@@ -12,7 +12,8 @@ export type ControlledAction =
   | 'je_suggest_approve'
   | 'je_post'
   | 'variance_confirm'
-  | 'audit_log_retention_purge';
+  | 'audit_log_retention_purge'
+  | 'certify_close';
 
 /** Minimum role required per action (approver > reviewer > preparer) */
 const ACTION_ROLE: Record<ControlledAction, CloseRole> = {
@@ -22,6 +23,7 @@ const ACTION_ROLE: Record<ControlledAction, CloseRole> = {
   je_post: 'approver',
   variance_confirm: 'reviewer',
   audit_log_retention_purge: 'approver',
+  certify_close: 'approver',
 };
 
 const ROLE_ORDER: CloseRole[] = ['preparer', 'reviewer', 'approver'];

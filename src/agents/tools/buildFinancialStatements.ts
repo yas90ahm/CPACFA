@@ -17,6 +17,7 @@ import {
   mergeAdjustmentsIntoEntries,
   type TrialBalanceAdjustment,
 } from '../../services/adjusted_trial_balance_service.js';
+import { getPostableJEAdjustments } from '../../services/journal_entry_service.js';
 import {
   runIntegrityGate,
   INTEGRITY_GATE_CRITICAL_MESSAGE,
@@ -157,7 +158,7 @@ export async function runBuildFinancialStatements(
       };
     }
 
-    // Merge approved HITL adjustments into a virtual Adjusted state before calculating Balance Sheet or P&L.
+    // Merge approved HITL adjustments and approved/postable JEs into a virtual Adjusted state before calculating Balance Sheet or P&L.
     const approvedStaging = await listStagingItems(context.pool, parsed.data.tenantId, { status: 'approved' });
     const approvedAdjustments: TrialBalanceAdjustment[] = [];
     const appliedAdjustmentIds: string[] = [];
@@ -179,6 +180,24 @@ export async function runBuildFinancialStatements(
       };
       approvedAdjustments.push(adj);
       appliedAdjustmentIds.push(item.id);
+    }
+    // Include approved/posted/exported journal entries (not drafts) for defensible close.
+    if (context.pool) {
+      try {
+        const jeAdjustments = await getPostableJEAdjustments(
+          context.pool,
+          parsed.data.tenantId,
+          parsed.data.sessionId
+        );
+        for (const jeAdj of jeAdjustments) {
+          approvedAdjustments.push({
+            debits: jeAdj.debits,
+            credits: jeAdj.credits,
+          });
+        }
+      } catch (_) {
+        /* non-fatal: continue with HITL adjustments only */
+      }
     }
 
     const entries = mergeAdjustmentsIntoEntries(unadjustedEntries, approvedAdjustments);
@@ -264,10 +283,6 @@ export async function runBuildFinancialStatements(
           netIncome: profitAndLoss.netIncome,
         },
         classifiedEntriesCount: classifiedEntries.length,
-        /** IDs of approved HITL adjustments merged into this report (traceability). */
-        appliedAdjustmentIds: appliedAdjustmentIds.length ? appliedAdjustmentIds : undefined,
-        /** For audit: plan + deterministic verification (V1–V3b). */
-        reasoningChain: { plan: pev.plan, executedAt: pev.executedAt, verification: pev.verification },
         ...(standard ? { standard } : {}),
         ...(standardMetadata ? { standardMetadata } : {}),
         ...('cashFlow' in result && result.cashFlow ? { cashFlow: result.cashFlow } : {}),
@@ -284,8 +299,7 @@ export async function runBuildFinancialStatements(
       return {
         success: false,
         error: selfHealMessage,
-        data: { check: e.check, imbalanceAmount: e.imbalanceAmount, details: e.details },
-      } as ToolResult<unknown>;
+      };
     }
     const message = e instanceof Error ? e.message : String(e);
     return { success: false, error: message };

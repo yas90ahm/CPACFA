@@ -52,15 +52,51 @@ function binderToHtml(binder: AuditBinder): string {
   if (binder.justifications.length > 10) {
     parts.push(`<p>... and ${binder.justifications.length - 10} more justifications.</p>`);
   }
+
+  if (binder.chainVerification) {
+    parts.push('<h2>Audit Ledger Chain Verification (Appendix)</h2>');
+    parts.push('<p>Third parties can verify audit ledger integrity using the following artifact.</p>');
+    parts.push('<table border="1" cellpadding="4" style="border-collapse: collapse;">');
+    parts.push(`<tr><td><strong>Valid</strong></td><td>${binder.chainVerification.valid}</td></tr>`);
+    parts.push(`<tr><td><strong>Entry count</strong></td><td>${binder.chainVerification.entryCount}</td></tr>`);
+    parts.push(`<tr><td><strong>Verified at (ISO)</strong></td><td>${binder.chainVerification.verifiedAt}</td></tr>`);
+    if (binder.chainVerification.latestEntryHash) {
+      parts.push(`<tr><td><strong>Latest entry hash</strong></td><td><code>${binder.chainVerification.latestEntryHash}</code></td></tr>`);
+    }
+    if (binder.chainVerification.latestEntryId) {
+      parts.push(`<tr><td><strong>Latest entry id</strong></td><td>${binder.chainVerification.latestEntryId}</td></tr>`);
+    }
+    if (binder.chainVerification.brokenAtEntryId) {
+      parts.push(`<tr><td><strong>Broken at entry id</strong></td><td>${binder.chainVerification.brokenAtEntryId}</td></tr>`);
+    }
+    if (binder.chainVerification.message) {
+      parts.push(`<tr><td><strong>Message</strong></td><td>${binder.chainVerification.message}</td></tr>`);
+    }
+    parts.push('</table>');
+  }
+
   return parts.join('\n');
 }
 
 /**
- * Export audit binder to PDF buffer.
+ * Export audit binder to PDF buffer (certified only; no watermark).
  */
 export async function exportAuditBinderToPdf(binder: AuditBinder): Promise<Buffer> {
   const html = binderToHtml(binder);
   return createPdfFromHtml(html);
+}
+
+/**
+ * Export draft package to PDF (explicitly NOT the Audit Binder). Same content shape as binder but with
+ * DRAFT — NOT CERTIFIED watermark and disclaimer on every page. Use for pre-certification review only.
+ */
+export async function exportDraftPackageToPdf(binder: AuditBinder): Promise<Buffer> {
+  const html = binderToHtml(binder);
+  return createPdfFromHtml(html, {
+    draft: true,
+    workflowState: 'draft',
+    generatedAt: binder.generatedAt ?? new Date().toISOString(),
+  });
 }
 
 /**

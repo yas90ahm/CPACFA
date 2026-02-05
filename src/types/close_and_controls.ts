@@ -2,13 +2,17 @@
  * Month-end close, JE suggestions, checklist, period lock, and segregation/audit log.
  */
 
-/** Suggested journal entry from gap or reconciliation mismatch */
+import type { AmountProvenance, DebitCreditLineWithProvenance } from './amount_provenance.js';
+
+export type { AmountProvenance, DebitCreditLineWithProvenance };
+
+/** Suggested journal entry from gap or reconciliation mismatch. Amounts require valid amountProvenance to be accepted. */
 export interface JournalEntrySuggestion {
   id: string;
   date: string; // ISO
   description: string;
-  debits: { account: string; amount: number }[];
-  credits: { account: string; amount: number }[];
+  debits: DebitCreditLineWithProvenance[];
+  credits: DebitCreditLineWithProvenance[];
   source: 'gap' | 'reconciliation' | 'manual';
   sourceDetail?: string;
   confidence?: number;

@@ -11,7 +11,6 @@ import { ingestTrialBalanceFile, type IngestTrialBalanceResult } from '../../ser
 import { buildValidatedStatements, MathematicalIntegrityError } from '../../services/financialStatements.js';
 import { getRoundingTolerance } from '../../services/rules_registry.js';
 import { absGt } from '../../utils/decimal.js';
-import { suggestJournalEntriesForImbalance } from '../../services/agentic_gap_analyzer.js';
 import { generateStatements } from '../../services/statementGenerator.js';
 import { buildCashFlowStatement, buildCashFlowFromTransactions } from '../../services/cashFlow.js';
 import { buildEquityChangesStatement } from '../../services/equityChanges.js';
@@ -40,6 +39,8 @@ import type { Pool } from 'pg';
 import type { StatementGeneratorOptions } from '../../services/statementGenerator.js';
 import { assertPeriodNotLocked, PeriodLockedError } from '../../services/period_lock_service.js';
 import { appendAuditLog } from '../../services/audit_log_service.js';
+import { createIssueFromIntegrityFailure } from '../../services/issue_item_service.js';
+import { createDecisionRecord } from '../../services/decision_record_service.js';
 import { validateBody, requireValidTenantId } from '../../middleware/validationMiddleware.js';
 import { ingestBodySchema, type IngestBody } from '../../schemas/request/trialBalance.js';
 import { getPrecedentForCloseStep, toSimilarPrecedentSummary } from '../../services/precedent_for_close_step.js';
@@ -47,10 +48,10 @@ import { runProfessionalReview } from '../../services/professional_review_servic
 import { deriveCovenantAndLiquidityFromIngest } from '../../services/ingest_covenant_liquidity.js';
 import * as periodFinancialDataState from '../../db/repositories/period_financial_data_state_repository.js';
 import { classifyTrialBalance } from '../../services/accountClassifier.js';
-import { saveUnadjustedFromUpload } from '../../services/trial_balance_store_service.js';
+import { executeBridgeCommand } from '../../bridge/index.js';
 import { getAdjustedTrialBalance } from '../../services/adjusted_trial_balance_service.js';
-import { isMessyTrialBalance, agenticLedgerToTrialBalance } from '../../services/agentic_ledger_to_tb.js';
 import { attachLineProvenance, attachCategories, parseTransactions, normalizeStandard } from './helpers.js';
+import { log } from '../../lib/logger.js';
 
 const router = Router();
 
@@ -85,7 +86,7 @@ function injectTenantFromBody(req: Request, _res: Response, next: import('expres
  */
 router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValidTenantId, validateBody(ingestBodySchema), async (req: Request, res: Response) => {
   try {
-    console.log('POST /api/trial-balance/ingest received, file:', req.file?.originalname ?? 'none');
+    log('info', 'trial-balance ingest received', { file: req.file?.originalname ?? 'none' });
     const file = req.file;
     if (!file) {
       res.status(400).json({
@@ -102,7 +103,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       ? `ingest-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
       : null;
     if (ingestSessionId && !/^ingest-\d+-[a-z0-9]+$/.test(ingestSessionId)) {
-      console.error('Invalid sessionId format generated:', ingestSessionId);
+      log('error', 'Invalid sessionId format generated', { ingestSessionId });
       res.status(500).json({ error: 'Internal error', message: 'Session ID generation failed' });
       return;
     }
@@ -127,35 +128,28 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       });
       return;
     }
+    const maxTbRows = Number(process.env.MAX_TB_ROWS ?? 100_000);
+    if (rawRows.length > maxTbRows) {
+      res.status(413).json({
+        error: 'Trial balance too large',
+        message: `Row count ${rawRows.length} exceeds maximum ${maxTbRows}. Set MAX_TB_ROWS to allow more.`,
+        rowCount: rawRows.length,
+        maxAllowed: maxTbRows,
+      });
+      return;
+    }
 
     if (body.confirmMapping && Array.isArray(body.confirmedEntries) && body.confirmedEntries.length > 0) {
       rawRows = body.confirmedEntries as RawTrialBalanceRow[];
     } else if (ingestResult.needsAgenticMapping) {
-      try {
-        const suggestedEntries = await agenticLedgerToTrialBalance(file.buffer, file.mimetype);
-        if (suggestedEntries.length > 0) {
-          return res.status(200).json({
-            requiresColumnConfirmation: true,
-            message: 'Column mapping could not be determined. Please confirm the suggested mapping before saving.',
-            suggestedEntries,
-          });
-        }
-      } catch {
-        // fall through to parse with all-zero amounts; buildValidatedStatements will fail with 422 if unbalanced
-      }
-    } else if (isMessyTrialBalance(rawRows)) {
-      if (uploadId && tenantIdIngest && poolIngest) {
-        await persistence.updateSessionUploadMetadata(poolIngest, uploadId, tenantIdIngest, {
-          rawRows,
-          status: 'pending_agentic_cleanup',
-        });
-      }
-      try {
-        const agenticRows = await agenticLedgerToTrialBalance(file.buffer, file.mimetype);
-        if (agenticRows.length > 0) rawRows = agenticRows;
-      } catch {
-        // keep original rawRows
-      }
+      // Scope: no AI numeric extraction. Ask for human confirmation or use deterministic parse.
+      return res.status(200).json({
+        requiresColumnConfirmation: true,
+        message: 'Column mapping could not be determined. Confirm columns (account, debit, credit) and re-upload, or use HITL resolve-ingest with a corrected file.',
+        suggestedEntries: [],
+      });
+    } else if (false) {
+      // Scope: agentic ledger-to-TB numeric extraction quarantined. Branch kept for brace structure; never runs.
     }
 
     const trialBalance = parseTrialBalance(rawRows);
@@ -190,22 +184,14 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
         });
         stagedId = item.id;
       }
-      const suggestions = await suggestJournalEntriesForImbalance({
-        imbalanceAmount,
-        totalDebits,
-        totalCredits,
-        unmappedRows: trialBalance.entries.slice(0, 30).map((e) => ({
-          accountName: e.accountName ?? '',
-          debit: e.debit,
-          credit: e.credit,
-        })),
-      });
+      // Scope: no AI-generated amounts. Staging only; human supplies correction via resolve-ingest.
       return res.status(200).json({
         status: 'staged',
         stagedId,
         imbalanceAmount,
-        suggestions,
-        message: 'Trial balance does not balance. Data staged for HITL fix; not saved to main ledger.',
+        totalDebits,
+        totalCredits,
+        message: 'Trial balance does not balance. Data staged for HITL fix. Use POST /api/hitl/resolve-ingest with human-supplied adjustment; not saved to main ledger.',
       });
     }
 
@@ -325,19 +311,35 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
     const buildOpts = useAgenticClassification && preClassified ? { preClassifiedEntries: preClassified } : undefined;
 
     let trialBalanceForBuild: import('../../types/financial.js').TrialBalanceResult = trialBalance;
-    if (body.periodLabel) {
-      const tenantIdForSave = tenantIdIngest ?? 'default';
+    if (body.periodLabel && poolIngest && tenantIdIngest) {
+      const tenantIdForSave = tenantIdIngest;
       const entriesToStore = preClassified ?? (await classifyTrialBalance(trialBalance.entries));
-      await saveUnadjustedFromUpload(
-        tenantIdForSave,
-        body.periodLabel,
-        entriesToStore,
+      const result = await executeBridgeCommand(
         {
-          uploadedBy: (req as AuthRequest).userId,
-          fileName: file.originalname,
+          pool: poolIngest,
+          tenantId: tenantIdForSave,
+          actor: (req as AuthRequest).userId ?? 'anonymous',
         },
-        poolIngest ?? undefined
+        {
+          commandType: 'SaveTrialBalance',
+          periodLabel: body.periodLabel,
+          entries: entriesToStore.map((e) => ({
+            accountName: e.accountName,
+            debit: e.debit ?? 0,
+            credit: e.credit ?? 0,
+            accountCode: e.accountCode,
+          })),
+          fileName: file.originalname,
+        }
       );
+      if (!result.ok) {
+        if (result.code === 'PERIOD_LOCKED') {
+          res.status(409).json({ error: 'Period locked', message: result.error });
+          return;
+        }
+        res.status(400).json({ error: result.error, code: result.code });
+        return;
+      }
       try {
         const adjustedEntries = await getAdjustedTrialBalance(tenantIdForSave, body.periodLabel, poolIngest ?? undefined);
         const totalDebits = adjustedEntries.reduce((s, e) => s + (e.debit ?? 0), 0);
@@ -368,6 +370,24 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
     const { balanceSheet, profitAndLoss } = base;
     const classifiedEntries = base.classifiedEntries;
     const standardMetadata = 'standardMetadata' in base ? base.standardMetadata : undefined;
+    if (tenantIdIngest && poolIngest && classifiedEntries.length > 0) {
+      try {
+        await createDecisionRecord(poolIngest, {
+          closeSessionId: (body as { closeSessionId?: string }).closeSessionId ?? null,
+          tenantId: tenantIdIngest,
+          decisionType: 'classification',
+          subjectRef: { entryCount: classifiedEntries.length },
+          inputSnapshot: { accountNames: trialBalanceForBuild.entries.map((e) => e.accountName) },
+          outputSnapshot: {
+            classifications: classifiedEntries.map((e) => ({ accountName: e.accountName, accountType: e.accountType })),
+          },
+          rationaleText: useAgenticClassification ? 'Agentic classification (classifyTrialBalance)' : 'Deterministic classification',
+          engineVersion: useAgenticClassification ? 'agentic' : 'deterministic',
+        });
+      } catch (_) {
+        /* non-fatal */
+      }
+    }
     const priorBalanceSheetIngest =
       priorTrialBalanceIngest
         ? (
@@ -587,6 +607,42 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       return res.status(403).json({ error: 'Period locked', periodLabel: err.periodLabel });
     }
     if (err instanceof MathematicalIntegrityError) {
+      const tenantId = getTenantId(req);
+      const pool = getTenantPool(req);
+      const closeSessionId = (req.body as Record<string, unknown>)?.closeSessionId ?? (req.query as Record<string, unknown>).closeSessionId;
+      if (tenantId && pool) {
+        try {
+          await createDecisionRecord(pool, {
+            closeSessionId: typeof closeSessionId === 'string' ? closeSessionId : null,
+            tenantId,
+            decisionType: 'anomaly_flag',
+            subjectRef: { check: err.check, imbalanceAmount: err.imbalanceAmount },
+            inputSnapshot: err.details ?? {},
+            outputSnapshot: { blocked: true, reason: 'MathematicalIntegrityError' },
+            rationaleText: err.message,
+            engineVersion: 'financialStatements_validator',
+          });
+        } catch (_) {
+          /* non-fatal */
+        }
+        if (typeof closeSessionId === 'string' && closeSessionId) {
+          try {
+            await createIssueFromIntegrityFailure(
+            { pool, tenantId, closeSessionId, createdBy: (req as AuthRequest).userId },
+            {
+              title: 'Trial balance imbalance (debits ≠ credits or A ≠ L+E)',
+              description: err.message,
+              category: 'posting',
+              severity: 'high',
+              impactPl: err.imbalanceAmount,
+              impactBs: err.check === 'B' ? err.imbalanceAmount : undefined,
+              sourceRef: { check: err.check, imbalanceAmount: err.imbalanceAmount, details: err.details },
+            }
+          );
+        } catch (_) {
+          /* non-fatal */
+        }
+      }
       return res.status(422).json({
         error: 'MathematicalIntegrityError',
         message: err.message,
@@ -597,6 +653,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
     }
     const message = err instanceof Error ? err.message : 'Ingestion failed';
     res.status(400).json({ error: 'Ingestion error', message });
+  }
   }
 });
 

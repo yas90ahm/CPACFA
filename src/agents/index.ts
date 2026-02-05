@@ -1,9 +1,7 @@
 /**
- * Agents — Supervisor (ReAct + Claude 3.5 Sonnet), Skeptic (Auditor), and Toolbox.
- * ReAct logic is consolidated in Supervisor.ts; unified_orchestrator.ts is the single entry point.
+ * Agents — Toolbox and CPA/Skeptic (Supervisor quarantined to /experimental).
  */
 
-export { runSupervisor, type SupervisorInput, type SupervisorOutput } from './Supervisor.js';
 export {
   runSkepticReview,
   runDiscussion,

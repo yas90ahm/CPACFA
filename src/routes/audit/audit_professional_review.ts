@@ -39,17 +39,17 @@ router.post('/professional-review', validateBody(professionalReviewBodySchema), 
 router.post('/integrity/validate', validateBody(integrityValidateBodySchema), async (req: Request, res: Response) => {
   try {
     const body = req.body;
-    const classified = body.entries.every((e) => e.accountType != null)
-      ? body.entries as import('../../types/financial.js').TrialBalanceEntry[]
-      : classifyTrialBalanceDeterministic(body.entries as import('../../types/financial.js').TrialBalanceEntry[]);
-    const contracts = body.contracts.map((c) => ({
-      id: c.id,
-      totalContractValue: c.totalContractValue,
-      periodRecognizedRevenue: c.periodRecognizedRevenue,
-    }));
+    type TBEntry = import('../../types/financial.js').TrialBalanceEntry;
+    const classified = body.entries.every((e: TBEntry) => e.accountType != null)
+      ? (body.entries as TBEntry[])
+      : classifyTrialBalanceDeterministic(body.entries as TBEntry[]);
+    const totals = classified.reduce(
+      (acc, e) => ({ totalDebits: acc.totalDebits + (e.debit ?? 0), totalCredits: acc.totalCredits + (e.credit ?? 0) }),
+      { totalDebits: 0, totalCredits: 0 }
+    );
     const result = runIntegrityGate({
-      trialBalanceEntries: classified,
-      contracts,
+      trialBalance: { totalDebits: totals.totalDebits, totalCredits: totals.totalCredits },
+      balanceSheet: { totalAssets: 0, totalLiabilities: 0, totalEquity: 0 },
       tolerance: body.tolerance,
     });
     res.json(result);

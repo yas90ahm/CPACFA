@@ -6,6 +6,7 @@
 import type { Pool } from 'pg';
 import type { TrialBalanceEntry } from '../types/financial.js';
 import { isDbConfigured } from '../db/index.js';
+import { disallowMemoryStoreInProduction } from '../lib/env.js';
 import * as repo from '../db/repositories/period_trial_balance_repository.js';
 import type { PeriodTrialBalanceSource } from '../db/repositories/period_trial_balance_repository.js';
 
@@ -75,6 +76,7 @@ export async function saveUnadjustedFromSync(
     });
     return;
   }
+  disallowMemoryStoreInProduction({ storeName: 'trial balance (sync)', hasDurableContext: false });
   memory.set(key(tenantId, periodLabel), {
     entries,
     source: 'synced',
@@ -103,6 +105,7 @@ export async function getUnadjusted(
       fileName: rec.fileName,
     };
   }
+  disallowMemoryStoreInProduction({ storeName: 'trial balance', hasDurableContext: false });
   const m = memory.get(key(tenantId, periodLabel));
   if (!m) return null;
   return {
@@ -123,6 +126,7 @@ export async function getUnadjustedMeta(
   if (isDbConfigured() && pool) {
     return repo.getUnadjustedMeta(pool, tenantId, periodLabel);
   }
+  disallowMemoryStoreInProduction({ storeName: 'trial balance', hasDurableContext: false });
   const m = memory.get(key(tenantId, periodLabel));
   if (!m) return null;
   return { source: m.source, at: m.at, by: m.by, connectionId: m.connectionId };
@@ -136,6 +140,7 @@ export async function listPeriodLabelsWithTB(
   if (isDbConfigured() && pool) {
     return repo.listPeriodLabelsForTenant(pool, tenantId);
   }
+  disallowMemoryStoreInProduction({ storeName: 'trial balance', hasDurableContext: false });
   const prefix = `${tenantId}:`;
   const labels: string[] = [];
   for (const k of memory.keys()) {

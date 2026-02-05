@@ -68,7 +68,6 @@ export async function generateText(input: TextGenerationInput): Promise<string> 
 
   if (provider === 'openai') {
     const apiKey = getApiKey('openai');
-    // @ts-expect-error — optional dependency; module may not be installed
     const mod = await import('openai').catch(() => null);
     if (!mod?.default) {
       throw new Error('OpenAI SDK not installed. Add "openai" to dependencies.');
@@ -78,16 +77,16 @@ export async function generateText(input: TextGenerationInput): Promise<string> 
       model: input.model ?? 'gpt-4o-mini',
       max_tokens: maxTokens,
       messages: [
-        ...(system ? [{ role: 'system', content: system }] : []),
-        { role: 'user', content: prompt },
+        ...(system ? [{ role: 'system' as const, content: system }] : []),
+        { role: 'user' as const, content: prompt },
       ],
     });
-    return response.choices?.[0]?.message?.content?.trim() ?? '';
+    const content = response.choices?.[0]?.message?.content;
+    return typeof content === 'string' ? content.trim() : '';
   }
 
   // Mistral
   const apiKey = getApiKey('mistral');
-  // @ts-expect-error — optional dependency; module may not be installed
   const mod = await import('@mistralai/mistralai').catch(() => null);
   if (!mod) {
     throw new Error('Mistral SDK not installed. Add "@mistralai/mistralai" to dependencies.');
@@ -95,12 +94,15 @@ export async function generateText(input: TextGenerationInput): Promise<string> 
   const client = new mod.Mistral({ apiKey });
   const response = await client.chat.complete({
     model: input.model ?? 'mistral-large-latest',
-    max_tokens: maxTokens,
+    maxTokens,
     messages: [
-      ...(system ? [{ role: 'system', content: system }] : []),
-      { role: 'user', content: prompt },
+      ...(system ? [{ role: 'system' as const, content: system }] : []),
+      { role: 'user' as const, content: prompt },
     ],
   });
-  return response.choices?.[0]?.message?.content?.trim() ?? '';
+  const content = response.choices?.[0]?.message?.content;
+  if (typeof content === 'string') return content.trim();
+  if (Array.isArray(content)) return content.map((c) => (typeof c === 'string' ? c : (c as { text?: string }).text ?? '')).join('').trim();
+  return '';
 }
 

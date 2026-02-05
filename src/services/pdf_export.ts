@@ -4,7 +4,7 @@
  * Supports agent-drafted narrative and Reasoning Chain (ReAct thoughts + actions) as appendix.
  */
 
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { PDFDocument, rgb, StandardFonts, degrees } from 'pdf-lib';
 import type { ReasoningChainEntry, CompliancePackage } from './export_service.js';
 
 const MARGIN = 50;
@@ -12,6 +12,9 @@ const LINE_HEIGHT = 14;
 const FONT_SIZE = 11;
 const TITLE_SIZE = 16;
 const SMALL_SIZE = 9;
+
+/** Export mode: draft (watermarked, not certified) vs certified (final). */
+export type ExportMode = 'draft' | 'certified';
 
 /** Structured payload for PDF with agent narrative, Reasoning Chain appendix, and optional Compliance Package. */
 export interface StructuredPdfPayload {
@@ -27,6 +30,14 @@ export interface StructuredPdfPayload {
   unauditedNarrativeHeader?: boolean;
   /** Compliance Package: balanced statements, IRAC justifications, ledger hash (audit binder). */
   compliancePackage?: CompliancePackage;
+  /** Export mode: draft adds watermark and disclaimer; certified has no watermark. */
+  exportMode?: ExportMode;
+  /** For draft: workflow state (e.g. session status) for footer. */
+  draftWorkflowState?: string;
+  /** For draft: generated-at timestamp for footer. */
+  generatedAt?: string;
+  /** For draft when ALLOW_IMBALANCED_DRAFT_EXPORT: imbalance amount for banner. */
+  imbalanceAmount?: number;
 }
 
 function wrapLines(
@@ -51,7 +62,13 @@ function wrapLines(
   return lines;
 }
 
-export async function createPdfFromHtml(html: string): Promise<Buffer> {
+export interface CreatePdfFromHtmlDraftOptions {
+  draft: true;
+  workflowState?: string;
+  generatedAt?: string;
+}
+
+export async function createPdfFromHtml(html: string, draftOpts?: CreatePdfFromHtmlDraftOptions): Promise<Buffer> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
@@ -61,6 +78,16 @@ export async function createPdfFromHtml(html: string): Promise<Buffer> {
 
   let page = doc.addPage([pageWidth, pageHeight]);
   let y = pageHeight - MARGIN;
+  if (draftOpts?.draft) {
+    page.drawText('DRAFT — NOT CERTIFIED. This document is for internal/review use only and has not been certified. Do not rely on it as final.', {
+      x: MARGIN,
+      y,
+      size: 10,
+      font: bold,
+      color: rgb(0.6, 0, 0),
+    });
+    y -= LINE_HEIGHT * 2;
+  }
 
   const drawText = (text: string, opts?: { bold?: boolean; size?: number }) => {
     const size = opts?.size ?? FONT_SIZE;
@@ -121,6 +148,31 @@ export async function createPdfFromHtml(html: string): Promise<Buffer> {
     y -= LINE_HEIGHT;
   }
 
+  if (draftOpts?.draft) {
+    const pages = doc.getPages();
+    const workflowState = draftOpts.workflowState ?? 'draft';
+    const generatedAt = draftOpts.generatedAt ?? new Date().toISOString();
+    const footerText = `Workflow: ${workflowState} | Generated: ${generatedAt}`;
+    for (const p of pages) {
+      const { width, height } = p.getSize();
+      p.drawText('DRAFT — NOT CERTIFIED', {
+        x: width / 2 - 120,
+        y: height / 2 - 12,
+        size: 24,
+        font: bold,
+        color: rgb(0.85, 0.85, 0.85),
+        rotate: degrees(-30),
+      });
+      p.drawText(footerText, {
+        x: MARGIN,
+        y: 20,
+        size: SMALL_SIZE,
+        font: font,
+        color: rgb(0.4, 0.4, 0.4),
+      });
+    }
+  }
+
   const pdfBytes = await doc.save();
   return Buffer.from(pdfBytes);
 }
@@ -139,6 +191,18 @@ export async function createPdfFromStructuredPayload(payload: StructuredPdfPaylo
 
   let page = doc.addPage([pageWidth, pageHeight]);
   let y = pageHeight - MARGIN;
+
+  const isDraft = payload.exportMode === 'draft';
+  if (isDraft) {
+    const disclaimer = 'DRAFT — NOT CERTIFIED. This document is for internal/review use only and has not been certified. Do not rely on it as final.';
+    page.drawText(disclaimer, { x: MARGIN, y, size: 10, font: bold, color: rgb(0.6, 0, 0) });
+    y -= LINE_HEIGHT * 2;
+    if (payload.imbalanceAmount != null && !Number.isNaN(payload.imbalanceAmount)) {
+      const imbalanceText = `IMBALANCED by $${Math.abs(payload.imbalanceAmount).toFixed(2)} — For review only.`;
+      page.drawText(imbalanceText, { x: MARGIN, y, size: 10, font: bold, color: rgb(0.6, 0, 0) });
+      y -= LINE_HEIGHT * 2;
+    }
+  }
 
   if (payload.unauditedNarrativeHeader) {
     const headerText = 'UNAUDITED NARRATIVE - PRELIMINARY ONLY';
@@ -252,6 +316,33 @@ export async function createPdfFromStructuredPayload(payload: StructuredPdfPaylo
     drawText('Ledger integrity (SHA-256): ' + payload.compliancePackage.ledgerHash, { size: SMALL_SIZE });
     drawText('This hash proves the ledger has not been tampered with since the last CPA review.', { size: SMALL_SIZE });
     y -= LINE_HEIGHT;
+  }
+
+  if (isDraft) {
+    const pages = doc.getPages();
+    const workflowState = payload.draftWorkflowState ?? 'draft';
+    const generatedAt = payload.generatedAt ?? new Date().toISOString();
+    const footerText = `Workflow: ${workflowState} | Generated: ${generatedAt}`;
+    const hasImbalance = payload.imbalanceAmount != null && !Number.isNaN(payload.imbalanceAmount);
+    const imbalanceLabel = hasImbalance ? ` IMBALANCED by $${Math.abs(payload.imbalanceAmount!).toFixed(2)}` : '';
+    for (const p of pages) {
+      const { width, height } = p.getSize();
+      p.drawText('DRAFT — NOT CERTIFIED' + imbalanceLabel, {
+        x: width / 2 - 120,
+        y: height / 2 - 12,
+        size: 24,
+        font: bold,
+        color: rgb(0.85, 0.85, 0.85),
+        rotate: degrees(-30),
+      });
+      p.drawText(footerText, {
+        x: MARGIN,
+        y: 20,
+        size: SMALL_SIZE,
+        font: font,
+        color: rgb(0.4, 0.4, 0.4),
+      });
+    }
   }
 
   const pdfBytes = await doc.save();

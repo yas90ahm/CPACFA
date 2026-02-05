@@ -8,8 +8,6 @@ import type { Pool } from 'pg';
 import type { CatalogQueryResult } from '../types/data_catalog.js';
 import { getDataset } from './data_catalog_service.js';
 import { getLastStatementGeneration } from './audit_export_service.js';
-import { getBudgetVersion, listBudgetVersions } from './budget_version_service.js';
-import { listCashFlowForecasts } from './cash_flow_forecast_service.js';
 import { listExceptionsForTenant } from './data_quality_exception_service.js';
 
 export interface CatalogQueryFilters {
@@ -96,30 +94,12 @@ async function runByType(
       }));
       return { datasetId, columns: [{ name: 'accountName', type: 'string' }, { name: 'debit', type: 'number' }, { name: 'credit', type: 'number' }], rows };
     }
-    case 'budget_version': {
-      const periodLabel = filters?.periodLabel;
-      const versions = await listBudgetVersions(periodLabel, pool ?? undefined, tenantId);
-      const version = versions[0];
-      if (!version) return { datasetId, columns: [{ name: 'label', type: 'string' }, { name: 'amount', type: 'number' }], rows: [] };
-      const lines = version.lines ?? [];
-      const rows = (filters?.limit ? lines.slice(0, filters.limit) : lines).map((l) => ({
-        label: (l as { label?: string; accountName?: string }).label ?? (l as { accountName?: string }).accountName ?? '',
-        amount: (l as { amount?: number }).amount ?? 0,
-      }));
-      return { datasetId, columns: [{ name: 'label', type: 'string' }, { name: 'amount', type: 'number' }], rows };
-    }
-    case 'cash_forecast': {
-      const list = listCashFlowForecasts({ limit: filters?.limit ?? 50 });
-      const rows = list.flatMap((f) =>
-        (f.periods ?? []).map((p) => ({
-          periodLabel: p.periodLabel ?? '',
-          openingBalance: p.openingBalance ?? 0,
-          receipts: p.receipts ?? 0,
-          disbursements: p.disbursements ?? 0,
-        }))
-      );
-      return { datasetId, columns: [{ name: 'periodLabel', type: 'string' }, { name: 'openingBalance', type: 'number' }, { name: 'receipts', type: 'number' }, { name: 'disbursements', type: 'number' }], rows };
-    }
+    case 'budget_version':
+      // Scope: budget quarantined; return empty.
+      return { datasetId, columns: [{ name: 'label', type: 'string' }, { name: 'amount', type: 'number' }], rows: [] };
+    case 'cash_forecast':
+      // Scope: forecasting quarantined; return empty.
+      return { datasetId, columns: [{ name: 'periodLabel', type: 'string' }, { name: 'openingBalance', type: 'number' }, { name: 'receipts', type: 'number' }, { name: 'disbursements', type: 'number' }], rows: [] };
     case 'ar_aging':
     case 'ap_aging':
       return { datasetId, columns: [{ name: 'bucket', type: 'string' }, { name: 'amount', type: 'number' }, { name: 'count', type: 'number' }], rows: [] };

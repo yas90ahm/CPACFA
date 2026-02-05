@@ -166,9 +166,11 @@ router.post('/bank-rec/suggest-adjustments', async (req: Request, res: Response)
       res.status(400).json({ error: 'unmatchedStatement and unmatchedGL arrays required' });
       return;
     }
+    type BankStatementLine = import('../services/bank_reconciliation_service.js').BankStatementLine;
+    type GLCashEntry = import('../services/bank_reconciliation_service.js').GLCashEntry;
     const result = await suggestReconciliationAdjustmentAgentic({
-      unmatchedStatement: body.unmatchedStatement,
-      unmatchedGL: body.unmatchedGL,
+      unmatchedStatement: body.unmatchedStatement as BankStatementLine[],
+      unmatchedGL: body.unmatchedGL as GLCashEntry[],
     });
     res.json(result);
   } catch (e) {

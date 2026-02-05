@@ -10,7 +10,17 @@ export type AuditLedgerEventType =
   | 'integrity_gate_bypass'
   | 'user_induced_variance'
   | 'cpa_observation'
-  | 'cfa_recommendation';
+  | 'cfa_recommendation'
+  | 'mapping_rule_update'
+  | 'issue_status_change'
+  | 'recon_confirmation'
+  | 'recon_signoff'
+  | 'je_approval'
+  | 'je_posting'
+  | 'statement_package_generation'
+  | 'export_event'
+  | 'certify_close'
+  | 'bridge_command';
 
 /** Payload for appending one ledger entry (append-only). */
 export interface AuditLedgerEntryInput {
@@ -45,9 +55,17 @@ export interface AuditLedgerEntry {
   createdBy: string | null;
 }
 
-/** Result of chain verification. */
+/** Result of chain verification. When valid and entries exist, includes summary for binder/third-party verification. */
 export interface AuditLedgerVerifyResult {
   valid: boolean;
   brokenAtEntryId?: string;
   message?: string;
+  /** Last entry's hash (when valid and chain non-empty); enables third-party verification */
+  latestEntryHash?: string;
+  /** Last entry's id (when valid and chain non-empty) */
+  latestEntryId?: string;
+  /** Total entries in chain */
+  entryCount: number;
+  /** ISO timestamp when verification was run */
+  verifiedAt: string;
 }

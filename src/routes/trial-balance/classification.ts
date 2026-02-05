@@ -119,7 +119,7 @@ router.post('/equity-changes-narrative', validateBody(equityChangesNarrativeBody
   try {
     const body: EquityChangesNarrativeBody = req.body;
     const narrative = await generateEquityChangesNarrativeAgentic(
-      body.equityChangesStatement as import('../../types/financial.js').EquityChangesStatement
+      body.equityChangesStatement as unknown as import('../../types/financial.js').EquityChangesStatement
     );
     res.json({ narrative });
   } catch (e) {

@@ -5,8 +5,8 @@
 
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
-import app from '../src/app.js';
-import { createTestTenant, cleanupTestTenant, getTestAuthToken } from './helpers/testHelpers.js';
+import { app } from '../../src/server.js';
+import { createTestTenant, cleanupTestTenant, getTestAuthToken } from '../helpers/testHelpers.js';
 
 describe('API Input Validation Tests', () => {
   let tenantId: string;

@@ -10,55 +10,32 @@ import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
-import { optionalAuth, requireAuth, attachTenantPool, requireTenantContext } from './auth/middleware.js';
+import { optionalAuth, requireAuth, attachTenantPool, requireTenantContext, type AuthRequest } from './auth/middleware.js';
 import { isDbConfigured, getPool, queryControl } from './db/index.js';
 import { runMigrations } from './db/migrate.js';
 import authRouter from './routes/auth.js';
 import trialBalanceRouter from './routes/trial-balance/index.js';
 import justificationRouter from './routes/justification.js';
-import orchestratorRouter from './routes/orchestrator.js';
 import auditRouter from './routes/audit/index.js';
 import exportRouter from './routes/export.js';
 import financialMemoryRouter from './routes/financial_memory.js';
 import vectorStoreRouter from './routes/vector_store.js';
 import ingestionRouter from './routes/ingestion.js';
 import hitlRouter from './routes/hitl.js';
-import supervisorRouter from './routes/supervisor.js';
 import memoryRouter from './routes/memory.js';
 import integrationsRouter from './routes/integrations.js';
 import pipelinesRouter from './routes/pipelines.js';
 import closeRouter from './routes/close/index.js';
-import forecastingRouter from './routes/forecasting.js';
-import capitalRouter from './routes/capital.js';
-import budgetRouter from './routes/budget.js';
-import entitiesRouter from './routes/entities.js';
-import intercompanyRouter from './routes/intercompany.js';
+import coaMappingRouter from './routes/coa_mapping.js';
 import dataQualityRouter from './routes/data_quality.js';
 import approvalsRouter from './routes/approvals.js';
-import catalogRouter from './routes/catalog.js';
-import reportingRouter from './routes/reporting.js';
-import accessRouter from './routes/access.js';
 import accountingIntegrationRouter from './routes/accounting_integration.js';
-import arApWorkflowsRouter from './routes/ar_ap_workflows.js';
-import invoiceToBooksRouter from './routes/invoice_to_books.js';
-import bankFeedMatchingRouter from './routes/bank_feed_matching.js';
-import revenueRecognitionRouter from './routes/revenue_recognition.js';
 import onboardingRouter from './routes/onboarding.js';
 import tenantsRouter from './routes/tenants.js';
-import stockCompensationRouter from './routes/stock_compensation.js';
-import deferredTaxRouter from './routes/deferred_tax.js';
-import impairmentRouter from './routes/impairment.js';
-import segmentReportingRouter from './routes/segment_reporting.js';
-import businessCombinationRouter from './routes/business_combination.js';
-import equityMethodRouter from './routes/equity_method.js';
-import leasesRouter from './routes/leases.js';
-import fixedAssetsRouter from './routes/fixed_assets.js';
-import epsRouter from './routes/eps.js';
-import fxCurrencyRouter from './routes/fx_currency.js';
-import consolidationRouter from './routes/consolidation.js';
-import statutoryRouter from './routes/statutory.js';
 import cpaRouter from './routes/cpa_index.js';
+import devDiagnosticsRouter from './routes/dev_diagnostics.js';
 import { startIngestionScheduler } from './services/ingestion_scheduler.js';
+import { runWorkerLoop } from './services/job_worker.js';
 import { send500 } from './lib/errorHandler.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 
@@ -111,39 +88,33 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Require auth for all other /api routes. In production always require auth; in dev respect REQUIRE_AUTH.
+// Require auth for all other /api routes. In production ALWAYS require auth (no bypass).
 const isProduction = process.env.NODE_ENV === 'production';
 const requireAuthByDefault = process.env.REQUIRE_AUTH !== 'false';
 const useRequireAuth = isProduction || requireAuthByDefault;
 
-// Auth bypass for diagnostics: only when NOT production and explicitly enabled (DIAGNOSTICS_AUTH_BYPASS=true).
-// In production these paths always require auth.
-const authBypassPaths: (string | RegExp)[] = [
-  '/trial-balance/ingest',
-  '/supervisor/chat',
-  /^\/supervisor\/session\/[^/]+\/trace$/,
-];
-function shouldBypassAuth(path: string): boolean {
-  if (isProduction) return false;
-  if (process.env.DIAGNOSTICS_AUTH_BYPASS !== 'true') return false;
-  return authBypassPaths.some((p) => (typeof p === 'string' ? path === p : p.test(path)));
+/** For tests: in production, /api must always use requireAuth (bypass impossible). */
+export function useRequireAuthForApi(): boolean {
+  return process.env.NODE_ENV === 'production' || process.env.REQUIRE_AUTH !== 'false';
 }
+
 app.use('/api', apiLimiter, (req, res, next) => {
-  const path = (req as express.Request).path;
-  if (shouldBypassAuth(path)) return optionalAuth(req as AuthRequest, res, next);
   return (useRequireAuth ? requireAuth : optionalAuth)(req as AuthRequest, res, next);
 });
 app.use('/api', attachTenantPool);
 app.use('/api', requireTenantContext);
+
+// Dev-only diagnostics router: optionalAuth for trial-balance/ingest, supervisor/chat, supervisor/session/:id/trace.
+// Mounted only when NODE_ENV !== 'production'; never available in production.
+if (!isProduction) {
+  app.use('/api-dev', devDiagnosticsRouter);
+}
 
 // API: Trial Balance ingest → Balance Sheet + P&L
 app.use('/api/trial-balance', trialBalanceRouter);
 
 // API: Justification chat (RAG, IRAC, [Source]), Export Audit Defense PDF
 app.use('/api/justification', justificationRouter);
-
-// API: Task Decomposition — Prepare Q4 Financials (plan, reconciliation worker, self-correction)
-app.use('/api/orchestrator', orchestratorRouter);
 
 // API: Audit Binder (statements + justification chain + line-level deep links), GAAP Consistency Report
 app.use('/api/audit', auditRouter);
@@ -172,20 +143,8 @@ app.use('/api/pipelines', pipelinesRouter);
 // API: Month-end close — JE suggestions, checklist, period lock, audit log, segregation
 app.use('/api/close', closeRouter);
 
-// API: Forecasting — Rolling 13-week cash, quarterly/annual projections
-app.use('/api/forecasting', forecastingRouter);
-
-// API: Capital allocation — ROI, payback
-app.use('/api/capital', capitalRouter);
-
-// API: Budget — Versioning, reforecast (agentic), driver-based planning
-app.use('/api/budget', budgetRouter);
-
-// API: Entities — Multi-entity consolidation
-app.use('/api/entities', entitiesRouter);
-
-// API: Intercompany — Pairs, reconciliation, agentic variance explain
-app.use('/api/intercompany', intercompanyRouter);
+// API: COA Mapping — FS taxonomy lines, mapping rules, apply rules to accounts
+app.use('/api/coa-mapping', coaMappingRouter);
 
 // API: Data quality — Configurable rules, exceptions, agentic remediation
 app.use('/api/data-quality', dataQualityRouter);
@@ -193,29 +152,8 @@ app.use('/api/data-quality', dataQualityRouter);
 // API: Approvals — Multi-step workflows, requests, agentic summary
 app.use('/api/approvals', approvalsRouter);
 
-// API: Catalog — Datasets, query, agentic intent/summary (ad-hoc analysis)
-app.use('/api/catalog', catalogRouter);
-
-// API: Reporting — Pack builder, commentary library
-app.use('/api/reporting', reportingRouter);
-
-// API: Access — Role dashboards, alerts, usage log
-app.use('/api/access', accessRouter);
-
 // API: Accounting integration — QuickBooks, Xero, NetSuite (sync TB, push JE, pull transactions)
 app.use('/api/accounting-integration', accountingIntegrationRouter);
-
-// API: AR/AP workflows — Collections (agentic), payment run (agentic), cash application (agentic)
-app.use('/api/ar-ap-workflows', arApWorkflowsRouter);
-
-// API: Invoice-in → books — Capture, agentic coding, approval, post to GL
-app.use('/api/invoice-to-books', invoiceToBooksRouter);
-
-// API: Bank feed + auto-match to GL/AR (agentic)
-app.use('/api/bank-feed-matching', bankFeedMatchingRouter);
-
-// API: Revenue recognition — Contracts, POBs, allocation/schedule (agentic)
-app.use('/api/revenue-recognition', revenueRecognitionRouter);
 
 // API: Onboarding — Guided setup, CoA import, first close wizard
 app.use('/api/onboarding', onboardingRouter);
@@ -223,44 +161,6 @@ app.use('/api/onboarding', onboardingRouter);
 // API: Tenants — BYOD database_url (PATCH/GET; require auth, same-tenant only)
 app.use('/api/tenants', tenantsRouter);
 
-// API: Stock Compensation — Grants, valuations, expense, dilution (IFRS 2 / ASC 718)
-app.use('/api/stock-comp', stockCompensationRouter);
-
-// API: Deferred Tax — Temporary differences, DTA/DTL, valuation allowance (IAS 12 / ASC 740)
-app.use('/api/deferred-tax', deferredTaxRouter);
-
-// API: Impairment — CGUs, goodwill, impairment testing (IAS 36 / ASC 350)
-app.use('/api/impairment', impairmentRouter);
-
-// API: Segment Reporting — Operating segments, 10% test, reconciliation (IFRS 8 / ASC 280)
-app.use('/api/segments', segmentReportingRouter);
-
-// API: Consolidation — suggest eliminations, footnote (agentic)
-app.use('/api/consolidation', consolidationRouter);
-
-// API: Statutory — suggest management-to-statutory adjustments (agentic)
-app.use('/api/statutory', statutoryRouter);
-
-// API: Business Combinations — Acquisitions, PPA, goodwill (IFRS 3 / ASC 805)
-app.use('/api/acquisitions', businessCombinationRouter);
-
-// API: Equity Method Investments — Share of profit, basis differences (IAS 28 / ASC 323)
-app.use('/api/equity-investments', equityMethodRouter);
-
-// API: Leases (ASC 842 / IFRS 16)
-app.use('/api/leases', leasesRouter);
-
-// API: Fixed assets and depreciation (PP&E)
-app.use('/api/fixed-assets', fixedAssetsRouter);
-
-// API: Earnings per share (ASC 260)
-app.use('/api/eps', epsRouter);
-
-// API: FX currency (ASC 830 / IAS 21) — translation, remeasurement, agentic
-app.use('/api/fx', fxCurrencyRouter);
-
-// API: Supervisor Agent (ReAct + Claude); HUD / Full Audit & Statement Build
-app.use('/api/supervisor', supervisorRouter);
 // API: HITL staging and webhook
 app.use('/api/hitl', hitlRouter);
 
@@ -279,6 +179,9 @@ app.use((_req, res) => {
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   send500(res, err, 'Internal server error');
 });
+
+/** Exported for headless/integration tests (e.g. sovereign_validator). */
+export { app };
 
 async function start(): Promise<void> {
   if (isDbConfigured()) {
@@ -319,8 +222,19 @@ async function start(): Promise<void> {
   });
 }
 
-start().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
-startIngestionScheduler();
+const isJest = typeof process.env.JEST_WORKER_ID === 'string';
+const shouldStart = !isJest ? process.env.NODE_ENV !== 'test' : process.env.NODE_ENV === 'production';
+if (shouldStart) {
+  start().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+  startIngestionScheduler();
+  const workerEnabled = (process.env.JOB_WORKER_ENABLED ?? 'true') === 'true';
+  if (workerEnabled && isDbConfigured()) {
+    runWorkerLoop({
+      pollIntervalMs: Number(process.env.JOB_WORKER_POLL_MS ?? 2000),
+      backoffBaseMs: Number(process.env.JOB_WORKER_BACKOFF_BASE_MS ?? 60_000),
+    }).catch((e) => console.error('Job worker error:', e));
+  }
+}

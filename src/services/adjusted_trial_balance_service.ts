@@ -15,6 +15,7 @@ import type { TrialBalanceEntry } from '../types/financial.js';
 import type { CloseAdjustment } from '../types/close_and_controls.js';
 import { getUnadjustedOrRollup } from './trial_balance_rollup_service.js';
 import { listAdjustments } from './close_adjustments_service.js';
+import { getPostableJEAdjustments } from './journal_entry_service.js';
 
 /** Single debit or credit line for an adjustment (journal entry or reclassification). */
 export interface AdjustmentLine {
@@ -107,28 +108,44 @@ export function mergeAdjustmentsIntoEntries(
 }
 
 /**
- * Get adjusted trial balance for a period: Unadjusted TB (roll-up from months) + all posted close adjustments.
+ * Get adjusted trial balance for a period: Unadjusted TB (roll-up from months) + posted close adjustments + approved/postable JEs (when closeSessionId provided).
  * Throws if no unadjusted TB for period (caller may 404).
  */
 export async function getAdjustedTrialBalance(
   tenantId: string,
   periodLabel: string,
-  pool: Pool | undefined
+  pool: Pool | undefined,
+  closeSessionId?: string
 ): Promise<TrialBalanceEntry[]> {
   const result = await getUnadjustedOrRollup(tenantId, periodLabel, pool);
   if (!result || result.entries.length === 0) {
     throw new Error(`No unadjusted trial balance for period ${periodLabel}`);
   }
 
+  const adjustmentPayloads: TrialBalanceAdjustment[] = [];
+
   const adjustments = await listAdjustments({ periodLabel, status: 'posted' }, tenantId, pool);
-  if (adjustments.length === 0) {
-    return result.entries;
+  for (const adj of adjustments as CloseAdjustment[]) {
+    adjustmentPayloads.push({
+      debits: adj.debits ?? [],
+      credits: adj.credits ?? [],
+    });
   }
 
-  const adjustmentPayloads: TrialBalanceAdjustment[] = (adjustments as CloseAdjustment[]).map((adj) => ({
-    debits: adj.debits ?? [],
-    credits: adj.credits ?? [],
-  }));
+  if (pool && closeSessionId) {
+    try {
+      const jeAdjustments = await getPostableJEAdjustments(pool, tenantId, closeSessionId);
+      for (const jeAdj of jeAdjustments) {
+        adjustmentPayloads.push({ debits: jeAdj.debits, credits: jeAdj.credits });
+      }
+    } catch (_) {
+      /* non-fatal */
+    }
+  }
+
+  if (adjustmentPayloads.length === 0) {
+    return result.entries;
+  }
 
   return mergeAdjustmentsIntoEntries(result.entries, adjustmentPayloads);
 }

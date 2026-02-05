@@ -6,8 +6,7 @@ import { Router, type Request, type Response } from 'express';
 import { buildJournalEntrySuggestions } from '../../services/month_end_close_service.js';
 import { buildAccrualSuggestions, suggestAccrualsAgentic } from '../../services/accrual_deferral_service.js';
 import { computeInventoryValuation } from '../../services/inventory_valuation_service.js';
-import { explainJESuggestionsAgentic, suggestJEsFromTextAgentic } from '../../services/agentic_je_suggestions.js';
-import { accrualSuggestionsSchema, inventoryValuationSchema, jeSuggestionsSchema, jeFromTextSchema, jeExplainSchema } from '../../schemas/closeSchemas.js';
+import { accrualSuggestionsSchema, inventoryValuationSchema, jeSuggestionsSchema } from '../../schemas/closeSchemas.js';
 import { validateBody } from '../../middleware/validateRequest.js';
 import { send500 } from '../../lib/errorHandler.js';
 
@@ -59,27 +58,20 @@ router.post('/je-suggestions', validateBody(jeSuggestionsSchema), (req: Request,
   }
 });
 
-/** POST /api/close/je-suggestions/from-text */
-router.post('/je-suggestions/from-text', validateBody(jeFromTextSchema), async (req: Request, res: Response) => {
-  try {
-    const body = req.body as { text: string; periodEnd?: string };
-    const suggestions = await suggestJEsFromTextAgentic({ text: body.text, periodEnd: body.periodEnd });
-    res.json({ suggestions });
-  } catch (e) {
-    send500(res, e, 'JE suggestions from text failed');
-  }
+/** POST /api/close/je-suggestions/from-text — Quarantined (AI amounts out of scope). */
+router.post('/je-suggestions/from-text', (_req: Request, res: Response) => {
+  res.status(410).json({
+    error: 'Out of scope',
+    message: 'Agentic JE suggestions from text are quarantined. Use deterministic je-suggestions or HITL staging.',
+  });
 });
 
-/** POST /api/close/je-suggestions/explain */
-router.post('/je-suggestions/explain', validateBody(jeExplainSchema), async (req: Request, res: Response) => {
-  try {
-    const body = req.body;
-    const suggestions = body.suggestions ?? [];
-    const narrative = await explainJESuggestionsAgentic(suggestions);
-    res.json({ narrative });
-  } catch (e) {
-    send500(res, e, 'JE suggestions explain failed');
-  }
+/** POST /api/close/je-suggestions/explain — Quarantined (agentic narrative). */
+router.post('/je-suggestions/explain', (_req: Request, res: Response) => {
+  res.status(410).json({
+    error: 'Out of scope',
+    message: 'Agentic JE explain is quarantined. Use justification service for IRAC memos.',
+  });
 });
 
 export default router;

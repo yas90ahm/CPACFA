@@ -78,6 +78,17 @@ export interface CleanLedgerRow {
   account_type?: string;
 }
 
+/** Chain verification summary for third-party cryptographic verification of audit ledger. */
+export interface ChainVerificationSummary {
+  valid: boolean;
+  latestEntryHash?: string;
+  latestEntryId?: string;
+  entryCount: number;
+  verifiedAt: string;
+  brokenAtEntryId?: string;
+  message?: string;
+}
+
 /** Full Audit Binder: all statements + justification chains + line links */
 export interface AuditBinder {
   entityName: string;
@@ -96,6 +107,8 @@ export interface AuditBinder {
   justifications: StoredJustification[];
   /** CPA-verified Clean Ledger (trial balance) for CSV export when available */
   cleanLedger?: CleanLedgerRow[];
+  /** Audit ledger chain verification: enables third party to verify chain integrity from binder output */
+  chainVerification?: ChainVerificationSummary;
 }
 
 /** Single accounting policy change during the fiscal year (GAAP consistency) */

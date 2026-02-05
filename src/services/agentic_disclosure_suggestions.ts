@@ -6,6 +6,12 @@
  */
 
 import { callLLMWithFallback } from '../llm/callWithFallback.js';
+import type { DisclosureItem } from '../types/disclosure_checklist.js';
+
+const SYSTEM_EVIDENCE =
+  'You are an audit specialist. Given a disclosure item and optional notes excerpt, suggest what evidence or workpaper would satisfy it. Respond in 1–2 sentences only.';
+const SYSTEM_REVIEW =
+  'You are an audit specialist. Given a disclosure checklist (topic, standard, status), write a short review summary paragraph.';
 
 export interface DisclosureSuggestion {
   topicId: string;

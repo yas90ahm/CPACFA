@@ -1,11 +1,12 @@
 /**
  * Period lock store: lock a period so no further edits.
- * Uses tenant pool when DATABASE_URL is set and pool is provided; otherwise in-memory.
+ * Uses tenant pool when DATABASE_URL is set and pool is provided; in production no in-memory fallback.
  */
 
 import type { Pool } from 'pg';
 import type { PeriodLock } from '../types/close_and_controls.js';
 import { isDbConfigured } from '../db/index.js';
+import { disallowMemoryStoreInProduction } from '../lib/env.js';
 import * as periodLockRepo from '../db/repositories/period_lock_repository.js';
 
 const locks = new Map<string, PeriodLock>();
@@ -24,6 +25,7 @@ export async function lockPeriod(
   if (isDbConfigured() && tenantId && pool) {
     return periodLockRepo.lockPeriod(pool, tenantId, periodLabel, lockedBy, reason);
   }
+  disallowMemoryStoreInProduction({ storeName: 'period lock', hasDurableContext: false });
   const lock: PeriodLock = {
     periodLabel,
     lockedAt: new Date().toISOString(),
@@ -56,6 +58,7 @@ export async function getPeriodLock(
     const lock = await periodLockRepo.getPeriodLock(pool, tenantId, periodLabel);
     return lock ?? undefined;
   }
+  disallowMemoryStoreInProduction({ storeName: 'period lock', hasDurableContext: false });
   return locks.get(periodLabel);
 }
 
@@ -66,6 +69,7 @@ export async function listLockedPeriods(tenantId?: string, pool?: Pool): Promise
   if (isDbConfigured() && tenantId && pool) {
     return periodLockRepo.listLockedPeriods(pool, tenantId);
   }
+  disallowMemoryStoreInProduction({ storeName: 'period lock', hasDurableContext: false });
   return Array.from(locks.values());
 }
 

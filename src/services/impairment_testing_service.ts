@@ -3,6 +3,7 @@
  */
 
 import type { Pool } from 'pg';
+import { round2 } from '../utils/decimal.js';
 import * as repo from '../db/repositories/impairment_repository.js';
 import type { CGURow, GoodwillAllocationRow, ImpairmentTestRow } from '../db/repositories/impairment_repository.js';
 

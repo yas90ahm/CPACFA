@@ -3,6 +3,7 @@
  */
 
 import { callLLMWithFallback } from '../llm/callWithFallback.js';
+import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import type { AccountType } from '../types/financial.js';
 
 const SYSTEM = [
@@ -18,13 +19,15 @@ export async function classifyAccountsAgentic(names: string[]): Promise<AccountT
     ...names.map((n, i) => `${i + 1}. ${n}`),
     'Return JSON array of types only.',
   ].join('\n');
-  return callLLMWithFallback({
+  const result = await callLLMWithFallback({
     system: SYSTEM,
     prompt,
     maxTokens: 400,
     parse: (raw) => parseTypes(raw, names.length),
     fallback: null,
   });
+  if (result) assertNoNumericAmountsInAgentOutput(result, 'agentic_account_classifier');
+  return result;
 }
 
 function parseTypes(raw: string, expected: number): AccountType[] | null {

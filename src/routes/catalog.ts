@@ -1,5 +1,6 @@
 /**
  * Data catalog API: list datasets, run query (for UI/API consumers).
+ * All mutation routes use Zod-validated body (validateBody).
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -15,8 +16,14 @@ import { runCatalogQuery } from '../services/catalog_query_service.js';
 import { resolveQueryIntentAgentic } from '../services/agentic_query_intent.js';
 import { summarizeQueryResultAgentic } from '../services/agentic_query_summary.js';
 import { suggestFollowUpQuestionsAgentic } from '../services/agentic_query_follow_up.js';
-import type { DataCatalogDatasetType } from '../types/data_catalog.js';
 import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
+import { validateBody } from '../middleware/validationMiddleware.js';
+import {
+  catalogQueryBodySchema,
+  catalogCreateDatasetBodySchema,
+  catalogUpdateDatasetBodySchema,
+  catalogResolveIntentBodySchema,
+} from '../schemas/catalogSchemas.js';
 
 const router = Router();
 
@@ -33,15 +40,11 @@ router.get('/datasets', async (req: Request, res: Response) => {
 });
 
 /** POST /api/catalog/query — Run query (body: datasetId, periodLabel?, entityId?, limit?); optional ?summarize=true, ?suggest_follow_up=true */
-router.post('/query', async (req: Request, res: Response) => {
+router.post('/query', validateBody(catalogQueryBodySchema), async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req) ?? 'default';
     const pool = getTenantPool(req) ?? null;
     const body = req.body as { datasetId: string; periodLabel?: string; entityId?: string; limit?: number };
-    if (!body?.datasetId) {
-      res.status(400).json({ error: 'Missing datasetId' });
-      return;
-    }
     const result = await runCatalogQuery(
       tenantId,
       body.datasetId,
@@ -73,7 +76,7 @@ router.post('/query', async (req: Request, res: Response) => {
 });
 
 /** POST /api/catalog/datasets — Create custom dataset (body: name, type, schema?). Custom ids only. */
-router.post('/datasets', async (req: Request, res: Response) => {
+router.post('/datasets', validateBody(catalogCreateDatasetBodySchema), async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req) ?? 'default';
     const pool = getTenantPool(req);
@@ -81,14 +84,10 @@ router.post('/datasets', async (req: Request, res: Response) => {
       res.status(503).json({ error: 'Tenant database not available' });
       return;
     }
-    const body = req.body as { name: string; type: DataCatalogDatasetType; schema?: { name: string; type: string }[] };
-    if (!body?.name?.trim() || !body?.type) {
-      res.status(400).json({ error: 'Missing name or type' });
-      return;
-    }
+    const body = req.body as { name: string; type: string; schema?: { name: string; type: string }[] };
     const entry = await createCustomDataset(pool, tenantId, {
       name: body.name.trim(),
-      type: body.type,
+      type: body.type as import('../types/data_catalog.js').DataCatalogDatasetType,
       schema: body.schema,
     });
     res.status(201).json(entry);
@@ -115,7 +114,7 @@ router.get('/datasets/:id', async (req: Request, res: Response) => {
 });
 
 /** PATCH /api/catalog/datasets/:id — Update custom dataset (body: name?, type?, schema?). Only custom entries. */
-router.patch('/datasets/:id', async (req: Request, res: Response) => {
+router.patch('/datasets/:id', validateBody(catalogUpdateDatasetBodySchema), async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req) ?? 'default';
     const pool = getTenantPool(req);
@@ -124,7 +123,7 @@ router.patch('/datasets/:id', async (req: Request, res: Response) => {
       return;
     }
     const id = (req.params as { id: string }).id;
-    const body = req.body as { name?: string; type?: DataCatalogDatasetType; schema?: { name: string; type: string }[] };
+    const body = req.body as { name?: string; type?: import('../types/data_catalog.js').DataCatalogDatasetType; schema?: { name: string; type: string }[] };
     const entry = await updateCustomDataset(pool, tenantId, id, body);
     if (!entry) {
       res.status(404).json({ error: 'Custom dataset not found or cannot update default' });
@@ -158,7 +157,7 @@ router.delete('/datasets/:id', async (req: Request, res: Response) => {
 });
 
 /** POST /api/catalog/resolve-intent — Agentic: natural-language question → suggested datasetId + filters */
-router.post('/resolve-intent', async (req: Request, res: Response) => {
+router.post('/resolve-intent', validateBody(catalogResolveIntentBodySchema), async (req: Request, res: Response) => {
   try {
     const body = req.body as { question?: string };
     const question = (body?.question ?? '').trim();

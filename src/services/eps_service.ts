@@ -147,6 +147,7 @@ export async function saveEpsCalculation(
   result: EpsResult
 ): Promise<repo.EpsCalculationRow> {
   return repo.createEpsCalculation(pool, tenantId, {
+    tenantId,
     periodLabel,
     basicIncomeAvailable: result.basicIncomeAvailable,
     basicWeightedShares: result.basicWeightedShares,

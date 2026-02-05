@@ -68,9 +68,48 @@ export async function recordObservation(pool: Pool, input: RecordObservationInpu
   });
 }
 
+export interface RecordMaterialEventInput {
+  tenantId: string;
+  periodLabel?: string;
+  eventType: Extract<
+    AuditLedgerEventType,
+    | 'mapping_rule_update'
+    | 'issue_status_change'
+    | 'recon_confirmation'
+    | 'recon_signoff'
+    | 'je_approval'
+    | 'je_posting'
+    | 'statement_package_generation'
+    | 'export_event'
+    | 'certify_close'
+    | 'bridge_command'
+  >;
+  /** Snapshot of the event for audit trail. */
+  deterministicFlagSnapshot: Record<string, unknown>;
+  agentDissentSnapshot?: Record<string, unknown>;
+  createdBy?: string;
+}
+
 /**
- * Verify hash chain for tenant. Used by export gate before allowing PDF/CSV.
+ * Append a material event to the audit ledger (hash-chained).
+ * Uses system rationale; no user prompt required.
  */
-export async function verifyChain(pool: Pool, tenantId: string): Promise<{ valid: boolean; brokenAtEntryId?: string; message?: string }> {
+export async function recordMaterialEvent(pool: Pool, input: RecordMaterialEventInput): Promise<void> {
+  const rationale = `Material event: ${input.eventType}`;
+  await auditLedgerRepo.appendEntry(pool, {
+    tenantId: input.tenantId,
+    periodLabel: input.periodLabel,
+    eventType: input.eventType,
+    deterministicFlagSnapshot: input.deterministicFlagSnapshot,
+    agentDissentSnapshot: input.agentDissentSnapshot,
+    userPromptRationale: rationale,
+    createdBy: input.createdBy,
+  });
+}
+
+/**
+ * Verify hash chain for tenant. Used by export gate before allowing PDF/CSV and by audit binder for cryptographic verification.
+ */
+export async function verifyChain(pool: Pool, tenantId: string): Promise<import('../types/audit_ledger.js').AuditLedgerVerifyResult> {
   return auditLedgerRepo.verifyChain(pool, tenantId);
 }

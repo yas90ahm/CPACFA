@@ -1,7 +1,7 @@
 /**
  * Accounting software integration: QuickBooks, Xero, NetSuite.
  * Adapter interface: sync TB, push JEs, pull transactions.
- * Uses tenant pool when DATABASE_URL is set and pool is provided; otherwise in-memory.
+ * Uses tenant pool when DATABASE_URL is set and pool is provided; in production no in-memory fallback.
  */
 
 import type { Pool } from 'pg';
@@ -18,9 +18,10 @@ import type {
 } from '../types/accounting_integration.js';
 import { createInMemoryStore } from '../lib/inMemoryStore.js';
 import { isDbConfigured } from '../db/index.js';
+import { disallowMemoryStoreInProduction } from '../lib/env.js';
 import * as connectionRepo from '../db/repositories/accounting_connection_repository.js';
 
-/** In-memory connections (tenant-scoped); used when DATABASE_URL not set or no pool */
+/** In-memory connections (tenant-scoped); used only when not production and no pool */
 const connectionStore = createInMemoryStore<AccountingConnection>({
   idPrefix: 'conn',
   timestamps: true,
@@ -34,6 +35,7 @@ async function getConnectionById(
   if (isDbConfigured() && pool && tenantId) {
     return connectionRepo.getConnection(pool, tenantId, connectionId);
   }
+  disallowMemoryStoreInProduction({ storeName: 'accounting connections', hasDurableContext: false });
   return connectionStore.get(connectionId) ?? null;
 }
 
@@ -116,6 +118,7 @@ export async function getConnection(connectionId: string, pool?: Pool, tenantId?
     const conn = await connectionRepo.getConnection(pool, tenantId, connectionId);
     return conn ?? undefined;
   }
+  disallowMemoryStoreInProduction({ storeName: 'accounting connections', hasDurableContext: false });
   return connectionStore.get(connectionId);
 }
 
@@ -141,6 +144,7 @@ export async function syncTrialBalance(
   if (isDbConfigured() && pool && tenantId && result.success) {
     await connectionRepo.updateConnection(pool, tenantId, connectionId, { lastSyncAt: new Date().toISOString(), lastSyncStatus: 'success' });
   } else if (!pool && result.success) {
+    disallowMemoryStoreInProduction({ storeName: 'accounting connections', hasDurableContext: false });
     connectionStore.update(connectionId, { lastSyncAt: new Date().toISOString(), lastSyncStatus: 'success' });
   }
   return result;

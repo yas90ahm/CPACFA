@@ -1,7 +1,10 @@
 /**
- * Structured logger with secret redaction. Never logs secrets or PII.
+ * Structured logger with secret redaction and request correlation.
+ * Every log line includes request_id when present (from async context).
  * Outputs JSON to stderr (error/warn) or stdout (info) for containers and log aggregators.
  */
+
+import { getRequestId } from './request_context.js';
 
 const REDACT_KEYS = ['secret', 'password', 'token', 'key', 'authorization', 'cookie'];
 
@@ -27,10 +30,12 @@ function serializeMeta(meta?: Record<string, unknown>): Record<string, unknown> 
 }
 
 function write(stream: NodeJS.WritableStream, level: string, message: string, meta?: Record<string, unknown>): void {
-  const payload = {
+  const requestId = getRequestId();
+  const payload: Record<string, unknown> = {
     level,
     timestamp: new Date().toISOString(),
     message,
+    ...(requestId != null && { request_id: requestId }),
     ...serializeMeta(meta),
   };
   const line = JSON.stringify(payload) + '\n';
@@ -38,7 +43,7 @@ function write(stream: NodeJS.WritableStream, level: string, message: string, me
 }
 
 /**
- * Log at info (stdout), warn (stderr), or error (stderr). Meta is redacted for sensitive keys.
+ * Log at info (stdout), warn (stderr), or error (stderr). request_id auto-injected when in request context. Meta is redacted for sensitive keys.
  */
 export function log(level: 'info' | 'warn' | 'error', message: string, meta?: Record<string, unknown>): void {
   if (level === 'info') {

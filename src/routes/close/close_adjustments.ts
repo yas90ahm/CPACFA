@@ -8,6 +8,7 @@ import {
   listAdjustments,
   addJEAsAdjustments,
   addAccrualsAsAdjustments,
+  ProvenanceValidationError,
 } from '../../services/close_adjustments_service.js';
 import { updateCloseAdjustmentStatus } from '../../services/close_adjustment_update_service.js';
 import { getCloseRoleFromReq } from '../../lib/closeRole.js';
@@ -42,7 +43,15 @@ router.post('/adjustments/from-je', async (req: Request, res: Response) => {
     const pool = getTenantPool(req);
     const added = await addJEAsAdjustments(body.periodLabel, body.suggestions, tenantId ?? undefined, pool);
     res.status(201).json({ added, count: added.length });
-  } catch (e) {
+  } catch (e: unknown) {
+    if (e instanceof ProvenanceValidationError) {
+      res.status(400).json({
+        error: 'AMOUNT_PROVENANCE_REQUIRED',
+        message: 'Every non-zero amount must have valid amountProvenance (ledger_exact | engine_calculation | human_entered). Advisor may not invent or estimate amounts.',
+        errors: e.errors,
+      });
+      return;
+    }
     send500(res, e, 'Add JE adjustments failed');
   }
 });
@@ -119,6 +128,13 @@ router.patch('/adjustments/:id', async (req: Request, res: Response) => {
         error: result.error,
         message: result.errors?.join(' ') ?? 'Unknown error',
         errors: result.errors,
+      });
+    }
+    if (result.statusCode === 501) {
+      return res.status(501).json({
+        error: result.error,
+        message: 'GL post-back is disabled; set ENABLE_GL_POSTBACK=true to enable.',
+        ...(result.errors && { errors: result.errors }),
       });
     }
     res.status(result.statusCode).json({ error: result.error, ...(result.errors && { errors: result.errors }) });

@@ -95,17 +95,21 @@ async function runMigrations(pool: Pool, tenantId: string): Promise<void> {
  * Generate a test authentication token
  */
 export function getTestAuthToken(tenantId: string): string {
+  return getTestAuthTokenWithRole(tenantId, undefined);
+}
+
+/**
+ * Generate a test authentication token with a specific role (e.g. 'approver' for certify_close, period_lock).
+ */
+export function getTestAuthTokenWithRole(tenantId: string, role?: string): string {
   const secret = process.env.JWT_SECRET || 'test_secret_key';
-  
-  return jwt.sign(
-    {
-      userId: 'test_user_123',
-      tenantId,
-      email: 'test@example.com',
-    },
-    secret,
-    { expiresIn: '1h' }
-  );
+  const payload: Record<string, unknown> = {
+    userId: 'test_user_123',
+    tenantId,
+    email: 'test@example.com',
+  };
+  if (role) payload.role = role;
+  return jwt.sign(payload as object, secret as string, { expiresIn: '1h' });
 }
 
 /**

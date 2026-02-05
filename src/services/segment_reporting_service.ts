@@ -3,6 +3,7 @@
  */
 
 import type { Pool } from 'pg';
+import { round2 } from '../utils/decimal.js';
 import * as repo from '../db/repositories/segment_repository.js';
 import type { OperatingSegmentRow, SegmentFinancialsRow, SegmentReconciliationRow, ReconcilingItem } from '../db/repositories/segment_repository.js';
 

@@ -9,7 +9,11 @@
     "start": "node dist/server.js",
     "lint": "eslint src --ext .ts",
     "migrate": "tsx src/db/migrate.ts",
-    "migrate:tenant": "tsx src/db/migrate.ts --tenant"
+    "migrate:tenant": "tsx src/db/migrate.ts --tenant",
+    "db:reset": "cross-env ALLOW_DB_RESET=true tsx src/db/reset_and_bootstrap.ts",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:verify": "tsx src/db/verify_schema.ts",
+    "db:seed:test": "tsx src/db/seed_test.ts"
   },
   "engines": {
     "node": ">=18"
@@ -44,6 +48,7 @@
     "@types/multer": "^1.4.11",
     "@types/node": "^20.10.0",
     "@types/pg": "^8.10.9",
+    "cross-env": "^7.0.3",
     "tsx": "^4.6.2",
     "typescript": "^5.3.2"
   }

@@ -91,9 +91,16 @@ export async function generateStatements(
   }
 
   if (contractsToCheck && contractsToCheck.length > 0) {
+    const totalDebits = classified.reduce((s, e) => s + (e.debit ?? 0), 0);
+    const totalCredits = classified.reduce((s, e) => s + (e.credit ?? 0), 0);
+    const balanceSheet = buildBalanceSheet(classified);
     runIntegrityGate({
-      trialBalanceEntries: classified,
-      contracts: contractsToCheck,
+      trialBalance: { totalDebits, totalCredits },
+      balanceSheet: {
+        totalAssets: balanceSheet.totalAssets,
+        totalLiabilities: balanceSheet.totalLiabilities,
+        totalEquity: balanceSheet.totalEquity,
+      },
       tolerance: options.integrityTolerance,
     });
   } else if (

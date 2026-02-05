@@ -45,6 +45,10 @@ const EMBEDDED_LEASE_MATERIALITY = 1_000_000;
 
 const SUBSTANCE_OVER_FORM_SYSTEM = `You are a lease specialist under ASC 842 and IFRS 16. Given contract or expense text, determine whether it describes a LEASE: the customer has the right to control the use of an IDENTIFIED ASSET for a period of time in exchange for consideration. Consider: (1) Is there an identified asset (specific item, or capacity that is physically distinct)? (2) Does the customer have the right to obtain substantially all economic benefits from use? (3) Does the customer have the right to direct how and for what purpose the asset is used (e.g. no substantive substitution rights by the supplier)? Reply with a single JSON object only: { "hasEmbeddedLease": true or false, "rationale": "brief reason" }.`;
 
+const REFLECTIVE_SYSTEM =
+  'You are a lease specialist. Given text that mentions exclusive use or designated capacity, determine whether the customer has the right to direct how and for what purpose the asset is used (control). Reply with JSON only: { "hasControlRights": true or false, "rationale": "brief reason" }.';
+const REFLECTIVE_PROMPT_PREFIX = 'Contract/expense text (excerpt):\n';
+
 function parseEmbeddedLeaseResponse(raw: string): { hasEmbeddedLease: boolean; rationale: string } {
   try {
     const trimmed = raw.trim().replace(/^```json?\s*|\s*```$/g, '');

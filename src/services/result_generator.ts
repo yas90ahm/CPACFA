@@ -27,13 +27,10 @@ import { inferAccountingStandard } from './standard_selector.js';
 import { evaluateQualityChecks, type QualityCheck } from './quality_checks.js';
 import { shouldEscalateToHuman, submitToStaging } from './hitl_orchestrator.js';
 import { runGapAnalysis, type DataGap } from '../agents/cpa_brain.js';
-import { analyzeGapsAgentic } from './agentic_gap_analyzer.js';
-import { proposePolicyChangesAgentic, type PolicyProposal } from './policy_inference_agentic.js';
+import type { PolicyProposal } from './policy_inference_agentic.js';
 import { computeLiquidityMetrics, assessLiquidityRisk } from './analysis_agent.js';
 import type { LiquidityInputs } from '../types/analysis.js';
 import type { ConflictVariance } from '../types/orchestrator.js';
-import { getFlagsForContext } from './risk_context_store.js';
-import { resolveConflict } from './lead_partner_orchestrator.js';
 import { runPlanExecuteVerify } from './planExecuteVerify.js';
 
 /** Optional tenant context for integrity gate (load contracts when building statements). */
@@ -406,19 +403,8 @@ export async function runResultPipeline(
   const step1 = await step1CPA(input, context);
   const ratios = step2CFA(step1.balanceSheet, step1.profitAndLoss);
   const executiveMemo = step3Supervisor(step1.balanceSheet, step1.profitAndLoss, ratios);
-  let dissentingOpinion: ConflictVariance | undefined;
-  if (context) {
-    const periodLabel = (input.meta && 'periodLabel' in input.meta ? (input.meta as { periodLabel?: string }).periodLabel : undefined);
-    const flags = await getFlagsForContext(context.pool, context.tenantId, periodLabel);
-    dissentingOpinion = resolveConflict(
-      step1.balanceSheet,
-      step1.profitAndLoss,
-      ratios,
-      undefined,
-      flags.length ? flags : undefined,
-      undefined
-    );
-  }
+  // Scope: no CPA-CFA conflict resolution (quarantined).
+  const dissentingOpinion: ConflictVariance | undefined = undefined;
   const qualityChecks = evaluateQualityChecks(
     step1.balanceSheet,
     step1.profitAndLoss,
@@ -443,16 +429,8 @@ export async function runResultPipeline(
       description: t.description,
     })),
   });
-  const ledgerSummary = ledgerEntries.slice(0, 200).map((e) => `${e.accountName}: ${e.debit - e.credit}`).join('; ');
-  const agenticGaps = await analyzeGapsAgentic({
-    ledgerSummary,
-    metadata: {
-      taxId: meta.taxId,
-      businessNumber: meta.businessNumber,
-      transactionCount: meta.transactions?.length ?? 0,
-    },
-  });
-  const allGaps = [...dataGaps, ...agenticGaps];
+  // Scope: no AI gap analysis (quarantined). Use deterministic dataGaps only.
+  const allGaps = [...dataGaps];
   const critical = qualityChecks.filter((c) => c.severity === 'critical');
   const highGaps = allGaps.filter((g) => g.urgency === 'high');
   let hitl: ResultGeneratorOutput['hitl'] = { escalated: false };
@@ -474,13 +452,8 @@ export async function runResultPipeline(
     }
   }
 
-  const policyProposals = await proposePolicyChangesAgentic({
-    standard: meta.standard,
-    balanceSheet: step1.balanceSheet,
-    profitAndLoss: step1.profitAndLoss,
-    qualityChecks,
-    dataGaps: allGaps,
-  });
+  // Scope: no agentic policy proposals (quarantined).
+  const policyProposals: PolicyProposal[] = [];
 
   return {
     balanceSheet: step1.balanceSheet,

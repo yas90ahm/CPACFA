@@ -49,6 +49,7 @@ import {
 import {
   proposeTrialBalanceAdjustmentDefinition,
   runProposeTrialBalanceAdjustment,
+  proposeTrialBalanceAdjustmentSchema,
   type ProposeTrialBalanceAdjustmentInput,
 } from './proposeTrialBalanceAdjustment.js';
 import * as persistence from '../../services/persistence_service.js';
@@ -183,6 +184,8 @@ export interface ToolContext {
   /** Mutated by supervisor_tools when step1CPA or catalog tools run. */
   step1Output?: SupervisorToolContext['step1Output'];
   lastCatalogResult?: SupervisorToolContext['lastCatalogResult'];
+  /** Uncommitted Save for Later drafts (hydrated workspace). Never used by buildFinancialStatements or export; only committed data is exported. */
+  draftAdjustments?: Array<{ kind: string; [k: string]: unknown }>;
 }
 
 const DATA_GROUNDING_VIOLATION = 'Data Grounding Violation: No source data found to perform this calculation.';
@@ -252,8 +255,8 @@ export async function executeTool(
       const effectiveInput: BuildFinancialStatementsInput = {
         sessionId: context.sessionId,
         tenantId: context.tenantId,
+        fullSet: raw.fullSet !== undefined && raw.fullSet !== null ? Boolean(raw.fullSet) : false,
         ...(raw.standard != null && { standard: raw.standard as BuildFinancialStatementsInput['standard'] }),
-        ...(raw.fullSet != null && { fullSet: Boolean(raw.fullSet) }),
         ...(raw.lease != null && typeof raw.lease === 'object' && { lease: raw.lease as BuildFinancialStatementsInput['lease'] }),
       };
       try {
@@ -305,7 +308,20 @@ export async function executeTool(
           error: 'Grounding Violation: tenantId and pool are required. Use this tool in a session with trial balance data.',
         };
       }
-      return runProposeTrialBalanceAdjustment(input as ProposeTrialBalanceAdjustmentInput, {
+      const parsed = proposeTrialBalanceAdjustmentSchema.safeParse(input);
+      if (!parsed.success) {
+        return { success: false, error: `Amount provenance required: ${parsed.error.message}` };
+      }
+      const ptb = parsed.data;
+      for (const line of [...ptb.debits, ...ptb.credits]) {
+        if (line.amountProvenance == null || !['SOURCE_LINE_AMOUNT', 'HUMAN_ENTERED_AMOUNT', 'DETERMINISTIC_ENGINE_AMOUNT'].includes(line.amountProvenance)) {
+          return { success: false, error: 'AMOUNT_PROVENANCE_REQUIRED: Every line must have amountProvenance (SOURCE_LINE_AMOUNT | HUMAN_ENTERED_AMOUNT | DETERMINISTIC_ENGINE_AMOUNT). Advisor may not invent or estimate amounts.' };
+        }
+        if (line.amount != null && line.amountProvenance === 'DETERMINISTIC_ENGINE_AMOUNT') {
+          return { success: false, error: 'Advisor must not provide amount when amountProvenance is DETERMINISTIC_ENGINE_AMOUNT; TS core computes it.' };
+        }
+      }
+      return runProposeTrialBalanceAdjustment(ptb, {
         tenantId: context.tenantId,
         pool: context.pool,
       });

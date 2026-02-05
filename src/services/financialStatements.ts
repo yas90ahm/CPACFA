@@ -28,10 +28,17 @@ import { detectSuspiciousPlugs, type SuspiciousPlugResult } from './integrity_ga
 /** Re-export for backward compatibility. Primary gatekeeper: totalDebits !== totalCredits → MUST throw this (422). */
 export { MathematicalIntegrityError };
 
+/** Credit-positive fs line ids (positive = credit); others are debit-positive. */
+const CREDIT_POSITIVE_FS_LINES = new Set(['fs_liability', 'fs_equity', 'fs_revenue']);
+
 /** Net amount for an account (debit − credit). Assets/Expenses: positive = debit. Liabilities/Equity/Revenue: positive = credit. Uses decimal round for display. */
 function netAmount(entry: TrialBalanceEntry): number {
   const net = entry.debit - entry.credit;
-  const signed = entry.accountType === 'LIABILITY' || entry.accountType === 'EQUITY' || entry.accountType === 'REVENUE' ? -net : net;
+  const creditPositive =
+    entry.fsLineId != null
+      ? CREDIT_POSITIVE_FS_LINES.has(entry.fsLineId)
+      : entry.accountType === 'LIABILITY' || entry.accountType === 'EQUITY' || entry.accountType === 'REVENUE';
+  const signed = creditPositive ? -net : net;
   return round2(signed);
 }
 
@@ -41,6 +48,8 @@ function toLine(entry: TrialBalanceEntry): FinancialStatementLine {
     accountCode: entry.accountCode,
     label: entry.accountName,
     amount,
+    fsLineId: entry.fsLineId,
+    fsLineCode: entry.fsLineCode,
     codificationRef: entry.codificationRef,
     classificationSource: entry.classificationSource,
     classificationRationale: entry.classificationRationale,
@@ -58,18 +67,33 @@ function sumLines(lines: FinancialStatementLine[]): number {
 
 const DEFAULT_MATERIALITY = 0.01;
 
+/** When fsLineId is set, bucket by taxonomy line id (BS defaults: fs_asset, fs_liability, fs_equity). */
+function bucketBsByFsLine(entries: TrialBalanceEntry[]): { assets: TrialBalanceEntry[]; liabilities: TrialBalanceEntry[]; equity: TrialBalanceEntry[] } {
+  const assets: TrialBalanceEntry[] = [];
+  const liabilities: TrialBalanceEntry[] = [];
+  const equity: TrialBalanceEntry[] = [];
+  for (const e of entries) {
+    if (e.fsLineId === 'fs_asset') assets.push(e);
+    else if (e.fsLineId === 'fs_liability') liabilities.push(e);
+    else if (e.fsLineId === 'fs_equity') equity.push(e);
+    else if (e.accountType === 'ASSET') assets.push(e);
+    else if (e.accountType === 'LIABILITY') liabilities.push(e);
+    else if (e.accountType === 'EQUITY') equity.push(e);
+  }
+  return { assets, liabilities, equity };
+}
+
 /**
  * Build Balance Sheet (Assets = Liabilities + Equity)
  * ASC 210-10-45, IAS 1.54. Uses decimal sums and configurable materiality for balance check.
+ * When entries have fsLineId, groups by taxonomy line (fs_asset/fs_liability/fs_equity); otherwise by accountType.
  */
 export function buildBalanceSheet(
   entries: TrialBalanceEntry[],
   options?: { materiality?: number }
 ): BalanceSheet {
   const materiality = options?.materiality ?? DEFAULT_MATERIALITY;
-  const assetEntries = entries.filter((e) => e.accountType === 'ASSET');
-  const liabilityEntries = entries.filter((e) => e.accountType === 'LIABILITY');
-  const equityEntries = entries.filter((e) => e.accountType === 'EQUITY');
+  const { assets: assetEntries, liabilities: liabilityEntries, equity: equityEntries } = bucketBsByFsLine(entries);
 
   const assets = assetEntries.map(toLine);
   const liabilities = liabilityEntries.map(toLine);
@@ -94,16 +118,29 @@ export function buildBalanceSheet(
   };
 }
 
+/** When fsLineId is set, bucket PL by taxonomy (fs_revenue, fs_expense); otherwise by accountType. */
+function bucketPlByFsLine(entries: TrialBalanceEntry[]): { revenue: TrialBalanceEntry[]; expenses: TrialBalanceEntry[] } {
+  const revenue: TrialBalanceEntry[] = [];
+  const expenses: TrialBalanceEntry[] = [];
+  for (const e of entries) {
+    if (e.fsLineId === 'fs_revenue') revenue.push(e);
+    else if (e.fsLineId === 'fs_expense') expenses.push(e);
+    else if (e.accountType === 'REVENUE') revenue.push(e);
+    else if (e.accountType === 'EXPENSE') expenses.push(e);
+  }
+  return { revenue: revenue, expenses: expenses };
+}
+
 /**
  * Build P&L (Revenue − Expenses = Net Income)
  * ASC 220-10-45, IAS 1.81. Uses decimal sums; optional materiality for cross-foot check.
+ * When entries have fsLineId, groups by taxonomy (fs_revenue/fs_expense); otherwise by accountType.
  */
 export function buildProfitAndLoss(
   entries: TrialBalanceEntry[],
   options?: { materiality?: number }
 ): ProfitAndLoss {
-  const revenueEntries = entries.filter((e) => e.accountType === 'REVENUE');
-  const expenseEntries = entries.filter((e) => e.accountType === 'EXPENSE');
+  const { revenue: revenueEntries, expenses: expenseEntries } = bucketPlByFsLine(entries);
 
   const revenue = revenueEntries.map(toLine);
   const expenses = expenseEntries.map(toLine);

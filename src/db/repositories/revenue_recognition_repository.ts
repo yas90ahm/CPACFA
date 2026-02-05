@@ -3,8 +3,7 @@
  */
 
 import type { Pool } from 'pg';
-import type { RevRecStatus } from '../../types/revenue_recognition.js';
-import type { RecognitionScheduleEntry } from '../../types/revenue_recognition.js';
+import type { RevRecStatus, RevenueScheduleType, RecognitionScheduleEntry } from '../../types/revenue_recognition.js';
 
 export interface RevenueContractRow {
   id: string;
@@ -33,6 +32,10 @@ export interface PerformanceObligationRow {
   allocationPercent?: number;
   allocationAmount?: number;
   schedule?: RecognitionScheduleEntry[];
+  scheduleType?: RevenueScheduleType;
+  costToCostTotalEstimated?: number;
+  costToCostCostsToDate?: number;
+  milestoneAmounts?: { date: string; amount: number }[];
   createdAt: string;
   updatedAt: string;
 }
@@ -83,7 +86,7 @@ function rowToPob(row: Record<string, unknown>): PerformanceObligationRow {
     allocationPercent: row.allocation_percent != null ? Number(row.allocation_percent) : undefined,
     allocationAmount: row.allocation_amount != null ? Number(row.allocation_amount) : undefined,
     schedule: row.schedule != null ? (row.schedule as RecognitionScheduleEntry[]) : undefined,
-    scheduleType: (row.schedule_type as ScheduleType) ?? undefined,
+    scheduleType: (row.schedule_type as RevenueScheduleType) ?? undefined,
     costToCostTotalEstimated: row.cost_to_cost_total_estimated != null ? Number(row.cost_to_cost_total_estimated) : undefined,
     costToCostCostsToDate: row.cost_to_cost_costs_to_date != null ? Number(row.cost_to_cost_costs_to_date) : undefined,
     milestoneAmounts: row.milestone_amounts != null ? (row.milestone_amounts as { date: string; amount: number }[]) : undefined,
@@ -123,7 +126,7 @@ export async function createContract(
       row.allocation != null ? JSON.stringify(row.allocation) : null, now, now,
     ]
   );
-  return { id, tenantId, ...row, createdAt: now, updatedAt: now };
+  return { id, ...row, tenantId, createdAt: now, updatedAt: now };
 }
 
 export async function getContract(

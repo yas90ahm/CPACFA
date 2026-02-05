@@ -15,6 +15,7 @@ import { canPerform, type ControlledAction } from './segregation_service.js';
 import { listConnections } from './accounting_integration_service.js';
 import { pushAdjustmentToGL } from './push_close_to_gl_service.js';
 import { appendAuditLog } from './audit_log_service.js';
+import { createJustification } from './justification_service.js';
 
 export interface UpdateCloseAdjustmentStatusParams {
   id: string;
@@ -129,6 +130,9 @@ export async function updateCloseAdjustmentStatus(
     }
 
     const pushResult = await pushAdjustmentToGL(existing, connectionId, pool, tenantId);
+    if (pushResult.notImplemented) {
+      return { error: 'GL post-back is disabled', statusCode: 501, errors: pushResult.errors };
+    }
     if (!pushResult.success) {
       return {
         error: 'Push to GL failed',
@@ -153,12 +157,34 @@ export async function updateCloseAdjustmentStatus(
       },
       { pool, tenantId }
     );
+    await createJustification({
+      tenantId,
+      pool,
+      periodLabel: existing.periodLabel,
+      relatedType: 'close_adjustment',
+      relatedId: id,
+      memoMarkdown: existing.description,
+      createdBy: approvedBy ?? actorUserId,
+      createdByType: 'user',
+    });
     return { updated };
   }
 
   const updated = await updateAdjustmentStatus(id, status, approvedBy, tenantId, pool);
   if (!updated) {
     return { error: 'Adjustment not found', statusCode: 404 };
+  }
+  if (status === 'approved') {
+    await createJustification({
+      tenantId,
+      pool,
+      periodLabel: existing.periodLabel,
+      relatedType: 'close_adjustment',
+      relatedId: id,
+      memoMarkdown: existing.description,
+      createdBy: approvedBy ?? actorUserId,
+      createdByType: 'user',
+    });
   }
   return { updated };
 }

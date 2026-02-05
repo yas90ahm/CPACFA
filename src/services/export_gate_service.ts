@@ -3,6 +3,9 @@
  * When Integration is on: also block if unresolved CPA-CFA conflicts exist for the period.
  * On failure: CRITICAL_TAMPER_ALERT, block financial export.
  *
+ * Only committed and balanced data can be exported. Save for Later drafts (tenant_draft_adjustments)
+ * are never included; export uses period_trial_balance and approved HITL adjustments only.
+ *
  * Zero-trust: materiality flags are read only from period_export_checks (DB). The gate
  * performs a server-side state-check; caller must not supply roundingGapExceedsMateriality
  * or aggregateRoundingExceedsMateriality.
@@ -10,6 +13,7 @@
 
 import type { Pool } from 'pg';
 import { verifyChain } from './audit_ledger_service.js';
+import { getQualitativeEvidenceMissing } from './risk_context_store.js';
 import { ENABLE_INTEGRATED_SUPERVISOR } from '../lib/capability_flags.js';
 import { getUnresolvedConflicts } from './risk_context_store.js';
 import * as conflictsRepo from '../db/repositories/risk_context_conflicts_repository.js';
@@ -31,6 +35,8 @@ export interface ExportGateResult {
   allowed: boolean;
   alert?: typeof CRITICAL_TAMPER_ALERT | typeof TAMPERING_ATTEMPT_DETECTED | typeof UNRESOLVED_CONFLICTS_ALERT;
   message?: string;
+  /** When true, qualitative evidence is missing for the period (informational). */
+  qualitativeEvidenceMissing?: boolean;
 }
 
 /**
