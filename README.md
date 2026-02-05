@@ -1,174 +1,148 @@
-# FinOS Agent (CPACFA)
+# Sovereign CPA Engine
 
-Enterprise backend for **financial close, reporting, audit support, and valuation** in one place. Valuation and export run only on closed, reviewed data; CPA (books) and CFA (valuation) conflicts are flagged and can block export.
-
----
-
-## What it is
-
-- **Close-gated valuation:** DCF, comps, LBO consume data only after period close and controls (checklist, lock) are satisfied.
-- **Conflict enforcement:** If the books say one thing (e.g. going-concern risk) and valuation another (e.g. perpetual growth), the system records a **CPA–CFA conflict** and can block export until resolved or acknowledged.
-- **Deterministic books, optional AI:** Balance Sheet and P&L totals are driven only by deterministic classification and user-confirmed overrides. LLM is used for narratives, suggestions, and analysis—not for the numbers that define the financial statements.
+Backend-only deterministic close and certification engine. Trial balance in → human-in-the-loop for imbalances and overrides → period lock → close session certification → draft or certified export and audit binder. All math is enforced (Truth Gate); certified outputs require session status `certified`, audit-ledger chain verification, and final integrity check (balance + plug detection). A hash-chained audit trail records overrides and material events. AI pillars exist in code as: **Classifier** (suggestions for imbalanced TB, stored in staging payload); **Advisor** (proposals to `tenant_ai_proposals`); **Shadow Auditor** (blocks JE post and resolve-ingest when severity is `block`; findings in `tenant_shadow_audit_findings`); **Justifier** (memo/IRAC for posted JEs in `tenant_justifications`). All AI uses strict JSON outputs, is logged, and does not compute or post amounts—provenance required for adjustments.
 
 ---
 
-## CPA (financial reporting, close, audit)
+## Key capabilities
 
-- **Trial balance → financials:** Ingest CSV/XLSX; validate balance; classify accounts (Asset/Liability/Equity/Revenue/Expense) with FASB ASC / IASB refs; produce Balance Sheet and P&L with codification. Plan–Execute–Verify loop (V1–V4: TB balance, Assets = L+E, P&L ties to equity, codification).
-- **Month-end close:** Checklist, JE suggestions (rule-based + optional agentic), accrual/deferral suggestions, period lock (approver-only), close adjustments (approve/reject/post), **push posted adjustments to GL** (QuickBooks/Xero/NetSuite), audit log (append-only), segregation (preparer/reviewer/approver).
-- **Audit support:** Binder, justification chat (IRAC + RAG + citations), audit-defense PDF, GAAP consistency report, prior-period comparison, sampling, controls catalogue.
-- **Standards:** Period-scoped policy; GAAP/IFRS by jurisdiction (US GAAP, IFRS, ASPE, FRS 102); policy change log.
-- **Major topics (US GAAP / IFRS):** Leases (ASC 842 / IFRS 16), Revenue (ASC 606 / IFRS 15), EPS (ASC 260), FX (ASC 830 / IAS 21), Deferred tax (ASC 740 / IAS 12), Impairment (ASC 350 / IAS 36), Segment reporting (ASC 280 / IFRS 8), Business combinations (ASC 805 / IFRS 3), Equity method (ASC 323 / IAS 28), Stock compensation (ASC 718 / IFRS 2), Fixed assets, Consolidation, Statutory. Bank rec, AR/AP workflows, invoice-to-books, revenue recognition, intercompany, data quality, approvals, onboarding.
-
----
-
-## CFA (valuation, corporate finance, portfolio)
-
-- **Valuation:** DCF (WACC, terminal value, sensitivity), Comparable companies, Precedent transactions, LBO (sources/uses, debt schedule, IRR/MOIC).
-- **Analysis:** Liquidity and ratios (current/quick, CCC), Capital allocation (ROI, payback), CFO dashboard (MD&A, burn rate, runway, Rule of 40, variance, sensitivity).
-- **Portfolio:** Allocation, Sharpe/Sortino, attribution, rebalancing; performance with hash-chained corrections.
-- **Agents:** CFA Analyst (audit checks, DCF, liquidity, sensitivity, pointed questions). CFA Agent (DuPont, benchmarking, Monte Carlo, skepticism). **Supervisor** coordinates CPA + CFA and runs **reconcileCPAwithCFA**; unresolved conflicts are stored and can block export.
+- Ingest trial balance (CSV/XLSX); balanced TB saved to period ledger; imbalanced TB staged for HITL.
+- Forge/staging: imbalanced uploads create staging items; human resolves via adjustment with amount provenance.
+- Protocol Bridge: single mutation path—SaveTrialBalance, ApplyHitlAdjustmentToTrialBalance, CreateDraftJE, ProposeJE, ApproveJE, PostJE, LockPeriod (period lock asserted before mutations).
+- Deterministic math: debits = credits and Assets = Liabilities + Equity enforced; imbalance throws 422.
+- Close workflow: session status draft → … → locked → certified; certify requires no hard blockers and approver role.
+- Certified export and audit binder: require `closeSessionId` + session `certified`, export gate (chain + materiality from DB), final integrity check.
+- Draft export: optional; can allow imbalanced with watermark via env.
+- Audit chain: verifyChain before certified export; overrides and material events appended hash-chained.
 
 ---
 
-## Platform
+## Core workflow
 
-- **Multi-tenant:** JWT auth, tenant-scoped data, roles (accountant, preparer, reviewer, approver).
-- **BYOD:** Optional per-tenant Postgres; business data can live in the customer’s DB (`tenants.database_url`). Shared DB by default; database-per-tenant when set.
-- **Integrations:** QuickBooks, Xero, NetSuite—sync TB, push JEs (e.g. posted close adjustments), pull transactions.
-- **Security:** Structured logging (secret redaction), audit log retention (configurable purge), JWT 24h default, production auth lock, password complexity, request-id; see `docs/PRODUCTION_AND_SOC2_CHECKLIST.md`.
-
----
-
-## Agentic features (LLM-powered)
-
-The app uses LLM (Anthropic/OpenAI/Mistral) for **narratives, suggestions, parsing, and interpretation** only. Statement totals and lock/export logic remain **deterministic**. Below is where “agentic” is used.
-
-### Close and month-end
-
-| Feature | What the LLM does |
-|--------|---------------------|
-| Accrual/deferral suggestions | Suggests accruals/deferrals from open AR/AP, payroll, text; rule-based fallback. |
-| JE suggestions from text | Turns free-text into journal entry suggestions. |
-| JE suggestions explain | Narrative explaining suggested JEs for close docs. |
-| Materiality / disclosure suggest | Suggests materiality threshold; suggests missing disclosures; evidence for disclosure items. |
-| Controls suggest assertions | Suggests control assertions for a control. |
-| Close exceptions / readiness / tie-out / package narrative | Narratives and next actions for open items, readiness, tie-out, close package. |
-
-### CFO dashboard and reporting
-
-| Feature | What the LLM does |
-|--------|---------------------|
-| MD&A narrative (agentic) | LLM-enhanced management discussion; fallback to rule-based. |
-| Variance explain / drivers refine | Explains budget vs actual; refines volume/price/mix drivers. |
-| Pointed-question / sensitivity | Parses free-form sensitivity questions; scenario interpretation. |
-| KPI commentary / Board one-pager / Board deck | Commentary on KPIs; executive one-pager; slide-ready JSON. |
-| Sensitivity report interpret | Interprets sensitivity report output. |
-
-### Valuation (DCF, comps, precedent, LBO)
-
-| Feature | What the LLM does |
-|--------|---------------------|
-| DCF | Revenue/margin forecast, WACC, terminal growth, beta, valuation summary. |
-| Comps / Precedent | Memo and outlier commentary. |
-| LBO | Exit multiple, debt capacity, LBO memo. |
-
-### Audit and quality
-
-| Feature | What the LLM does |
-|--------|---------------------|
-| Prior-period / bank rec / sampling / reconciliation narrative | Narratives for prior-period, bank rec, sampling, reconciliation. |
-| Plan–Execute–Verify (agentic) | Optional LLM-generated plan; verification (V1–V4) stays programmatic. |
-| Account classification (agentic) | Optional LLM classification suggestion; applied only after user confirm. |
-| Gap analyzer / Quality assessor | Anomaly and gap analysis; data quality assessment. |
-
-### Judgments (flag-only, no auto-apply)
-
-| Feature | What the LLM does |
-|--------|---------------------|
-| Revenue: POB vs marketing | Distinguishes performance obligation (ASC 606) vs marketing incentive. |
-| Substance over form (embedded lease) | Semantic “control of identified asset” (IFRS 16/ASC 842). |
-
-### Enterprise, pipelines, operations
-
-| Feature | What the LLM does |
-|--------|---------------------|
-| Covenants / Statutory | Commentary on covenants; narrative for management vs statutory. |
-| Budget reforecast | Reforecast from actuals + prior budget. |
-| AR/AP / Invoice-to-books / Bank feed | Collections, payment run, cash application; invoice coding; bank match suggestions. |
-| Revenue recognition / Intercompany / Data quality / Approvals / Catalog | Allocation/timing suggestions; variance explain; remediation suggestions; approval summary; query intent/summary. |
-
-### Technical accounting narratives
-
-Leases, fixed assets, deferred tax, impairment, segment reporting, business combinations, equity method, consolidation, statutory, FX, stock comp, tax tie-out, cash flow/equity/notes narrative, reporting commentary—all have **agentic footnote or narrative** options.
-
-### Supervisor and conflict check
-
-**Supervisor** coordinates CPA (build statements) and CFA (ratios, valuation) via tool-calling. **Reconcile CPA with CFA** compares books vs valuation/ratios, surfaces conflicts (e.g. going concern vs DCF terminal growth); conflicts are stored and can block export.
-
-**Summary:** 57+ agentic service modules. Every one is suggestion, narrative, or interpretation. None drive BS/P&L totals, period lock, or export gates—those remain rule-based and user-confirmed.
+1. **Ingest** — Upload TB; if imbalanced, staging item created (Classifier/Advisor run, fail-open).
+2. **Forge/HITL** — Review staging; for trial-balance ingest, POST adjustment to resolve-ingest (balance check, Shadow Auditor, then bridge apply).
+3. **Adjust** — Close adjustments and JEs via bridge; JE lifecycle: draft → propose → approve → post (Shadow blocks on severity=block); Justifier runs after post.
+4. **Shadow Audit** — Runs before JE post and before resolve-ingest apply; blocks only when severity=block.
+5. **Lock** — POST period-lock (approver); further TB/JE mutations for that period blocked.
+6. **Certify** — POST close session certify (from locked, no hard blockers, approver).
+7. **Export** — Certified PDF/CSV: gates + final integrity; draft: optional imbalance with watermark.
+8. **Binder** — GET binder (certified-only): requireCertifiedSession + same gates, then build binder.
 
 ---
 
-## In scope / Out of scope
+## Architecture at a glance
 
-**In scope:** Full path from trial balance and close through financials, audit support, and valuation, with conflict checks and close-gated export. Deterministic statement totals; agentic for narratives, suggestions, and analysis.
-
-**Out of scope:** SEC/XBRL or 10-K/10-Q builder. Full AR/AP subledger as general-ledger replacement. Bond pricing, credit spread, CDS, or full derivatives beyond Black–Scholes.
+- **Deterministic TypeScript core** — Balance and integrity in `integrity_gate_service`, `financialStatements`; no AI in the math path.
+- **Protocol Bridge** (`src/bridge/protocol_bridge.ts`) — All TB/JE/lock mutations go through bridge; period lock asserted; Zod schemas.
+- **Audit chain + verification** — `audit_ledger_service` / `audit_ledger_repository`; `verifyChain` used by export gate.
+- **Draft vs certified export gating** — Certified: session certified + checkExportGate + finalIntegrityCheck; production ignores bypass flag.
+- **AI layer** — Strict JSON schemas; calls logged; no AI math; adjustment amounts require amountProvenance (ledger_exact | engine_calculation | human_entered).
 
 ---
 
-## Quick start
+## Quickstart (local)
+
+**Environment variables** (infer from code):
+
+- `DATABASE_URL` — Postgres connection (required for DB, migrations, and integration tests).
+- `PORT` — API port (default 3001).
+- `JWT_SECRET` — Required in production.
+- `NODE_ENV` — `production` disables in-memory fallbacks and auth bypass.
+- Optional: `AI_MODEL`, `AI_TIMEOUT_MS`, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `MISTRAL_API_KEY` for AI pillars; `AI_MOCK_CLASSIFIER`, `AI_MOCK_ADVISOR`, `AI_MOCK` for mocks.
+- Optional: `CORS_ORIGIN` / `CORS_ORIGINS`, `REQUIRE_AUTH`, `ALLOW_IMBALANCED_DRAFT_EXPORT`, `CPA_ENABLED`.
+
+**Setup:**
 
 ```bash
 npm install
-npm run dev
+cp .env.example .env   # edit with DATABASE_URL, etc.
+npm run db:migrate     # run migrations (uses DATABASE_URL)
+npm run db:verify      # verify schema (exits 1 if missing tables/columns)
+npm run build         # compile TypeScript
+npm run dev            # or: npm run start (node dist/server.js)
 ```
 
-- **Upload:** `POST http://localhost:3001/api/trial-balance/ingest` with `file` (CSV or XLSX).
-- **JSON:** `POST http://localhost:3001/api/trial-balance/statements` with body:
-  ```json
-  {
-    "entries": [
-      { "accountName": "Cash", "debit": 10000, "credit": 0 },
-      { "accountName": "Revenue", "debit": 0, "credit": 10000 }
-    ]
-  }
-  ```
+Reset DB (destructive, use with care):
 
-Requires `DATABASE_URL` for persistence; see `.env.example` for production-related variables.
+```bash
+npm run db:reset       # ALLOW_DB_RESET=true; runs reset_and_bootstrap
+```
+
+**Tests:** See “Running tests” below. Certification pipeline and other integration tests require `DATABASE_URL`; when missing they skip (CI guard).
 
 ---
 
-## Project structure
+## Running tests
 
+Tests are in the `tests/` directory with their own `package.json`. From repo root:
+
+```bash
+cd tests && npm install && npm test
 ```
-CPACFA/
-├── docs/                    # REASONING_CHAIN, BYOD_ARCHITECTURE, CPA_CFA_CAPABILITY, AUDIT_AND_CONTROLS, PRODUCTION_AND_SOC2_CHECKLIST, etc.
-├── migrations/              # Control + tenant SQL migrations
-├── src/
-│   ├── auth/                # JWT, bcrypt, middleware (requireAuth, attachTenantPool)
-│   ├── db/                   # Control + tenant pools, repositories, migrate
-│   ├── lib/                  # logger, errorHandler, tenant_context, closeRole
-│   ├── middleware/           # requestId, validateRequest
-│   ├── routes/               # trialBalance, close, cfa, cfo-dashboard, audit, valuation, etc.
-│   ├── services/             # 50+ agentic_* services + rule-based services
-│   ├── agents/               # Supervisor, CPA/CFA brains, tools
-│   ├── llm/                  # provider, tool schema, callWithFallback
-│   └── server.ts
-├── scripts/                 # purge_audit_log, generateOpenAPI
-├── frontend/                # Next.js (optional)
-├── .env.example
-├── package.json
-└── README.md
+
+- **When `DATABASE_URL` is not set:** Integration tests that depend on DB (e.g. certification pipeline) skip; no failure. Suited for CI without a database.
+- **When `DATABASE_URL` is set:** Full integration runs; certification pipeline test: imbalanced TB → staging → resolve-ingest → lock → certify → export gates → binder; DB artifacts and audit chain verified.
+
+Integration-only:
+
+```bash
+cd tests && npm run test:integration
+```
+
+Smoke (no DB required by default):
+
+```bash
+cd tests && npm run test:smoke
+```
+
+Schema verification (DB required):
+
+```bash
+npm run db:verify
 ```
 
 ---
 
-## Docs
+## Safety & invariants
 
-- `docs/REASONING_CHAIN.md` — Plan–Execute–Verify + codification
-- `docs/CPA_CFA_CAPABILITY.md` — CPA/CFA capability matrix
-- `docs/BYOD_ARCHITECTURE.md` — Bring Your Own Database
-- `docs/AUDIT_AND_CONTROLS.md` — Zero-trust controls, deterministic totals
-- `docs/PRODUCTION_AND_SOC2_CHECKLIST.md` — Deployment and SOC 2 checklist
+- **Truth Gate** — Rounding tolerance from `shared/config/financial_rules.json` (default 0.01). Debits = credits and Assets = Liabilities + Equity enforced; failure → 422 MathematicalIntegrityError.
+- **Certified-only “official” outputs** — Certified export and binder require session status `certified` and server-side gates; draft export is explicitly draft and can be watermarked when imbalanced.
+- **Hash-chained audit trail** — Overrides and material events appended; chain verified before certified export.
+- **AI cannot compute or post** — All posting and balance math are deterministic; adjustment lines require amountProvenance; AI suggests only (Classifier/Advisor) or blocks (Shadow) or documents (Justifier).
+
+---
+
+## API overview (core workflow)
+
+Only key mounted routes; not an exhaustive list.
+
+| Base path | Purpose |
+|-----------|--------|
+| `GET /health`, `GET /health/ready` | Health and readiness (ready checks DB). |
+| `POST /api/auth/login`, `POST /api/auth/register` | Auth. |
+| `POST /api/trial-balance/ingest` | Upload TB CSV/XLSX; balanced → save; imbalanced → staging. |
+| `GET /api/hitl/staging`, `POST /api/hitl/resolve`, `POST /api/hitl/resolve-ingest` | Staging list; approve/reject; apply adjustment for imbalanced ingest. |
+| `POST /api/close/journal-entries`, `POST /api/close/journal-entries/:id/propose`, `:id/approve`, `:id/post` | JE lifecycle (via bridge). |
+| `POST /api/close/period-lock` | Lock period (bridge). |
+| `POST /api/close/sessions/:id/certify` | Certify close session. |
+| `POST /api/export/pdf`, `POST /api/export/csv` | Export (draft vs certified by body/query; certified requires session + gates). |
+| `GET /api/audit/binder`, `GET /api/audit/binder/export/pdf`, `.../csv` | Audit binder (certified-only; requireCertifiedSession + gates). |
+
+Other mounted prefixes: `/api/justification`, `/api/audit` (reconciliation, todos, GAAP consistency, etc.), `/api/close/*` (sessions, issues, adjustments, checklist, etc.), `/api/coa-mapping`, `/api/onboarding`, `/api/tenants`, `/api/knowledge-base`, `/api/vector-store`, `/api/ingestion`, `/api/memory`, `/api/integrations`, `/api/pipelines`, `/api/data-quality`, `/api/approvals`, `/api/accounting-integration`. Dev-only: `/api-dev` when `NODE_ENV !== 'production'`.
+
+---
+
+## Repo structure
+
+- `src/` — Backend: `routes/` (API), `services/` (business logic), `db/` (migrate, repositories, schema_verify, verify_schema, reset_and_bootstrap), `bridge/` (protocol_bridge), `ai/` (orchestrator, adapters, prompts, schemas), `auth/`, `lib/`, `middleware/`, `types/`.
+- `migrations/` — SQL migrations.
+- `tests/` — Unit and integration tests; `tests/integration/` includes certification pipeline; `tests/smoke/` for smoke tests.
+- `shared/config/` — e.g. financial_rules.json (rounding tolerance, materiality).
+
+---
+
+## What this is NOT
+
+- Not an ERP (no GL/AP/AR/inventory).
+- Not forecasting or FP&A.
+- Not payments or banking core.
