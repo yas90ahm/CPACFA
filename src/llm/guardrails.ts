@@ -56,9 +56,7 @@ function hasNumericAmount(obj: unknown, path: string): boolean {
     }
   }
   return false;
-}
-
-/**
+}/**
  * Scope guardrail: fail if agent output contains debit/credit/amount (or similar) numeric fields.
  * Call this on any LLM/agent response before using it to drive ledger or adjustments.
  * Allowed: confidence, type, labels, rationale. Forbidden: debit, credit, amount as numbers.
