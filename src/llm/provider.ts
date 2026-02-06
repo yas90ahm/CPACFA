@@ -39,11 +39,19 @@ function getApiKey(provider: LLMProvider): string {
   return key;
 }
 
+/** Deterministic mock response when AI_MOCK=true (e.g. in tests) to avoid live LLM calls. */
+const AI_MOCK_RESPONSE =
+  'Analysis: Mock analysis for testing. The treatment is consistent with the authoritative literature cited.\n\nConclusion: Therefore, the accounting treatment is supported by FASB ASC (General).';
+
 /**
  * Generate plain text from the selected provider.
  * Tool-calling is not handled here (use provider-specific flows for tool use).
+ * When AI_MOCK=true, returns immediately with a deterministic string (no network call).
  */
 export async function generateText(input: TextGenerationInput): Promise<string> {
+  if (process.env.AI_MOCK === 'true') {
+    return AI_MOCK_RESPONSE;
+  }
   const provider = getProviderFromEnv();
   const maxTokens = input.maxTokens ?? 1024;
   const prompt = input.prompt;

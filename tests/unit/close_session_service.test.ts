@@ -17,6 +17,9 @@ import * as repo from '../../src/db/repositories/close_session_repository.js';
 import * as readiness from '../../src/services/close_checklist_readiness_service.js';
 import * as segregation from '../../src/services/segregation_service.js';
 import * as auditLedger from '../../src/services/audit_ledger_service.js';
+import * as adjustedTb from '../../src/services/adjusted_trial_balance_service.js';
+import * as certifiedStatements from '../../src/services/certified_statements_service.js';
+import * as ledgerSnapshot from '../../src/services/ledger_snapshot_service.js';
 
 const mockPool = {} as Pool;
 
@@ -271,6 +274,7 @@ describe('Close session — certifyCloseSession', () => {
       certifiedBy: 'approver@test.com',
       certifiedAt: '2025-01-02T12:00:00Z',
       certificationMemo: 'Signed off',
+      certifiedSnapshotId: 'snap-1',
       updatedAt: '2025-01-02T12:00:00Z',
     };
     jest.spyOn(repo, 'getCloseSessionById')
@@ -286,6 +290,17 @@ describe('Close session — certifyCloseSession', () => {
       materialJesApproved: true,
       integrityChecksPass: true,
     });
+    jest.spyOn(adjustedTb, 'getAdjustedTrialBalance').mockResolvedValue([
+      { accountName: 'Cash', debit: 1000, credit: 0 },
+      { accountName: 'Retained Earnings', debit: 0, credit: 1000 },
+    ]);
+    jest.spyOn(certifiedStatements, 'buildCertifiedStatementsFromSnapshot').mockReturnValue({} as never);
+    jest.spyOn(ledgerSnapshot, 'createSnapshotFromTrialBalanceAndEntries').mockResolvedValue({
+      id: 'snap-1',
+      tenantId: 't1',
+      periodLabel: '2025-01',
+      closeSessionId: 'sess-1',
+    } as never);
     jest.spyOn(repo, 'updateCertification').mockResolvedValue(certifiedSession);
     jest.spyOn(auditLedger, 'recordMaterialEvent').mockResolvedValue();
     const result = await certifyCloseSession(
@@ -306,7 +321,8 @@ describe('Close session — certifyCloseSession', () => {
       'sess-1',
       'approver@test.com',
       expect.any(String),
-      'Signed off'
+      'Signed off',
+      'snap-1'
     );
     expect(auditLedger.recordMaterialEvent).toHaveBeenCalledWith(
       mockPool,
@@ -316,6 +332,7 @@ describe('Close session — certifyCloseSession', () => {
         deterministicFlagSnapshot: expect.objectContaining({
           closeSessionId: 'sess-1',
           certifiedBy: 'approver@test.com',
+          certifiedSnapshotId: 'snap-1',
         }),
       })
     );

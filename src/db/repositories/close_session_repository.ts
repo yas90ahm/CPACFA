@@ -21,6 +21,7 @@ interface CloseSessionRow {
   certified_by: string | null;
   certified_at: string | Date | null;
   certification_memo: string | null;
+  certified_snapshot_id: string | null;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -39,6 +40,9 @@ function toISOTimestampString(v: string | Date | null | undefined): string {
   return (v as Date).toISOString();
 }
 
+const SESSION_COLUMNS =
+  'id, tenant_id, entity_id, period_start, period_end, basis, standard, status, certified_by, certified_at, certification_memo, certified_snapshot_id, created_at, updated_at';
+
 function rowToSession(row: CloseSessionRow): CloseSession {
   return {
     id: row.id,
@@ -55,6 +59,7 @@ function rowToSession(row: CloseSessionRow): CloseSession {
         ? (typeof row.certified_at === 'string' ? row.certified_at : (row.certified_at as Date).toISOString())
         : undefined,
     certificationMemo: row.certification_memo ?? undefined,
+    certifiedSnapshotId: row.certified_snapshot_id ?? undefined,
     createdAt: toISOTimestampString(row.created_at),
     updatedAt: toISOTimestampString(row.updated_at),
   };
@@ -88,9 +93,7 @@ export async function getOverlappingSession(
   periodEnd: string
 ): Promise<CloseSession | null> {
   const r = await pool.query<CloseSessionRow>(
-    `SELECT id, tenant_id, entity_id, period_start, period_end, basis, standard, status,
-      certified_by, certified_at, certification_memo, created_at, updated_at
-     FROM close_sessions
+    `SELECT ${SESSION_COLUMNS} FROM close_sessions
      WHERE tenant_id = $1 AND entity_id = $2
        AND period_start <= $4 AND period_end >= $3
      LIMIT 1`,
@@ -119,9 +122,7 @@ export async function insertCloseSession(
     [id, tenantId, entityId, periodStart, periodEnd, basis, standard, status, now]
   );
   const r = await pool.query<CloseSessionRow>(
-    `SELECT id, tenant_id, entity_id, period_start, period_end, basis, standard, status,
-      certified_by, certified_at, certification_memo, created_at, updated_at
-     FROM close_sessions WHERE id = $1`,
+    `SELECT ${SESSION_COLUMNS} FROM close_sessions WHERE id = $1`,
     [id]
   );
   return rowToSession(r.rows[0]);
@@ -133,9 +134,7 @@ export async function getCloseSessionById(
   id: string
 ): Promise<CloseSession | null> {
   const r = await pool.query<CloseSessionRow>(
-    `SELECT id, tenant_id, entity_id, period_start, period_end, basis, standard, status,
-      certified_by, certified_at, certification_memo, created_at, updated_at
-     FROM close_sessions WHERE tenant_id = $1 AND id = $2`,
+    `SELECT ${SESSION_COLUMNS} FROM close_sessions WHERE tenant_id = $1 AND id = $2`,
     [tenantId, id]
   );
   const row = r.rows[0];
@@ -149,10 +148,7 @@ export async function listCloseSessions(
   entityId?: string,
   status?: string
 ): Promise<CloseSession[]> {
-  let sql =
-    `SELECT id, tenant_id, entity_id, period_start, period_end, basis, standard, status,
-      certified_by, certified_at, certification_memo, created_at, updated_at
-     FROM close_sessions WHERE tenant_id = $1`;
+  let sql = `SELECT ${SESSION_COLUMNS} FROM close_sessions WHERE tenant_id = $1`;
   const params: string[] = [tenantId];
   let i = 2;
   if (entityId) {
@@ -190,14 +186,16 @@ export async function updateCertification(
   id: string,
   certifiedBy: string,
   certifiedAt: string,
-  certificationMemo?: string
+  certificationMemo?: string,
+  certifiedSnapshotId?: string
 ): Promise<CloseSession | null> {
   const now = new Date().toISOString();
   const r = await pool.query(
     `UPDATE close_sessions
-     SET status = 'certified', certified_by = $1, certified_at = $2, certification_memo = $3, updated_at = $4
-     WHERE tenant_id = $5 AND id = $6`,
-    [certifiedBy, certifiedAt, certificationMemo ?? null, now, tenantId, id]
+     SET status = 'certified', certified_by = $1, certified_at = $2, certification_memo = $3,
+         certified_snapshot_id = COALESCE($4, certified_snapshot_id), updated_at = $5
+     WHERE tenant_id = $6 AND id = $7`,
+    [certifiedBy, certifiedAt, certificationMemo ?? null, certifiedSnapshotId ?? null, now, tenantId, id]
   );
   if (r.rowCount === 0) return null;
   return getCloseSessionById(pool, tenantId, id);

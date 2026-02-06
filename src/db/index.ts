@@ -177,6 +177,7 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 82, file: '082_tenant_ai_proposals.sql' },
   { version: 83, file: '083_ledger_snapshots.sql' },
   { version: 84, file: '084_journal_entry_lines_amount_provenance.sql' },
+  { version: 85, file: '085_close_sessions_certified_snapshot_id.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 

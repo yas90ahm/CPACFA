@@ -127,22 +127,31 @@ router.post('/register-statements', validateBody(registerStatementsBodySchema), 
   }
 });
 
-/** GET /api/audit/binder — certified only; requires closeSessionId, session.status === 'certified', checkExportGate. Uses canonical getCertifiedStatementsForBinder (snapshot or last registered + Truth Gate). */
+function allowLegacyCertifiedSource(req: Request): boolean {
+  return req.query.allowLegacyCertifiedSource === '1' || process.env.ALLOW_LEGACY_CERTIFIED_SOURCE === 'true';
+}
+
+/** GET /api/audit/binder — certified only; requires closeSessionId, session.status === 'certified', checkExportGate. Default: requires certified snapshot (no legacy fallback). Use allowLegacyCertifiedSource=1 to allow legacy. */
 router.get('/binder', async (req: Request, res: Response) => {
   try {
     const auth = await requireCertifiedSession(req, res);
     if (!auth || !auth.pool || auth.tenantId == null) return;
     if (!(await runBinderExportGates(req, res, { pool: auth.pool, tenantId: auth.tenantId }))) return;
     const closeSessionId = (req.query.closeSessionId as string) ?? '';
-    const statements = await getCertifiedStatementsForBinder(auth.pool, auth.tenantId, closeSessionId);
-    if (!statements) {
-      res.status(422).json({
-        error: 'Unprocessable Entity',
-        code: 'FINAL_INTEGRITY_CHECK_FAILED',
-        message: 'No certified statements available or Truth Gate failed. Create a ledger snapshot for this session or register statements that pass integrity check.',
-      });
+    const result = await getCertifiedStatementsForBinder(auth.pool, auth.tenantId, closeSessionId, {
+      allowLegacyCertifiedSource: allowLegacyCertifiedSource(req),
+    });
+    if (!result) {
+      const code = closeSessionId && !allowLegacyCertifiedSource(req)
+        ? 'NO_CERTIFIED_SOURCE'
+        : 'FINAL_INTEGRITY_CHECK_FAILED';
+      const message = code === 'NO_CERTIFIED_SOURCE'
+        ? 'No certified snapshot for this session. Certification creates the snapshot; ensure the session was certified. To allow legacy source (last registered statements), set query allowLegacyCertifiedSource=1 or env ALLOW_LEGACY_CERTIFIED_SOURCE=true.'
+        : 'No certified statements available or Truth Gate failed. Create a ledger snapshot for this session or register statements that pass integrity check.';
+      res.status(422).json({ error: 'Unprocessable Entity', code, message });
       return;
     }
+    if (result.source) res.setHeader('X-Certified-Source', result.source);
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
     const periodLabel = periodEnd.slice(0, 7);
@@ -154,7 +163,7 @@ router.get('/binder', async (req: Request, res: Response) => {
       periodStart,
       periodEnd,
       entityName,
-      statements,
+      statements: result.statements,
       baseSourceDocumentUrl: `${baseUrl}/api/audit/source-document`,
       baseReasoningUrl: `${baseUrl}/api/audit/reasoning`,
       tenantId: auth.tenantId,
@@ -167,22 +176,25 @@ router.get('/binder', async (req: Request, res: Response) => {
   }
 });
 
-/** GET /api/audit/binder/export/pdf — certified only; uses getCertifiedStatementsForBinder. */
+/** GET /api/audit/binder/export/pdf — certified only; default requires certified snapshot. Use allowLegacyCertifiedSource=1 for legacy. */
 router.get('/binder/export/pdf', async (req: Request, res: Response) => {
   try {
     const auth = await requireCertifiedSession(req, res);
     if (!auth || !auth.pool || auth.tenantId == null) return;
     if (!(await runBinderExportGates(req, res, { pool: auth.pool, tenantId: auth.tenantId }))) return;
     const closeSessionId = (req.query.closeSessionId as string) ?? '';
-    const statements = await getCertifiedStatementsForBinder(auth.pool, auth.tenantId, closeSessionId);
-    if (!statements) {
-      res.status(422).json({
-        error: 'Unprocessable Entity',
-        code: 'FINAL_INTEGRITY_CHECK_FAILED',
-        message: 'No certified statements available or Truth Gate failed.',
-      });
+    const result = await getCertifiedStatementsForBinder(auth.pool, auth.tenantId, closeSessionId, {
+      allowLegacyCertifiedSource: allowLegacyCertifiedSource(req),
+    });
+    if (!result) {
+      const code = closeSessionId && !allowLegacyCertifiedSource(req) ? 'NO_CERTIFIED_SOURCE' : 'FINAL_INTEGRITY_CHECK_FAILED';
+      const message = code === 'NO_CERTIFIED_SOURCE'
+        ? 'No certified snapshot for this session. Certification creates the snapshot. Use allowLegacyCertifiedSource=1 or ALLOW_LEGACY_CERTIFIED_SOURCE=true for legacy.'
+        : 'No certified statements available or Truth Gate failed.';
+      res.status(422).json({ error: 'Unprocessable Entity', code, message });
       return;
     }
+    if (result.source) res.setHeader('X-Certified-Source', result.source);
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
     const entityName = (req.query.entityName as string) ?? 'Entity';
@@ -193,7 +205,7 @@ router.get('/binder/export/pdf', async (req: Request, res: Response) => {
       periodStart,
       periodEnd,
       entityName,
-      statements,
+      statements: result.statements,
       baseSourceDocumentUrl: `${baseUrl}/api/audit/source-document`,
       baseReasoningUrl: `${baseUrl}/api/audit/reasoning`,
       tenantId: auth.tenantId,
@@ -209,22 +221,25 @@ router.get('/binder/export/pdf', async (req: Request, res: Response) => {
   }
 });
 
-/** GET /api/audit/binder/export/csv — certified only; uses getCertifiedStatementsForBinder. */
+/** GET /api/audit/binder/export/csv — certified only; default requires certified snapshot. Use allowLegacyCertifiedSource=1 for legacy. */
 router.get('/binder/export/csv', async (req: Request, res: Response) => {
   try {
     const auth = await requireCertifiedSession(req, res);
     if (!auth || !auth.pool || auth.tenantId == null) return;
     if (!(await runBinderExportGates(req, res, { pool: auth.pool, tenantId: auth.tenantId }))) return;
     const closeSessionId = (req.query.closeSessionId as string) ?? '';
-    const statements = await getCertifiedStatementsForBinder(auth.pool, auth.tenantId, closeSessionId);
-    if (!statements) {
-      res.status(422).json({
-        error: 'Unprocessable Entity',
-        code: 'FINAL_INTEGRITY_CHECK_FAILED',
-        message: 'No certified statements available or Truth Gate failed.',
-      });
+    const result = await getCertifiedStatementsForBinder(auth.pool, auth.tenantId, closeSessionId, {
+      allowLegacyCertifiedSource: allowLegacyCertifiedSource(req),
+    });
+    if (!result) {
+      const code = closeSessionId && !allowLegacyCertifiedSource(req) ? 'NO_CERTIFIED_SOURCE' : 'FINAL_INTEGRITY_CHECK_FAILED';
+      const message = code === 'NO_CERTIFIED_SOURCE'
+        ? 'No certified snapshot for this session. Certification creates the snapshot. Use allowLegacyCertifiedSource=1 or ALLOW_LEGACY_CERTIFIED_SOURCE=true for legacy.'
+        : 'No certified statements available or Truth Gate failed.';
+      res.status(422).json({ error: 'Unprocessable Entity', code, message });
       return;
     }
+    if (result.source) res.setHeader('X-Certified-Source', result.source);
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
     const entityName = (req.query.entityName as string) ?? 'Entity';
@@ -235,7 +250,7 @@ router.get('/binder/export/csv', async (req: Request, res: Response) => {
       periodStart,
       periodEnd,
       entityName,
-      statements,
+      statements: result.statements,
       baseSourceDocumentUrl: `${baseUrl}/api/audit/source-document`,
       baseReasoningUrl: `${baseUrl}/api/audit/reasoning`,
       tenantId: auth.tenantId,

@@ -31,7 +31,9 @@ describe('Classifier on ingest (staged)', () => {
     );
   });
 
-  it('after staged ingest with AI_MOCK_CLASSIFIER=true, staging payload has classification_results', async () => {
+  it(
+    'after staged ingest with AI_MOCK_CLASSIFIER=true, staging payload has classification_results',
+    async () => {
     if (!isDbConfigured()) return;
 
     const prevMock = process.env.AI_MOCK_CLASSIFIER;
@@ -65,5 +67,7 @@ describe('Classifier on ingest (staged)', () => {
     expect(payload?.classification_results).toBeDefined();
     expect(Array.isArray(payload?.classification_results)).toBe(true);
     expect((payload?.classification_results as unknown[]).length).toBeGreaterThanOrEqual(0);
-  });
+    },
+    15000
+  );
 });

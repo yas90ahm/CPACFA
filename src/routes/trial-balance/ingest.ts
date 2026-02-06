@@ -681,7 +681,14 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       );
       return res.status(403).json({ error: 'Period locked', periodLabel: err.periodLabel });
     }
-    if (err instanceof MathematicalIntegrityError) {
+    // Recognize MathematicalIntegrityError even when instanceof fails (e.g. Jest/ESM class identity)
+    const integrityErr: MathematicalIntegrityError | null =
+      err instanceof MathematicalIntegrityError
+        ? err
+        : err && typeof err === 'object' && (err as { name?: string }).name === 'MathematicalIntegrityError'
+          ? (err as MathematicalIntegrityError)
+          : null;
+    if (integrityErr) {
       const tenantId = getTenantId(req);
       const pool = getTenantPool(req);
       const closeSessionId = (req.body as Record<string, unknown>)?.closeSessionId ?? (req.query as Record<string, unknown>).closeSessionId;
@@ -691,10 +698,10 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
             closeSessionId: typeof closeSessionId === 'string' ? closeSessionId : null,
             tenantId,
             decisionType: 'anomaly_flag',
-            subjectRef: { check: err.check, imbalanceAmount: err.imbalanceAmount },
-            inputSnapshot: err.details ?? {},
+            subjectRef: { check: integrityErr.check, imbalanceAmount: integrityErr.imbalanceAmount },
+            inputSnapshot: integrityErr.details ?? {},
             outputSnapshot: { blocked: true, reason: 'MathematicalIntegrityError' },
-            rationaleText: err.message,
+            rationaleText: integrityErr.message,
             engineVersion: 'financialStatements_validator',
           });
         } catch (_) {
@@ -706,12 +713,12 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
             { pool, tenantId, closeSessionId, createdBy: (req as AuthRequest).userId },
             {
               title: 'Trial balance imbalance (debits ≠ credits or A ≠ L+E)',
-              description: err.message,
+              description: integrityErr.message,
               category: 'posting',
               severity: 'high',
-              impactPl: err.imbalanceAmount,
-              impactBs: err.check === 'B' ? err.imbalanceAmount : undefined,
-              sourceRef: { check: err.check, imbalanceAmount: err.imbalanceAmount, details: err.details },
+              impactPl: integrityErr.imbalanceAmount,
+              impactBs: integrityErr.check === 'B' ? integrityErr.imbalanceAmount : undefined,
+              sourceRef: { check: integrityErr.check, imbalanceAmount: integrityErr.imbalanceAmount, details: integrityErr.details },
             }
           );
         } catch (_) {
@@ -720,10 +727,10 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       }
       return res.status(422).json({
         error: 'MathematicalIntegrityError',
-        message: err.message,
-        check: err.check,
-        imbalanceAmount: err.imbalanceAmount,
-        details: err.details,
+        message: integrityErr.message,
+        check: integrityErr.check,
+        imbalanceAmount: integrityErr.imbalanceAmount,
+        details: integrityErr.details,
       });
     }
     const message = err instanceof Error ? err.message : 'Ingestion failed';

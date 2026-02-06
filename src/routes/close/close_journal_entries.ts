@@ -67,7 +67,8 @@ router.post('/journal-entries', async (req: Request, res: Response) => {
       }
     );
     if (!result.ok) {
-      const status = result.code === 'PERIOD_LOCKED' ? 409 : result.code === 'VALIDATION' ? 400 : 400;
+      const status =
+        result.code === 'PERIOD_LOCKED' ? 409 : result.code === 'VALIDATION' ? 422 : 400;
       res.status(status).json({ error: result.error, code: result.code });
       return;
     }

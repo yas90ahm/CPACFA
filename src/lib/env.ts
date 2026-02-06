@@ -11,6 +11,10 @@ export const isProduction = (): boolean =>
 export const ALLOW_IMBALANCED_DRAFT_EXPORT = (): boolean =>
   process.env.ALLOW_IMBALANCED_DRAFT_EXPORT === 'true';
 
+/** When true, certified binder/export may use legacy source (last registered statements) when no certified snapshot exists. Default false: require certified snapshot. */
+export const ALLOW_LEGACY_CERTIFIED_SOURCE = (): boolean =>
+  process.env.ALLOW_LEGACY_CERTIFIED_SOURCE === 'true';
+
 /**
  * When in production, throw if the caller would use an in-memory path (e.g. missing pool/tenantId or storage).
  * Call this before using any in-memory fallback.

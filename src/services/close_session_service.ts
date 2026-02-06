@@ -11,6 +11,10 @@ import * as repo from '../db/repositories/close_session_repository.js';
 import { computeReadiness } from './close_checklist_readiness_service.js';
 import { canPerform } from './segregation_service.js';
 import { recordMaterialEvent } from './audit_ledger_service.js';
+import { getAdjustedTrialBalance } from './adjusted_trial_balance_service.js';
+import { createSnapshotFromTrialBalanceAndEntries } from './ledger_snapshot_service.js';
+import { buildCertifiedStatementsFromSnapshot } from './certified_statements_service.js';
+import type { LedgerSnapshotPayload } from '../types/ledger_snapshot.js';
 
 const ALLOWED_TRANSITIONS: Record<CloseSessionStatus, CloseSessionStatus[]> = {
   draft: ['in_progress'],
@@ -175,6 +179,64 @@ export async function certifyCloseSession(
   if (!canPerform(actorRole, 'certify_close')) {
     throw new CloseSessionError('Insufficient role: certify_close requires approver', 'INSUFFICIENT_ROLE');
   }
+  const periodLabel = input.periodLabel ?? session.periodEnd.slice(0, 7);
+
+  // Create ledger snapshot at certification so binder/export have a certified source of truth.
+  let adjustedEntries: Awaited<ReturnType<typeof getAdjustedTrialBalance>>;
+  try {
+    adjustedEntries = await getAdjustedTrialBalance(
+      input.tenantId,
+      periodLabel,
+      pool,
+      input.closeSessionId
+    );
+  } catch (_e) {
+    throw new CloseSessionError(
+      'No trial balance for period; run ingest or resolve staging before certifying.',
+      'VALIDATION'
+    );
+  }
+  const totalDebits = adjustedEntries.reduce((s, e) => s + (e.debit ?? 0), 0);
+  const totalCredits = adjustedEntries.reduce((s, e) => s + (e.credit ?? 0), 0);
+  const snapshotPayload: LedgerSnapshotPayload = {
+    trialBalance: {
+      entries: adjustedEntries.map((e) => ({
+        accountName: e.accountName,
+        debit: e.debit ?? 0,
+        credit: e.credit ?? 0,
+        ...(e.accountCode != null && { accountCode: e.accountCode }),
+        ...(e.lineId != null && e.lineId !== '' && { lineId: e.lineId }),
+      })),
+      totalDebits,
+      totalCredits,
+    },
+  };
+  try {
+    buildCertifiedStatementsFromSnapshot(snapshotPayload);
+  } catch (_e) {
+    throw new CloseSessionError(
+      'Trial balance does not pass integrity check (Truth Gate). Fix imbalance or balance sheet equation before certifying.',
+      'VALIDATION'
+    );
+  }
+  const snapshot = await createSnapshotFromTrialBalanceAndEntries(pool, {
+    tenantId: input.tenantId,
+    periodLabel,
+    closeSessionId: input.closeSessionId,
+    createdBy: input.certifiedBy,
+    source: 'close_session',
+    trialBalance: {
+      entries: snapshotPayload.trialBalance.entries.map((e) => ({
+        accountName: e.accountName,
+        debit: e.debit,
+        credit: e.credit,
+        ...(e.accountCode != null && { accountCode: e.accountCode }),
+      })),
+      totalDebits: snapshotPayload.trialBalance.totalDebits,
+      totalCredits: snapshotPayload.trialBalance.totalCredits,
+    },
+  });
+
   const certifiedAt = new Date().toISOString();
   const updated = await repo.updateCertification(
     pool,
@@ -182,12 +244,12 @@ export async function certifyCloseSession(
     input.closeSessionId,
     input.certifiedBy,
     certifiedAt,
-    input.memo
+    input.memo,
+    snapshot.id
   );
   if (!updated) {
     throw new CloseSessionError('Close session not found', 'NOT_FOUND');
   }
-  const periodLabel = input.periodLabel ?? updated.periodEnd.slice(0, 7);
   await recordMaterialEvent(pool, {
     tenantId: input.tenantId,
     periodLabel,
@@ -197,6 +259,7 @@ export async function certifyCloseSession(
       certifiedBy: input.certifiedBy,
       certifiedAt,
       certificationMemo: input.memo,
+      certifiedSnapshotId: snapshot.id,
     },
     createdBy: input.certifiedBy,
   });

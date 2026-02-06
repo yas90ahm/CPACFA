@@ -9,8 +9,9 @@ import request from 'supertest';
 import { describe, it, expect, beforeAll } from '@jest/globals';
 import { app } from '../../src/server.js';
 import { getTestAuthToken } from '../helpers/testHelpers.js';
-import { isDbConfigured } from '../../src/db/index.js';
+import { isDbConfigured, getTenantPool } from '../../src/db/index.js';
 import * as closeSessionRepo from '../../src/db/repositories/close_session_repository.js';
+import { createSnapshotFromTrialBalanceAndEntries } from '../../src/services/ledger_snapshot_service.js';
 
 const TEST_TENANT_ID = process.env.TEST_TENANT_ID ?? 'export-certified-gate-tenant';
 
@@ -26,7 +27,6 @@ describe('Export certified gate', () => {
     }
     authToken = getTestAuthToken(TEST_TENANT_ID);
     try {
-      const { getTenantPool } = await import('../../src/db/index.js');
       const pool = await getTenantPool(TEST_TENANT_ID);
       const locked = await closeSessionRepo.insertCloseSession(
         pool,
@@ -52,6 +52,31 @@ describe('Export certified gate', () => {
         'certified'
       );
       closeSessionIdCertified = certified.id;
+      // V2: certified binder/export requires a snapshot; create one and link to session.
+      const snapshot = await createSnapshotFromTrialBalanceAndEntries(pool, {
+        tenantId: TEST_TENANT_ID,
+        periodLabel: '2025-02',
+        closeSessionId: certified.id,
+        createdBy: 'test-setup',
+        source: 'close_session',
+        trialBalance: {
+          entries: [
+            { accountName: 'Cash', debit: 100, credit: 0 },
+            { accountName: 'Retained Earnings', debit: 0, credit: 100 },
+          ],
+          totalDebits: 100,
+          totalCredits: 100,
+        },
+      });
+      await closeSessionRepo.updateCertification(
+        pool,
+        TEST_TENANT_ID,
+        certified.id,
+        'test@test.com',
+        new Date().toISOString(),
+        'Setup',
+        snapshot.id
+      );
     } catch (e) {
       console.warn('Export certified gate: could not create test sessions (tenant or schema); skipping.', e);
     }

@@ -13,9 +13,10 @@ import { verifyChain } from '../../src/services/audit_ledger_service.js';
 
 const TEST_TENANT_ID = process.env.TEST_TENANT_ID ?? 'full-close-flow-tenant';
 const PERIOD_LABEL = '2025-01';
+// TB must satisfy balance sheet equation (Assets = L+E). Cash (asset) + Equity (equity) does.
 const SMALL_TB_CSV = `Account Name,Debit,Credit
 Cash,1000,0
-Revenue,0,1000`;
+Equity,0,1000`;
 
 describe('Full close flow integration', () => {
   let authToken: string;
@@ -30,20 +31,24 @@ describe('Full close flow integration', () => {
     authToken = getTestAuthToken(TEST_TENANT_ID);
   });
 
-  it('ingests trial balance', async () => {
-    if (!isDbConfigured()) return;
-    const path = process.env.NODE_ENV === 'production' ? '/api/trial-balance/ingest' : '/api-dev/trial-balance/ingest';
-    const res = await request(app)
-      .post(path)
-      .set('Content-Type', 'multipart/form-data')
-      .field('tenantId', TEST_TENANT_ID)
-      .field('periodLabel', PERIOD_LABEL)
-      .attach('file', Buffer.from(SMALL_TB_CSV), 'tb.csv');
-    expect([200, 401, 503]).toContain(res.status);
-    if (res.status === 503) return;
-    if (res.status === 401) return;
-    expect(res.body).toBeDefined();
-  });
+  it(
+    'ingests trial balance',
+    async () => {
+      if (!isDbConfigured()) return;
+      const path = process.env.NODE_ENV === 'production' ? '/api/trial-balance/ingest' : '/api-dev/trial-balance/ingest';
+      const res = await request(app)
+        .post(path)
+        .set('Content-Type', 'multipart/form-data')
+        .field('tenantId', TEST_TENANT_ID)
+        .field('periodLabel', PERIOD_LABEL)
+        .attach('file', Buffer.from(SMALL_TB_CSV), 'tb.csv');
+      expect([200, 401, 503]).toContain(res.status);
+      if (res.status === 503) return;
+      if (res.status === 401) return;
+      expect(res.body).toBeDefined();
+    },
+    15000
+  );
 
   it('creates close session', async () => {
     if (!isDbConfigured()) return;

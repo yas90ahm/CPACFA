@@ -48,7 +48,7 @@ describe('POST /api/precheck/board-ready', () => {
         periodLabel: '2025-01',
         trialBalance: [
           { accountName: 'Cash', debit: 1000, credit: 0 },
-          { accountName: 'Revenue', debit: 0, credit: 1000 },
+          { accountName: 'Retained Earnings', debit: 0, credit: 1000 },
         ],
       });
     if (res.status === 503) return;
@@ -92,6 +92,28 @@ describe('POST /api/precheck/board-ready', () => {
     expect(res.body.proofSummary.trialBalanceBalanced).toBe(false);
   });
 
+  it('balanced TB but Assets != L+E (e.g. Revenue not in BS buckets) => status not_ready with BALANCE_SHEET_EQUATION_FAILED', async () => {
+    if (!isDbConfigured()) return;
+    const res = await request(app)
+      .post('/api/precheck/board-ready')
+      .set('Authorization', `Bearer ${authToken}`)
+      .set('Content-Type', 'application/json')
+      .send({
+        periodLabel: '2025-01',
+        trialBalance: [
+          { accountName: 'Cash', debit: 1000, credit: 0 },
+          { accountName: 'Revenue', debit: 0, credit: 1000 },
+        ],
+      });
+    if (res.status === 503) return;
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('status', 'not_ready');
+    const blocker = res.body.blockers?.find((b: { code: string }) => b.code === 'BALANCE_SHEET_EQUATION_FAILED');
+    expect(blocker).toBeDefined();
+    expect(res.body.proofSummary.trialBalanceBalanced).toBe(true);
+    expect(res.body.proofSummary.balanceSheetEquationBalanced).toBe(false);
+  });
+
   it('plug detection (Suspense + Other) => status not_ready with PLUG_ACCOUNTS_DETECTED', async () => {
     if (!isDbConfigured()) return;
     const res = await request(app)
@@ -123,11 +145,11 @@ describe('POST /api/precheck/board-ready', () => {
         periodLabel: '2025-01',
         trialBalance: [
           { accountName: 'Cash', debit: 1000, credit: 0 },
-          { accountName: 'Revenue', debit: 0, credit: 1000 },
+          { accountName: 'Retained Earnings', debit: 0, credit: 1000 },
         ],
         journalEntries: [
           { accountRef: 'Cash', debit: 100, credit: 0 },
-          { accountRef: 'Revenue', debit: 0, credit: 100 },
+          { accountRef: 'Retained Earnings', debit: 0, credit: 100 },
         ],
       });
     if (res.status === 503) return;

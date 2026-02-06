@@ -59,8 +59,8 @@ describe('Shadow Auditor gate', () => {
           closeSessionId,
           source: 'manual',
           lines: [
-            { accountRef: 'Cash', debit: 1, credit: 0 },
-            { accountRef: 'Revenue', debit: 0, credit: 1 },
+            { accountRef: 'Cash', debit: 1, credit: 0, amountProvenance: { kind: 'human_entered', enteredBy: 'test-user' } },
+            { accountRef: 'Revenue', debit: 0, credit: 1, amountProvenance: { kind: 'human_entered', enteredBy: 'test-user' } },
           ],
         });
       expect([200, 201]).toContain(createJeRes.status);
@@ -130,8 +130,8 @@ describe('Shadow Auditor gate', () => {
           closeSessionId: sessionId,
           source: 'manual',
           lines: [
-            { accountRef: 'Cash', debit: 1, credit: 0 },
-            { accountRef: 'Revenue', debit: 0, credit: 1 },
+            { accountRef: 'Cash', debit: 1, credit: 0, amountProvenance: { kind: 'human_entered', enteredBy: 'test-user' } },
+            { accountRef: 'Revenue', debit: 0, credit: 1, amountProvenance: { kind: 'human_entered', enteredBy: 'test-user' } },
           ],
         });
       expect([200, 201]).toContain(createJeRes.status);

@@ -25,10 +25,11 @@ import { validateTrialBalanceAndBalanceSheet } from './integrity_gate_service.js
 import { verifyChain } from './audit_ledger_service.js';
 import { finalIntegrityCheck } from './integrity_check.js';
 import { buildCertifiedStatementsFromSnapshot } from './certified_statements_service.js';
-import { getLatestSnapshotByCloseSessionId } from '../db/repositories/ledger_snapshot_repository.js';
+import { getLatestSnapshotByCloseSessionId, getLedgerSnapshotById } from '../db/repositories/ledger_snapshot_repository.js';
+import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
 import * as statementRegistry from '../db/repositories/statement_registry_repository.js';
 import * as closeAuditTrail from '../db/repositories/close_audit_trail_repository.js';
-import { disallowMemoryStoreInProduction } from '../lib/env.js';
+import { disallowMemoryStoreInProduction, ALLOW_LEGACY_CERTIFIED_SOURCE } from '../lib/env.js';
 import type { Pool } from 'pg';
 
 // --- Last statement generation: tenant DB when pool/tenantId provided; else in-memory (dev only; production disallows) ---
@@ -142,25 +143,49 @@ export async function getLastStatementGeneration(
   return lastStatementGeneration;
 }
 
+export type CertifiedSourceKind = 'certified_snapshot' | 'session_snapshot' | 'legacy';
+
+export interface GetCertifiedStatementsResult {
+  statements: FinancialStatementsOutput;
+  source: CertifiedSourceKind;
+}
+
 /**
- * Canonical certified statements for binder/export: from snapshot when available, else last registered + Truth Gate.
- * Returns null when no statements or final integrity check fails.
+ * Canonical certified statements for binder/export.
+ * Default: requires certified snapshot (certification creates it). Legacy fallback only when allowLegacyCertifiedSource is true or ALLOW_LEGACY_CERTIFIED_SOURCE env is set.
+ * Prefers session.certifiedSnapshotId (fast path); then latest by close_session_id; then last registered + Truth Gate only if legacy allowed.
+ * Returns null when no statements, integrity check fails, or (when closeSessionId present and no snapshot) legacy not allowed.
  */
 export async function getCertifiedStatementsForBinder(
   pool: Pool,
   tenantId: string,
-  closeSessionId?: string
-): Promise<FinancialStatementsOutput | null> {
+  closeSessionId?: string,
+  options?: { allowLegacyCertifiedSource?: boolean }
+): Promise<GetCertifiedStatementsResult | null> {
+  const allowLegacy = options?.allowLegacyCertifiedSource === true || ALLOW_LEGACY_CERTIFIED_SOURCE();
+
   if (closeSessionId) {
-    const snapshot = await getLatestSnapshotByCloseSessionId(pool, closeSessionId);
+    const session = await getCloseSessionById(pool, tenantId, closeSessionId);
+    const snapshotId = session?.certifiedSnapshotId;
+    const snapshot = snapshotId
+      ? await getLedgerSnapshotById(pool, snapshotId)
+      : await getLatestSnapshotByCloseSessionId(pool, closeSessionId);
     if (snapshot) {
       try {
-        return buildCertifiedStatementsFromSnapshot(snapshot.snapshotPayloadJson);
+        const statements = buildCertifiedStatementsFromSnapshot(snapshot.snapshotPayloadJson);
+        return {
+          statements,
+          source: snapshotId ? 'certified_snapshot' : 'session_snapshot',
+        };
       } catch {
         return null;
       }
     }
+    if (!allowLegacy) {
+      return null;
+    }
   }
+
   const stored = await getLastStatementGeneration(tenantId, pool);
   const statements = stored?.statements;
   if (statements?.trialBalance == null || statements?.balanceSheet == null) return null;
@@ -171,7 +196,7 @@ export async function getCertifiedStatementsForBinder(
     balanceSheet: { totalAssets: bs.totalAssets ?? 0, totalLiabilities: bs.totalLiabilities ?? 0, totalEquity: bs.totalEquity ?? 0 },
     entriesForPlugDetection: tb.entries?.map((e) => ({ accountName: e.accountName ?? '', debit: e.debit ?? 0, credit: e.credit ?? 0 })),
   });
-  return finalCheck.passed ? statements : null;
+  return finalCheck.passed ? { statements, source: 'legacy' } : null;
 }
 
 // --- Line-level deep links ---

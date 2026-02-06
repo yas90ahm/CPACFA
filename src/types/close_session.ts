@@ -27,6 +27,8 @@ export interface CloseSession {
   certifiedBy?: string;
   certifiedAt?: string;  // ISO
   certificationMemo?: string;
+  /** Ledger snapshot id created at certification (source of truth for binder/export). */
+  certifiedSnapshotId?: string;
   createdAt: string;  // ISO
   updatedAt: string;  // ISO
 }

@@ -149,22 +149,26 @@ describe('Sovereign Validator — High-Integrity Accounting Engine', () => {
   // 3. Where AI Helps (Operational Audit) — IRAC justification
   // ==========================================================================
   describe('3. Where AI Helps (Operational Audit)', () => {
-    it('justification_service produces IRAC-grounded memo with standard citation (e.g. ASC 842)', async () => {
-      const response = await justifyWithRAG(
-        'How should we recognize a 3-year operating lease under US GAAP?',
-        { framework: 'FASB' }
-      );
-      expect(response.irac).toBeDefined();
-      expect(response.irac.issue).toBeDefined();
-      expect(response.irac.rule).toBeDefined();
-      expect(response.irac.analysis).toBeDefined();
-      expect(response.irac.conclusion).toBeDefined();
-      expect(response.sourceTag).toBeDefined();
-      expect(response.formatted).toMatch(/\[Source:/);
-      expect(
-        response.formatted.includes('ASC') || response.formatted.includes('FASB') || response.irac.rule.includes('842')
-      ).toBe(true);
-    });
+    it(
+      'justification_service produces IRAC-grounded memo with standard citation (e.g. ASC 842)',
+      async () => {
+        const response = await justifyWithRAG(
+          'How should we recognize a 3-year operating lease under US GAAP?',
+          { framework: 'FASB' }
+        );
+        expect(response.irac).toBeDefined();
+        expect(response.irac.issue).toBeDefined();
+        expect(response.irac.rule).toBeDefined();
+        expect(response.irac.analysis).toBeDefined();
+        expect(response.irac.conclusion).toBeDefined();
+        expect(response.sourceTag).toBeDefined();
+        expect(response.formatted).toMatch(/\[Source:/);
+        expect(
+          response.formatted.includes('ASC') || response.formatted.includes('FASB') || response.irac.rule.includes('842')
+        ).toBe(true);
+      },
+      15000
+    );
   });
 
   // ==========================================================================

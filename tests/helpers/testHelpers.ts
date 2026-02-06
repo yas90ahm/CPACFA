@@ -14,21 +14,29 @@ interface TestTenant {
 
 const testTenants: Map<string, TestTenant> = new Map();
 
+/** Quote identifier for PostgreSQL (schema/table names); escapes double quotes. */
+function quoteId(id: string): string {
+  return `"${id.replace(/"/g, '""')}"`;
+}
+
 /**
- * Create a test tenant with isolated database
+ * Create a test tenant with isolated database.
+ * Uses DATABASE_URL when set (same as app); otherwise TEST_DB_* for local test DB.
  */
 export async function createTestTenant(): Promise<TestTenant> {
   const tenantId = `test_${uuidv4()}`;
   const tenantName = `Test Tenant ${tenantId}`;
-  
-  // Create a pool for the test tenant
-  const pool = new Pool({
-    host: process.env.TEST_DB_HOST || 'localhost',
-    port: parseInt(process.env.TEST_DB_PORT || '5432'),
-    database: process.env.TEST_DB_NAME || 'cpacfa_test',
-    user: process.env.TEST_DB_USER || 'postgres',
-    password: process.env.TEST_DB_PASSWORD || 'postgres',
-  });
+
+  const pool =
+    process.env.DATABASE_URL?.trim()
+      ? new Pool({ connectionString: process.env.DATABASE_URL.trim(), max: 5 })
+      : new Pool({
+          host: process.env.TEST_DB_HOST || 'localhost',
+          port: parseInt(process.env.TEST_DB_PORT || '5432'),
+          database: process.env.TEST_DB_NAME || 'cpacfa_test',
+          user: process.env.TEST_DB_USER || 'postgres',
+          password: process.env.TEST_DB_PASSWORD || 'postgres',
+        });
 
   // Run migrations for test tenant
   await runMigrations(pool, tenantId);
@@ -50,8 +58,8 @@ export async function cleanupTestTenant(tenantId: string): Promise<void> {
   const tenant = testTenants.get(tenantId);
   if (!tenant) return;
 
-  // Drop tenant schema
-  await tenant.pool.query(`DROP SCHEMA IF EXISTS ${tenantId} CASCADE`);
+  // Drop tenant schema (quoted: tenantId may contain hyphens from UUID)
+  await tenant.pool.query(`DROP SCHEMA IF EXISTS ${quoteId(tenantId)} CASCADE`);
   
   // Close pool
   await tenant.pool.end();
@@ -63,21 +71,22 @@ export async function cleanupTestTenant(tenantId: string): Promise<void> {
  * Run database migrations for a tenant
  */
 async function runMigrations(pool: Pool, tenantId: string): Promise<void> {
-  // Create tenant schema
-  await pool.query(`CREATE SCHEMA IF NOT EXISTS ${tenantId}`);
-  
+  const q = quoteId(tenantId);
+  // Create tenant schema (quoted: tenantId may contain hyphens from UUID)
+  await pool.query(`CREATE SCHEMA IF NOT EXISTS ${q}`);
+
   // Run migrations (simplified for testing)
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS ${tenantId}.users (
+    CREATE TABLE IF NOT EXISTS ${q}.users (
       id VARCHAR(255) PRIMARY KEY,
       email VARCHAR(255) UNIQUE NOT NULL,
       password_hash VARCHAR(255) NOT NULL,
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
-  
+
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS ${tenantId}.stock_grants (
+    CREATE TABLE IF NOT EXISTS ${q}.stock_grants (
       id VARCHAR(255) PRIMARY KEY,
       grant_type VARCHAR(50) NOT NULL,
       grant_date DATE NOT NULL,
@@ -87,7 +96,7 @@ async function runMigrations(pool: Pool, tenantId: string): Promise<void> {
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
-  
+
   // Add more tables as needed for tests
 }
 
@@ -127,7 +136,7 @@ export async function createTestUser(
   const passwordHash = 'hashed_' + password; // Simplified for testing
 
   await tenant.pool.query(
-    `INSERT INTO ${tenantId}.users (id, email, password_hash) VALUES ($1, $2, $3)`,
+    `INSERT INTO ${quoteId(tenantId)}.users (id, email, password_hash) VALUES ($1, $2, $3)`,
     [userId, email, passwordHash]
   );
 

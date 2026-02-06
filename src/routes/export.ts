@@ -191,11 +191,18 @@ router.post('/pdf', async (req: Request, res: Response) => {
       if (closeSessionIdExport && tenantId && pool) {
         const { getCertifiedStatementsForBinder } = await import('../services/audit_export_service.js');
         const { statementsToExportPayload } = await import('../services/certified_statements_service.js');
-        const certifiedStatements = await getCertifiedStatementsForBinder(pool, tenantId, closeSessionIdExport);
-        if (certifiedStatements) {
-          const payload = statementsToExportPayload(certifiedStatements);
+        const allowLegacy = (req.query.allowLegacyCertifiedSource as string) === '1' || process.env.ALLOW_LEGACY_CERTIFIED_SOURCE === 'true';
+        const result = await getCertifiedStatementsForBinder(pool, tenantId, closeSessionIdExport, { allowLegacyCertifiedSource: allowLegacy });
+        if (result) {
+          const payload = statementsToExportPayload(result.statements);
           financial_statements = payload.financial_statements;
           clean_ledger_raw = payload.clean_ledger;
+        } else if (!allowLegacy) {
+          return res.status(422).json({
+            error: 'Unprocessable Entity',
+            code: 'NO_CERTIFIED_SOURCE',
+            message: 'No certified snapshot for this session. Certification creates the snapshot. Use allowLegacyCertifiedSource=1 or ALLOW_LEGACY_CERTIFIED_SOURCE=true for legacy.',
+          });
         }
       }
     }
@@ -501,10 +508,17 @@ router.post('/csv', async (req: Request, res: Response) => {
     if (exportModeCsv === 'certified' && closeSessionIdCsv && tenantId && pool) {
       const { getCertifiedStatementsForBinder } = await import('../services/audit_export_service.js');
       const { statementsToExportPayload } = await import('../services/certified_statements_service.js');
-      const certifiedStatements = await getCertifiedStatementsForBinder(pool, tenantId, closeSessionIdCsv);
-      if (certifiedStatements) {
-        const payload = statementsToExportPayload(certifiedStatements);
+      const allowLegacyCsv = (req.query.allowLegacyCertifiedSource as string) === '1' || process.env.ALLOW_LEGACY_CERTIFIED_SOURCE === 'true';
+      const resultCsv = await getCertifiedStatementsForBinder(pool, tenantId, closeSessionIdCsv, { allowLegacyCertifiedSource: allowLegacyCsv });
+      if (resultCsv) {
+        const payload = statementsToExportPayload(resultCsv.statements);
         raw = payload.clean_ledger as typeof raw;
+      } else if (!allowLegacyCsv) {
+        return res.status(422).json({
+          error: 'Unprocessable Entity',
+          code: 'NO_CERTIFIED_SOURCE',
+          message: 'No certified snapshot for this session. Certification creates the snapshot. Use allowLegacyCertifiedSource=1 or ALLOW_LEGACY_CERTIFIED_SOURCE=true for legacy.',
+        });
       }
     }
     let totalDebitsCsv = 0;
