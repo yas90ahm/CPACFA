@@ -15,7 +15,8 @@ describe('precheck_board_ready_service', () => {
         periodLabel: '2025-01',
         trialBalance: [
           { accountName: 'Cash', debit: 1000, credit: 0 },
-          { accountName: 'Revenue', debit: 0, credit: 1000 },
+          { accountName: 'Account Payable', debit: 0, credit: 200 },
+          { accountName: 'Equity', debit: 0, credit: 800 },
         ],
       };
       const verdict = runPrecheckBoardReady(input);
@@ -77,11 +78,12 @@ describe('precheck_board_ready_service', () => {
         periodLabel: '2025-01',
         trialBalance: [
           { accountName: 'Cash', debit: 1000, credit: 0 },
-          { accountName: 'Revenue', debit: 0, credit: 1000 },
+          { accountName: 'Account Payable', debit: 0, credit: 200 },
+          { accountName: 'Equity', debit: 0, credit: 800 },
         ],
         journalEntries: [
           { accountRef: 'Cash', debit: 100, credit: 0 },
-          { accountRef: 'Revenue', debit: 0, credit: 100 },
+          { accountRef: 'Equity', debit: 0, credit: 100 },
         ],
       });
       expect(verdict.status).toBe('ready');

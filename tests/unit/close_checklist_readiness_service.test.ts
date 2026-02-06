@@ -54,7 +54,8 @@ describe('Close checklist readiness — initializeChecklistTemplate', () => {
     jest.spyOn(itemRepo, 'hasChecklistForSession').mockResolvedValue(false);
     jest.spyOn(itemRepo, 'insertChecklistItem').mockResolvedValue({ ...sampleItem });
     const result = await initializeChecklistTemplate(mockPool, 'sess-1');
-    expect(result).toHaveLength(4);
+    expect(result.created).toBe(true);
+    expect(result.items).toHaveLength(4);
     expect(itemRepo.insertChecklistItem).toHaveBeenCalledTimes(4);
   });
 
@@ -66,7 +67,8 @@ describe('Close checklist readiness — initializeChecklistTemplate', () => {
     ]);
     const insertSpy = jest.spyOn(itemRepo, 'insertChecklistItem');
     const result = await initializeChecklistTemplate(mockPool, 'sess-1');
-    expect(result).toHaveLength(2);
+    expect(result.created).toBe(false);
+    expect(result.items).toHaveLength(2);
     expect(insertSpy).not.toHaveBeenCalled();
   });
 });
@@ -81,7 +83,7 @@ describe('Close checklist readiness — computeReadiness', () => {
     jest.spyOn(reconRepo, 'listReconRunsByCloseSession').mockResolvedValue([]);
     jest.spyOn(issueService, 'listIssues').mockResolvedValue([]);
     jest.spyOn(jeRepo, 'listJournalEntries').mockResolvedValue([]);
-    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true });
+    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true, entryCount: 1, verifiedAt: new Date().toISOString() });
     jest.spyOn(periodExportChecks, 'getPeriodExportChecks').mockResolvedValue(null);
     const result = await computeReadiness(mockPool, 't1', sampleSession);
     expect(result.ready).toBe(false);
@@ -96,7 +98,7 @@ describe('Close checklist readiness — computeReadiness', () => {
     jest.spyOn(reconRepo, 'listReconRunsByCloseSession').mockResolvedValue([]);
     jest.spyOn(issueService, 'listIssues').mockResolvedValue([]);
     jest.spyOn(jeRepo, 'listJournalEntries').mockResolvedValue([]);
-    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true });
+    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true, entryCount: 1, verifiedAt: new Date().toISOString() });
     jest.spyOn(periodExportChecks, 'getPeriodExportChecks').mockResolvedValue(null);
     const result = await computeReadiness(mockPool, 't1', sampleSession);
     expect(result.ready).toBe(false);
@@ -114,7 +116,7 @@ describe('Close checklist readiness — computeReadiness', () => {
     jest.spyOn(reconRepo, 'listReconRunsByCloseSession').mockResolvedValue([]);
     jest.spyOn(issueService, 'listIssues').mockResolvedValue([]);
     jest.spyOn(jeRepo, 'listJournalEntries').mockResolvedValue([]);
-    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true });
+    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true, entryCount: 1, verifiedAt: new Date().toISOString() });
     jest.spyOn(periodExportChecks, 'getPeriodExportChecks').mockResolvedValue(null);
     const result = await computeReadiness(mockPool, 't1', sampleSession);
     expect(result.ready).toBe(true);
@@ -144,7 +146,7 @@ describe('Close checklist readiness — computeReadiness', () => {
       } as any,
     ]);
     jest.spyOn(jeRepo, 'listJournalEntries').mockResolvedValue([]);
-    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true });
+    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true, entryCount: 1, verifiedAt: new Date().toISOString() });
     jest.spyOn(periodExportChecks, 'getPeriodExportChecks').mockResolvedValue(null);
     const result = await computeReadiness(mockPool, 't1', sampleSession);
     expect(result.ready).toBe(false);
@@ -164,7 +166,7 @@ describe('Close checklist readiness — computeReadiness', () => {
     jest.spyOn(jeRepo, 'listJournalEntries').mockResolvedValue([
       { id: 'je-1', closeSessionId: 'sess-1', tenantId: 't1', status: 'draft' } as any,
     ]);
-    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true });
+    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true, entryCount: 1, verifiedAt: new Date().toISOString() });
     jest.spyOn(periodExportChecks, 'getPeriodExportChecks').mockResolvedValue(null);
     const result = await computeReadiness(mockPool, 't1', sampleSession);
     expect(result.ready).toBe(false);
@@ -182,7 +184,7 @@ describe('Close checklist readiness — computeReadiness', () => {
     jest.spyOn(reconRepo, 'listReconRunsByCloseSession').mockResolvedValue([]);
     jest.spyOn(issueService, 'listIssues').mockResolvedValue([]);
     jest.spyOn(jeRepo, 'listJournalEntries').mockResolvedValue([]);
-    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: false, message: 'Chain broken' });
+    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: false, message: 'Chain broken', entryCount: 1, verifiedAt: new Date().toISOString() });
     jest.spyOn(periodExportChecks, 'getPeriodExportChecks').mockResolvedValue(null);
     const result = await computeReadiness(mockPool, 't1', sampleSession);
     expect(result.ready).toBe(false);

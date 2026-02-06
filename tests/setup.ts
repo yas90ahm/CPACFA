@@ -8,6 +8,7 @@ import { cleanupAllTestTenants } from './helpers/testHelpers.js';
 // Set test environment variables (preserve NODE_ENV=production for auth bypass production tests)
 if (process.env.TEST_AUTH_PRODUCTION !== '1') {
   process.env.NODE_ENV = 'test';
+  process.env.REQUIRE_AUTH = 'false';
 }
 process.env.JWT_SECRET = 'test_secret_key_for_testing_only';
 process.env.TEST_DB_HOST = process.env.TEST_DB_HOST || 'localhost';

@@ -26,7 +26,7 @@ describe('Export gate — materiality and chain verification', () => {
       aggregateRoundingExceedsMateriality: false,
       updatedAt: '2025-01-01T00:00:00Z',
     });
-    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true });
+    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true, entryCount: 1, verifiedAt: new Date().toISOString() });
     const result = await checkExportGate({
       pool: mockPool,
       tenantId: 'test-tenant',
@@ -45,7 +45,7 @@ describe('Export gate — materiality and chain verification', () => {
       aggregateRoundingExceedsMateriality: true,
       updatedAt: '2025-01-01T00:00:00Z',
     });
-    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true });
+    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true, entryCount: 1, verifiedAt: new Date().toISOString() });
     const result = await checkExportGate({
       pool: mockPool,
       tenantId: 'test-tenant',
@@ -61,6 +61,8 @@ describe('Export gate — materiality and chain verification', () => {
       valid: false,
       brokenAtEntryId: 'al-123',
       message: 'Hash mismatch',
+      entryCount: 1,
+      verifiedAt: new Date().toISOString(),
     });
     const result = await checkExportGate({
       pool: mockPool,
@@ -73,7 +75,7 @@ describe('Export gate — materiality and chain verification', () => {
 
   it('allows export when materiality and chain pass', async () => {
     jest.spyOn(periodExportChecks, 'getPeriodExportChecks').mockResolvedValue(null);
-    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true });
+    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true, entryCount: 1, verifiedAt: new Date().toISOString() });
     jest.spyOn(riskContextStore, 'getUnresolvedConflicts').mockResolvedValue([]);
     jest.spyOn(riskContextStore, 'getQualitativeEvidenceMissing').mockResolvedValue(false);
     jest.spyOn(conflictsRepo, 'countResolvedByTenantPeriod').mockResolvedValue(0);

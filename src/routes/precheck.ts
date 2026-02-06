@@ -53,7 +53,7 @@ router.post('/board-ready', (req: Request, res: Response) => {
     });
     res.json(verdict);
   } catch (err) {
-    send500(req, res, err as Error, 'precheck.board-ready');
+    send500(res, err as Error, 'precheck.board-ready');
   }
 });
 

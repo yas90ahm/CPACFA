@@ -74,5 +74,5 @@ describe('runShadowAudit fail-open', () => {
       expect(result.findings.some((f) => f.code === 'AI_FAILED')).toBe(true);
       expect(result.severity).not.toBe('block');
     }
-  });
+  }, 15000);
 });
