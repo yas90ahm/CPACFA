@@ -27,6 +27,7 @@ import memoryRouter from './routes/memory.js';
 import integrationsRouter from './routes/integrations.js';
 import pipelinesRouter from './routes/pipelines.js';
 import closeRouter from './routes/close/index.js';
+import precheckRouter from './routes/precheck.js';
 import coaMappingRouter from './routes/coa_mapping.js';
 import dataQualityRouter from './routes/data_quality.js';
 import approvalsRouter from './routes/approvals.js';
@@ -145,6 +146,9 @@ app.use('/api/pipelines', pipelinesRouter);
 
 // API: Month-end close — JE suggestions, checklist, period lock, audit log, segregation
 app.use('/api/close', closeRouter);
+
+// API: Pre-certification structural check (board-ready) — stateless, no DB/AI
+app.use('/api/precheck', precheckRouter);
 
 // API: COA Mapping — FS taxonomy lines, mapping rules, apply rules to accounts
 app.use('/api/coa-mapping', coaMappingRouter);

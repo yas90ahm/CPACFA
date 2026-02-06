@@ -183,7 +183,22 @@ router.post('/pdf', async (req: Request, res: Response) => {
 
     const body = req.body as Record<string, unknown> & { pdf_type?: string; agent_context?: AgentExportContext };
     const pdfType = (body?.pdf_type ?? 'detailed') as string;
-    const financial_statements = (body.financial_statements as Record<string, unknown>) ?? {};
+    type CleanLedgerRow = { account_code?: string; account_name: string; debit: number; credit: number; account_type?: string };
+    let financial_statements: Record<string, unknown> = (body.financial_statements as Record<string, unknown>) ?? {};
+    let clean_ledger_raw: CleanLedgerRow[] = (body.clean_ledger as CleanLedgerRow[]) ?? [];
+    if (exportMode === 'certified') {
+      const closeSessionIdExport = (bodyForMode.closeSessionId ?? (req.query.closeSessionId as string) ?? '') as string;
+      if (closeSessionIdExport && tenantId && pool) {
+        const { getCertifiedStatementsForBinder } = await import('../services/audit_export_service.js');
+        const { statementsToExportPayload } = await import('../services/certified_statements_service.js');
+        const certifiedStatements = await getCertifiedStatementsForBinder(pool, tenantId, closeSessionIdExport);
+        if (certifiedStatements) {
+          const payload = statementsToExportPayload(certifiedStatements);
+          financial_statements = payload.financial_statements;
+          clean_ledger_raw = payload.clean_ledger;
+        }
+      }
+    }
 
     const conflictInput = extractIntegrityConflictInput(financial_statements);
     if (conflictInput) {
@@ -225,7 +240,6 @@ router.post('/pdf', async (req: Request, res: Response) => {
       }
     }
 
-    const clean_ledger_raw = (body.clean_ledger as Array<{ account_code?: string; account_name: string; debit: number; credit: number; account_type?: string }>) ?? [];
     const bs = (financial_statements.balance_sheet ?? financial_statements.balanceSheet) as Record<string, unknown> | undefined;
     const totalAssets = bs != null ? Number(bs.total_assets ?? bs.totalAssets ?? 0) : 0;
     const totalLiabilities = bs != null ? Number(bs.total_liabilities ?? bs.totalLiabilities ?? 0) : 0;
@@ -276,7 +290,6 @@ router.post('/pdf', async (req: Request, res: Response) => {
       const cover = (body.cover as Record<string, string>) ?? {};
       const audit_trail = (body.audit_trail as Array<{ timestamp_utc: string; event_type: string; reasoning: string; citations: string; outcome: string }>) ?? [];
       const audit_trail_rules_cited = (body.audit_trail_rules_cited as string[]) ?? [];
-      const clean_ledger_raw = (body.clean_ledger as Array<{ account_code?: string; account_name: string; debit: number; credit: number; account_type?: string }>) ?? [];
       const binderSummary = {
         entityName: cover.entity_name,
         periodStart: (body.periodStart as string) ?? '',
@@ -483,7 +496,17 @@ router.post('/csv', async (req: Request, res: Response) => {
     const body = req.body as {
       clean_ledger?: Array<{ account_code?: string; account_name: string; debit: number; credit: number; account_type?: string; Agent_Confidence_Score?: number }>;
     };
-    const raw = body?.clean_ledger ?? [];
+    const closeSessionIdCsv = (bodyCsv.closeSessionId ?? (req.query.closeSessionId as string) ?? '') as string;
+    let raw: Array<{ account_code?: string; account_name: string; debit: number; credit: number; account_type?: string; Agent_Confidence_Score?: number }> = body?.clean_ledger ?? [];
+    if (exportModeCsv === 'certified' && closeSessionIdCsv && tenantId && pool) {
+      const { getCertifiedStatementsForBinder } = await import('../services/audit_export_service.js');
+      const { statementsToExportPayload } = await import('../services/certified_statements_service.js');
+      const certifiedStatements = await getCertifiedStatementsForBinder(pool, tenantId, closeSessionIdCsv);
+      if (certifiedStatements) {
+        const payload = statementsToExportPayload(certifiedStatements);
+        raw = payload.clean_ledger as typeof raw;
+      }
+    }
     let totalDebitsCsv = 0;
     let totalCreditsCsv = 0;
     for (const row of raw) {

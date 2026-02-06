@@ -7,7 +7,7 @@ import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import {
   buildAuditBinder,
   registerStatementGeneration,
-  getLastStatementGeneration,
+  getCertifiedStatementsForBinder,
 } from '../../services/audit_export_service.js';
 import {
   exportAuditBinderToPdf,
@@ -15,7 +15,6 @@ import {
   exportDraftPackageToPdf,
 } from '../../services/audit_binder_export_service.js';
 import { checkExportGate } from '../../services/export_gate_service.js';
-import { finalIntegrityCheck } from '../../services/integrity_check.js';
 import { listStagingItems } from '../../services/persistence_service.js';
 import { validateBody } from '../../middleware/validationMiddleware.js';
 import { registerStatementsBodySchema } from '../../schemas/auditSchemas.js';
@@ -85,7 +84,7 @@ async function requireCertifiedSession(
   return { allowed: true, pool, tenantId };
 }
 
-/** Run checkExportGate and finalIntegrityCheck (Truth Gate) before binder. Returns false and sends 403/422 if gate fails. */
+/** Run checkExportGate only. Certified statements (with Truth Gate) are obtained via getCertifiedStatementsForBinder. */
 async function runBinderExportGates(
   req: Request,
   res: Response,
@@ -108,36 +107,6 @@ async function runBinderExportGates(
     });
     return false;
   }
-  const stored = await getLastStatementGeneration(auth.tenantId, auth.pool);
-  const statements = stored?.statements;
-  if (statements?.trialBalance != null && statements?.balanceSheet != null) {
-    const tb = statements.trialBalance as { totalDebits: number; totalCredits: number; entries?: Array<{ accountName: string; debit: number; credit: number }> };
-    const bs = statements.balanceSheet as { totalAssets: number; totalLiabilities: number; totalEquity: number };
-    const finalCheck = finalIntegrityCheck({
-      trialBalance: { totalDebits: tb.totalDebits ?? 0, totalCredits: tb.totalCredits ?? 0 },
-      balanceSheet: {
-        totalAssets: bs.totalAssets ?? 0,
-        totalLiabilities: bs.totalLiabilities ?? 0,
-        totalEquity: bs.totalEquity ?? 0,
-      },
-      entriesForPlugDetection: tb.entries?.map((e) => ({
-        accountName: e.accountName ?? '',
-        debit: e.debit ?? 0,
-        credit: e.credit ?? 0,
-      })),
-    });
-    if (!finalCheck.passed) {
-      res.status(422).json({
-        error: 'Unprocessable Entity',
-        code: 'FINAL_INTEGRITY_CHECK_FAILED',
-        message: finalCheck.error ?? 'Binder export blocked: imbalance or unclassified Suspense accounts.',
-        checks: finalCheck.checks,
-        suspenseAccounts: finalCheck.suspenseAccounts,
-        plugSuspicious: finalCheck.plugSuspicious,
-      });
-      return false;
-    }
-  }
   return true;
 }
 
@@ -158,12 +127,22 @@ router.post('/register-statements', validateBody(registerStatementsBodySchema), 
   }
 });
 
-/** GET /api/audit/binder — certified only; requires closeSessionId, session.status === 'certified', checkExportGate, and finalIntegrityCheck. */
+/** GET /api/audit/binder — certified only; requires closeSessionId, session.status === 'certified', checkExportGate. Uses canonical getCertifiedStatementsForBinder (snapshot or last registered + Truth Gate). */
 router.get('/binder', async (req: Request, res: Response) => {
   try {
     const auth = await requireCertifiedSession(req, res);
     if (!auth || !auth.pool || auth.tenantId == null) return;
     if (!(await runBinderExportGates(req, res, { pool: auth.pool, tenantId: auth.tenantId }))) return;
+    const closeSessionId = (req.query.closeSessionId as string) ?? '';
+    const statements = await getCertifiedStatementsForBinder(auth.pool, auth.tenantId, closeSessionId);
+    if (!statements) {
+      res.status(422).json({
+        error: 'Unprocessable Entity',
+        code: 'FINAL_INTEGRITY_CHECK_FAILED',
+        message: 'No certified statements available or Truth Gate failed. Create a ledger snapshot for this session or register statements that pass integrity check.',
+      });
+      return;
+    }
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
     const periodLabel = periodEnd.slice(0, 7);
@@ -175,6 +154,7 @@ router.get('/binder', async (req: Request, res: Response) => {
       periodStart,
       periodEnd,
       entityName,
+      statements,
       baseSourceDocumentUrl: `${baseUrl}/api/audit/source-document`,
       baseReasoningUrl: `${baseUrl}/api/audit/reasoning`,
       tenantId: auth.tenantId,
@@ -187,23 +167,33 @@ router.get('/binder', async (req: Request, res: Response) => {
   }
 });
 
-/** GET /api/audit/binder/export/pdf — certified only; requires closeSessionId, session.status === 'certified', checkExportGate, and finalIntegrityCheck. */
+/** GET /api/audit/binder/export/pdf — certified only; uses getCertifiedStatementsForBinder. */
 router.get('/binder/export/pdf', async (req: Request, res: Response) => {
   try {
     const auth = await requireCertifiedSession(req, res);
     if (!auth || !auth.pool || auth.tenantId == null) return;
     if (!(await runBinderExportGates(req, res, { pool: auth.pool, tenantId: auth.tenantId }))) return;
+    const closeSessionId = (req.query.closeSessionId as string) ?? '';
+    const statements = await getCertifiedStatementsForBinder(auth.pool, auth.tenantId, closeSessionId);
+    if (!statements) {
+      res.status(422).json({
+        error: 'Unprocessable Entity',
+        code: 'FINAL_INTEGRITY_CHECK_FAILED',
+        message: 'No certified statements available or Truth Gate failed.',
+      });
+      return;
+    }
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
-    const periodLabel = periodEnd.slice(0, 7);
     const entityName = (req.query.entityName as string) ?? 'Entity';
     const host = req.get('host');
     const baseUrl = req.protocol + '://' + (host ?? '');
-    const ingestMetadata = await getIngestMetadataForPeriod(auth.pool, auth.tenantId, periodLabel);
+    const ingestMetadata = await getIngestMetadataForPeriod(auth.pool, auth.tenantId, periodEnd.slice(0, 7));
     const binder = await buildAuditBinder({
       periodStart,
       periodEnd,
       entityName,
+      statements,
       baseSourceDocumentUrl: `${baseUrl}/api/audit/source-document`,
       baseReasoningUrl: `${baseUrl}/api/audit/reasoning`,
       tenantId: auth.tenantId,
@@ -219,23 +209,33 @@ router.get('/binder/export/pdf', async (req: Request, res: Response) => {
   }
 });
 
-/** GET /api/audit/binder/export/csv — certified only; requires closeSessionId, session.status === 'certified', checkExportGate, and finalIntegrityCheck. */
+/** GET /api/audit/binder/export/csv — certified only; uses getCertifiedStatementsForBinder. */
 router.get('/binder/export/csv', async (req: Request, res: Response) => {
   try {
     const auth = await requireCertifiedSession(req, res);
     if (!auth || !auth.pool || auth.tenantId == null) return;
     if (!(await runBinderExportGates(req, res, { pool: auth.pool, tenantId: auth.tenantId }))) return;
+    const closeSessionId = (req.query.closeSessionId as string) ?? '';
+    const statements = await getCertifiedStatementsForBinder(auth.pool, auth.tenantId, closeSessionId);
+    if (!statements) {
+      res.status(422).json({
+        error: 'Unprocessable Entity',
+        code: 'FINAL_INTEGRITY_CHECK_FAILED',
+        message: 'No certified statements available or Truth Gate failed.',
+      });
+      return;
+    }
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
-    const periodLabel = periodEnd.slice(0, 7);
     const entityName = (req.query.entityName as string) ?? 'Entity';
     const host = req.get('host');
     const baseUrl = req.protocol + '://' + (host ?? '');
-    const ingestMetadata = await getIngestMetadataForPeriod(auth.pool, auth.tenantId, periodLabel);
+    const ingestMetadata = await getIngestMetadataForPeriod(auth.pool, auth.tenantId, periodEnd.slice(0, 7));
     const binder = await buildAuditBinder({
       periodStart,
       periodEnd,
       entityName,
+      statements,
       baseSourceDocumentUrl: `${baseUrl}/api/audit/source-document`,
       baseReasoningUrl: `${baseUrl}/api/audit/reasoning`,
       tenantId: auth.tenantId,

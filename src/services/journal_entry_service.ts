@@ -12,6 +12,7 @@ import type {
   CreateDraftJEInput,
   ValidationResult,
 } from '../types/journal_entry.js';
+import { validateJEProvenance } from '../types/amount_provenance.js';
 import * as repo from '../db/repositories/journal_entry_repository.js';
 import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
 import { getLatestTriage } from './triage_service.js';
@@ -34,12 +35,25 @@ export class JournalEntryError extends Error {
   }
 }
 
-/** Create a draft JE with lines. */
+/** Create a draft JE with lines. Enforces amount provenance at API and persists on each line. */
 export async function createDraftJE(pool: Pool, input: CreateDraftJEInput): Promise<JournalEntry> {
   const balanced = validateBalanced(input.lines);
   if (!balanced.valid) {
     throw new JournalEntryError(
       `Journal entry must balance: ${balanced.errors.join('; ')}`,
+      'VALIDATION'
+    );
+  }
+  const debits = input.lines
+    .filter((l) => (l.debit ?? 0) > 0)
+    .map((l) => ({ account: l.accountRef, amount: l.debit!, amountProvenance: l.amountProvenance }));
+  const credits = input.lines
+    .filter((l) => (l.credit ?? 0) > 0)
+    .map((l) => ({ account: l.accountRef, amount: l.credit!, amountProvenance: l.amountProvenance }));
+  const provenanceResult = validateJEProvenance({ debits, credits });
+  if (!provenanceResult.valid) {
+    throw new JournalEntryError(
+      `Amount provenance required for non-zero amounts: ${provenanceResult.errors.join('; ')}`,
       'VALIDATION'
     );
   }
@@ -60,6 +74,7 @@ export async function createDraftJE(pool: Pool, input: CreateDraftJEInput): Prom
       debit: l.debit ?? 0,
       credit: l.credit ?? 0,
       description: l.description,
+      amountProvenance: l.amountProvenance,
     }))
   );
   const je = await repo.getJournalEntryById(pool, id, input.tenantId);

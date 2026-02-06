@@ -16,6 +16,8 @@ export type AccountType =
 
 /** Single trial balance line (must participate in double-entry) */
 export interface TrialBalanceEntry {
+  /** Stable identifier assigned at parse/ingest (UUID); durable for audit trail and snapshot. */
+  lineId?: string;
   accountCode?: string;
   accountName: string;
   debit: number;
@@ -77,6 +79,8 @@ export interface FinancialStatementLine {
   accountCode?: string;
   label: string;
   amount: number;
+  /** Stable line ID (UUID) from TB parse for audit trail and binder */
+  lineId?: string;
   /** FS taxonomy line id/code when built from COA mapping */
   fsLineId?: string;
   fsLineCode?: string;

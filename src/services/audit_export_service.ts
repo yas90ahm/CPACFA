@@ -23,6 +23,9 @@ import type { StoredJustification } from '../types/justification.js';
 import { getJustificationsForPeriod } from './justification_service.js';
 import { validateTrialBalanceAndBalanceSheet } from './integrity_gate_service.js';
 import { verifyChain } from './audit_ledger_service.js';
+import { finalIntegrityCheck } from './integrity_check.js';
+import { buildCertifiedStatementsFromSnapshot } from './certified_statements_service.js';
+import { getLatestSnapshotByCloseSessionId } from '../db/repositories/ledger_snapshot_repository.js';
 import * as statementRegistry from '../db/repositories/statement_registry_repository.js';
 import * as closeAuditTrail from '../db/repositories/close_audit_trail_repository.js';
 import { disallowMemoryStoreInProduction } from '../lib/env.js';
@@ -139,6 +142,38 @@ export async function getLastStatementGeneration(
   return lastStatementGeneration;
 }
 
+/**
+ * Canonical certified statements for binder/export: from snapshot when available, else last registered + Truth Gate.
+ * Returns null when no statements or final integrity check fails.
+ */
+export async function getCertifiedStatementsForBinder(
+  pool: Pool,
+  tenantId: string,
+  closeSessionId?: string
+): Promise<FinancialStatementsOutput | null> {
+  if (closeSessionId) {
+    const snapshot = await getLatestSnapshotByCloseSessionId(pool, closeSessionId);
+    if (snapshot) {
+      try {
+        return buildCertifiedStatementsFromSnapshot(snapshot.snapshotPayloadJson);
+      } catch {
+        return null;
+      }
+    }
+  }
+  const stored = await getLastStatementGeneration(tenantId, pool);
+  const statements = stored?.statements;
+  if (statements?.trialBalance == null || statements?.balanceSheet == null) return null;
+  const tb = statements.trialBalance as { totalDebits: number; totalCredits: number; entries?: Array<{ accountName: string; debit: number; credit: number }> };
+  const bs = statements.balanceSheet as { totalAssets: number; totalLiabilities: number; totalEquity: number };
+  const finalCheck = finalIntegrityCheck({
+    trialBalance: { totalDebits: tb.totalDebits ?? 0, totalCredits: tb.totalCredits ?? 0 },
+    balanceSheet: { totalAssets: bs.totalAssets ?? 0, totalLiabilities: bs.totalLiabilities ?? 0, totalEquity: bs.totalEquity ?? 0 },
+    entriesForPlugDetection: tb.entries?.map((e) => ({ accountName: e.accountName ?? '', debit: e.debit ?? 0, credit: e.credit ?? 0 })),
+  });
+  return finalCheck.passed ? statements : null;
+}
+
 // --- Line-level deep links ---
 
 function lineToAuditLink(
@@ -158,6 +193,7 @@ function lineToAuditLink(
     label: line.label,
     accountCode: line.accountCode,
     amount: line.amount,
+    lineId: line.lineId,
     sourceDocumentUrl,
     sourceDocumentName,
     reasoningMonologueUrl,
@@ -367,10 +403,11 @@ export async function buildAuditBinder(options: BuildAuditBinderOptions): Promis
     };
   }
 
-  // Clean Ledger (trial balance) for CSV export when available
+  // Clean Ledger (trial balance) for CSV export when available; include line_id for durable audit trail
   const entries = statements.trialBalance?.entries;
   if (entries?.length) {
-    binder.cleanLedger = entries.map((e: { accountCode?: string; accountName: string; debit: number; credit: number; accountType?: string }) => ({
+    binder.cleanLedger = entries.map((e: { lineId?: string; accountCode?: string; accountName: string; debit: number; credit: number; accountType?: string }) => ({
+      line_id: e.lineId ?? undefined,
       account_code: e.accountCode ?? '',
       account_name: e.accountName ?? '',
       debit: e.debit ?? 0,

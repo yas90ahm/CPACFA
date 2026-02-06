@@ -11,6 +11,7 @@ import type {
   JournalEntryStatus,
   JournalEntrySource,
 } from '../../types/journal_entry.js';
+import type { AmountProvenance } from '../../types/amount_provenance.js';
 
 interface JournalEntryRow {
   id: string;
@@ -34,6 +35,7 @@ interface JournalEntryLineRow {
   debit: string;
   credit: string;
   description: string | null;
+  amount_provenance: unknown;
 }
 
 function rowToJE(row: JournalEntryRow): JournalEntry {
@@ -61,11 +63,15 @@ function rowToLine(row: JournalEntryLineRow): JournalEntryLine {
     debit: Number(row.debit),
     credit: Number(row.credit),
     description: row.description ?? undefined,
+    amountProvenance:
+      row.amount_provenance != null && typeof row.amount_provenance === 'object'
+        ? (row.amount_provenance as AmountProvenance)
+        : undefined,
   };
 }
 
 const JE_COLS = `id, close_session_id, tenant_id, status, memo, source, created_by, approved_by, posted_at, reversal_date, created_at, updated_at`;
-const LINE_COLS = `je_id, line_index, account_ref, debit, credit, description`;
+const LINE_COLS = `je_id, line_index, account_ref, debit, credit, description, amount_provenance`;
 
 export async function insertJournalEntry(
   pool: Pool,
@@ -164,19 +170,35 @@ export async function updateJournalEntryStatus(
 export async function insertJournalEntryLines(
   pool: Pool,
   jeId: string,
-  lines: { accountRef: string; debit?: number; credit?: number; description?: string }[]
+  lines: {
+    accountRef: string;
+    debit?: number;
+    credit?: number;
+    description?: string;
+    amountProvenance?: AmountProvenance;
+  }[]
 ): Promise<JournalEntryLine[]> {
   const result: JournalEntryLine[] = [];
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     const debit = l.debit ?? 0;
     const credit = l.credit ?? 0;
+    const amountProvenanceJson =
+      l.amountProvenance != null ? JSON.stringify(l.amountProvenance) : null;
     await pool.query(
-      `INSERT INTO journal_entry_lines (je_id, line_index, account_ref, debit, credit, description)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [jeId, i, l.accountRef, debit, credit, l.description ?? null]
+      `INSERT INTO journal_entry_lines (je_id, line_index, account_ref, debit, credit, description, amount_provenance)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+      [jeId, i, l.accountRef, debit, credit, l.description ?? null, amountProvenanceJson]
     );
-    result.push({ jeId, lineIndex: i, accountRef: l.accountRef, debit, credit, description: l.description });
+    result.push({
+      jeId,
+      lineIndex: i,
+      accountRef: l.accountRef,
+      debit,
+      credit,
+      description: l.description,
+      amountProvenance: l.amountProvenance,
+    });
   }
   return result;
 }

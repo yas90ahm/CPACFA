@@ -55,11 +55,18 @@ const saveTrialBalanceSchema = z.object({
   fileName: z.string().optional(),
 });
 
+const amountProvenanceSchema = z.union([
+  z.object({ kind: z.literal('ledger_exact'), sourceTbRowId: z.string().optional(), sourceLedgerLineId: z.string().optional() }),
+  z.object({ kind: z.literal('engine_calculation'), ruleId: z.string(), ruleVersion: z.string(), inputs: z.record(z.unknown()).optional() }),
+  z.object({ kind: z.literal('human_entered'), enteredBy: z.string(), enteredAt: z.string().optional() }),
+]);
+
 const jeLineSchema = z.object({
   accountRef: z.string().min(1),
   debit: z.number().min(0).optional(),
   credit: z.number().min(0).optional(),
   description: z.string().optional(),
+  amountProvenance: amountProvenanceSchema.optional(),
 });
 
 const createDraftJESchema = z.object({
@@ -240,6 +247,7 @@ export async function executeBridgeCommand(
             debit: l.debit ?? 0,
             credit: l.credit ?? 0,
             description: l.description,
+            amountProvenance: l.amountProvenance,
           })),
         });
         await recordBridgeMutation(ctx, 'CreateDraftJE', {

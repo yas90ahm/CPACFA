@@ -103,7 +103,7 @@ export async function exportDraftPackageToPdf(binder: AuditBinder): Promise<Buff
  * Flatten binder line links to CSV rows: statementType, label, amount, sourceDocumentUrl, reasoningMonologueUrl.
  */
 function binderToCsvRows(binder: AuditBinder): string[][] {
-  const headers = ['statementType', 'label', 'amount', 'sourceDocumentUrl', 'sourceDocumentName', 'reasoningMonologueUrl'];
+  const headers = ['statementType', 'label', 'amount', 'lineId', 'sourceDocumentUrl', 'sourceDocumentName', 'reasoningMonologueUrl'];
   const rows: string[][] = [headers];
 
   const pushLinks = (statementType: string, links: (LineAuditLink | CashFlowOrEquityLineLink)[]) => {
@@ -112,6 +112,7 @@ function binderToCsvRows(binder: AuditBinder): string[][] {
         statementType,
         l.label,
         String(l.amount),
+        (l as LineAuditLink).lineId ?? '',
         l.sourceDocumentUrl ?? '',
         (l as LineAuditLink).sourceDocumentName ?? '',
         l.reasoningMonologueUrl ?? '',
@@ -126,9 +127,18 @@ function binderToCsvRows(binder: AuditBinder): string[][] {
 
   if (binder.cleanLedger?.length) {
     rows.push([]);
-    rows.push(['account_code', 'account_name', 'debit', 'credit', 'account_type']);
+    rows.push(['line_id', 'account_code', 'account_name', 'debit', 'credit', 'account_type', 'amount_provenance']);
     for (const r of binder.cleanLedger) {
-      rows.push([r.account_code ?? '', r.account_name ?? '', String(r.debit ?? 0), String(r.credit ?? 0), r.account_type ?? '']);
+      const prov = r.amount_provenance != null ? JSON.stringify(r.amount_provenance) : '';
+      rows.push([
+        r.line_id ?? '',
+        r.account_code ?? '',
+        r.account_name ?? '',
+        String(r.debit ?? 0),
+        String(r.credit ?? 0),
+        r.account_type ?? '',
+        prov,
+      ]);
     }
   }
   return rows;

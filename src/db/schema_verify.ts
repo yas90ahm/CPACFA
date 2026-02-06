@@ -17,7 +17,7 @@ const REQUIRED: Array<{ table: string; columns: string[] }> = [
   { table: 'tenant_hitl_staging', columns: ['id', 'tenant_id', 'status', 'payload'] },
   { table: 'period_trial_balance', columns: ['tenant_id', 'period_label', 'entries'] },
   { table: 'journal_entries', columns: ['id', 'tenant_id', 'close_session_id', 'status'] },
-  { table: 'journal_entry_lines', columns: ['je_id', 'line_index', 'debit', 'credit'] },
+  { table: 'journal_entry_lines', columns: ['je_id', 'line_index', 'debit', 'credit', 'amount_provenance'] },
   { table: 'tenant_justifications', columns: ['id', 'tenant_id', 'period_label', 'related_type', 'related_id'] },
   { table: 'period_locks', columns: ['tenant_id', 'period_label', 'locked_at'] },
   { table: 'close_sessions', columns: ['id', 'tenant_id', 'entity_id', 'period_start', 'period_end', 'status'] },

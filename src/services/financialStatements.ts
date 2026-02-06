@@ -48,6 +48,7 @@ function toLine(entry: TrialBalanceEntry): FinancialStatementLine {
     accountCode: entry.accountCode,
     label: entry.accountName,
     amount,
+    lineId: entry.lineId,
     fsLineId: entry.fsLineId,
     fsLineCode: entry.fsLineCode,
     codificationRef: entry.codificationRef,
