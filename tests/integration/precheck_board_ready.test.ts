@@ -18,14 +18,22 @@ describe('POST /api/precheck/board-ready', () => {
     authToken = getTestAuthToken(TEST_TENANT_ID);
   });
 
-  it('returns 400 when periodLabel is missing', async () => {
+  it('when periodLabel omitted, returns 200 and periodLabel "unspecified"', async () => {
+    if (!isDbConfigured()) return;
     const res = await request(app)
       .post('/api/precheck/board-ready')
       .set('Authorization', `Bearer ${authToken}`)
       .set('Content-Type', 'application/json')
-      .send({ trialBalance: [{ accountName: 'Cash', debit: 1000, credit: 0 }] });
-    expect(res.status).toBe(400);
-    expect(res.body?.message).toMatch(/periodLabel/);
+      .send({
+        trialBalance: [
+          { accountName: 'Cash', debit: 1000, credit: 0 },
+          { accountName: 'Retained Earnings', debit: 0, credit: 1000 },
+        ],
+      });
+    if (res.status === 503) return;
+    expect(res.status).toBe(200);
+    expect(res.body?.periodLabel).toBe('unspecified');
+    expect(res.body?.status).toBe('ready');
   });
 
   it('returns 400 when trialBalance is not an array', async () => {
@@ -35,10 +43,10 @@ describe('POST /api/precheck/board-ready', () => {
       .set('Content-Type', 'application/json')
       .send({ periodLabel: '2025-01', trialBalance: {} });
     expect(res.status).toBe(400);
-    expect(res.body?.message).toMatch(/trialBalance/);
+    expect(res.body?.code).toBe('TRIAL_BALANCE_NOT_ARRAY');
   });
 
-  it('balanced TB => status ready and proofSummary', async () => {
+  it('balanced TB => status ready, contractVersion v1, and stable proofSummary shape', async () => {
     if (!isDbConfigured()) return;
     const res = await request(app)
       .post('/api/precheck/board-ready')
@@ -53,24 +61,36 @@ describe('POST /api/precheck/board-ready', () => {
       });
     if (res.status === 503) return;
     expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('periodLabel', '2025-01');
+    expect(res.body).toHaveProperty('contractVersion', 'v1');
     expect(res.body).toHaveProperty('status', 'ready');
     expect(res.body).toHaveProperty('blockers');
     expect(Array.isArray(res.body.blockers)).toBe(true);
     expect(res.body.blockers).toHaveLength(0);
     expect(res.body).toHaveProperty('warnings');
+    expect(Array.isArray(res.body.warnings)).toBe(true);
     expect(res.body).toHaveProperty('proofSummary');
     expect(res.body.proofSummary).toMatchObject({
       trialBalanceBalanced: true,
       balanceSheetEquationBalanced: true,
       plugDetected: false,
     });
+    expect(res.body.proofSummary).toHaveProperty('roundingToleranceUsed');
+    expect(res.body.proofSummary).toHaveProperty('computedTotalsSummary');
     expect(res.body.proofSummary.computedTotalsSummary).toMatchObject({
       totalDebits: 1000,
       totalCredits: 1000,
     });
+    expect(Object.keys(res.body.proofSummary.computedTotalsSummary).sort()).toEqual([
+      'totalAssets',
+      'totalCredits',
+      'totalDebits',
+      'totalEquity',
+      'totalLiabilities',
+    ]);
   });
 
-  it('imbalanced TB => status not_ready with TRIAL_BALANCE_IMBALANCED blocker', async () => {
+  it('imbalanced TB => status not_ready with TRIAL_BALANCE_IMBALANCED blocker (stable shape)', async () => {
     if (!isDbConfigured()) return;
     const res = await request(app)
       .post('/api/precheck/board-ready')
@@ -85,10 +105,13 @@ describe('POST /api/precheck/board-ready', () => {
       });
     if (res.status === 503) return;
     expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('contractVersion', 'v1');
     expect(res.body).toHaveProperty('status', 'not_ready');
     const blocker = res.body.blockers?.find((b: { code: string }) => b.code === 'TRIAL_BALANCE_IMBALANCED');
     expect(blocker).toBeDefined();
-    expect(blocker.message).toBeDefined();
+    expect(blocker).toHaveProperty('code', 'TRIAL_BALANCE_IMBALANCED');
+    expect(blocker).toHaveProperty('details');
+    expect(blocker.details).toEqual(expect.any(Object));
     expect(res.body.proofSummary.trialBalanceBalanced).toBe(false);
   });
 
@@ -107,9 +130,12 @@ describe('POST /api/precheck/board-ready', () => {
       });
     if (res.status === 503) return;
     expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('contractVersion', 'v1');
     expect(res.body).toHaveProperty('status', 'not_ready');
     const blocker = res.body.blockers?.find((b: { code: string }) => b.code === 'BALANCE_SHEET_EQUATION_FAILED');
     expect(blocker).toBeDefined();
+    expect(blocker).toHaveProperty('details');
+    expect(blocker.details).toEqual(expect.any(Object));
     expect(res.body.proofSummary.trialBalanceBalanced).toBe(true);
     expect(res.body.proofSummary.balanceSheetEquationBalanced).toBe(false);
   });
@@ -129,9 +155,11 @@ describe('POST /api/precheck/board-ready', () => {
       });
     if (res.status === 503) return;
     expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('contractVersion', 'v1');
     expect(res.body).toHaveProperty('status', 'not_ready');
     const blocker = res.body.blockers?.find((b: { code: string }) => b.code === 'PLUG_ACCOUNTS_DETECTED');
     expect(blocker).toBeDefined();
+    expect(blocker).toHaveProperty('details');
     expect(res.body.proofSummary.plugDetected).toBe(true);
   });
 
@@ -154,10 +182,95 @@ describe('POST /api/precheck/board-ready', () => {
       });
     if (res.status === 503) return;
     expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('contractVersion', 'v1');
     expect(res.body.status).toBe('ready');
     expect(res.body.proofSummary.computedTotalsSummary).toMatchObject({
       totalDebits: 1100,
       totalCredits: 1100,
+    });
+  });
+
+  describe('format query param', () => {
+    it('default and format=json return JSON with same shape', async () => {
+      if (!isDbConfigured()) return;
+      const payload = {
+        periodLabel: '2025-01',
+        trialBalance: [
+          { accountName: 'Cash', debit: 1000, credit: 0 },
+          { accountName: 'Retained Earnings', debit: 0, credit: 1000 },
+        ],
+      };
+      const resDefault = await request(app)
+        .post('/api/precheck/board-ready')
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('Content-Type', 'application/json')
+        .send(payload);
+      const resJson = await request(app)
+        .post('/api/precheck/board-ready?format=json')
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('Content-Type', 'application/json')
+        .send(payload);
+      if (resDefault.status === 503 || resJson.status === 503) return;
+      expect(resDefault.status).toBe(200);
+      expect(resJson.status).toBe(200);
+      expect(resDefault.headers['content-type']).toMatch(/application\/json/);
+      expect(resJson.headers['content-type']).toMatch(/application\/json/);
+      expect(resDefault.body).toHaveProperty('contractVersion', 'v1');
+      expect(resDefault.body).toHaveProperty('status');
+      expect(resDefault.body).toHaveProperty('blockers');
+      expect(resDefault.body).toHaveProperty('warnings');
+      expect(resDefault.body).toHaveProperty('proofSummary');
+      expect(resJson.body).toMatchObject({
+        contractVersion: resDefault.body.contractVersion,
+        status: resDefault.body.status,
+      });
+    });
+
+    it('format=text returns text/plain with period, status, blockers, warnings, proof summary', async () => {
+      if (!isDbConfigured()) return;
+      const res = await request(app)
+        .post('/api/precheck/board-ready?format=text')
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('Content-Type', 'application/json')
+        .send({
+          periodLabel: '2025-01',
+          trialBalance: [
+            { accountName: 'Cash', debit: 1000, credit: 0 },
+            { accountName: 'Retained Earnings', debit: 0, credit: 1000 },
+          ],
+        });
+      if (res.status === 503) return;
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toMatch(/text\/plain/);
+      const text = res.text;
+      expect(text).toContain('Period: 2025-01');
+      expect(text).toContain('Status: ready');
+      expect(text).toContain('Blockers:');
+      expect(text).toContain('Warnings:');
+      expect(text).toContain('Proof summary:');
+      expect(text).toContain('Totals: Debits 1000  Credits 1000');
+    });
+
+    it('format=text with not_ready includes blocker code and remediation', async () => {
+      if (!isDbConfigured()) return;
+      const res = await request(app)
+        .post('/api/precheck/board-ready?format=text')
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('Content-Type', 'application/json')
+        .send({
+          periodLabel: '2025-01',
+          trialBalance: [
+            { accountName: 'Cash', debit: 1000, credit: 0 },
+            { accountName: 'Revenue', debit: 0, credit: 500 },
+          ],
+        });
+      if (res.status === 503) return;
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toMatch(/text\/plain/);
+      const text = res.text;
+      expect(text).toContain('Status: not_ready');
+      expect(text).toContain('TRIAL_BALANCE_IMBALANCED');
+      expect(text).toContain('Reconcile debits and credits');
     });
   });
 });

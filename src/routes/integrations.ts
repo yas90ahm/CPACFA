@@ -1,9 +1,11 @@
 /**
  * OAuth integrations (Google) — tenant-scoped.
+ * Tenant ID comes exclusively from JWT; query.tenantId is ignored to prevent tenant IDOR.
  */
 
 import { Router, type Request, type Response } from 'express';
 import { setIntegration, getIntegration, listIntegrations } from '../services/integration_store.js';
+import { getTenantId } from '../lib/tenant_context.js';
 
 const router = Router();
 
@@ -18,7 +20,11 @@ const GOOGLE_SCOPES =
   ].join(' ');
 
 router.get('/google/start', (req: Request, res: Response) => {
-  const tenantId = (req.query.tenantId as string) ?? 'default-tenant';
+  const tenantId = getTenantId(req);
+  if (!tenantId) {
+    res.status(403).json({ error: 'Tenant context required', message: 'Authenticate with a valid token to start OAuth.' });
+    return;
+  }
   if (!GOOGLE_CLIENT_ID || !GOOGLE_REDIRECT_URI) {
     res.status(400).json({ error: 'Google OAuth is not configured' });
     return;
@@ -91,12 +97,20 @@ router.get('/google/callback', async (req: Request, res: Response) => {
 });
 
 router.get('/list', (req: Request, res: Response) => {
-  const tenantId = (req.query.tenantId as string) ?? 'default-tenant';
+  const tenantId = getTenantId(req);
+  if (!tenantId) {
+    res.status(403).json({ error: 'Tenant context required', message: 'Authenticate with a valid token to list integrations.' });
+    return;
+  }
   res.json({ tenantId, integrations: listIntegrations(tenantId) });
 });
 
 router.get('/google/status', (req: Request, res: Response) => {
-  const tenantId = (req.query.tenantId as string) ?? 'default-tenant';
+  const tenantId = getTenantId(req);
+  if (!tenantId) {
+    res.status(403).json({ error: 'Tenant context required', message: 'Authenticate with a valid token to check integration status.' });
+    return;
+  }
   const record = getIntegration(tenantId, 'google');
   res.json({ connected: Boolean(record), tenantId });
 });

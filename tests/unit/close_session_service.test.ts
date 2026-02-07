@@ -10,8 +10,11 @@ import {
   listSessions,
   updateStatus,
   certifyCloseSession,
+  advanceSession,
   getAllowedTransitions,
   CloseSessionError,
+  periodLabelToPeriodBounds,
+  ensureSessionForPeriod,
 } from '../../src/services/close_session_service.js';
 import * as repo from '../../src/db/repositories/close_session_repository.js';
 import * as readiness from '../../src/services/close_checklist_readiness_service.js';
@@ -333,6 +336,119 @@ describe('Close session — certifyCloseSession', () => {
           closeSessionId: 'sess-1',
           certifiedBy: 'approver@test.com',
           certifiedSnapshotId: 'snap-1',
+        }),
+      })
+    );
+  });
+});
+
+describe('Close session — periodLabelToPeriodBounds', () => {
+  it('returns first and last day of month for YYYY-MM', () => {
+    expect(periodLabelToPeriodBounds('2025-06')).toEqual({ periodStart: '2025-06-01', periodEnd: '2025-06-30' });
+    expect(periodLabelToPeriodBounds('2025-02')).toEqual({ periodStart: '2025-02-01', periodEnd: '2025-02-28' });
+    expect(periodLabelToPeriodBounds('2024-02')).toEqual({ periodStart: '2024-02-01', periodEnd: '2024-02-29' });
+  });
+  it('returns null for invalid format', () => {
+    expect(periodLabelToPeriodBounds('')).toBeNull();
+    expect(periodLabelToPeriodBounds('2025')).toBeNull();
+    expect(periodLabelToPeriodBounds('2025-13')).toBeNull();
+    expect(periodLabelToPeriodBounds('2025-00')).toBeNull();
+  });
+});
+
+describe('Close session — ensureSessionForPeriod (getOrCreate)', () => {
+  beforeEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('returns existing session when overlapping session exists (created=false)', async () => {
+    const existing = { ...sampleSession, id: 'existing-id' };
+    jest.spyOn(repo, 'getOverlappingSession').mockResolvedValue(existing);
+    const result = await ensureSessionForPeriod(mockPool, 't1', 'e1', '2025-01');
+    expect(result.session).toEqual(existing);
+    expect(result.created).toBe(false);
+    expect(repo.getOverlappingSession).toHaveBeenCalledWith(mockPool, 't1', 'e1', '2025-01-01', '2025-01-31');
+  });
+
+  it('creates draft session when none exists (created=true)', async () => {
+    jest.spyOn(repo, 'getOverlappingSession').mockResolvedValue(null);
+    jest.spyOn(repo, 'hasOverlappingSession').mockResolvedValue(false);
+    jest.spyOn(repo, 'insertCloseSession').mockResolvedValue({ ...sampleSession, id: 'new-id' });
+    const result = await ensureSessionForPeriod(mockPool, 't1', 'e1', '2025-03');
+    expect(result.created).toBe(true);
+    expect(result.session.status).toBe('draft');
+    expect(repo.insertCloseSession).toHaveBeenCalledWith(
+      mockPool,
+      expect.any(String),
+      't1',
+      'e1',
+      '2025-03-01',
+      '2025-03-31',
+      'accrual',
+      'GAAP',
+      'draft'
+    );
+  });
+
+  it('throws VALIDATION for invalid periodLabel', async () => {
+    await expect(ensureSessionForPeriod(mockPool, 't1', 'e1', 'invalid')).rejects.toThrow(CloseSessionError);
+    await expect(ensureSessionForPeriod(mockPool, 't1', 'e1', 'invalid')).rejects.toMatchObject({ code: 'VALIDATION' });
+  });
+});
+
+describe('Close session — advanceSession governance (close_lock)', () => {
+  beforeEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('appends close_lock audit ledger event when transitioning to locked', async () => {
+    const draftSession = { ...sampleSession, status: 'draft' as const };
+    const inProgressSession = { ...sampleSession, status: 'in_progress' as const };
+    const readySession = { ...sampleSession, status: 'ready_for_review' as const };
+    const finalizedSession = { ...sampleSession, status: 'finalized' as const };
+    const lockedSession = { ...sampleSession, status: 'locked' as const };
+
+    jest.spyOn(repo, 'getCloseSessionById')
+      .mockResolvedValueOnce(draftSession)
+      .mockResolvedValueOnce(draftSession)
+      .mockResolvedValueOnce(inProgressSession)
+      .mockResolvedValueOnce(readySession)
+      .mockResolvedValueOnce(finalizedSession);
+    jest.spyOn(readiness, 'computeReadiness').mockResolvedValue({
+      ready: true,
+      hardBlockers: [],
+      softWarnings: [],
+      checklistComplete: true,
+      cashRecComplete: true,
+      noCriticalIssues: true,
+      materialJesApproved: true,
+      integrityChecksPass: true,
+    });
+    jest.spyOn(repo, 'updateCloseSessionStatus')
+      .mockResolvedValueOnce(inProgressSession)
+      .mockResolvedValueOnce(readySession)
+      .mockResolvedValueOnce(finalizedSession)
+      .mockResolvedValueOnce(lockedSession);
+    jest.spyOn(auditLedger, 'recordMaterialEvent').mockResolvedValue();
+
+    const result = await advanceSession(mockPool, {
+      tenantId: 't1',
+      closeSessionId: 'sess-1',
+      actorRole: 'approver',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.actionTaken).toBe('locked');
+    expect(result.statusAfter).toBe('locked');
+    expect(auditLedger.recordMaterialEvent).toHaveBeenCalledWith(
+      mockPool,
+      expect.objectContaining({
+        eventType: 'close_lock',
+        tenantId: 't1',
+        deterministicFlagSnapshot: expect.objectContaining({
+          closeSessionId: 'sess-1',
+          statusAfter: 'locked',
+          actor: 'advance-api',
         }),
       })
     );

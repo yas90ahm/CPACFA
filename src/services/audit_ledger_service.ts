@@ -2,7 +2,10 @@
  * Audit ledger service — record human overrides with deterministic flag + agent dissent + user rationale.
  */
 
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
+
+/** Pool or client (for transactional writes). Both expose .query(). */
+type Queryable = Pool | PoolClient;
 import * as auditLedgerRepo from '../db/repositories/audit_ledger_repository.js';
 import type { AuditLedgerEventType } from '../types/audit_ledger.js';
 
@@ -81,6 +84,7 @@ export interface RecordMaterialEventInput {
     | 'je_posting'
     | 'statement_package_generation'
     | 'export_event'
+    | 'close_lock'
     | 'certify_close'
     | 'bridge_command'
   >;
@@ -94,9 +98,9 @@ export interface RecordMaterialEventInput {
  * Append a material event to the audit ledger (hash-chained).
  * Uses system rationale; no user prompt required.
  */
-export async function recordMaterialEvent(pool: Pool, input: RecordMaterialEventInput): Promise<void> {
+export async function recordMaterialEvent(client: Queryable, input: RecordMaterialEventInput): Promise<void> {
   const rationale = `Material event: ${input.eventType}`;
-  await auditLedgerRepo.appendEntry(pool, {
+  await auditLedgerRepo.appendEntry(client, {
     tenantId: input.tenantId,
     periodLabel: input.periodLabel,
     eventType: input.eventType,

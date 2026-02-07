@@ -11,6 +11,12 @@ import type { RawTrialBalanceRow } from './trialBalanceParser.js';
 import { buildFinancialStatements } from './financialStatements.js';
 import { finalIntegrityCheck } from './integrity_check.js';
 import { getRoundingTolerance } from './rules_registry.js';
+import {
+  PrecheckCode,
+  PrecheckMessage,
+  PrecheckRemediation,
+  PRECHECK_CONTRACT_VERSION,
+} from '../constants/precheck_codes.js';
 
 /** Same shape as TB ingest/parser input (JSON payload). */
 export interface PrecheckTrialBalanceRow {
@@ -34,10 +40,12 @@ export interface PrecheckBoardReadyInput {
   journalEntries?: PrecheckJournalEntryLine[];
 }
 
+/** Contract: code (stable), message (protective), details (always object), remediation (optional). */
 export interface PrecheckBlockerOrWarning {
   code: string;
   message: string;
-  details?: Record<string, unknown>;
+  details: Record<string, unknown>;
+  remediation?: string;
 }
 
 export interface PrecheckProofSummary {
@@ -54,7 +62,35 @@ export interface PrecheckProofSummary {
   };
 }
 
+const EMPTY_COMPUTED_TOTALS = {
+  totalDebits: 0,
+  totalCredits: 0,
+  totalAssets: 0,
+  totalLiabilities: 0,
+  totalEquity: 0,
+};
+
+function defaultProofSummary(tolerance: number): PrecheckProofSummary {
+  return {
+    trialBalanceBalanced: false,
+    balanceSheetEquationBalanced: false,
+    plugDetected: false,
+    roundingToleranceUsed: tolerance,
+    computedTotalsSummary: { ...EMPTY_COMPUTED_TOTALS },
+  };
+}
+
+function blocker(
+  code: string,
+  message: string,
+  details: Record<string, unknown> = {},
+  remediation?: string
+): PrecheckBlockerOrWarning {
+  return { code, message, details: details ?? {}, remediation };
+}
+
 export interface PrecheckBoardReadyVerdict {
+  contractVersion: string;
   status: 'ready' | 'not_ready';
   blockers: PrecheckBlockerOrWarning[];
   warnings: PrecheckBlockerOrWarning[];
@@ -89,33 +125,39 @@ export function runPrecheckBoardReady(input: PrecheckBoardReadyInput): PrecheckB
   const tolerance = getRoundingTolerance();
 
   if (!input.trialBalance?.length) {
+    const proof = defaultProofSummary(tolerance);
     return {
+      contractVersion: PRECHECK_CONTRACT_VERSION,
       status: 'not_ready',
-      blockers: [{ code: 'MISSING_TRIAL_BALANCE', message: 'Provide a non-empty trial balance array to run the check.' }],
+      blockers: [
+        blocker(
+          PrecheckCode.MISSING_TRIAL_BALANCE,
+          PrecheckMessage[PrecheckCode.MISSING_TRIAL_BALANCE],
+          {},
+          PrecheckRemediation[PrecheckCode.MISSING_TRIAL_BALANCE]
+        ),
+      ],
       warnings: [],
-      proofSummary: {
-        trialBalanceBalanced: false,
-        balanceSheetEquationBalanced: false,
-        plugDetected: false,
-        roundingToleranceUsed: tolerance,
-        computedTotalsSummary: { totalDebits: 0, totalCredits: 0, totalAssets: 0, totalLiabilities: 0, totalEquity: 0 },
-      },
+      proofSummary: proof,
     };
   }
 
   const rawRows = input.trialBalance.map(toRawRow).filter((r) => r.accountName);
   if (rawRows.length === 0) {
+    const proof = defaultProofSummary(tolerance);
     return {
+      contractVersion: PRECHECK_CONTRACT_VERSION,
       status: 'not_ready',
-      blockers: [{ code: 'EMPTY_TRIAL_BALANCE', message: 'Add at least one row with an account name to run the check.' }],
+      blockers: [
+        blocker(
+          PrecheckCode.EMPTY_TRIAL_BALANCE,
+          PrecheckMessage[PrecheckCode.EMPTY_TRIAL_BALANCE],
+          {},
+          PrecheckRemediation[PrecheckCode.EMPTY_TRIAL_BALANCE]
+        ),
+      ],
       warnings: [],
-      proofSummary: {
-        trialBalanceBalanced: false,
-        balanceSheetEquationBalanced: false,
-        plugDetected: false,
-        roundingToleranceUsed: tolerance,
-        computedTotalsSummary: { totalDebits: 0, totalCredits: 0, totalAssets: 0, totalLiabilities: 0, totalEquity: 0 },
-      },
+      proofSummary: proof,
     };
   }
 
@@ -166,46 +208,56 @@ export function runPrecheckBoardReady(input: PrecheckBoardReadyInput): PrecheckB
   const plugDetected = finalCheck.plugSuspicious === true;
 
   if (!trialBalanceBalanced) {
-    blockers.push({
-      code: 'TRIAL_BALANCE_IMBALANCED',
-      message: 'Blocked until resolved: debits and credits do not match within tolerance.',
-      details: { totalDebits, totalCredits, tolerance },
-    });
+    blockers.push(
+      blocker(
+        PrecheckCode.TRIAL_BALANCE_IMBALANCED,
+        PrecheckMessage[PrecheckCode.TRIAL_BALANCE_IMBALANCED],
+        { totalDebits, totalCredits, tolerance },
+        PrecheckRemediation[PrecheckCode.TRIAL_BALANCE_IMBALANCED]
+      )
+    );
   }
   if (!balanceSheetEquationBalanced) {
-    blockers.push({
-      code: 'BALANCE_SHEET_EQUATION_FAILED',
-      message: 'Blocked until resolved: Assets do not equal Liabilities + Equity within tolerance.',
-      details: { ...balanceSheet, tolerance },
-    });
+    blockers.push(
+      blocker(
+        PrecheckCode.BALANCE_SHEET_EQUATION_FAILED,
+        PrecheckMessage[PrecheckCode.BALANCE_SHEET_EQUATION_FAILED],
+        { ...balanceSheet, tolerance },
+        PrecheckRemediation[PrecheckCode.BALANCE_SHEET_EQUATION_FAILED]
+      )
+    );
   }
   if (plugDetected) {
-    blockers.push({
-      code: 'PLUG_ACCOUNTS_DETECTED',
-      message:
-        'Blocked until resolved: reclassify or reduce Suspense/Miscellaneous/Other accounts (≥90% of activity).',
-      details: { suspenseAccounts: finalCheck.suspenseAccounts ?? [] },
-    });
+    blockers.push(
+      blocker(
+        PrecheckCode.PLUG_ACCOUNTS_DETECTED,
+        PrecheckMessage[PrecheckCode.PLUG_ACCOUNTS_DETECTED],
+        { suspenseAccounts: finalCheck.suspenseAccounts ?? [] },
+        PrecheckRemediation[PrecheckCode.PLUG_ACCOUNTS_DETECTED]
+      )
+    );
   }
 
   const status = blockers.length === 0 ? 'ready' : 'not_ready';
+  const proofSummary: PrecheckProofSummary = {
+    trialBalanceBalanced,
+    balanceSheetEquationBalanced,
+    plugDetected,
+    roundingToleranceUsed: tolerance,
+    computedTotalsSummary: {
+      totalDebits,
+      totalCredits,
+      totalAssets: balanceSheet.totalAssets,
+      totalLiabilities: balanceSheet.totalLiabilities,
+      totalEquity: balanceSheet.totalEquity,
+    },
+  };
 
   return {
+    contractVersion: PRECHECK_CONTRACT_VERSION,
     status,
     blockers,
     warnings,
-    proofSummary: {
-      trialBalanceBalanced,
-      balanceSheetEquationBalanced,
-      plugDetected,
-      roundingToleranceUsed: tolerance,
-      computedTotalsSummary: {
-        totalDebits,
-        totalCredits,
-        totalAssets: balanceSheet.totalAssets,
-        totalLiabilities: balanceSheet.totalLiabilities,
-        totalEquity: balanceSheet.totalEquity,
-      },
-    },
+    proofSummary,
   };
 }

@@ -6,7 +6,10 @@
  * - createdAt / updatedAt / certifiedAt: full ISO 8601 string (timestamps).
  */
 
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
+
+/** Pool or client (for transactional writes). Both expose .query(). */
+type Queryable = Pool | PoolClient;
 import type { CloseSession, CloseSessionStatus } from '../../types/close_session.js';
 
 interface CloseSessionRow {
@@ -129,11 +132,11 @@ export async function insertCloseSession(
 }
 
 export async function getCloseSessionById(
-  pool: Pool,
+  client: Queryable,
   tenantId: string,
   id: string
 ): Promise<CloseSession | null> {
-  const r = await pool.query<CloseSessionRow>(
+  const r = await client.query<CloseSessionRow>(
     `SELECT ${SESSION_COLUMNS} FROM close_sessions WHERE tenant_id = $1 AND id = $2`,
     [tenantId, id]
   );
@@ -166,22 +169,22 @@ export async function listCloseSessions(
 }
 
 export async function updateCloseSessionStatus(
-  pool: Pool,
+  client: Queryable,
   tenantId: string,
   id: string,
   status: string
 ): Promise<CloseSession | null> {
   const now = new Date().toISOString();
-  const r = await pool.query(
+  const r = await client.query(
     'UPDATE close_sessions SET status = $1, updated_at = $2 WHERE tenant_id = $3 AND id = $4',
     [status, now, tenantId, id]
   );
   if (r.rowCount === 0) return null;
-  return getCloseSessionById(pool, tenantId, id);
+  return getCloseSessionById(client, tenantId, id);
 }
 
 export async function updateCertification(
-  pool: Pool,
+  client: Queryable,
   tenantId: string,
   id: string,
   certifiedBy: string,
@@ -190,7 +193,7 @@ export async function updateCertification(
   certifiedSnapshotId?: string
 ): Promise<CloseSession | null> {
   const now = new Date().toISOString();
-  const r = await pool.query(
+  const r = await client.query(
     `UPDATE close_sessions
      SET status = 'certified', certified_by = $1, certified_at = $2, certification_memo = $3,
          certified_snapshot_id = COALESCE($4, certified_snapshot_id), updated_at = $5
@@ -198,5 +201,5 @@ export async function updateCertification(
     [certifiedBy, certifiedAt, certificationMemo ?? null, certifiedSnapshotId ?? null, now, tenantId, id]
   );
   if (r.rowCount === 0) return null;
-  return getCloseSessionById(pool, tenantId, id);
+  return getCloseSessionById(client, tenantId, id);
 }

@@ -19,6 +19,7 @@ export type AuditLedgerEventType =
   | 'je_posting'
   | 'statement_package_generation'
   | 'export_event'
+  | 'close_lock'
   | 'certify_close'
   | 'bridge_command';
 

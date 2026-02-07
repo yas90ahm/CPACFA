@@ -7,7 +7,10 @@
  * Missing hash_version is treated as v1 for backward compatibility.
  */
 
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
+
+/** Pool or client (for transactional writes). Both expose .query(). */
+type Queryable = Pool | PoolClient;
 import { createHash } from 'crypto';
 import type {
   AuditLedgerEntryInput,
@@ -78,8 +81,8 @@ function computeEntryHashV2(payload: HashPayload): string {
   return createHash('sha256').update(canonical, 'utf8').digest('hex');
 }
 
-export async function getLatestHash(pool: Pool, tenantId: string): Promise<string | null> {
-  const r = await pool.query<{ entry_hash: string }>(
+export async function getLatestHash(client: Queryable, tenantId: string): Promise<string | null> {
+  const r = await client.query<{ entry_hash: string }>(
     'SELECT entry_hash FROM audit_ledger WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 1',
     [tenantId]
   );
@@ -87,12 +90,12 @@ export async function getLatestHash(pool: Pool, tenantId: string): Promise<strin
 }
 
 export async function appendEntry(
-  pool: Pool,
+  client: Queryable,
   input: Omit<AuditLedgerEntryInput, 'previousEntryHash' | 'entryHash'> & { createdBy?: string }
 ): Promise<AuditLedgerEntry> {
   const id = nextId();
   const createdAt = new Date().toISOString();
-  const previousEntryHash = await getLatestHash(pool, input.tenantId);
+  const previousEntryHash = await getLatestHash(client, input.tenantId);
   const payload: HashPayload = {
     tenantId: input.tenantId,
     periodLabel: input.periodLabel ?? null,
@@ -105,7 +108,7 @@ export async function appendEntry(
   };
   const entryHash = computeEntryHashV2(payload);
 
-  await pool.query(
+  await client.query(
     `INSERT INTO audit_ledger (
       id, tenant_id, period_label, event_type, deterministic_flag_snapshot,
       agent_dissent_snapshot, user_prompt_rationale, previous_entry_hash, entry_hash,

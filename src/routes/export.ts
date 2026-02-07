@@ -23,6 +23,11 @@ import { ENABLE_INTEGRATED_SUPERVISOR } from '../lib/capability_flags.js';
 import { ALLOW_IMBALANCED_DRAFT_EXPORT, isProduction } from '../lib/env.js';
 import { getStorage } from '../storage/index.js';
 import type { AuthRequest } from '../auth/middleware.js';
+import {
+  BinderExportCode,
+  BinderExportMessage,
+  BinderExportRemediation,
+} from '../constants/binder_export_codes.js';
 import type { ExportMode } from '../services/pdf_export.js';
 
 const router = Router();
@@ -186,6 +191,7 @@ router.post('/pdf', async (req: Request, res: Response) => {
     type CleanLedgerRow = { account_code?: string; account_name: string; debit: number; credit: number; account_type?: string };
     let financial_statements: Record<string, unknown> = (body.financial_statements as Record<string, unknown>) ?? {};
     let clean_ledger_raw: CleanLedgerRow[] = (body.clean_ledger as CleanLedgerRow[]) ?? [];
+    let certifiedExportResult: Awaited<ReturnType<typeof import('../services/audit_export_service.js').getCertifiedStatementsForBinder>> = null;
     if (exportMode === 'certified') {
       const closeSessionIdExport = (bodyForMode.closeSessionId ?? (req.query.closeSessionId as string) ?? '') as string;
       if (closeSessionIdExport && tenantId && pool) {
@@ -194,15 +200,29 @@ router.post('/pdf', async (req: Request, res: Response) => {
         const allowLegacy = (req.query.allowLegacyCertifiedSource as string) === '1' || process.env.ALLOW_LEGACY_CERTIFIED_SOURCE === 'true';
         const result = await getCertifiedStatementsForBinder(pool, tenantId, closeSessionIdExport, { allowLegacyCertifiedSource: allowLegacy });
         if (result) {
+          certifiedExportResult = result;
           const payload = statementsToExportPayload(result.statements);
           financial_statements = payload.financial_statements;
           clean_ledger_raw = payload.clean_ledger;
         } else if (!allowLegacy) {
-          return res.status(422).json({
+          const payload: {
+            error: string;
+            code: string;
+            message: string;
+            remediation?: string;
+            allowLegacyCertifiedSourceEffective?: boolean;
+            attemptedSource?: string;
+          } = {
             error: 'Unprocessable Entity',
-            code: 'NO_CERTIFIED_SOURCE',
-            message: 'No certified snapshot for this session. Certification creates the snapshot. Use allowLegacyCertifiedSource=1 or ALLOW_LEGACY_CERTIFIED_SOURCE=true for legacy.',
-          });
+            code: BinderExportCode.NO_CERTIFIED_SOURCE,
+            message: BinderExportMessage[BinderExportCode.NO_CERTIFIED_SOURCE],
+            allowLegacyCertifiedSourceEffective: allowLegacy,
+            attemptedSource: 'certified_snapshot',
+          };
+          if (BinderExportRemediation[BinderExportCode.NO_CERTIFIED_SOURCE]) {
+            payload.remediation = BinderExportRemediation[BinderExportCode.NO_CERTIFIED_SOURCE];
+          }
+          return res.status(422).json(payload);
         }
       }
     }
@@ -271,8 +291,8 @@ router.post('/pdf', async (req: Request, res: Response) => {
       if (exportMode === 'certified') {
         return res.status(422).json({
           error: 'Unprocessable Entity',
-          code: 'FINAL_INTEGRITY_CHECK_FAILED',
-          message: finalCheck.error ?? 'Export blocked: imbalance or unclassified Suspense accounts.',
+          code: BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED,
+          message: finalCheck.error ?? BinderExportMessage[BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED],
           checks: finalCheck.checks,
           suspenseAccounts: finalCheck.suspenseAccounts,
           plugSuspicious: finalCheck.plugSuspicious,
@@ -283,8 +303,8 @@ router.post('/pdf', async (req: Request, res: Response) => {
       } else {
         return res.status(422).json({
           error: 'Unprocessable Entity',
-          code: 'FINAL_INTEGRITY_CHECK_FAILED',
-          message: finalCheck.error ?? 'Export blocked: imbalance or unclassified Suspense accounts.',
+          code: BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED,
+          message: finalCheck.error ?? BinderExportMessage[BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED],
           checks: finalCheck.checks,
           suspenseAccounts: finalCheck.suspenseAccounts,
           plugSuspicious: finalCheck.plugSuspicious,
@@ -372,6 +392,12 @@ router.post('/pdf', async (req: Request, res: Response) => {
         await getStorage().putObject(key, Buffer.from(buf), { contentType: 'application/pdf' });
         res.setHeader('X-Export-File-Ref', key);
       }
+      if (exportMode === 'certified' && certifiedExportResult) {
+        res.setHeader('X-Certified-Source', certifiedExportResult.source);
+        if (certifiedExportResult.certifiedSnapshotId) res.setHeader('X-Certified-Snapshot-Id', certifiedExportResult.certifiedSnapshotId);
+        if (certifiedExportResult.snapshotHash) res.setHeader('X-Certified-Snapshot-Hash', certifiedExportResult.snapshotHash);
+        if (certifiedExportResult.snapshotHashVersion != null) res.setHeader('X-Certified-Snapshot-Hash-Version', String(certifiedExportResult.snapshotHashVersion));
+      }
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
       return res.send(buf);
@@ -414,6 +440,12 @@ router.post('/pdf', async (req: Request, res: Response) => {
         : pdfType === 'summary'
           ? 'Draft_Financials_NOT_CERTIFIED_summary.pdf'
           : 'Draft_Financials_NOT_CERTIFIED.pdf';
+    if (exportMode === 'certified' && certifiedExportResult) {
+      res.setHeader('X-Certified-Source', certifiedExportResult.source);
+      if (certifiedExportResult.certifiedSnapshotId) res.setHeader('X-Certified-Snapshot-Id', certifiedExportResult.certifiedSnapshotId);
+      if (certifiedExportResult.snapshotHash) res.setHeader('X-Certified-Snapshot-Hash', certifiedExportResult.snapshotHash);
+      if (certifiedExportResult.snapshotHashVersion != null) res.setHeader('X-Certified-Snapshot-Hash-Version', String(certifiedExportResult.snapshotHashVersion));
+    }
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
     res.send(buf);
@@ -505,20 +537,35 @@ router.post('/csv', async (req: Request, res: Response) => {
     };
     const closeSessionIdCsv = (bodyCsv.closeSessionId ?? (req.query.closeSessionId as string) ?? '') as string;
     let raw: Array<{ account_code?: string; account_name: string; debit: number; credit: number; account_type?: string; Agent_Confidence_Score?: number }> = body?.clean_ledger ?? [];
+    let certifiedCsvResult: Awaited<ReturnType<typeof import('../services/audit_export_service.js').getCertifiedStatementsForBinder>> = null;
     if (exportModeCsv === 'certified' && closeSessionIdCsv && tenantId && pool) {
       const { getCertifiedStatementsForBinder } = await import('../services/audit_export_service.js');
       const { statementsToExportPayload } = await import('../services/certified_statements_service.js');
       const allowLegacyCsv = (req.query.allowLegacyCertifiedSource as string) === '1' || process.env.ALLOW_LEGACY_CERTIFIED_SOURCE === 'true';
       const resultCsv = await getCertifiedStatementsForBinder(pool, tenantId, closeSessionIdCsv, { allowLegacyCertifiedSource: allowLegacyCsv });
       if (resultCsv) {
+        certifiedCsvResult = resultCsv;
         const payload = statementsToExportPayload(resultCsv.statements);
         raw = payload.clean_ledger as typeof raw;
       } else if (!allowLegacyCsv) {
-        return res.status(422).json({
+        const payload: {
+          error: string;
+          code: string;
+          message: string;
+          remediation?: string;
+          allowLegacyCertifiedSourceEffective?: boolean;
+          attemptedSource?: string;
+        } = {
           error: 'Unprocessable Entity',
-          code: 'NO_CERTIFIED_SOURCE',
-          message: 'No certified snapshot for this session. Certification creates the snapshot. Use allowLegacyCertifiedSource=1 or ALLOW_LEGACY_CERTIFIED_SOURCE=true for legacy.',
-        });
+          code: BinderExportCode.NO_CERTIFIED_SOURCE,
+          message: BinderExportMessage[BinderExportCode.NO_CERTIFIED_SOURCE],
+          allowLegacyCertifiedSourceEffective: allowLegacyCsv,
+          attemptedSource: 'certified_snapshot',
+        };
+        if (BinderExportRemediation[BinderExportCode.NO_CERTIFIED_SOURCE]) {
+          payload.remediation = BinderExportRemediation[BinderExportCode.NO_CERTIFIED_SOURCE];
+        }
+        return res.status(422).json(payload);
       }
     }
     let totalDebitsCsv = 0;
@@ -539,8 +586,8 @@ router.post('/csv', async (req: Request, res: Response) => {
     if (!finalCheckCsv.passed) {
       return res.status(422).json({
         error: 'Unprocessable Entity',
-        code: 'FINAL_INTEGRITY_CHECK_FAILED',
-        message: finalCheckCsv.error ?? 'Export blocked: imbalance or unclassified Suspense accounts.',
+        code: BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED,
+        message: finalCheckCsv.error ?? BinderExportMessage[BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED],
         checks: finalCheckCsv.checks,
         suspenseAccounts: finalCheckCsv.suspenseAccounts,
         plugSuspicious: finalCheckCsv.plugSuspicious,
@@ -582,6 +629,12 @@ router.post('/csv', async (req: Request, res: Response) => {
       res.setHeader('X-Export-File-Ref', key);
     }
     const csvName = exportModeCsv === 'certified' ? 'Certified_Financials.csv' : 'Draft_Financials_NOT_CERTIFIED.csv';
+    if (exportModeCsv === 'certified' && certifiedCsvResult) {
+      res.setHeader('X-Certified-Source', certifiedCsvResult.source);
+      if (certifiedCsvResult.certifiedSnapshotId) res.setHeader('X-Certified-Snapshot-Id', certifiedCsvResult.certifiedSnapshotId);
+      if (certifiedCsvResult.snapshotHash) res.setHeader('X-Certified-Snapshot-Hash', certifiedCsvResult.snapshotHash);
+      if (certifiedCsvResult.snapshotHashVersion != null) res.setHeader('X-Certified-Snapshot-Hash-Version', String(certifiedCsvResult.snapshotHashVersion));
+    }
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${csvName}"`);
     res.send(buf);

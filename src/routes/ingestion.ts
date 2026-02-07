@@ -1,10 +1,12 @@
 /**
  * Ingestion Agent API — auto-detect file type, classify (bank statement / tax form),
  * route to specialist, and apply data cleaning (dates, negative numbers).
+ * Tenant ID comes exclusively from JWT; query.tenantId is ignored to prevent tenant IDOR.
  */
 
 import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
+import { getTenantId } from '../lib/tenant_context.js';
 import { runIngestionAgent } from '../services/ingestion_agent.js';
 import { buildIngestionPipeline } from '../services/ingestion_pipeline.js';
 import { runAllFetchers, runAllFetchersAndIngest } from '../services/ingestion_fetchers.js';
@@ -161,7 +163,11 @@ router.get('/fetchers/status', (_req: Request, res: Response) => {
  */
 router.post('/fetchers/run', validateQuery(fetchersRunQuerySchema), async (req: Request, res: Response) => {
   try {
-    const tenantId = String(req.query.tenantId ?? 'default-tenant');
+    const tenantId = getTenantId(req);
+    if (!tenantId) {
+      res.status(403).json({ error: 'Tenant context required', message: 'Authenticate with a valid token to run fetchers.' });
+      return;
+    }
     const mode = String(req.query.mode ?? 'fetch');
     if (mode === 'ingest') {
       const results = await runAllFetchersAndIngest(tenantId);
@@ -181,7 +187,11 @@ router.post('/fetchers/run', validateQuery(fetchersRunQuerySchema), async (req: 
  * Returns daily usage for tenant.
  */
 router.get('/fetchers/usage', (req: Request, res: Response) => {
-  const tenantId = String(req.query.tenantId ?? 'default-tenant');
+  const tenantId = getTenantId(req);
+  if (!tenantId) {
+    res.status(403).json({ error: 'Tenant context required', message: 'Authenticate with a valid token to view fetcher usage.' });
+    return;
+  }
   res.json({ ok: true, usage: getUsage(tenantId), quota: getQuota(tenantId) });
 });
 

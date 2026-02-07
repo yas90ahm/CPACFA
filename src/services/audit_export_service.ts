@@ -148,6 +148,10 @@ export type CertifiedSourceKind = 'certified_snapshot' | 'session_snapshot' | 'l
 export interface GetCertifiedStatementsResult {
   statements: FinancialStatementsOutput;
   source: CertifiedSourceKind;
+  /** Trust tokens from persisted snapshot (when source is certified_snapshot or session_snapshot). */
+  certifiedSnapshotId?: string;
+  snapshotHash?: string;
+  snapshotHashVersion?: number;
 }
 
 /**
@@ -176,6 +180,9 @@ export async function getCertifiedStatementsForBinder(
         return {
           statements,
           source: snapshotId ? 'certified_snapshot' : 'session_snapshot',
+          certifiedSnapshotId: snapshot.id,
+          snapshotHash: snapshot.snapshotHash,
+          snapshotHashVersion: snapshot.hashVersion,
         };
       } catch {
         return null;

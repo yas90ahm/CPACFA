@@ -4,6 +4,8 @@
 
 import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
+import { logCriticalRoute } from '../../lib/logger.js';
+import type { RequestWithId } from '../../middleware/requestId.js';
 import {
   buildAuditBinder,
   registerStatementGeneration,
@@ -19,6 +21,11 @@ import { listStagingItems } from '../../services/persistence_service.js';
 import { validateBody } from '../../middleware/validationMiddleware.js';
 import { registerStatementsBodySchema } from '../../schemas/auditSchemas.js';
 import { handleAuditError, handleAuditOrIntegrityError } from './audit_shared.js';
+import {
+  BinderExportCode,
+  BinderExportMessage,
+  BinderExportRemediation,
+} from '../../constants/binder_export_codes.js';
 
 const router = Router();
 
@@ -131,27 +138,68 @@ function allowLegacyCertifiedSource(req: Request): boolean {
   return req.query.allowLegacyCertifiedSource === '1' || process.env.ALLOW_LEGACY_CERTIFIED_SOURCE === 'true';
 }
 
+const ROUTE_BINDER = 'GET /api/audit/binder';
+
+function binderGateLog(
+  req: Request,
+  outcome: 'allow' | 'deny',
+  opts: { closeSessionId?: string; code?: string; certifiedSource?: string; startMs: number }
+): void {
+  const requestId = (req as RequestWithId).requestId ?? '';
+  logCriticalRoute({
+    ts: new Date().toISOString(),
+    level: 'info',
+    requestId,
+    tenantId: getTenantId(req) ?? undefined,
+    closeSessionId: opts.closeSessionId,
+    route: ROUTE_BINDER,
+    outcome,
+    code: opts.code,
+    durationMs: Date.now() - opts.startMs,
+  });
+}
+
 /** GET /api/audit/binder — certified only; requires closeSessionId, session.status === 'certified', checkExportGate. Default: requires certified snapshot (no legacy fallback). Use allowLegacyCertifiedSource=1 to allow legacy. */
 router.get('/binder', async (req: Request, res: Response) => {
+  const startMs = Date.now();
+  const closeSessionId = (req.query.closeSessionId as string) ?? '';
   try {
     const auth = await requireCertifiedSession(req, res);
     if (!auth || !auth.pool || auth.tenantId == null) return;
     if (!(await runBinderExportGates(req, res, { pool: auth.pool, tenantId: auth.tenantId }))) return;
-    const closeSessionId = (req.query.closeSessionId as string) ?? '';
     const result = await getCertifiedStatementsForBinder(auth.pool, auth.tenantId, closeSessionId, {
       allowLegacyCertifiedSource: allowLegacyCertifiedSource(req),
     });
     if (!result) {
-      const code = closeSessionId && !allowLegacyCertifiedSource(req)
-        ? 'NO_CERTIFIED_SOURCE'
-        : 'FINAL_INTEGRITY_CHECK_FAILED';
-      const message = code === 'NO_CERTIFIED_SOURCE'
-        ? 'No certified snapshot for this session. Certification creates the snapshot; ensure the session was certified. To allow legacy source (last registered statements), set query allowLegacyCertifiedSource=1 or env ALLOW_LEGACY_CERTIFIED_SOURCE=true.'
-        : 'No certified statements available or Truth Gate failed. Create a ledger snapshot for this session or register statements that pass integrity check.';
-      res.status(422).json({ error: 'Unprocessable Entity', code, message });
+      const code =
+        closeSessionId && !allowLegacyCertifiedSource(req)
+          ? BinderExportCode.NO_CERTIFIED_SOURCE
+          : BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED;
+      binderGateLog(req, 'deny', { closeSessionId, code, startMs });
+      const payload: {
+        error: string;
+        code: string;
+        message: string;
+        remediation?: string;
+        allowLegacyCertifiedSourceEffective?: boolean;
+        attemptedSource?: string;
+      } = {
+        error: 'Unprocessable Entity',
+        code,
+        message: BinderExportMessage[code],
+        allowLegacyCertifiedSourceEffective: allowLegacyCertifiedSource(req),
+        attemptedSource: 'certified_snapshot',
+      };
+      if (code === BinderExportCode.NO_CERTIFIED_SOURCE && BinderExportRemediation[code]) {
+        payload.remediation = BinderExportRemediation[code];
+      }
+      res.status(422).json(payload);
       return;
     }
     if (result.source) res.setHeader('X-Certified-Source', result.source);
+    if (result.certifiedSnapshotId) res.setHeader('X-Certified-Snapshot-Id', result.certifiedSnapshotId);
+    if (result.snapshotHash) res.setHeader('X-Certified-Snapshot-Hash', result.snapshotHash);
+    if (result.snapshotHashVersion != null) res.setHeader('X-Certified-Snapshot-Hash-Version', String(result.snapshotHashVersion));
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
     const periodLabel = periodEnd.slice(0, 7);
@@ -170,6 +218,16 @@ router.get('/binder', async (req: Request, res: Response) => {
       pool: auth.pool,
       ingestMetadata: ingestMetadata.length ? ingestMetadata : undefined,
     });
+    logCriticalRoute({
+      ts: new Date().toISOString(),
+      level: 'info',
+      requestId: (req as RequestWithId).requestId ?? '',
+      tenantId: auth.tenantId,
+      closeSessionId,
+      route: ROUTE_BINDER,
+      outcome: 'allow',
+      durationMs: Date.now() - startMs,
+    });
     res.json(binder);
   } catch (err) {
     handleAuditOrIntegrityError(res, err, 'Binder error');
@@ -187,14 +245,31 @@ router.get('/binder/export/pdf', async (req: Request, res: Response) => {
       allowLegacyCertifiedSource: allowLegacyCertifiedSource(req),
     });
     if (!result) {
-      const code = closeSessionId && !allowLegacyCertifiedSource(req) ? 'NO_CERTIFIED_SOURCE' : 'FINAL_INTEGRITY_CHECK_FAILED';
-      const message = code === 'NO_CERTIFIED_SOURCE'
-        ? 'No certified snapshot for this session. Certification creates the snapshot. Use allowLegacyCertifiedSource=1 or ALLOW_LEGACY_CERTIFIED_SOURCE=true for legacy.'
-        : 'No certified statements available or Truth Gate failed.';
-      res.status(422).json({ error: 'Unprocessable Entity', code, message });
+      const code = closeSessionId && !allowLegacyCertifiedSource(req) ? BinderExportCode.NO_CERTIFIED_SOURCE : BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED;
+      const payload: {
+        error: string;
+        code: string;
+        message: string;
+        remediation?: string;
+        allowLegacyCertifiedSourceEffective?: boolean;
+        attemptedSource?: string;
+      } = {
+        error: 'Unprocessable Entity',
+        code,
+        message: BinderExportMessage[code],
+        allowLegacyCertifiedSourceEffective: allowLegacyCertifiedSource(req),
+        attemptedSource: 'certified_snapshot',
+      };
+      if (code === BinderExportCode.NO_CERTIFIED_SOURCE && BinderExportRemediation[code]) {
+        payload.remediation = BinderExportRemediation[code];
+      }
+      res.status(422).json(payload);
       return;
     }
     if (result.source) res.setHeader('X-Certified-Source', result.source);
+    if (result.certifiedSnapshotId) res.setHeader('X-Certified-Snapshot-Id', result.certifiedSnapshotId);
+    if (result.snapshotHash) res.setHeader('X-Certified-Snapshot-Hash', result.snapshotHash);
+    if (result.snapshotHashVersion != null) res.setHeader('X-Certified-Snapshot-Hash-Version', String(result.snapshotHashVersion));
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
     const entityName = (req.query.entityName as string) ?? 'Entity';
@@ -232,14 +307,31 @@ router.get('/binder/export/csv', async (req: Request, res: Response) => {
       allowLegacyCertifiedSource: allowLegacyCertifiedSource(req),
     });
     if (!result) {
-      const code = closeSessionId && !allowLegacyCertifiedSource(req) ? 'NO_CERTIFIED_SOURCE' : 'FINAL_INTEGRITY_CHECK_FAILED';
-      const message = code === 'NO_CERTIFIED_SOURCE'
-        ? 'No certified snapshot for this session. Certification creates the snapshot. Use allowLegacyCertifiedSource=1 or ALLOW_LEGACY_CERTIFIED_SOURCE=true for legacy.'
-        : 'No certified statements available or Truth Gate failed.';
-      res.status(422).json({ error: 'Unprocessable Entity', code, message });
+      const code = closeSessionId && !allowLegacyCertifiedSource(req) ? BinderExportCode.NO_CERTIFIED_SOURCE : BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED;
+      const payload: {
+        error: string;
+        code: string;
+        message: string;
+        remediation?: string;
+        allowLegacyCertifiedSourceEffective?: boolean;
+        attemptedSource?: string;
+      } = {
+        error: 'Unprocessable Entity',
+        code,
+        message: BinderExportMessage[code],
+        allowLegacyCertifiedSourceEffective: allowLegacyCertifiedSource(req),
+        attemptedSource: 'certified_snapshot',
+      };
+      if (code === BinderExportCode.NO_CERTIFIED_SOURCE && BinderExportRemediation[code]) {
+        payload.remediation = BinderExportRemediation[code];
+      }
+      res.status(422).json(payload);
       return;
     }
     if (result.source) res.setHeader('X-Certified-Source', result.source);
+    if (result.certifiedSnapshotId) res.setHeader('X-Certified-Snapshot-Id', result.certifiedSnapshotId);
+    if (result.snapshotHash) res.setHeader('X-Certified-Snapshot-Hash', result.snapshotHash);
+    if (result.snapshotHashVersion != null) res.setHeader('X-Certified-Snapshot-Hash-Version', String(result.snapshotHashVersion));
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
     const entityName = (req.query.entityName as string) ?? 'Entity';

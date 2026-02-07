@@ -6,12 +6,16 @@
 import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { send500 } from '../../lib/errorHandler.js';
+import { logCriticalRoute } from '../../lib/logger.js';
+import type { RequestWithId } from '../../middleware/requestId.js';
 import {
   createSessionOrGetExisting,
+  ensureSessionForPeriod,
   getSession,
   listSessions,
   updateStatus,
   certifyCloseSession,
+  advanceSession,
   CloseSessionError,
 } from '../../services/close_session_service.js';
 import { getCloseRoleFromReq } from '../../lib/closeRole.js';
@@ -61,6 +65,78 @@ function handleSessionError(res: Response, err: unknown, fallbackLabel: string):
   }
   send500(res, err, fallbackLabel);
 }
+
+const ADVANCE_CONTRACT_VERSION = 'v1';
+
+const ENSURE_CONTRACT_VERSION = 'v1';
+
+const ROUTE_ENSURE = 'POST /api/close/sessions/ensure';
+const ROUTE_ADVANCE = 'POST /api/close/sessions/:id/advance';
+const ROUTE_CERTIFY = 'POST /api/close/sessions/:id/certify';
+
+function criticalLog(
+  req: Request,
+  route: string,
+  outcome: string,
+  opts: { code?: string; closeSessionId?: string; startMs: number }
+): void {
+  const requestId = (req as RequestWithId).requestId ?? '';
+  logCriticalRoute({
+    ts: new Date().toISOString(),
+    level: 'info',
+    requestId,
+    tenantId: getTenantId(req) ?? undefined,
+    closeSessionId: opts.closeSessionId,
+    route,
+    outcome,
+    code: opts.code,
+    durationMs: Date.now() - opts.startMs,
+  });
+}
+
+/** POST /api/close/sessions/ensure — idempotent ensure session exists for entityId + periodLabel (draft). */
+router.post('/sessions/ensure', async (req: Request, res: Response) => {
+  const startMs = Date.now();
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      criticalLog(req, ROUTE_ENSURE, 'error', { code: 'VALIDATION', startMs });
+      res.status(400).json({
+        error: 'Tenant context required',
+        code: 'VALIDATION',
+        message: 'Tenant context is required for ensure session.',
+      });
+      return;
+    }
+    const body = req.body as { entityId?: string; periodLabel?: string };
+    const entityId = typeof body?.entityId === 'string' ? body.entityId.trim() : '';
+    const periodLabel = typeof body?.periodLabel === 'string' ? body.periodLabel.trim() : '';
+    if (!entityId || !periodLabel) {
+      criticalLog(req, ROUTE_ENSURE, 'error', { code: 'VALIDATION', startMs });
+      res.status(400).json({
+        error: 'Validation failed',
+        code: 'VALIDATION',
+        message: 'entityId and periodLabel are required.',
+      });
+      return;
+    }
+    const { session, created } = await ensureSessionForPeriod(pool, tenantId, entityId, periodLabel);
+    const statusCode = created ? 201 : 200;
+    res.status(statusCode).json({
+      contractVersion: ENSURE_CONTRACT_VERSION,
+      closeSessionId: session.id,
+      entityId: session.entityId,
+      periodLabel: session.periodEnd?.slice(0, 7) ?? periodLabel,
+      status: session.status,
+      created,
+    });
+    criticalLog(req, ROUTE_ENSURE, 'ok', { closeSessionId: session.id, startMs });
+  } catch (e) {
+    criticalLog(req, ROUTE_ENSURE, 'error', { startMs });
+    handleSessionError(res, e, 'Ensure close session failed');
+  }
+});
 
 /** POST /api/close/sessions — create close session */
 router.post('/sessions', async (req: Request, res: Response) => {
@@ -119,6 +195,54 @@ router.get('/sessions/:id', async (req: Request, res: Response) => {
   }
 });
 
+/** POST /api/close/sessions/:id/advance — deterministic advance: draft→locked, locked→certified, certified→no-op */
+router.post('/sessions/:id/advance', async (req: Request, res: Response) => {
+  const startMs = Date.now();
+  const id = req.params.id ?? '';
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      criticalLog(req, ROUTE_ADVANCE, 'error', { code: 'VALIDATION', closeSessionId: id, startMs });
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const authReq = req as AuthRequest;
+    const body = (req.body as { certifiedBy?: string }) ?? {};
+    const actorRole = getCloseRoleFromReq(authReq);
+    const result = await advanceSession(pool, {
+      tenantId,
+      closeSessionId: id,
+      certifiedBy: body.certifiedBy,
+      actorRole,
+    });
+    const payload = {
+      contractVersion: ADVANCE_CONTRACT_VERSION,
+      closeSessionId: result.session.id,
+      statusBefore: result.statusBefore,
+      statusAfter: result.statusAfter,
+      actionTaken: result.actionTaken,
+      result: result.result,
+      blockers: result.blockers,
+    };
+    if (!result.success) {
+      criticalLog(req, ROUTE_ADVANCE, 'denied', { code: 'NOT_READY', closeSessionId: id, startMs });
+      res.status(422).json({
+        error: 'Close not ready to advance',
+        code: 'NOT_READY',
+        message: 'Resolve blockers before advancing.',
+        ...payload,
+      });
+      return;
+    }
+    res.status(200).json(payload);
+    criticalLog(req, ROUTE_ADVANCE, 'ok', { closeSessionId: id, startMs });
+  } catch (e) {
+    criticalLog(req, ROUTE_ADVANCE, 'error', { closeSessionId: id, startMs });
+    handleSessionError(res, e, 'Advance close session failed');
+  }
+});
+
 /** GET /api/close/sessions/:id/readiness — compute close readiness (hard/soft blockers) */
 router.get('/sessions/:id/readiness', async (req: Request, res: Response) => {
   try {
@@ -143,17 +267,20 @@ router.get('/sessions/:id/readiness', async (req: Request, res: Response) => {
 
 /** POST /api/close/sessions/:id/certify — certify close (gate before export); requires locked, no hard blockers, approver role */
 router.post('/sessions/:id/certify', async (req: Request, res: Response) => {
+  const startMs = Date.now();
+  const id = req.params.id ?? '';
   try {
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
     if (!tenantId || !pool) {
+      criticalLog(req, ROUTE_CERTIFY, 'error', { code: 'VALIDATION', closeSessionId: id, startMs });
       res.status(400).json({ error: 'Tenant context required' });
       return;
     }
-    const id = req.params.id ?? '';
     const authReq = req as AuthRequest;
     const body = req.body as { periodLabel?: string; certifiedBy: string; memo?: string };
     if (!body?.certifiedBy?.trim()) {
+      criticalLog(req, ROUTE_CERTIFY, 'error', { code: 'VALIDATION', closeSessionId: id, startMs });
       res.status(400).json({ error: 'certifiedBy is required' });
       return;
     }
@@ -165,9 +292,69 @@ router.post('/sessions/:id/certify', async (req: Request, res: Response) => {
       periodLabel: body.periodLabel,
       memo: body.memo,
     }, actorRole);
-    res.status(200).json(session);
+    const payload: Record<string, unknown> = { ...session };
+    if (session.certifiedSnapshotId) {
+      const { getLedgerSnapshotById } = await import('../../db/repositories/ledger_snapshot_repository.js');
+      const snapshot = await getLedgerSnapshotById(pool, session.certifiedSnapshotId);
+      if (snapshot) {
+        payload.snapshotHash = snapshot.snapshotHash;
+        payload.snapshotHashVersion = snapshot.hashVersion;
+      }
+    }
+    res.status(200).json(payload);
+    criticalLog(req, ROUTE_CERTIFY, 'ok', { closeSessionId: id, startMs });
   } catch (e) {
+    criticalLog(req, ROUTE_CERTIFY, 'error', { closeSessionId: id, startMs });
     handleSessionError(res, e, 'Certify close failed');
+  }
+});
+
+/** GET /api/close/sessions/:id/certified-source — read-only certified source metadata (no DB writes). */
+router.get('/sessions/:id/certified-source', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const id = req.params.id ?? '';
+    const session = await getSession(pool, tenantId, id);
+    if (!session) {
+      res.status(404).json({ error: 'Close session not found' });
+      return;
+    }
+    const allowLegacy =
+      req.query.allowLegacyCertifiedSource === '1' || process.env.ALLOW_LEGACY_CERTIFIED_SOURCE === 'true';
+    let certifiedSnapshotId: string | undefined = session.certifiedSnapshotId ?? undefined;
+    let snapshotHash: string | undefined;
+    let snapshotHashVersion: number | undefined;
+    let certifiedSource: 'certified_snapshot' | 'legacy' | 'none' = 'none';
+    if (certifiedSnapshotId) {
+      const { getLedgerSnapshotById } = await import('../../db/repositories/ledger_snapshot_repository.js');
+      const snapshot = await getLedgerSnapshotById(pool, certifiedSnapshotId);
+      if (snapshot) {
+        snapshotHash = snapshot.snapshotHash;
+        snapshotHashVersion = snapshot.hashVersion;
+        certifiedSource = 'certified_snapshot';
+      } else {
+        certifiedSnapshotId = undefined;
+      }
+    }
+    if (certifiedSource === 'none' && session.status === 'certified' && allowLegacy) {
+      certifiedSource = 'legacy';
+    }
+    res.json({
+      closeSessionId: session.id,
+      isCertified: session.status === 'certified',
+      certifiedSnapshotId: certifiedSnapshotId ?? null,
+      snapshotHash: snapshotHash ?? null,
+      snapshotHashVersion: snapshotHashVersion ?? null,
+      certifiedSource,
+      allowLegacyCertifiedSourceEffective: allowLegacy,
+    });
+  } catch (e) {
+    send500(res, e, 'Get certified source failed');
   }
 });
 

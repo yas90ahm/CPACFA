@@ -270,6 +270,9 @@ describe('Certification pipeline E2E', () => {
 
     expect(certifyRes.status).toBe(200);
     expect(certifyRes.body?.status).toBe('certified');
+    expect(certifyRes.body?.certifiedSnapshotId).toBeDefined();
+    expect(certifyRes.body?.snapshotHash).toBeDefined();
+    expect(certifyRes.body?.snapshotHashVersion).toBeDefined();
 
     // 8. Run export gates (checkExportGate + finalIntegrityCheck) via POST /api/export/pdf
     const balancedLedger = [
@@ -318,6 +321,9 @@ describe('Certification pipeline E2E', () => {
 
     expect(binderJsonRes.status).toBe(200);
     expect(binderJsonRes.headers['x-certified-source']).toBe('certified_snapshot');
+    expect(binderJsonRes.headers['x-certified-snapshot-id']).toBeDefined();
+    expect(binderJsonRes.headers['x-certified-snapshot-hash']).toBeDefined();
+    expect(binderJsonRes.headers['x-certified-snapshot-hash-version']).toBeDefined();
     const binder = binderJsonRes.body;
     expect(binder?.chainVerification).toBeDefined();
     expect(binder.chainVerification.valid).toBe(true);
@@ -333,6 +339,9 @@ describe('Certification pipeline E2E', () => {
 
     expect(binderPdfRes.status).toBe(200);
     expect(binderPdfRes.headers['x-certified-source']).toBe('certified_snapshot');
+    expect(binderPdfRes.headers['x-certified-snapshot-id']).toBeDefined();
+    expect(binderPdfRes.headers['x-certified-snapshot-hash']).toBeDefined();
+    expect(binderPdfRes.headers['x-certified-snapshot-hash-version']).toBeDefined();
     expect(binderPdfRes.headers['content-type']).toMatch(/pdf|octet-stream/);
     expect(Buffer.isBuffer(binderPdfRes.body) || typeof binderPdfRes.body === 'object').toBe(true);
 

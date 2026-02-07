@@ -2,7 +2,10 @@
  * Ledger snapshot repository — immutable snapshots for certification/export.
  */
 
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
+
+/** Pool or client (for transactional writes). Both expose .query(). */
+type Queryable = Pool | PoolClient;
 import type { LedgerSnapshot, LedgerSnapshotPayload, LedgerSnapshotSource } from '../../types/ledger_snapshot.js';
 
 interface LedgerSnapshotRow {
@@ -44,8 +47,8 @@ export interface InsertLedgerSnapshotParams {
   closeSessionId?: string;
 }
 
-export async function insertLedgerSnapshot(pool: Pool, params: InsertLedgerSnapshotParams): Promise<LedgerSnapshot> {
-  const r = await pool.query<LedgerSnapshotRow>(
+export async function insertLedgerSnapshot(client: Queryable, params: InsertLedgerSnapshotParams): Promise<LedgerSnapshot> {
+  const r = await client.query<LedgerSnapshotRow>(
     `INSERT INTO ledger_snapshots (
       tenant_id, period_label, created_by, source,
       snapshot_payload_json, snapshot_hash, hash_version, close_session_id

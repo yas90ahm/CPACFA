@@ -102,7 +102,6 @@ describe('Export certified gate', () => {
       });
     expect(res.status).toBe(403);
     expect(res.body?.code).toBe('CLOSE_NOT_CERTIFIED');
-    expect(res.body?.message).toMatch(/certified|Certify/);
   });
 
   it('certified export is not blocked by certified gate when session is certified', async () => {
@@ -128,6 +127,10 @@ describe('Export certified gate', () => {
     }
     if (res.status === 200) {
       expect(res.headers['content-disposition']).toMatch(/Certified_Financials/);
+      expect(res.headers['x-certified-source']).toBe('certified_snapshot');
+      expect(res.headers['x-certified-snapshot-id']).toBeDefined();
+      expect(res.headers['x-certified-snapshot-hash']).toBeDefined();
+      expect(res.headers['x-certified-snapshot-hash-version']).toBeDefined();
     }
   });
 
@@ -180,6 +183,32 @@ describe('Export certified gate', () => {
     expect(res.body?.code).toBe('CLOSE_NOT_CERTIFIED');
   });
 
+  it('GET /api/close/sessions/:id/certified-source returns metadata for certified and non-certified sessions', async () => {
+    if (!isDbConfigured() || !closeSessionIdCertified || !closeSessionIdLocked) return;
+    const certifiedRes = await request(app)
+      .get(`/api/close/sessions/${closeSessionIdCertified}/certified-source`)
+      .set('Authorization', `Bearer ${authToken}`)
+      .set('x-tenant-id', TEST_TENANT_ID);
+    expect(certifiedRes.status).toBe(200);
+    expect(certifiedRes.body?.closeSessionId).toBe(closeSessionIdCertified);
+    expect(certifiedRes.body?.isCertified).toBe(true);
+    expect(certifiedRes.body?.certifiedSnapshotId).toBeTruthy();
+    expect(certifiedRes.body?.snapshotHash).toBeTruthy();
+    expect(certifiedRes.body?.snapshotHashVersion).toBeDefined();
+    expect(certifiedRes.body?.certifiedSource).toBe('certified_snapshot');
+    expect(typeof certifiedRes.body?.allowLegacyCertifiedSourceEffective).toBe('boolean');
+
+    const lockedRes = await request(app)
+      .get(`/api/close/sessions/${closeSessionIdLocked}/certified-source`)
+      .set('Authorization', `Bearer ${authToken}`)
+      .set('x-tenant-id', TEST_TENANT_ID);
+    expect(lockedRes.status).toBe(200);
+    expect(lockedRes.body?.closeSessionId).toBe(closeSessionIdLocked);
+    expect(lockedRes.body?.isCertified).toBe(false);
+    expect(lockedRes.body?.certifiedSource).toBe('none');
+    expect(typeof lockedRes.body?.allowLegacyCertifiedSourceEffective).toBe('boolean');
+  });
+
   it('binder export with certified session returns 200 when gate passes', async () => {
     if (!isDbConfigured() || !closeSessionIdCertified) return;
     const res = await request(app)
@@ -197,6 +226,10 @@ describe('Export certified gate', () => {
     if (res.status === 200) {
       expect(res.headers['content-type']).toMatch(/pdf|octet-stream/);
       expect(res.headers['content-disposition']).toMatch(/Audit_Binder/);
+      expect(res.headers['x-certified-source']).toBe('certified_snapshot');
+      expect(res.headers['x-certified-snapshot-id']).toBeDefined();
+      expect(res.headers['x-certified-snapshot-hash']).toBeDefined();
+      expect(res.headers['x-certified-snapshot-hash-version']).toBeDefined();
     }
   });
 
