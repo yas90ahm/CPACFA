@@ -27,10 +27,7 @@ describe('Evidence policy enforcement', () => {
   let testTenantId: string;
   let closeSessionId: string;
   let materialJeId: string;
-  const ingestPath =
-    process.env.NODE_ENV === 'production'
-      ? '/api/trial-balance/ingest'
-      : '/api-dev/trial-balance/ingest';
+  const ingestPath = '/api/trial-balance/ingest';
 
   beforeAll(async () => {
     if (!isDbConfigured()) {

@@ -1,37 +1,46 @@
 /**
  * Auth bypass impossible in production.
- * - In production, useRequireAuthForApi() is always true (REQUIRE_AUTH cannot disable).
+ * - In MODE=prod, useRequireAuthForApi() is always true (REQUIRE_AUTH cannot disable).
  * - No path-based bypass exists in main router (removed).
- * - Dev-only diagnostics router is mounted only when NODE_ENV !== 'production'.
+ * - Dev-only diagnostics router is mounted only when MODE=dev.
  *
  * Run production app tests with:
- *   TEST_AUTH_PRODUCTION=1 NODE_ENV=production npx jest tests/unit/auth_bypass_production.test.ts --runInBand
+ *   TEST_AUTH_PRODUCTION=1 MODE=prod NODE_ENV=production npx jest tests/unit/auth_bypass_production.test.ts --runInBand
  */
 
 import { describe, it, expect, afterEach } from '@jest/globals';
 import request from 'supertest';
 import { app, useRequireAuthForApi } from '../../src/server.js';
+import { resetModeCache } from '../../src/lib/runtime_mode.js';
 
-const isProduction = process.env.NODE_ENV === 'production';
+const isProduction = process.env.MODE === 'prod' || process.env.NODE_ENV === 'production';
 
 describe('Auth bypass impossible in production', () => {
   const originalNodeEnv = process.env.NODE_ENV;
+  const originalMode = process.env.MODE;
   const originalRequireAuth = process.env.REQUIRE_AUTH;
 
   afterEach(() => {
     process.env.NODE_ENV = originalNodeEnv;
+    if (originalMode !== undefined) process.env.MODE = originalMode;
+    else delete process.env.MODE;
     process.env.REQUIRE_AUTH = originalRequireAuth;
+    resetModeCache();
   });
 
-  it('useRequireAuthForApi returns true when NODE_ENV=production', () => {
+  it('useRequireAuthForApi returns true when MODE=prod', () => {
+    process.env.MODE = 'prod';
     process.env.NODE_ENV = 'production';
     process.env.REQUIRE_AUTH = 'false';
+    resetModeCache();
     expect(useRequireAuthForApi()).toBe(true);
   });
 
-  it('useRequireAuthForApi returns true when NODE_ENV=production and REQUIRE_AUTH unset', () => {
+  it('useRequireAuthForApi returns true when MODE=prod and REQUIRE_AUTH unset', () => {
+    process.env.MODE = 'prod';
     process.env.NODE_ENV = 'production';
     delete process.env.REQUIRE_AUTH;
+    resetModeCache();
     expect(useRequireAuthForApi()).toBe(true);
   });
 
@@ -61,7 +70,7 @@ describe('Auth bypass impossible in production', () => {
     expect(res.status).toBe(401);
   });
 
-  it('POST /api-dev/trial-balance/ingest returns 404 when NODE_ENV=production (dev router not mounted)', async () => {
+  it('POST /api-dev/trial-balance/ingest returns 404 when MODE=prod (dev API never mounted in prod)', async () => {
     if (!isProduction) return;
     const res = await request(app)
       .post('/api-dev/trial-balance/ingest')

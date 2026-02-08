@@ -23,6 +23,7 @@ import {
   type EquityChangesNarrativeBody,
 } from '../../schemas/trialBalanceSchemas.js';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
+import { send500 } from '../../lib/errorHandler.js';
 import { getClassificationSuggestions, applyUserClassificationOverrides } from '../../services/accountClassifier.js';
 import { generateCashFlowNarrativeAgentic } from '../../services/agentic_cash_flow_narrative.js';
 import { generateNotesNarrativeAgentic } from '../../services/agentic_notes_narrative.js';
@@ -43,8 +44,7 @@ router.post('/classification-suggestions', validateBody(classificationSuggestion
     const result = await getClassificationSuggestions(entries);
     res.json(result);
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'Classification suggestions failed', message });
+    send500(res, e, 'Classification suggestions failed');
   }
 });
 
@@ -60,8 +60,7 @@ router.post('/apply-classification', validateBody(applyClassificationBodySchema)
     const classified = applyUserClassificationOverrides(entries, body.overrides);
     res.json({ entries: classified });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'Apply classification failed', message });
+    send500(res, e, 'Apply classification failed');
   }
 });
 
@@ -82,8 +81,7 @@ router.post('/confirm-standard', validateBody(confirmStandardBodySchema), async 
     });
     res.json({ ok: true, message: 'Standard confirmed; retry statement generation.' });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'Confirm standard failed', message });
+    send500(res, e, 'Confirm standard failed');
   }
 });
 
@@ -97,8 +95,7 @@ router.post('/cash-flow-narrative', validateBody(cashFlowNarrativeBodySchema), a
     );
     res.json({ narrative });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'Cash flow narrative failed', message });
+    send500(res, e, 'Cash flow narrative failed');
   }
 });
 
@@ -109,8 +106,7 @@ router.post('/notes-narrative', validateBody(notesNarrativeBodySchema), async (r
     const narrative = await generateNotesNarrativeAgentic(body.standard, body.context);
     res.json({ narrative });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'Notes narrative failed', message });
+    send500(res, e, 'Notes narrative failed');
   }
 });
 
@@ -123,8 +119,7 @@ router.post('/equity-changes-narrative', validateBody(equityChangesNarrativeBody
     );
     res.json({ narrative });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'Equity changes narrative failed', message });
+    send500(res, e, 'Equity changes narrative failed');
   }
 });
 

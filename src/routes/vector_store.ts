@@ -6,6 +6,7 @@
 
 import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
+import { getTenantId } from '../lib/tenant_context.js';
 import type { IngestChunkInput, IngestDocumentInput, StandardType, LevelOfAuthority } from '../knowledge_base/vector_store/index.js';
 import {
   ingestDocument,
@@ -15,8 +16,10 @@ import {
   retrievePrecedentForEntry,
   formatCitedRulesForBot,
   listChunks,
+  resolveTenantId,
 } from '../knowledge_base/vector_store/index.js';
 import { chunkTextByParagraphs } from '../knowledge_base/vector_store/chunker.js';
+import { send500 } from '../lib/errorHandler.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }); // 10 MB
@@ -40,22 +43,23 @@ function isPdfBuffer(buf: Buffer): boolean {
 /** POST /api/vector-store/ingest — Ingest document or chunks (metadata: Standard Type, Level of Authority). */
 router.post('/ingest', (req: Request, res: Response) => {
   try {
+    const tenantId = resolveTenantId(getTenantId(req));
     const body = req.body as {
       document?: IngestDocumentInput;
       chunks?: IngestChunkInput[];
     };
     if (body.document) {
-      const chunks = ingestDocument(body.document);
+      const chunks = ingestDocument(tenantId, body.document);
       return res.json({ ok: true, message: 'Document ingested', count: chunks.length, chunks: chunks.map((c) => ({ id: c.id, pageNumber: c.pageNumber, documentTitle: c.documentTitle })) });
     }
     if (body.chunks && Array.isArray(body.chunks)) {
-      const ingested = body.chunks.map((c) => ingestChunk(c));
+      const ingested = body.chunks.map((c) => ingestChunk(tenantId, c));
       return res.json({ ok: true, message: 'Chunks ingested', count: ingested.length, chunks: ingested.map((c) => ({ id: c.id, pageNumber: c.pageNumber, documentTitle: c.documentTitle })) });
     }
     return res.status(400).json({ error: 'Provide "document" or "chunks" in body' });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Ingest failed';
-    return res.status(500).json({ error: 'Ingest error', message });
+    send500(res, err, 'Vector store ingest failed');
+    return;
   }
 });
 
@@ -88,6 +92,7 @@ router.post('/ingest-pdf', pdfUpload.single('file'), async (req: Request, res: R
 
     if (!text.trim()) return res.status(400).json({ error: 'PDF produced no text' });
 
+    const tenantId = resolveTenantId(getTenantId(req));
     const maxChunkSize = 1200;
     const textChunks = chunkTextByParagraphs(text, maxChunkSize);
     const pageChunkCount = Math.max(1, Math.ceil(textChunks.length / numPages));
@@ -96,7 +101,7 @@ router.post('/ingest-pdf', pdfUpload.single('file'), async (req: Request, res: R
       const pageNumber = Math.min(numPages, Math.floor(i / pageChunkCount) + 1);
       pages.push({ pageNumber, text: textChunks[i] });
     }
-    const chunks = ingestDocument({
+    const chunks = ingestDocument(tenantId, {
       documentTitle,
       standardType,
       levelOfAuthority,
@@ -115,18 +120,19 @@ router.post('/ingest-pdf', pdfUpload.single('file'), async (req: Request, res: R
       chunks: chunks.map((c) => ({ id: c.id, pageNumber: c.pageNumber })),
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'PDF ingest failed';
-    return res.status(500).json({ error: 'PDF ingest error', message });
+    send500(res, err, 'Vector store PDF ingest failed');
+    return;
   }
 });
 
 /** POST /api/vector-store/query — Retrieve with optional precedent-first; citations include document title + page number. */
 router.post('/query', (req: Request, res: Response) => {
   try {
+    const tenantId = resolveTenantId(getTenantId(req));
     const body = req.body as { query: string; preferPrecedent?: boolean; standardType?: StandardType; levelOfAuthority?: LevelOfAuthority; topK?: number };
     const queryText = (body?.query ?? '').trim();
     if (!queryText) return res.status(400).json({ error: 'Missing "query" in body' });
-    const result = retrieve(queryText, {
+    const result = retrieve(tenantId, queryText, {
       preferPrecedent: body.preferPrecedent,
       standardType: body.standardType,
       levelOfAuthority: body.levelOfAuthority,
@@ -139,18 +145,19 @@ router.post('/query', (req: Request, res: Response) => {
       citedRulesForBot: formatCitedRulesForBot(result),
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Query failed';
-    return res.status(500).json({ error: 'Query error', message });
+    send500(res, err, 'Vector store query failed');
+    return;
   }
 });
 
 /** POST /api/vector-store/precedent — CPA agent: check for similar precedent in company history before processing entry. */
 router.post('/precedent', (req: Request, res: Response) => {
   try {
+    const tenantId = resolveTenantId(getTenantId(req));
     const body = req.body as { entryDescription: string; topK?: number; standardType?: 'GAAP' | 'IFRS' };
     const entryDescription = (body?.entryDescription ?? '').trim();
     if (!entryDescription) return res.status(400).json({ error: 'Missing "entryDescription" in body' });
-    const result = retrievePrecedentForEntry(entryDescription, { topK: body.topK ?? 5, standardType: body.standardType });
+    const result = retrievePrecedentForEntry(tenantId, entryDescription, { topK: body.topK ?? 5, standardType: body.standardType });
     return res.json({
       query: result.query,
       chunks: result.chunks.map((c) => ({ id: c.id, documentTitle: c.documentTitle, pageNumber: c.pageNumber, standardType: c.standardType, levelOfAuthority: c.levelOfAuthority, citationCode: c.citationCode })),
@@ -158,19 +165,20 @@ router.post('/precedent', (req: Request, res: Response) => {
       citedRulesForBot: formatCitedRulesForBot(result),
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Precedent lookup failed';
-    return res.status(500).json({ error: 'Precedent error', message });
+    send500(res, err, 'Vector store precedent lookup failed');
+    return;
   }
 });
 
 /** GET /api/vector-store/chunks — List stored chunks (e.g. admin). */
-router.get('/chunks', (_req: Request, res: Response) => {
+router.get('/chunks', (req: Request, res: Response) => {
   try {
-    const chunks = listChunks();
+    const tenantId = resolveTenantId(getTenantId(req));
+    const chunks = listChunks(tenantId);
     return res.json({ count: chunks.length, chunks: chunks.map((c) => ({ id: c.id, documentTitle: c.documentTitle, pageNumber: c.pageNumber, standardType: c.standardType, levelOfAuthority: c.levelOfAuthority })) });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'List failed';
-    return res.status(500).json({ error: 'List error', message });
+    send500(res, err, 'Vector store list chunks failed');
+    return;
   }
 });
 

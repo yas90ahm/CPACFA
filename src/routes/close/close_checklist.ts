@@ -114,7 +114,7 @@ router.post('/checklist-templates', async (req: Request, res: Response) => {
     }
     const template = await upsertTemplateForTenant(tenantId, body.periodType, { name: body.name, stepsSpec: body.stepsSpec }, pool);
     if (!template) {
-      res.status(500).json({ error: 'Upsert template failed (DB not configured?)' });
+      send500(res, new Error('Upsert template failed'), 'Upsert template failed');
       return;
     }
     res.status(201).json(template);
@@ -143,7 +143,7 @@ router.patch('/checklist-templates/:periodType', async (req: Request, res: Respo
     const name = body.name ?? existing?.name ?? 'Default';
     const template = await upsertTemplateForTenant(tenantId, periodType, { name, stepsSpec }, pool);
     if (!template) {
-      res.status(500).json({ error: 'Update template failed (DB not configured?)' });
+      send500(res, new Error('Update template failed'), 'Update template failed');
       return;
     }
     res.json(template);

@@ -5,6 +5,7 @@
 import type { Response } from 'express';
 import { MathematicalIntegrityError } from '../../services/financialStatements.js';
 import { SessionPersistenceError } from '../../errors.js';
+import { send500 } from '../../lib/errorHandler.js';
 
 /** Auditor Portal token: in production must be set and not the default; in dev default allowed. */
 export function getAuditorToken(): string | null {
@@ -16,17 +17,8 @@ export function getAuditorToken(): string | null {
   return raw ?? 'auditor-readonly-2025';
 }
 
-/** In production, avoid leaking system paths, table names, or stack traces to the client. */
-const SANITIZED_MESSAGE = 'An internal error occurred. Please try again or contact support.';
-
 export function handleAuditError(res: Response, err: unknown, label: string): void {
-  let message: string;
-  if (process.env.NODE_ENV === 'production') {
-    message = SANITIZED_MESSAGE;
-  } else {
-    message = err instanceof Error ? err.message : String(err);
-  }
-  res.status(500).json({ error: label, message });
+  send500(res, err, label);
 }
 
 /**
@@ -46,11 +38,7 @@ export function handleAuditOrIntegrityError(res: Response, err: unknown, label: 
     return;
   }
   if (err instanceof SessionPersistenceError) {
-    res.status(500).json({
-      error: 'SessionPersistenceError',
-      message: process.env.NODE_ENV === 'production' ? SANITIZED_MESSAGE : err.message,
-      ...(process.env.NODE_ENV !== 'production' && { operation: err.operation }),
-    });
+    send500(res, err, label);
     return;
   }
   handleAuditError(res, err, label);

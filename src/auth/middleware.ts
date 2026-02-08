@@ -6,6 +6,7 @@ import type { Pool } from 'pg';
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken } from './index.js';
 import { isDbConfigured, getTenantPoolWithMigrations } from '../db/index.js';
+import { getMode } from '../lib/runtime_mode.js';
 
 export interface AuthRequest extends Request {
   userId?: string;
@@ -61,12 +62,13 @@ export function attachTenantPool(req: AuthRequest, res: Response, next: NextFunc
     .catch(next);
 }
 
-const strictTenantContext =
-  process.env.NODE_ENV === 'production' || process.env.REQUIRE_TENANT_CONTEXT === 'true';
+function isStrictTenantContext(): boolean {
+  return getMode() === 'prod' || getMode() === 'demo' || process.env.REQUIRE_TENANT_CONTEXT === 'true';
+}
 
-/** In production (or when REQUIRE_TENANT_CONTEXT=true), require tenantId and tenantPool so in-memory fallbacks are not used. */
+/** In prod/demo (or when REQUIRE_TENANT_CONTEXT=true), require tenantId and tenantPool so in-memory fallbacks are not used. */
 export function requireTenantContext(req: AuthRequest, res: Response, next: NextFunction): void {
-  if (!strictTenantContext) {
+  if (!isStrictTenantContext()) {
     next();
     return;
   }

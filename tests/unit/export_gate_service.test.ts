@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import { checkExportGate, CRITICAL_TAMPER_ALERT } from '../../src/services/export_gate_service.js';
+import { checkExportGate, CRITICAL_TAMPER_ALERT, RESOLUTION_MISMATCH } from '../../src/services/export_gate_service.js';
 import * as periodExportChecks from '../../src/db/repositories/period_export_checks_repository.js';
 import * as auditLedger from '../../src/services/audit_ledger_service.js';
 import * as riskContextStore from '../../src/services/risk_context_store.js';
@@ -80,6 +80,38 @@ describe('Export gate — materiality and chain verification', () => {
     jest.spyOn(riskContextStore, 'getQualitativeEvidenceMissing').mockResolvedValue(false);
     jest.spyOn(conflictsRepo, 'countResolvedByTenantPeriod').mockResolvedValue(0);
     jest.spyOn(auditLedgerRepo, 'countByTenantPeriodAndEventType').mockResolvedValue(0);
+    const result = await checkExportGate({
+      pool: mockPool,
+      tenantId: 'test-tenant',
+      periodLabel: '2025-01',
+    });
+    expect(result.allowed).toBe(true);
+  });
+
+  it('blocks export when resolution counts mismatch (resolvedCount !== ledgerResolutionCount)', async () => {
+    jest.spyOn(periodExportChecks, 'getPeriodExportChecks').mockResolvedValue(null);
+    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true, entryCount: 1, verifiedAt: new Date().toISOString() });
+    jest.spyOn(riskContextStore, 'getUnresolvedConflicts').mockResolvedValue([]);
+    jest.spyOn(conflictsRepo, 'countResolvedByTenantPeriod').mockResolvedValue(2);
+    jest.spyOn(auditLedgerRepo, 'countByTenantPeriodAndEventType').mockResolvedValue(1);
+    const result = await checkExportGate({
+      pool: mockPool,
+      tenantId: 'test-tenant',
+      periodLabel: '2025-01',
+    });
+    expect(result.allowed).toBe(false);
+    expect(result.alert).toBe(RESOLUTION_MISMATCH);
+    expect(result.message).toMatch(/Ledger resolution mismatch/);
+    expect(result.details).toEqual({ resolvedCount: 2, ledgerResolutionCount: 1 });
+  });
+
+  it('allows export when resolution counts match (regression: happy path)', async () => {
+    jest.spyOn(periodExportChecks, 'getPeriodExportChecks').mockResolvedValue(null);
+    jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true, entryCount: 1, verifiedAt: new Date().toISOString() });
+    jest.spyOn(riskContextStore, 'getUnresolvedConflicts').mockResolvedValue([]);
+    jest.spyOn(riskContextStore, 'getQualitativeEvidenceMissing').mockResolvedValue(false);
+    jest.spyOn(conflictsRepo, 'countResolvedByTenantPeriod').mockResolvedValue(3);
+    jest.spyOn(auditLedgerRepo, 'countByTenantPeriodAndEventType').mockResolvedValue(3);
     const result = await checkExportGate({
       pool: mockPool,
       tenantId: 'test-tenant',

@@ -35,7 +35,7 @@ describe('Full close flow integration', () => {
     'ingests trial balance',
     async () => {
       if (!isDbConfigured()) return;
-      const path = process.env.NODE_ENV === 'production' ? '/api/trial-balance/ingest' : '/api-dev/trial-balance/ingest';
+      const path = '/api/trial-balance/ingest';
       const res = await request(app)
         .post(path)
         .set('Content-Type', 'multipart/form-data')

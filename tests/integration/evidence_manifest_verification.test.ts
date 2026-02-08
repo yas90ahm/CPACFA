@@ -65,10 +65,7 @@ describe('GET /api/verification/evidence-manifest/:snapshotId', () => {
     snapshotIdWithoutManifest = legacySnapshot.id;
 
     try {
-      const ingestPath =
-        process.env.NODE_ENV === 'production'
-          ? '/api/trial-balance/ingest'
-          : '/api-dev/trial-balance/ingest';
+      const ingestPath = '/api/trial-balance/ingest';
       const tmpCsv = path.join(os.tmpdir(), `ev-manifest-verify-${Date.now()}.csv`);
       fs.writeFileSync(tmpCsv, BALANCED_TB_CSV, 'utf8');
       try {

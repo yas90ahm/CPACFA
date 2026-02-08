@@ -6,6 +6,7 @@
 import { Router, type Request, type Response } from 'express';
 import { setIntegration, getIntegration, listIntegrations } from '../services/integration_store.js';
 import { getTenantId } from '../lib/tenant_context.js';
+import { send500 } from '../lib/errorHandler.js';
 
 const router = Router();
 
@@ -91,8 +92,7 @@ router.get('/google/callback', async (req: Request, res: Response) => {
     });
     res.json({ ok: true, tenantId });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'OAuth callback failed';
-    res.status(500).json({ error: message });
+    send500(res, err, 'OAuth callback failed');
   }
 });
 

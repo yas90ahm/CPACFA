@@ -5,6 +5,7 @@
  */
 
 import { retrievePrecedentForEntry } from '../knowledge_base/vector_store/retrieval.js';
+import { resolveTenantId } from '../knowledge_base/vector_store/index.js';
 import type { RAGQueryResult } from '../knowledge_base/vector_store/types.js';
 
 export type CloseStepName =
@@ -14,6 +15,7 @@ export type CloseStepName =
   | 'plan_execute_verify';
 
 export interface PrecedentForCloseStepContext {
+  tenantId?: string;
   entityId?: string;
   currentPeriodLabel?: string;
   priorPeriodLabel?: string;
@@ -62,14 +64,16 @@ function queryForStep(step: CloseStepName, ctx: PrecedentForCloseStepContext): s
 /**
  * Mandatory call: retrieve similar precedent for this close step.
  * Returns a summary suitable for attaching to the close-step response.
+ * Requires tenantId in context (or uses __dev_default when absent in dev).
  */
 export function getPrecedentForCloseStep(
   step: CloseStepName,
   context: PrecedentForCloseStepContext,
   options?: { topK?: number; standardType?: 'GAAP' | 'IFRS' }
 ): RAGQueryResult {
+  const tenantId = resolveTenantId(context.tenantId);
   const query = queryForStep(step, context);
-  return retrievePrecedentForEntry(query, {
+  return retrievePrecedentForEntry(tenantId, query, {
     topK: options?.topK ?? 5,
     standardType: options?.standardType,
   });

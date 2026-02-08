@@ -40,8 +40,7 @@ describe('Sovereign Validator — High-Integrity Accounting Engine', () => {
   // ==========================================================================
   // 1. Accounting Logic Test (Ingestion & Forge) — Garbage-In Prevention
   // ==========================================================================
-  const ingestPath =
-    process.env.NODE_ENV === 'production' ? '/api/trial-balance/ingest' : '/api-dev/trial-balance/ingest';
+  const ingestPath = '/api/trial-balance/ingest';
 
   describe('1. Accounting Logic Test (Ingestion & Forge)', () => {
     it('POST trial-balance/ingest with messy CSV returns 422 or staged status (no save to ledger)', async () => {

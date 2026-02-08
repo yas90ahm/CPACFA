@@ -62,6 +62,10 @@ function handleSessionError(res: Response, err: unknown, fallbackLabel: string):
       res.status(422).json({ error: err.message, code: 'NOT_READY' });
       return;
     }
+    if (err.code === 'SESSION_DATA_MISSING') {
+      res.status(422).json({ error: err.message, code: 'SESSION_DATA_MISSING' });
+      return;
+    }
     if (err.code === 'VALIDATION') {
       res.status(400).json({ error: err.message });
       return;

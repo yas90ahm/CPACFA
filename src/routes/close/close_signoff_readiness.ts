@@ -81,8 +81,7 @@ router.get('/readiness', async (req: Request, res: Response) => {
     const readiness = await buildCloseReadiness(tenantId, periodLabel, pool ?? undefined, { includeNarrative });
     res.json(readiness);
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'Close readiness failed', message });
+    send500(res, e, 'Close readiness failed');
   }
 });
 
@@ -106,8 +105,7 @@ router.get('/status', async (req: Request, res: Response) => {
     const status = await buildCloseStatus(tenantId, periodLabel, pool ?? undefined);
     res.json(status);
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'Close status failed', message });
+    send500(res, e, 'Close status failed');
   }
 });
 

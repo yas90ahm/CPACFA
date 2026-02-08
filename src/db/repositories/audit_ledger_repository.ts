@@ -173,7 +173,7 @@ type VerifyRow = {
   hash_version: number;
 };
 
-export async function verifyChain(pool: Pool, tenantId: string): Promise<AuditLedgerVerifyResult> {
+export async function verifyChain(pool: Queryable, tenantId: string): Promise<AuditLedgerVerifyResult> {
   const verifiedAt = new Date().toISOString();
   const baseSelect = `id, tenant_id, period_label, event_type, deterministic_flag_snapshot, agent_dissent_snapshot,
     user_prompt_rationale, previous_entry_hash, entry_hash, created_at`;

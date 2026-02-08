@@ -13,6 +13,7 @@ import { runAllFetchers, runAllFetchersAndIngest } from '../services/ingestion_f
 import { getUsage, getQuota } from '../services/fetcher_run_tracker.js';
 import { validateBody, validateQuery } from '../middleware/validationMiddleware.js';
 import { ingestionAgentBodySchema, fetchersRunQuerySchema } from '../schemas/ingestionSchemas.js';
+import { send500 } from '../lib/errorHandler.js';
 
 const router = Router();
 
@@ -106,8 +107,7 @@ router.post('/agent', upload.single('file'), validateBody(ingestionAgentBodySche
       },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Ingestion agent failed';
-    res.status(500).json({ error: 'Ingestion error', message });
+    send500(res, err, 'Ingestion agent failed');
   }
 });
 
@@ -139,8 +139,7 @@ router.post('/pipeline', upload.single('file'), async (req: Request, res: Respon
       pipeline,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Ingestion pipeline failed';
-    res.status(500).json({ error: 'Ingestion error', message });
+    send500(res, err, 'Ingestion pipeline failed');
   }
 });
 
@@ -177,8 +176,7 @@ router.post('/fetchers/run', validateQuery(fetchersRunQuerySchema), async (req: 
     const results = await runAllFetchers(tenantId);
     res.json({ ok: true, results });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Fetcher run failed';
-    res.status(500).json({ error: 'Fetcher error', message });
+    send500(res, err, 'Fetcher run failed');
   }
 });
 

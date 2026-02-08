@@ -55,6 +55,8 @@ import { executeBridgeCommand } from '../../bridge/index.js';
 import { getAdjustedTrialBalance } from '../../services/adjusted_trial_balance_service.js';
 import { attachLineProvenance, attachCategories, parseTransactions, normalizeStandard } from './helpers.js';
 import { log } from '../../lib/logger.js';
+import { isBodyTenantInjectionAllowed } from '../../lib/env.js';
+import { send500 } from '../../lib/errorHandler.js';
 
 const router = Router();
 
@@ -72,12 +74,30 @@ const upload = multer({
   },
 });
 
-/** Set req.tenantId from body when auth did not set it (e.g. Diagnostic HUD bypass). */
+/**
+ * Set req.tenantId from body ONLY when isBodyTenantInjectionAllowed() (dev/diagnostic).
+ * In strict modes (MODE=prod/demo, REQUIRE_AUTH=true, REQUIRE_TENANT_CONTEXT=true),
+ * body tenant injection is disabled; tenant must come from JWT.
+ */
 function injectTenantFromBody(req: Request, _res: Response, next: import('express').NextFunction): void {
   const authReq = req as AuthRequest;
-  if (!authReq.tenantId && req.body && typeof (req.body as { tenantId?: string }).tenantId === 'string') {
+  if (authReq.tenantId) {
+    next();
+    return;
+  }
+  if (!isBodyTenantInjectionAllowed()) {
+    next();
+    return;
+  }
+  if (req.body && typeof (req.body as { tenantId?: string }).tenantId === 'string') {
     const tid = (req.body as { tenantId: string }).tenantId.trim();
-    if (tid) authReq.tenantId = tid;
+    if (tid) {
+      authReq.tenantId = tid;
+      log('warn', 'tenant_injection_from_body', {
+        message: 'Body tenantId used (dev/diagnostic only). Disabled in production.',
+        resource: 'trial-balance/ingest',
+      });
+    }
   }
   next();
 }
@@ -107,7 +127,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       : null;
     if (ingestSessionId && !/^ingest-\d+-[a-z0-9]+$/.test(ingestSessionId)) {
       log('error', 'Invalid sessionId format generated', { ingestSessionId });
-      res.status(500).json({ error: 'Internal error', message: 'Session ID generation failed' });
+      send500(res, new Error('Session ID generation failed'), 'Session ID generation failed');
       return;
     }
 
@@ -585,6 +605,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
     if (gaps.length > 0) await addTodosFromGaps(gaps, authReq.tenantPool, authReq.tenantId);
 
     const precedentResult = getPrecedentForCloseStep('trial_balance_ingest', {
+      tenantId: authReq.tenantId,
       entityId: body.entityId,
       currentPeriodLabel: body.periodLabel,
       priorPeriodLabel: body.prior_period_label,

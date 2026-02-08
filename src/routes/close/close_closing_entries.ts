@@ -36,7 +36,7 @@ router.get('/closing-entries', async (req: Request, res: Response) => {
       res.status(404).json({ error: 'No trial balance for period', message });
       return;
     }
-    res.status(500).json({ error: 'Closing entries failed', message });
+    send500(res, e, 'Closing entries failed');
   }
 });
 
@@ -70,8 +70,7 @@ router.post('/closing-entries/add', async (req: Request, res: Response) => {
       }
       return res.status(403).json({ error: 'Period locked', periodLabel: e.periodLabel });
     }
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'Add closing entry failed', message });
+    send500(res, e, 'Add closing entry failed');
   }
 });
 

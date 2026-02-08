@@ -88,6 +88,7 @@ export interface RecordMaterialEventInput {
     | 'certify_close'
     | 'bridge_command'
     | 'evidence_link'
+    | 'legacy_certified_source_used'
   >;
   /** Snapshot of the event for audit trail. */
   deterministicFlagSnapshot: Record<string, unknown>;
@@ -108,6 +109,27 @@ export async function recordMaterialEvent(client: Queryable, input: RecordMateri
     deterministicFlagSnapshot: input.deterministicFlagSnapshot,
     agentDissentSnapshot: input.agentDissentSnapshot,
     userPromptRationale: rationale,
+    createdBy: input.createdBy,
+  });
+}
+
+/**
+ * Record that a certified binder/export used legacy source (last registered statements) instead of session snapshot.
+ * Call when result.source === 'legacy' from getCertifiedStatementsForBinder.
+ */
+export async function recordLegacyCertifiedSourceUsed(
+  client: Queryable,
+  input: { tenantId: string; closeSessionId: string; periodLabel?: string; createdBy?: string }
+): Promise<void> {
+  await recordMaterialEvent(client, {
+    tenantId: input.tenantId,
+    periodLabel: input.periodLabel,
+    eventType: 'legacy_certified_source_used',
+    deterministicFlagSnapshot: {
+      closeSessionId: input.closeSessionId,
+      tenantId: input.tenantId,
+      resolvedSource: 'legacy',
+    },
     createdBy: input.createdBy,
   });
 }

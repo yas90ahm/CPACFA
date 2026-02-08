@@ -68,10 +68,7 @@ describe('Certification pipeline E2E', () => {
     async () => {
       if (!isDbConfigured()) return;
 
-    const ingestPath =
-      process.env.NODE_ENV === 'production'
-        ? '/api/trial-balance/ingest'
-        : '/api-dev/trial-balance/ingest';
+    const ingestPath = '/api/trial-balance/ingest';
 
     // 1. Upload imbalanced CSV → staged (Classifier + Advisor run when mock on; fail-open)
     const prevClassifierMock = process.env.AI_MOCK_CLASSIFIER;

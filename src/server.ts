@@ -6,6 +6,13 @@
 
 import 'dotenv/config';
 import { assertNoDestructiveInStagingOrProduction } from './db/destructive_guards.js';
+import { applyModeDefaults, getMode } from './lib/runtime_mode.js';
+import { assertDeploymentConfigSafe, printDevModeEnforcementWarning } from './lib/deployment_config_guard.js';
+import { assertSigningKeysInStrictMode } from './lib/cert_signing.js';
+
+// Apply MODE-based defaults before any route setup (fail fast if prod/demo misconfigured)
+const _modeConfig = applyModeDefaults();
+assertSigningKeysInStrictMode();
 
 import express from 'express';
 import helmet from 'helmet';
@@ -93,14 +100,20 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Require auth for all other /api routes. In production ALWAYS require auth (no bypass).
-const isProduction = process.env.NODE_ENV === 'production';
-const requireAuthByDefault = process.env.REQUIRE_AUTH !== 'false';
-const useRequireAuth = isProduction || requireAuthByDefault;
+// Require auth for all other /api routes. In prod/demo ALWAYS require auth (no bypass).
+const useRequireAuth = process.env.REQUIRE_AUTH !== 'false';
 
-/** For tests: in production, /api must always use requireAuth (bypass impossible). */
+/** For tests: in prod/demo, /api must always use requireAuth (bypass impossible). */
 export function useRequireAuthForApi(): boolean {
-  return process.env.NODE_ENV === 'production' || process.env.REQUIRE_AUTH !== 'false';
+  const mode = getMode();
+  if (mode === 'prod' || mode === 'demo') return true;
+  return process.env.REQUIRE_AUTH !== 'false';
+}
+
+/** For tests: /api-dev is mounted only when MODE=dev and ENABLE_DEV_API === 'true'. */
+export function isDevApiMounted(): boolean {
+  const { getMode: gm } = require('./lib/runtime_mode.js');
+  return gm() === 'dev' && process.env.ENABLE_DEV_API === 'true';
 }
 
 app.use('/api', apiLimiter, (req, res, next) => {
@@ -109,9 +122,11 @@ app.use('/api', apiLimiter, (req, res, next) => {
 app.use('/api', attachTenantPool);
 app.use('/api', requireTenantContext);
 
-// Dev-only diagnostics router: optionalAuth for trial-balance/ingest, supervisor/chat, supervisor/session/:id/trace.
-// Mounted only when NODE_ENV !== 'production'; never available in production.
-if (!isProduction) {
+// Dev-only diagnostics router: optionalAuth for trial-balance/ingest, supervisor 410.
+// Mounted ONLY when: MODE=dev AND ENABLE_DEV_API === 'true'.
+// Single canonical API: /api. Use /api in tests; set ENABLE_DEV_API=true only for explicit dev-only tests.
+const canMountDevApi = getMode() === 'dev' && process.env.ENABLE_DEV_API === 'true';
+if (canMountDevApi) {
   app.use('/api-dev', devDiagnosticsRouter);
 }
 
@@ -203,6 +218,8 @@ export function ensureProductionHasDatabase(): void {
 }
 
 async function start(): Promise<void> {
+  assertDeploymentConfigSafe();
+  printDevModeEnforcementWarning();
   ensureProductionHasDatabase();
   if (isDbConfigured()) {
     try {
@@ -232,7 +249,9 @@ async function start(): Promise<void> {
     console.log('  POST /api/pipelines/bank — Bank tx; ap-aging, ar-aging, payroll-accrual, bank-rec, cash-position');
     console.log('  POST /api/close/sessions, /close/sessions/:id/certify — Close sessions; POST /api/close/journal-entries — JE lifecycle');
     console.log('  GET  /api/hitl/staging — Staging; POST /api/hitl/resolve-ingest — fix imbalanced ingest; POST /api/hitl/webhook — Approve/Reject');
-    console.log('  (Supervisor quarantined: /api-dev/supervisor returns 410 when NODE_ENV !== production)');
+    if (canMountDevApi) {
+      console.log('  /api-dev (ENABLE_DEV_API=true): trial-balance, supervisor 410');
+    }
   });
 }
 

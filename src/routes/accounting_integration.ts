@@ -14,6 +14,7 @@ import {
 } from '../services/accounting_integration_service.js';
 import { executeBridgeCommand } from '../bridge/index.js';
 import type { AuthRequest } from '../auth/middleware.js';
+import { send500 } from '../lib/errorHandler.js';
 
 const router = Router();
 
@@ -34,7 +35,7 @@ router.post('/connections', async (req: Request, res: Response) => {
     const conn = await createConnection(tenantId, provider, name, credentialRef, pool);
     res.status(201).json(conn);
   } catch (e) {
-    res.status(500).json({ error: String(e) });
+    send500(res, e, 'Create connection failed');
   }
 });
 
@@ -45,7 +46,7 @@ router.get('/connections', async (req: Request, res: Response) => {
     const list = await listConnections(tenantId, pool);
     res.json(list);
   } catch (e) {
-    res.status(500).json({ error: String(e) });
+    send500(res, e, 'List connections failed');
   }
 });
 
@@ -57,7 +58,7 @@ router.get('/connections/:id', async (req: Request, res: Response) => {
     if (!conn) return res.status(404).json({ error: 'Connection not found' });
     res.json(conn);
   } catch (e) {
-    res.status(500).json({ error: String(e) });
+    send500(res, e, 'Get connection failed');
   }
 });
 
@@ -105,7 +106,7 @@ router.post('/sync-trial-balance', async (req: Request, res: Response) => {
     }
     res.json(result);
   } catch (e) {
-    res.status(500).json({ error: String(e) });
+    send500(res, e, 'Sync trial balance failed');
   }
 });
 
@@ -120,7 +121,7 @@ router.post('/push-journal-entry', async (req: Request, res: Response) => {
     const result = await pushJournalEntry(input, pool, tenantId);
     res.json(result);
   } catch (e) {
-    res.status(500).json({ error: String(e) });
+    send500(res, e, 'Push journal entry failed');
   }
 });
 
@@ -135,7 +136,7 @@ router.post('/pull-transactions', async (req: Request, res: Response) => {
     const result = await pullTransactions({ connectionId, startDate, endDate, accountCodes }, pool, tenantId);
     res.json(result);
   } catch (e) {
-    res.status(500).json({ error: String(e) });
+    send500(res, e, 'Pull transactions failed');
   }
 });
 

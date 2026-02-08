@@ -22,7 +22,8 @@ export type AuditLedgerEventType =
   | 'close_lock'
   | 'certify_close'
   | 'bridge_command'
-  | 'evidence_link';
+  | 'evidence_link'
+  | 'legacy_certified_source_used';
 
 /** Payload for appending one ledger entry (append-only). */
 export interface AuditLedgerEntryInput {

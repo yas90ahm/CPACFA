@@ -188,9 +188,21 @@ export async function getCertifiedStatementsForBinder(
         return null;
       }
     }
-    if (!allowLegacy) {
-      return null;
+    // Legacy fallback only when explicitly allowed (allowLegacyCertifiedSource=1 or env).
+    if (allowLegacy) {
+      const stored = await getLastStatementGeneration(tenantId, pool);
+      const statements = stored?.statements;
+      if (statements?.trialBalance == null || statements?.balanceSheet == null) return null;
+      const tb = statements.trialBalance as { totalDebits: number; totalCredits: number; entries?: Array<{ accountName: string; debit: number; credit: number }> };
+      const bs = statements.balanceSheet as { totalAssets: number; totalLiabilities: number; totalEquity: number };
+      const finalCheck = finalIntegrityCheck({
+        trialBalance: { totalDebits: tb.totalDebits ?? 0, totalCredits: tb.totalCredits ?? 0 },
+        balanceSheet: { totalAssets: bs.totalAssets ?? 0, totalLiabilities: bs.totalLiabilities ?? 0, totalEquity: bs.totalEquity ?? 0 },
+        entriesForPlugDetection: tb.entries?.map((e) => ({ accountName: e.accountName ?? '', debit: e.debit ?? 0, credit: e.credit ?? 0 })),
+      });
+      return finalCheck.passed ? { statements, source: 'legacy' } : null;
     }
+    return null;
   }
 
   const stored = await getLastStatementGeneration(tenantId, pool);

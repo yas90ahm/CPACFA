@@ -17,6 +17,7 @@ import {
   setTransactionCategory,
   updatePolicyMemory,
 } from '../memory/index.js';
+import { send500 } from '../lib/errorHandler.js';
 
 const router = Router();
 
@@ -38,8 +39,8 @@ router.post('/correction', async (req: Request, res: Response) => {
     const entry = await storeUserCorrection(body);
     return res.json({ ok: true, id: entry.id, storedAt: entry.storedAt });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Store correction failed';
-    return res.status(500).json({ error: message });
+    send500(res, err, 'Store correction failed');
+    return;
   }
 });
 
@@ -58,8 +59,8 @@ router.post('/justification', async (req: Request, res: Response) => {
     const entry = await storeJustification(body);
     return res.json({ ok: true, id: entry.id, storedAt: entry.storedAt });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Store justification failed';
-    return res.status(500).json({ error: message });
+    send500(res, err, 'Store justification failed');
+    return;
   }
 });
 
@@ -79,8 +80,8 @@ router.post('/decision', async (req: Request, res: Response) => {
     const entry = await storeDecision(body);
     return res.json({ ok: true, id: entry.id, storedAt: entry.storedAt });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Store decision failed';
-    return res.status(500).json({ error: message });
+    send500(res, err, 'Store decision failed');
+    return;
   }
 });
 
@@ -98,8 +99,8 @@ router.post('/transaction-category', async (req: Request, res: Response) => {
     await setTransactionCategory(body.entityId, body.description, body.category);
     return res.json({ ok: true });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Store transaction category failed';
-    return res.status(500).json({ error: message });
+    send500(res, err, 'Store transaction category failed');
+    return;
   }
 });
 
@@ -120,8 +121,8 @@ router.post('/query', async (req: Request, res: Response) => {
       hits: hits.map((h) => ({ id: h.entry.id, score: h.score, entryType: h.entry.entryType, text: h.entry.text, payload: h.entry.payload, storedAt: h.entry.storedAt })),
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Query failed';
-    return res.status(500).json({ error: message });
+    send500(res, err, 'Memory query failed');
+    return;
   }
 });
 
@@ -143,8 +144,8 @@ router.get('/vendor/:vendor', async (req: Request, res: Response) => {
       })),
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Lookup failed';
-    return res.status(500).json({ error: message });
+    send500(res, err, 'Vendor lookup failed');
+    return;
   }
 });
 
@@ -158,8 +159,8 @@ router.post('/consistency-check', (req: Request, res: Response) => {
     const result = checkConsistency(body.vendor, body.currentCategory, { period: body.period });
     return res.json(result);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Consistency check failed';
-    return res.status(500).json({ error: message });
+    send500(res, err, 'Consistency check failed');
+    return;
   }
 });
 
@@ -189,8 +190,8 @@ router.post('/entity', (req: Request, res: Response) => {
     }, body.fiscalYear);
     return res.json({ ok: true });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Update entity policy failed';
-    return res.status(500).json({ error: message });
+    send500(res, err, 'Update entity policy failed');
+    return;
   }
 });
 

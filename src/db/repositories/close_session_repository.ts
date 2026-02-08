@@ -25,6 +25,7 @@ interface CloseSessionRow {
   certified_at: string | Date | null;
   certification_memo: string | null;
   certified_snapshot_id: string | null;
+  certification_artifact_id: string | null;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -44,7 +45,7 @@ function toISOTimestampString(v: string | Date | null | undefined): string {
 }
 
 const SESSION_COLUMNS =
-  'id, tenant_id, entity_id, period_start, period_end, basis, standard, status, certified_by, certified_at, certification_memo, certified_snapshot_id, created_at, updated_at';
+  'id, tenant_id, entity_id, period_start, period_end, basis, standard, status, certified_by, certified_at, certification_memo, certified_snapshot_id, certification_artifact_id, created_at, updated_at';
 
 function rowToSession(row: CloseSessionRow): CloseSession {
   return {
@@ -63,6 +64,7 @@ function rowToSession(row: CloseSessionRow): CloseSession {
         : undefined,
     certificationMemo: row.certification_memo ?? undefined,
     certifiedSnapshotId: row.certified_snapshot_id ?? undefined,
+    certificationArtifactId: row.certification_artifact_id ?? undefined,
     createdAt: toISOTimestampString(row.created_at),
     updatedAt: toISOTimestampString(row.updated_at),
   };
@@ -145,6 +147,21 @@ export async function getCloseSessionById(
   return rowToSession(row);
 }
 
+/** Lock session row for update (prevents concurrent certify race). Use inside transaction. */
+export async function getCloseSessionByIdForUpdate(
+  client: Queryable,
+  tenantId: string,
+  id: string
+): Promise<CloseSession | null> {
+  const r = await client.query<CloseSessionRow>(
+    `SELECT ${SESSION_COLUMNS} FROM close_sessions WHERE tenant_id = $1 AND id = $2 FOR UPDATE`,
+    [tenantId, id]
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  return rowToSession(row);
+}
+
 export async function listCloseSessions(
   pool: Pool,
   tenantId: string,
@@ -190,15 +207,18 @@ export async function updateCertification(
   certifiedBy: string,
   certifiedAt: string,
   certificationMemo?: string,
-  certifiedSnapshotId?: string
+  certifiedSnapshotId?: string,
+  certificationArtifactId?: string | null
 ): Promise<CloseSession | null> {
   const now = new Date().toISOString();
   const r = await client.query(
     `UPDATE close_sessions
      SET status = 'certified', certified_by = $1, certified_at = $2, certification_memo = $3,
-         certified_snapshot_id = COALESCE($4, certified_snapshot_id), updated_at = $5
-     WHERE tenant_id = $6 AND id = $7`,
-    [certifiedBy, certifiedAt, certificationMemo ?? null, certifiedSnapshotId ?? null, now, tenantId, id]
+         certified_snapshot_id = COALESCE($4, certified_snapshot_id),
+         certification_artifact_id = COALESCE($5, certification_artifact_id),
+         updated_at = $6
+     WHERE tenant_id = $7 AND id = $8`,
+    [certifiedBy, certifiedAt, certificationMemo ?? null, certifiedSnapshotId ?? null, certificationArtifactId ?? null, now, tenantId, id]
   );
   if (r.rowCount === 0) return null;
   return getCloseSessionById(client, tenantId, id);

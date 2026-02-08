@@ -259,6 +259,72 @@ describe('Export certified gate', () => {
     }
   });
 
+  it('certified export returns 422 RESOLUTION_MISMATCH when resolution counts mismatch (no artifact)', async () => {
+    if (!isDbConfigured() || !closeSessionIdCertified) return;
+    const exportGate = await import('../../src/services/export_gate_service.js');
+    const original = exportGate.checkExportGate;
+    (exportGate as { checkExportGate: typeof original }).checkExportGate = async () => ({
+      allowed: false,
+      alert: 'RESOLUTION_MISMATCH' as const,
+      message: 'Ledger resolution mismatch: export blocked.',
+      details: { resolvedCount: 2, ledgerResolutionCount: 1 },
+    });
+    try {
+      const res = await request(app)
+        .post('/api/export/pdf')
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('x-tenant-id', TEST_TENANT_ID)
+        .send({
+          exportMode: 'certified',
+          periodLabel: '2025-02',
+          closeSessionId: closeSessionIdCertified,
+          cover: { entity_name: 'E', report_date: '2025-02-28', period_label: '2025-02' },
+          executive_summary: 'Summary',
+          financial_statements: { balance_sheet: { totalAssets: 100, totalLiabilities: 50, totalEquity: 50 } },
+          clean_ledger: [
+            { account_name: 'A', debit: 100, credit: 0 },
+            { account_name: 'B', debit: 0, credit: 100 },
+          ],
+        });
+      expect(res.status).toBe(422);
+      expect(res.body?.code).toBe('RESOLUTION_MISMATCH');
+      expect(res.body?.details).toEqual({ resolvedCount: 2, ledgerResolutionCount: 1 });
+      expect(res.body?.message).toMatch(/Ledger resolution mismatch/);
+      expect(res.headers['content-type']).not.toMatch(/pdf/);
+    } finally {
+      (exportGate as { checkExportGate: typeof original }).checkExportGate = original;
+    }
+  });
+
+  it('binder export returns 422 RESOLUTION_MISMATCH when resolution counts mismatch (no artifact)', async () => {
+    if (!isDbConfigured() || !closeSessionIdCertified) return;
+    const exportGate = await import('../../src/services/export_gate_service.js');
+    const original = exportGate.checkExportGate;
+    (exportGate as { checkExportGate: typeof original }).checkExportGate = async () => ({
+      allowed: false,
+      alert: 'RESOLUTION_MISMATCH' as const,
+      message: 'Ledger resolution mismatch: export blocked.',
+      details: { resolvedCount: 0, ledgerResolutionCount: 1 },
+    });
+    try {
+      const res = await request(app)
+        .get('/api/audit/binder/export/pdf')
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('x-tenant-id', TEST_TENANT_ID)
+        .query({
+          closeSessionId: closeSessionIdCertified,
+          periodStart: '2025-02-01',
+          periodEnd: '2025-02-28',
+        });
+      expect(res.status).toBe(422);
+      expect(res.body?.code).toBe('RESOLUTION_MISMATCH');
+      expect(res.body?.details).toEqual({ resolvedCount: 0, ledgerResolutionCount: 1 });
+      expect(res.headers['content-type']).not.toMatch(/pdf/);
+    } finally {
+      (exportGate as { checkExportGate: typeof original }).checkExportGate = original;
+    }
+  });
+
   it('with NODE_ENV=production, exportBypassCertification=1 does NOT bypass: certified + non-certified session -> 403', async () => {
     if (!isDbConfigured() || !closeSessionIdLocked) return;
     const prevEnv = process.env.NODE_ENV;

@@ -32,10 +32,7 @@ router.post('/task-assign', async (req: Request, res: Response) => {
     }
     res.json({ periodLabel: body.periodLabel, stepId: body.stepId, assignee: body.assignee, dueDate: body.dueDate, steps });
   } catch (e) {
-    res.status(500).json({
-      error: 'Task assign failed',
-      message: e instanceof Error ? e.message : String(e),
-    });
+    send500(res, e, 'Task assign failed');
   }
 });
 

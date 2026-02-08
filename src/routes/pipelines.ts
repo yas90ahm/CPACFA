@@ -18,6 +18,7 @@ import {
 import { storeBankRecByPeriod, listBankRecByPeriod } from '../services/bank_rec_by_period_service.js';
 import { buildCashPosition } from '../services/cash_position_service.js';
 import type { CanonicalApItem, CanonicalArItem, CanonicalPayrollItem } from '../types/canonical_ap_ar_payroll.js';
+import { send500 } from '../lib/errorHandler.js';
 
 const router = Router();
 
@@ -40,10 +41,7 @@ router.post('/bank', (req: Request, res: Response) => {
     });
     res.json(result);
   } catch (e) {
-    res.status(500).json({
-      error: 'Bank pipeline failed',
-      message: e instanceof Error ? e.message : String(e),
-    });
+    send500(res, e, 'Bank pipeline failed');
   }
 });
 
@@ -58,10 +56,7 @@ router.post('/ap-aging', (req: Request, res: Response) => {
     const report = buildApAgingReport(body.items, { asOfDate: body.asOfDate });
     res.json(report);
   } catch (e) {
-    res.status(500).json({
-      error: 'AP aging failed',
-      message: e instanceof Error ? e.message : String(e),
-    });
+    send500(res, e, 'AP aging failed');
   }
 });
 
@@ -76,10 +71,7 @@ router.post('/ar-aging', (req: Request, res: Response) => {
     const report = buildArAgingReport(body.items, { asOfDate: body.asOfDate });
     res.json(report);
   } catch (e) {
-    res.status(500).json({
-      error: 'AR aging failed',
-      message: e instanceof Error ? e.message : String(e),
-    });
+    send500(res, e, 'AR aging failed');
   }
 });
 
@@ -98,10 +90,7 @@ router.post('/payroll-accrual', (req: Request, res: Response) => {
     });
     res.json(result);
   } catch (e) {
-    res.status(500).json({
-      error: 'Payroll accrual failed',
-      message: e instanceof Error ? e.message : String(e),
-    });
+    send500(res, e, 'Payroll accrual failed');
   }
 });
 
@@ -136,10 +125,7 @@ router.post('/bank-rec', async (req: Request, res: Response) => {
     }
     res.json(result);
   } catch (e) {
-    res.status(500).json({
-      error: 'Bank reconciliation failed',
-      message: e instanceof Error ? e.message : String(e),
-    });
+    send500(res, e, 'Bank reconciliation failed');
   }
 });
 
@@ -151,10 +137,7 @@ router.get('/bank-rec/by-period', (req: Request, res: Response) => {
     const list = listBankRecByPeriod({ periodLabel, limit });
     res.json({ resolutions: list });
   } catch (e) {
-    res.status(500).json({
-      error: 'List bank rec by period failed',
-      message: e instanceof Error ? e.message : String(e),
-    });
+    send500(res, e, 'List bank rec by period failed');
   }
 });
 
@@ -174,10 +157,7 @@ router.post('/bank-rec/suggest-adjustments', async (req: Request, res: Response)
     });
     res.json(result);
   } catch (e) {
-    res.status(500).json({
-      error: 'Suggest adjustments failed',
-      message: e instanceof Error ? e.message : String(e),
-    });
+    send500(res, e, 'Suggest adjustments failed');
   }
 });
 
@@ -192,10 +172,7 @@ router.post('/bank-rec/explain', async (req: Request, res: Response) => {
     const narrative = await explainBankRecAgentic(result);
     res.json({ narrative });
   } catch (e) {
-    res.status(500).json({
-      error: 'Bank rec explain failed',
-      message: e instanceof Error ? e.message : String(e),
-    });
+    send500(res, e, 'Bank rec explain failed');
   }
 });
 
@@ -210,10 +187,7 @@ router.post('/cash-position', (req: Request, res: Response) => {
     const result = buildCashPosition(body);
     res.json(result);
   } catch (e) {
-    res.status(500).json({
-      error: 'Cash position failed',
-      message: e instanceof Error ? e.message : String(e),
-    });
+    send500(res, e, 'Cash position failed');
   }
 });
 

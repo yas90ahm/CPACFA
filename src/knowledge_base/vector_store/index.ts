@@ -6,7 +6,7 @@
 
 export * from './types.js';
 export * from './chunker.js';
-export { addChunk, addChunks, query, queryForPrecedent, getById, listChunks, clearStore } from './store.js';
+export { addChunk, addChunks, query, queryForPrecedent, getById, listChunks, clearStore, clearTenant, resolveTenantId, DEFAULT_TENANT_ID } from './store.js';
 export * from './citation.js';
 export * from './ingestion.js';
 export * from './retrieval.js';

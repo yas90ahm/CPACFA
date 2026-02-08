@@ -8,6 +8,7 @@ import { cleanupAllTestTenants } from './helpers/testHelpers.js';
 // Set test environment variables (preserve NODE_ENV=production for auth bypass production tests)
 if (process.env.TEST_AUTH_PRODUCTION !== '1') {
   process.env.NODE_ENV = 'test';
+  process.env.MODE = 'dev'; // Permissive: allow REQUIRE_AUTH=false, AI_MOCK, etc.
   process.env.REQUIRE_AUTH = 'false';
   // Ensure AI mocks are on so no test calls live LLMs (deterministic, no timeouts).
   process.env.AI_MOCK = 'true';

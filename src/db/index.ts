@@ -181,6 +181,7 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 86, file: '086_tenant_evidence_anchoring.sql' },
   { version: 87, file: '087_evidence_links_assertion.sql' },
   { version: 88, file: '088_tenant_evidence_policy.sql' },
+  { version: 89, file: '089_certification_artifacts.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 

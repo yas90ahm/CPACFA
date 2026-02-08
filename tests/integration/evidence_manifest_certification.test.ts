@@ -48,10 +48,7 @@ describe('Certified Evidence Manifest', () => {
     if (!isDbConfigured()) return;
     const pool = await getTenantPool(testTenantId);
 
-    const ingestPath =
-      process.env.NODE_ENV === 'production'
-        ? '/api/trial-balance/ingest'
-        : '/api-dev/trial-balance/ingest';
+    const ingestPath = '/api/trial-balance/ingest';
     const tmpCsv = path.join(os.tmpdir(), `evidence-manifest-${Date.now()}.csv`);
     fs.writeFileSync(tmpCsv, BALANCED_TB_CSV, 'utf8');
     try {
@@ -204,10 +201,7 @@ describe('Certified Evidence Manifest', () => {
     if (!isDbConfigured()) return;
     const pool = await getTenantPool(testTenantId);
 
-    const ingestPath =
-      process.env.NODE_ENV === 'production'
-        ? '/api/trial-balance/ingest'
-        : '/api-dev/trial-balance/ingest';
+    const ingestPath = '/api/trial-balance/ingest';
     const tmpCsv = path.join(os.tmpdir(), `evidence-manifest-empty-${Date.now()}.csv`);
     fs.writeFileSync(tmpCsv, BALANCED_TB_CSV, 'utf8');
     try {

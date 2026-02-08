@@ -1,18 +1,20 @@
 /**
  * RAG Vector Store — Retrieval strategy for Intelligent Context.
+ * Tenant-scoped: queries only return chunks for the given tenant.
  * When CPA agent processes an entry, first query for similar precedent in company history.
  * Every cited rule returns document title + page number for citation.
  */
 
 import type { RAGQueryResult, RAGQueryOptions, RAGChunk } from './types.js';
 import { query, queryForPrecedent } from './store.js';
-import { buildCitations, formatCitationShort } from './citation.js';
+import { buildCitations } from './citation.js';
 
 /**
- * Retrieve chunks for a query with optional filters.
- * Returns chunks and citations (document title + page number for every rule).
+ * Retrieve chunks for a tenant query with optional filters.
+ * Returns only chunks for that tenant. Cross-tenant retrieval is impossible.
  */
 export function retrieve(
+  tenantId: string,
   queryText: string,
   options?: RAGQueryOptions
 ): RAGQueryResult {
@@ -20,12 +22,12 @@ export function retrieve(
   let chunks: RAGChunk[];
 
   if (options?.preferPrecedent) {
-    chunks = queryForPrecedent(queryText, {
+    chunks = queryForPrecedent(tenantId, queryText, {
       topK,
       standardType: options?.standardType,
     });
   } else {
-    chunks = query(queryText, {
+    chunks = query(tenantId, queryText, {
       topK,
       standardType: options?.standardType,
       levelOfAuthority: options?.levelOfAuthority,
@@ -42,13 +44,14 @@ export function retrieve(
 
 /**
  * CPA agent: when processing an entry, first check for similar precedent in company history.
- * Returns precedent chunks (if any) with full citation (document title, page number).
+ * Returns precedent chunks (if any) for the tenant with full citation.
  */
 export function retrievePrecedentForEntry(
+  tenantId: string,
   entryDescription: string,
   options?: { topK?: number; standardType?: 'GAAP' | 'IFRS' }
 ): RAGQueryResult {
-  return retrieve(entryDescription, {
+  return retrieve(tenantId, entryDescription, {
     preferPrecedent: true,
     topK: options?.topK ?? 5,
     standardType: options?.standardType,

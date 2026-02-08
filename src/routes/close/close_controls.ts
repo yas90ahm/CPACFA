@@ -100,7 +100,7 @@ router.post('/controls/:id/assertions', async (req: Request, res: Response) => {
     }
     const assertion = await addAssertionToControl(tenantId, pool, controlId, body.assertionLabel, body.riskCategory);
     if (!assertion) {
-      res.status(500).json({ error: 'Add assertion failed (DB not configured?)' });
+      send500(res, new Error('Add assertion failed'), 'Add assertion failed');
       return;
     }
     res.status(201).json(assertion);

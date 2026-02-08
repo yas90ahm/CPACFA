@@ -17,6 +17,9 @@ import { buildEvidenceManifest } from './evidence_manifest_service.js';
 import { checkEvidencePolicyForCertification } from './evidence_policy_service.js';
 import { withTransaction } from '../db/transaction.js';
 import { buildCertifiedStatementsFromSnapshot } from './certified_statements_service.js';
+import { buildCertificationArtifact } from './certification_artifact_service.js';
+import * as certArtifactRepo from '../db/repositories/certification_artifact_repository.js';
+import { verifyChain } from '../db/repositories/audit_ledger_repository.js';
 import { sumRound2 } from '../utils/decimal.js';
 import type { LedgerSnapshotPayload } from '../types/ledger_snapshot.js';
 import { getLedgerSnapshotById } from '../db/repositories/ledger_snapshot_repository.js';
@@ -33,7 +36,7 @@ const ALLOWED_TRANSITIONS: Record<CloseSessionStatus, CloseSessionStatus[]> = {
 export class CloseSessionError extends Error {
   constructor(
     message: string,
-    public readonly code: 'OVERLAP' | 'INVALID_TRANSITION' | 'NOT_FOUND' | 'VALIDATION' | 'INSUFFICIENT_ROLE' | 'NOT_LOCKED' | 'HARD_BLOCKERS' | 'NOT_READY'
+    public readonly code: 'OVERLAP' | 'INVALID_TRANSITION' | 'NOT_FOUND' | 'VALIDATION' | 'INSUFFICIENT_ROLE' | 'NOT_LOCKED' | 'HARD_BLOCKERS' | 'NOT_READY' | 'SESSION_DATA_MISSING'
   ) {
     super(message);
     this.name = 'CloseSessionError';
@@ -260,8 +263,8 @@ export async function certifyCloseSession(
     );
   } catch (_e) {
     throw new CloseSessionError(
-      'No trial balance for period; run ingest or resolve staging before certifying.',
-      'VALIDATION'
+      'No trial balance anchored to session period; run ingest or resolve staging before certifying.',
+      'SESSION_DATA_MISSING'
     );
   }
   const totalDebits = sumRound2(adjustedEntries.map((e) => e.debit ?? 0));
@@ -288,6 +291,16 @@ export async function certifyCloseSession(
     );
   }
   return withTransaction(pool, async (client) => {
+    const lockedSession = await repo.getCloseSessionByIdForUpdate(client, input.tenantId, input.closeSessionId);
+    if (!lockedSession) {
+      throw new CloseSessionError('Close session not found', 'NOT_FOUND');
+    }
+    if (lockedSession.status !== 'locked') {
+      throw new CloseSessionError(
+        `Certification only allowed from locked; current status is ${lockedSession.status}`,
+        'NOT_LOCKED'
+      );
+    }
     const evidenceManifest = await buildEvidenceManifest(client, input.tenantId, input.closeSessionId);
     const snapshot = await createSnapshotFromTrialBalanceAndEntries(client, {
       tenantId: input.tenantId,
@@ -309,6 +322,36 @@ export async function certifyCloseSession(
     });
 
     const certifiedAt = new Date().toISOString();
+
+    let certificationArtifactId: string | null = null;
+    const existingArtifact = await certArtifactRepo.existsForCloseSession(client, input.tenantId, input.closeSessionId);
+    if (!existingArtifact) {
+      const auditChainResult = await verifyChain(client, input.tenantId);
+      const { artifact, artifactHash, signatureB64, publicKeyB64, alg } = buildCertificationArtifact({
+        tenantId: input.tenantId,
+        closeSessionId: input.closeSessionId,
+        periodLabel,
+        certifiedAt,
+        certifiedBy: input.certifiedBy,
+        snapshotId: snapshot.id,
+        snapshotHash: snapshot.snapshotHash,
+        hashVersion: snapshot.hashVersion,
+        snapshotPayload: snapshot.snapshotPayloadJson,
+        auditChainResult,
+      });
+      const inserted = await certArtifactRepo.insertCertificationArtifact(client, {
+        tenantId: input.tenantId,
+        closeSessionId: input.closeSessionId,
+        periodLabel,
+        artifact,
+        artifactHash,
+        signatureB64: signatureB64 || '',
+        publicKeyB64: publicKeyB64 || '',
+        alg,
+      });
+      certificationArtifactId = inserted.id;
+    }
+
     const updated = await repo.updateCertification(
       client,
       input.tenantId,
@@ -316,7 +359,8 @@ export async function certifyCloseSession(
       input.certifiedBy,
       certifiedAt,
       input.memo,
-      snapshot.id
+      snapshot.id,
+      certificationArtifactId
     );
     if (!updated) {
       throw new CloseSessionError('Close session not found', 'NOT_FOUND');

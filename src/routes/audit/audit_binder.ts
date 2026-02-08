@@ -4,7 +4,7 @@
 
 import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
-import { logCriticalRoute } from '../../lib/logger.js';
+import { log, logCriticalRoute } from '../../lib/logger.js';
 import type { RequestWithId } from '../../middleware/requestId.js';
 import {
   buildAuditBinder,
@@ -16,7 +16,8 @@ import {
   exportAuditBinderToCsv,
   exportDraftPackageToPdf,
 } from '../../services/audit_binder_export_service.js';
-import { checkExportGate } from '../../services/export_gate_service.js';
+import { checkExportGate, RESOLUTION_MISMATCH } from '../../services/export_gate_service.js';
+import { recordLegacyCertifiedSourceUsed } from '../../services/audit_ledger_service.js';
 import { listStagingItems } from '../../services/persistence_service.js';
 import { validateBody } from '../../middleware/validationMiddleware.js';
 import { registerStatementsBodySchema } from '../../schemas/auditSchemas.js';
@@ -107,6 +108,14 @@ async function runBinderExportGates(
     periodLabel,
   });
   if (!gateResult.allowed) {
+    if (gateResult.alert === RESOLUTION_MISMATCH && gateResult.details) {
+      res.status(422).json({
+        code: 'RESOLUTION_MISMATCH',
+        message: gateResult.message ?? 'Ledger resolution mismatch: export blocked.',
+        details: gateResult.details,
+      });
+      return false;
+    }
     res.status(403).json({
       error: gateResult.alert ?? 'Export blocked',
       code: gateResult.alert,
@@ -197,12 +206,22 @@ router.get('/binder', async (req: Request, res: Response) => {
       return;
     }
     if (result.source) res.setHeader('X-Certified-Source', result.source);
+    if (result.source === 'legacy') res.setHeader('X-Legacy-Certified-Source', 'true');
     if (result.certifiedSnapshotId) res.setHeader('X-Certified-Snapshot-Id', result.certifiedSnapshotId);
     if (result.snapshotHash) res.setHeader('X-Certified-Snapshot-Hash', result.snapshotHash);
     if (result.snapshotHashVersion != null) res.setHeader('X-Certified-Snapshot-Hash-Version', String(result.snapshotHashVersion));
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
     const periodLabel = periodEnd.slice(0, 7);
+    if (result.source === 'legacy') {
+      log('warn', 'Legacy certified source used', { tenantId: auth.tenantId, closeSessionId });
+      await recordLegacyCertifiedSourceUsed(auth.pool, {
+        tenantId: auth.tenantId,
+        closeSessionId,
+        periodLabel,
+        createdBy: (req as { userId?: string }).userId,
+      });
+    }
     const entityName = (req.query.entityName as string) ?? 'Entity';
     const host = req.get('host');
     const baseUrl = req.protocol + '://' + (host ?? '');
@@ -267,15 +286,26 @@ router.get('/binder/export/pdf', async (req: Request, res: Response) => {
       return;
     }
     if (result.source) res.setHeader('X-Certified-Source', result.source);
+    if (result.source === 'legacy') res.setHeader('X-Legacy-Certified-Source', 'true');
     if (result.certifiedSnapshotId) res.setHeader('X-Certified-Snapshot-Id', result.certifiedSnapshotId);
     if (result.snapshotHash) res.setHeader('X-Certified-Snapshot-Hash', result.snapshotHash);
     if (result.snapshotHashVersion != null) res.setHeader('X-Certified-Snapshot-Hash-Version', String(result.snapshotHashVersion));
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
+    const periodLabel = periodEnd.slice(0, 7);
+    if (result.source === 'legacy') {
+      log('warn', 'Legacy certified source used', { tenantId: auth.tenantId, closeSessionId });
+      await recordLegacyCertifiedSourceUsed(auth.pool, {
+        tenantId: auth.tenantId,
+        closeSessionId,
+        periodLabel,
+        createdBy: (req as { userId?: string }).userId,
+      });
+    }
     const entityName = (req.query.entityName as string) ?? 'Entity';
     const host = req.get('host');
     const baseUrl = req.protocol + '://' + (host ?? '');
-    const ingestMetadata = await getIngestMetadataForPeriod(auth.pool, auth.tenantId, periodEnd.slice(0, 7));
+    const ingestMetadata = await getIngestMetadataForPeriod(auth.pool, auth.tenantId, periodLabel);
     const binder = await buildAuditBinder({
       periodStart,
       periodEnd,
@@ -329,15 +359,26 @@ router.get('/binder/export/csv', async (req: Request, res: Response) => {
       return;
     }
     if (result.source) res.setHeader('X-Certified-Source', result.source);
+    if (result.source === 'legacy') res.setHeader('X-Legacy-Certified-Source', 'true');
     if (result.certifiedSnapshotId) res.setHeader('X-Certified-Snapshot-Id', result.certifiedSnapshotId);
     if (result.snapshotHash) res.setHeader('X-Certified-Snapshot-Hash', result.snapshotHash);
     if (result.snapshotHashVersion != null) res.setHeader('X-Certified-Snapshot-Hash-Version', String(result.snapshotHashVersion));
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
+    const periodLabel = periodEnd.slice(0, 7);
+    if (result.source === 'legacy') {
+      log('warn', 'Legacy certified source used', { tenantId: auth.tenantId, closeSessionId });
+      await recordLegacyCertifiedSourceUsed(auth.pool, {
+        tenantId: auth.tenantId,
+        closeSessionId,
+        periodLabel,
+        createdBy: (req as { userId?: string }).userId,
+      });
+    }
     const entityName = (req.query.entityName as string) ?? 'Entity';
     const host = req.get('host');
     const baseUrl = req.protocol + '://' + (host ?? '');
-    const ingestMetadata = await getIngestMetadataForPeriod(auth.pool, auth.tenantId, periodEnd.slice(0, 7));
+    const ingestMetadata = await getIngestMetadataForPeriod(auth.pool, auth.tenantId, periodLabel);
     const binder = await buildAuditBinder({
       periodStart,
       periodEnd,

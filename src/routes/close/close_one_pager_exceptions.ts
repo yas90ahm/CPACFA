@@ -26,8 +26,7 @@ router.get('/one-pager', async (req: Request, res: Response) => {
     const onePager = await buildCloseOnePager(tenantId, periodLabel, pool ?? undefined, { includeNarrative });
     res.json(onePager);
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'Close one-pager failed', message });
+    send500(res, e, 'Close one-pager failed');
   }
 });
 
@@ -47,8 +46,7 @@ router.get('/one-pager/export/pdf', async (req: Request, res: Response) => {
     res.setHeader('Content-Disposition', `attachment; filename="close-one-pager-${periodLabel}.pdf"`);
     res.send(pdf);
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'Close one-pager PDF export failed', message });
+    send500(res, e, 'Close one-pager PDF export failed');
   }
 });
 
@@ -70,8 +68,7 @@ router.get('/exceptions', async (req: Request, res: Response) => {
     }
     res.json(exceptions);
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'Close exceptions failed', message });
+    send500(res, e, 'Close exceptions failed');
   }
 });
 
@@ -88,8 +85,7 @@ router.post('/tie-out/narrative', async (req: Request, res: Response) => {
     const narrative = await generateTieOutNarrativeAgentic(tieOut);
     res.json({ narrative });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'Tie-out narrative failed', message });
+    send500(res, e, 'Tie-out narrative failed');
   }
 });
 

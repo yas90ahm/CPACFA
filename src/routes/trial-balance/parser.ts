@@ -46,6 +46,7 @@ import { classifyTrialBalance } from '../../services/accountClassifier.js';
 import { getUnadjustedOrRollup } from '../../services/trial_balance_rollup_service.js';
 import { getAdjustedTrialBalance } from '../../services/adjusted_trial_balance_service.js';
 import { attachLineProvenance, attachCategories, parseTransactions, normalizeStandard } from './helpers.js';
+import { send500 } from '../../lib/errorHandler.js';
 
 const router = Router();
 
@@ -289,6 +290,7 @@ router.post('/statements', validateBody(statementsBodySchema), async (req: Reque
     if (gapsStatements.length > 0) await addTodosFromGaps(gapsStatements, authReqStatements.tenantPool, authReqStatements.tenantId);
 
     const precedentResultStmt = getPrecedentForCloseStep('trial_balance_statements', {
+      tenantId: authReqStatements.tenantId,
       entityId: body.entityId,
       currentPeriodLabel: body.periodLabel,
       priorPeriodLabel: body.prior_period_label,
@@ -395,8 +397,7 @@ router.get('/period/:periodLabel', validateParams(periodLabelParamSchema), async
       ...(result.source === 'rollup' && 'constituentPeriods' in result ? { constituentPeriods: result.constituentPeriods } : {}),
     });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'Failed to load unadjusted trial balance', message });
+    send500(res, e, 'Failed to load unadjusted trial balance');
   }
 });
 
@@ -414,7 +415,7 @@ router.get('/period/:periodLabel/adjusted', validateParams(periodLabelParamSchem
       res.status(404).json({ error: 'No unadjusted trial balance for period', periodLabel: req.params.periodLabel });
       return;
     }
-    res.status(500).json({ error: 'Failed to load adjusted trial balance', message });
+    send500(res, e, 'Failed to load adjusted trial balance');
   }
 });
 
@@ -483,7 +484,7 @@ router.get(
         res.status(404).json({ error: 'No unadjusted trial balance for period', periodLabel: req.params.periodLabel });
         return;
       }
-      res.status(500).json({ error: 'Failed to build statements', message });
+      send500(res, e, 'Failed to build statements');
     }
   }
 );

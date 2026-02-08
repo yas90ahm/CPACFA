@@ -23,6 +23,7 @@ import { getPeriodExportChecks } from '../db/repositories/period_export_checks_r
 export const CRITICAL_TAMPER_ALERT = 'CRITICAL_TAMPER_ALERT';
 export const TAMPERING_ATTEMPT_DETECTED = 'TAMPERING_ATTEMPT_DETECTED';
 export const UNRESOLVED_CONFLICTS_ALERT = 'UNRESOLVED_CONFLICTS';
+export const RESOLUTION_MISMATCH = 'RESOLUTION_MISMATCH';
 
 export interface ExportGateInput {
   tenantId: string;
@@ -33,10 +34,12 @@ export interface ExportGateInput {
 
 export interface ExportGateResult {
   allowed: boolean;
-  alert?: typeof CRITICAL_TAMPER_ALERT | typeof TAMPERING_ATTEMPT_DETECTED | typeof UNRESOLVED_CONFLICTS_ALERT;
+  alert?: typeof CRITICAL_TAMPER_ALERT | typeof TAMPERING_ATTEMPT_DETECTED | typeof UNRESOLVED_CONFLICTS_ALERT | typeof RESOLUTION_MISMATCH;
   message?: string;
   /** When true, qualitative evidence is missing for the period (informational). */
   qualitativeEvidenceMissing?: boolean;
+  /** When alert is RESOLUTION_MISMATCH: resolved vs ledger resolution counts. */
+  details?: { resolvedCount: number; ledgerResolutionCount: number };
 }
 
 /**
@@ -88,7 +91,8 @@ export async function checkExportGate(input: ExportGateInput): Promise<ExportGat
         message: `Unresolved CPA-CFA conflict(s) (${conflicts.length}); resolve via Resolution Memo before export.`,
       };
     }
-    // Optional integrity check: resolved conflict count vs ledger user_induced_variance count for period
+    // Integrity check: resolved conflict count must match ledger user_induced_variance count for period.
+    // Mismatch blocks export (deterministic certification).
     const resolvedCount = await conflictsRepo.countResolvedByTenantPeriod(input.pool, input.tenantId, input.periodLabel);
     const ledgerResolutionCount = await auditLedgerRepo.countByTenantPeriodAndEventType(
       input.pool,
@@ -98,8 +102,10 @@ export async function checkExportGate(input: ExportGateInput): Promise<ExportGat
     );
     if (resolvedCount !== ledgerResolutionCount) {
       return {
-        allowed: true,
-        message: `Export allowed. Integrity check: resolved conflict count (${resolvedCount}) for period does not match ledger resolution count (${ledgerResolutionCount}).`,
+        allowed: false,
+        alert: RESOLUTION_MISMATCH,
+        message: 'Ledger resolution mismatch: export blocked.',
+        details: { resolvedCount, ledgerResolutionCount },
       };
     }
     const qualitativeEvidenceMissing = await getQualitativeEvidenceMissing(input.pool, input.tenantId, input.periodLabel);

@@ -129,7 +129,7 @@ Only key mounted routes; not an exhaustive list.
 | `POST /api/export/pdf`, `POST /api/export/csv` | Export (draft vs certified by body/query; certified requires session + gates). |
 | `GET /api/audit/binder`, `GET /api/audit/binder/export/pdf`, `.../csv` | Audit binder (certified-only; requireCertifiedSession + gates). |
 
-Other mounted prefixes: `/api/justification`, `/api/audit` (reconciliation, todos, GAAP consistency, etc.), `/api/close/*` (sessions, issues, adjustments, checklist, etc.), `/api/coa-mapping`, `/api/onboarding`, `/api/tenants`, `/api/knowledge-base`, `/api/vector-store`, `/api/ingestion`, `/api/memory`, `/api/integrations`, `/api/pipelines`, `/api/data-quality`, `/api/approvals`, `/api/accounting-integration`. Dev-only: `/api-dev` when `NODE_ENV !== 'production'`.
+Other mounted prefixes: `/api/justification`, `/api/audit` (reconciliation, todos, GAAP consistency, etc.), `/api/close/*` (sessions, issues, adjustments, checklist, etc.), `/api/coa-mapping`, `/api/onboarding`, `/api/tenants`, `/api/knowledge-base`, `/api/vector-store`, `/api/ingestion`, `/api/memory`, `/api/integrations`, `/api/pipelines`, `/api/data-quality`, `/api/approvals`, `/api/accounting-integration`. Dev-only: `/api-dev` only when `ENABLE_DEV_API=true` and `NODE_ENV !== 'production'` and `DEMO_MODE !== 'true'` (never in DEMO or production).
 
 ---
 

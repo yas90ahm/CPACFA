@@ -53,10 +53,7 @@ describe('POST /api/close/sessions/:id/advance', () => {
     const entityDraftOnly = `entity-advance-draft-${ts}`;
     const entityE = `entity-advance-e-${ts}`;
 
-    const ingestPath =
-      process.env.NODE_ENV === 'production'
-        ? '/api/trial-balance/ingest'
-        : '/api-dev/trial-balance/ingest';
+    const ingestPath = '/api/trial-balance/ingest';
 
     // Session that will be advanced to locked then certified (A, B, C)
     const ensureReady = await request(app)

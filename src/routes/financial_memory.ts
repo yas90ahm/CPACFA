@@ -20,6 +20,7 @@ import {
   searchFinancialMemory,
   cpaInvoiceConsistencyLookup,
 } from '../knowledge_base/index.js';
+import { send500 } from '../lib/errorHandler.js';
 
 const COA_TYPES: ChartOfAccountsLine['type'][] = ['asset', 'liability', 'equity', 'revenue', 'expense', 'other'];
 
@@ -31,8 +32,7 @@ router.get('/tier1/entries', (_req: Request, res: Response) => {
     const entries = getGlobalEntries();
     res.json({ tier: 'global', entries });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Tier1 list failed';
-    res.status(500).json({ error: 'Tier1 error', message });
+    send500(res, err, 'Tier1 list failed');
   }
 });
 
@@ -42,8 +42,7 @@ router.get('/tier2/chart-of-accounts', (_req: Request, res: Response) => {
     const lines = getChartOfAccounts();
     res.json({ tier: 'firm', chartOfAccounts: lines });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'CoA get failed';
-    res.status(500).json({ error: 'Tier2 error', message });
+    send500(res, err, 'CoA get failed');
   }
 });
 
@@ -64,8 +63,7 @@ router.post('/tier2/chart-of-accounts', (req: Request, res: Response) => {
     setChartOfAccounts(lines);
     res.json({ tier: 'firm', message: 'Chart of Accounts updated', count: lines.length });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'CoA set failed';
-    res.status(500).json({ error: 'Tier2 error', message });
+    send500(res, err, 'CoA set failed');
   }
 });
 
@@ -84,8 +82,7 @@ router.post('/tier2/policies', (req: Request, res: Response) => {
     });
     res.json({ tier: 'firm', message: 'Policy added', id });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Policy add failed';
-    res.status(500).json({ error: 'Tier2 error', message });
+    send500(res, err, 'Policy add failed');
   }
 });
 
@@ -95,8 +92,7 @@ router.get('/tier2/policies', (_req: Request, res: Response) => {
     const policies = getHistoricalPolicies();
     res.json({ tier: 'firm', policies });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Policies get failed';
-    res.status(500).json({ error: 'Tier2 error', message });
+    send500(res, err, 'Policies get failed');
   }
 });
 
@@ -127,8 +123,7 @@ router.post('/tier2/invoice-treatments', (req: Request, res: Response) => {
     });
     res.json({ tier: 'firm', message: 'Invoice treatment recorded', treatment: record });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Invoice treatment record failed';
-    res.status(500).json({ error: 'Tier2 error', message });
+    send500(res, err, 'Invoice treatment record failed');
   }
 });
 
@@ -138,8 +133,7 @@ router.get('/tier2/invoice-treatments', (_req: Request, res: Response) => {
     const treatments = getInvoiceTreatments();
     res.json({ tier: 'firm', treatments });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Treatments get failed';
-    res.status(500).json({ error: 'Tier2 error', message });
+    send500(res, err, 'Treatments get failed');
   }
 });
 
@@ -156,8 +150,7 @@ router.post('/tier3/upload', (req: Request, res: Response) => {
     });
     res.json({ tier: 'session', message: 'Upload recorded', upload });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Session upload failed';
-    res.status(500).json({ error: 'Tier3 error', message });
+    send500(res, err, 'Session upload failed');
   }
 });
 
@@ -168,8 +161,7 @@ router.get('/tier3/uploads', (req: Request, res: Response) => {
     const uploads = getSessionUploads(sessionId);
     res.json({ tier: 'session', sessionId, uploads });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Session uploads get failed';
-    res.status(500).json({ error: 'Tier3 error', message });
+    send500(res, err, 'Session uploads get failed');
   }
 });
 
@@ -180,8 +172,7 @@ router.delete('/tier3/session/:sessionId', (req: Request, res: Response) => {
     clearSession(sessionId);
     res.json({ tier: 'session', message: 'Session cleared', sessionId });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Session clear failed';
-    res.status(500).json({ error: 'Tier3 error', message });
+    send500(res, err, 'Session clear failed');
   }
 });
 
@@ -202,8 +193,7 @@ router.post('/search', (req: Request, res: Response) => {
     });
     res.json({ query, results });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Search failed';
-    res.status(500).json({ error: 'Search error', message });
+    send500(res, err, 'Search failed');
   }
 });
 
@@ -234,8 +224,7 @@ router.post('/invoice-consistency', (req: Request, res: Response) => {
     });
     res.json(result);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Invoice consistency lookup failed';
-    res.status(500).json({ error: 'Invoice consistency error', message });
+    send500(res, err, 'Invoice consistency lookup failed');
   }
 });
 

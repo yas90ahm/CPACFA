@@ -52,6 +52,7 @@ router.post('/prior-period-comparison', validateBody(priorPeriodComparisonBodySc
       materialThresholdAmount: th.amount,
     });
     const precedentResult = getPrecedentForCloseStep('prior_period_comparison', {
+      tenantId: getTenantId(req),
       entityId: body.entityId,
       currentPeriodLabel: body.currentPeriodLabel,
       priorPeriodLabel: body.priorPeriodLabel,

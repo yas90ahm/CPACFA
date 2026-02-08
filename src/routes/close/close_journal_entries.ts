@@ -33,7 +33,32 @@ import { executeBridgeCommand } from '../../bridge/index.js';
 import type { AuthRequest } from '../../auth/middleware.js';
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } }); // 20 MB
+
+/** Allowed MIME types for JE attachments (configurable via env; default whitelist). */
+const ATTACHMENT_ALLOWED_MIMES = (
+  process.env.SECURITY_ATTACHMENT_MIME_WHITELIST?.toLowerCase().split(',').map((s) => s.trim()).filter(Boolean)
+) ?? [
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'text/csv',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+];
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
+  fileFilter: (_req, file, cb) => {
+    const mime = (file.mimetype ?? '').toLowerCase();
+    const ext = (file.originalname ?? '').toLowerCase().split('.').pop();
+    const allowedExts = ['pdf', 'png', 'jpg', 'jpeg', 'csv', 'xlsx'];
+    const mimeOk = ATTACHMENT_ALLOWED_MIMES.includes(mime);
+    const extOk = ext && allowedExts.includes(ext);
+    if (mimeOk && extOk) cb(null, true);
+    else cb(new Error('Allowed attachment types: pdf, png, jpg, jpeg, csv, xlsx only.'));
+  },
+});
 
 /** POST /api/close/journal-entries — create draft JE (via bridge) */
 router.post('/journal-entries', async (req: Request, res: Response) => {
@@ -79,7 +104,7 @@ router.post('/journal-entries', async (req: Request, res: Response) => {
     if (result.commandType !== 'CreateDraftJE') throw new Error('Unexpected result');
     const je = await getJournalEntry(pool, tenantId, result.journalEntry.id);
     if (!je) {
-      res.status(500).json({ error: 'Journal entry not found after create' });
+      send500(res, new Error('Journal entry not found after create'), 'Journal entry not found after create');
       return;
     }
     res.status(201).json(je);
@@ -299,7 +324,7 @@ router.post('/journal-entries/:id/post', async (req: Request, res: Response) => 
     const message = e instanceof Error ? e.message : String(e);
     const stack = e instanceof Error ? e.stack : undefined;
     log('error', 'Post JE failed', { message, stack });
-    res.status(500).json({ error: 'Post JE failed', code: 'SERVICE' });
+    send500(res, new Error('Post JE failed'), 'Post JE failed');
   }
 });
 

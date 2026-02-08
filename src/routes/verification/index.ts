@@ -7,10 +7,12 @@ import { Router } from 'express';
 import snapshotsRouter from './snapshots.js';
 import auditChainRouter from './audit_chain.js';
 import evidenceManifestRouter from './evidence_manifest.js';
+import certificationRouter from './certification.js';
 
 const router = Router();
 router.use(snapshotsRouter);
 router.use(auditChainRouter);
 router.use(evidenceManifestRouter);
+router.use('/certification', certificationRouter);
 
 export default router;
