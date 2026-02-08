@@ -116,7 +116,7 @@ describe('PBC Index', () => {
     expect(res.body?.code).toBe('NOT_FOUND');
   });
 
-  it('returns contractVersion v1 and stable response shape', async () => {
+  it('returns contractVersion v1 and stable response shape including evidenceSummary', async () => {
     if (!closeSessionIdDraft) return;
     const res = await request(app)
       .get('/api/audit/pbc-index')
@@ -144,6 +144,10 @@ describe('PBC Index', () => {
     expect(res.body?.evidence?.binder?.endpoints?.json).toMatch(/^\/api\//);
     expect(res.body?.evidence?.exports?.certifiedPdf?.endpoint).toMatch(/^\/api\//);
     expect(Array.isArray(res.body?.missing)).toBe(true);
+    expect(res.body?.evidenceSummary).toBeDefined();
+    expect(['off', 'warn_only', 'hard_block']).toContain(res.body?.evidenceSummary?.enforcementMode);
+    expect(typeof res.body?.evidenceSummary?.totalJournalEntries).toBe('number');
+    expect(Array.isArray(res.body?.evidenceSummary?.missingEvidenceDetails)).toBe(true);
   });
 
   it('returns relative URLs by default (no absoluteUrls)', async () => {

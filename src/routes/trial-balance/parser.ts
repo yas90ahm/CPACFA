@@ -361,6 +361,7 @@ router.post('/statements', validateBody(statementsBodySchema), async (req: Reque
     if (err instanceof MathematicalIntegrityError) {
       return res.status(422).json({
         error: 'MathematicalIntegrityError',
+        code: 'FINAL_INTEGRITY_CHECK_FAILED',
         message: err.message,
         check: err.check,
         imbalanceAmount: err.imbalanceAmount,
@@ -470,6 +471,7 @@ router.get(
       if (e instanceof MathematicalIntegrityError) {
         return res.status(422).json({
           error: 'MathematicalIntegrityError',
+          code: 'FINAL_INTEGRITY_CHECK_FAILED',
           message: e.message,
           check: e.check,
           imbalanceAmount: e.imbalanceAmount,

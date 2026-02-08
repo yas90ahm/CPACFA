@@ -1,16 +1,12 @@
 /**
- * Close adjustments routes: adjustments GET, from-je, from-accruals, PATCH :id (uses close_adjustment_update_service).
+ * Close adjustments routes: adjustments GET, from-je, from-accruals, PATCH :id.
+ * All mutations route through executeBridgeCommand (lock assertion, audit ledger).
  */
 
 import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
-import {
-  listAdjustments,
-  addJEAsAdjustments,
-  addAccrualsAsAdjustments,
-  ProvenanceValidationError,
-} from '../../services/close_adjustments_service.js';
-import { updateCloseAdjustmentStatus } from '../../services/close_adjustment_update_service.js';
+import { listAdjustments } from '../../services/close_adjustments_service.js';
+import { executeBridgeCommand } from '../../bridge/index.js';
 import { getCloseRoleFromReq } from '../../lib/closeRole.js';
 import { send500 } from '../../lib/errorHandler.js';
 import type { AuthRequest } from '../../auth/middleware.js';
@@ -41,17 +37,34 @@ router.post('/adjustments/from-je', async (req: Request, res: Response) => {
     }
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    const added = await addJEAsAdjustments(body.periodLabel, body.suggestions, tenantId ?? undefined, pool);
-    res.status(201).json({ added, count: added.length });
-  } catch (e: unknown) {
-    if (e instanceof ProvenanceValidationError) {
-      res.status(400).json({
-        error: 'AMOUNT_PROVENANCE_REQUIRED',
-        message: 'Every non-zero amount must have valid amountProvenance (ledger_exact | engine_calculation | human_entered). Advisor may not invent or estimate amounts.',
-        errors: e.errors,
-      });
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
       return;
     }
+    const result = await executeBridgeCommand(
+      {
+        pool,
+        tenantId,
+        actor: (req as AuthRequest).userId ?? 'anonymous',
+        actorRole: getCloseRoleFromReq(req as AuthRequest),
+      },
+      {
+        commandType: 'CreateCloseAdjustmentsFromJE',
+        periodLabel: body.periodLabel,
+        suggestions: body.suggestions,
+      }
+    );
+    if (!result.ok) {
+      if (result.code === 'PERIOD_LOCKED') {
+        return res.status(409).json({ error: result.error, code: result.code, periodLabel: result.periodLabel });
+      }
+      return res
+        .status(result.statusCode ?? 400)
+        .json({ error: result.error, code: result.code, ...(result.errors && { errors: result.errors }) });
+    }
+    if (result.commandType !== 'CreateCloseAdjustmentsFromJE') throw new Error('Unexpected result');
+    res.status(201).json({ added: result.added, count: result.added.length });
+  } catch (e: unknown) {
     send500(res, e, 'Add JE adjustments failed');
   }
 });
@@ -66,9 +79,34 @@ router.post('/adjustments/from-accruals', async (req: Request, res: Response) =>
     }
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    const added = await addAccrualsAsAdjustments(body.periodLabel, body.suggestions, tenantId ?? undefined, pool);
-    res.status(201).json({ added, count: added.length });
-  } catch (e) {
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const result = await executeBridgeCommand(
+      {
+        pool,
+        tenantId,
+        actor: (req as AuthRequest).userId ?? 'anonymous',
+        actorRole: getCloseRoleFromReq(req as AuthRequest),
+      },
+      {
+        commandType: 'CreateCloseAdjustmentsFromAccruals',
+        periodLabel: body.periodLabel,
+        suggestions: body.suggestions,
+      }
+    );
+    if (!result.ok) {
+      if (result.code === 'PERIOD_LOCKED') {
+        return res.status(409).json({ error: result.error, code: result.code, periodLabel: result.periodLabel });
+      }
+      return res
+        .status(result.statusCode ?? 400)
+        .json({ error: result.error, code: result.code, ...(result.errors && { errors: result.errors }) });
+    }
+    if (result.commandType !== 'CreateCloseAdjustmentsFromAccruals') throw new Error('Unexpected result');
+    res.status(201).json({ added: result.added, count: result.added.length });
+  } catch (e: unknown) {
     send500(res, e, 'Add accrual adjustments failed');
   }
 });
@@ -92,52 +130,60 @@ router.patch('/adjustments/:id', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Tenant context required' });
       return;
     }
-    const actorRole = getCloseRoleFromReq(req as AuthRequest);
-    const actorUserId = (req as AuthRequest).userId;
-    const result = await updateCloseAdjustmentStatus({
-      id,
-      status: body.status,
-      approvedBy: body.approvedBy,
-      connectionId: body.connectionId,
-      tenantId,
-      pool,
-      actorRole,
-      actorUserId,
-    });
-    if ('updated' in result) {
+    const result = await executeBridgeCommand(
+      {
+        pool,
+        tenantId,
+        actor: (req as AuthRequest).userId ?? 'anonymous',
+        actorRole: getCloseRoleFromReq(req as AuthRequest),
+      },
+      {
+        commandType: 'UpdateCloseAdjustment',
+        adjustmentId: id,
+        status: body.status,
+        approvedBy: body.approvedBy,
+        connectionId: body.connectionId,
+      }
+    );
+    if (result.ok && result.commandType === 'UpdateCloseAdjustment') {
       return res.json(result.updated);
     }
-    if (result.statusCode === 403 && result.periodLabel) {
-      return res.status(403).json({ error: result.error, periodLabel: result.periodLabel });
+    if (!result.ok) {
+      if (result.code === 'PERIOD_LOCKED' || (result.statusCode === 403 && result.periodLabel)) {
+        return res.status(409).json({ error: result.error, periodLabel: result.periodLabel });
+      }
+      if (result.statusCode === 400 && result.approvalRequestId !== undefined) {
+        return res.status(400).json({
+          error: result.error,
+          message: `Approve via PATCH /api/approvals/requests/${result.approvalRequestId} with body: { action: "approved", actor?: "userId" }`,
+          approvalRequestId: result.approvalRequestId,
+        });
+      }
+      if (result.statusCode === 400 && result.error === 'Approval workflow required') {
+        return res.status(400).json({
+          error: result.error,
+          message: `Submit for approval first via POST /api/approvals/submit with body: { resourceType: "close_adjustment", resourceId: "${id}" }`,
+        });
+      }
+      if (result.statusCode === 502 && result.errors) {
+        return res.status(502).json({
+          error: result.error,
+          message: result.errors?.join(' ') ?? 'Unknown error',
+          errors: result.errors,
+        });
+      }
+      if (result.statusCode === 501) {
+        return res.status(501).json({
+          error: result.error,
+          message: 'GL post-back is disabled; set ENABLE_GL_POSTBACK=true to enable.',
+          ...(result.errors && { errors: result.errors }),
+        });
+      }
+      return res
+        .status(result.statusCode ?? 400)
+        .json({ error: result.error, ...(result.errors && { errors: result.errors }) });
     }
-    if (result.statusCode === 400 && result.approvalRequestId !== undefined) {
-      return res.status(400).json({
-        error: result.error,
-        message: `Approve via PATCH /api/approvals/requests/${result.approvalRequestId} with body: { action: "approved", actor?: "userId" }`,
-        approvalRequestId: result.approvalRequestId,
-      });
-    }
-    if (result.statusCode === 400 && result.error === 'Approval workflow required') {
-      return res.status(400).json({
-        error: result.error,
-        message: `Submit for approval first via POST /api/approvals/submit with body: { resourceType: "close_adjustment", resourceId: "${id}" }`,
-      });
-    }
-    if (result.statusCode === 502 && result.errors) {
-      return res.status(502).json({
-        error: result.error,
-        message: result.errors?.join(' ') ?? 'Unknown error',
-        errors: result.errors,
-      });
-    }
-    if (result.statusCode === 501) {
-      return res.status(501).json({
-        error: result.error,
-        message: 'GL post-back is disabled; set ENABLE_GL_POSTBACK=true to enable.',
-        ...(result.errors && { errors: result.errors }),
-      });
-    }
-    res.status(result.statusCode).json({ error: result.error, ...(result.errors && { errors: result.errors }) });
+    send500(res, new Error('Unexpected result'), 'Update adjustment failed');
   } catch (e) {
     send500(res, e, 'Update adjustment failed');
   }

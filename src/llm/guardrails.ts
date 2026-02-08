@@ -34,9 +34,7 @@ export function shouldEscalateToHuman(confidence: number): boolean {
 
 /** Keys that indicate monetary/ledger amounts (AI must not produce these). */
 const AMOUNT_KEYS = new Set(['debit', 'credit', 'amount', 'debits', 'credits', 'amounts', 'balance', 'total']);/** Metadata keys we allow (e.g. confidence, count). */
-const ALLOWED_KEYS = new Set(['confidence', 'count', 'urgency', 'type', 'title', 'description', 'suggestion', 'rationale', 'id']);
-
-function hasNumericAmount(obj: unknown, path: string): boolean {
+const ALLOWED_KEYS = new Set(['confidence', 'count', 'urgency', 'type', 'title', 'description', 'suggestion', 'rationale', 'id']);function hasNumericAmount(obj: unknown, path: string): boolean {
   if (obj === null || obj === undefined) return false;
   if (typeof obj === 'number') return true;
   if (Array.isArray(obj)) {

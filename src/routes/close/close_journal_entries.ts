@@ -23,6 +23,10 @@ import {
   addJEAttachment,
   JournalEntryError,
 } from '../../services/journal_entry_service.js';
+import {
+  attachEvidenceToJournalEntry,
+  EvidenceAttachmentError,
+} from '../../services/evidence_attachment_service.js';
 import * as jeRepo from '../../db/repositories/journal_entry_repository.js';
 import type { JournalEntrySource } from '../../types/journal_entry.js';
 import { executeBridgeCommand } from '../../bridge/index.js';
@@ -384,6 +388,69 @@ router.post('/journal-entries/validate-materiality', async (req: Request, res: R
     res.json(result);
   } catch (e) {
     send500(res, e, 'Validate materiality failed');
+  }
+});
+
+/** POST /api/close/journal-entries/:id/evidence — attach evidence (proof + reference metadata only; no file storage) */
+router.post('/journal-entries/:id/evidence', async (req: Request, res: Response) => {
+  try {
+    const pool = getTenantPool(req);
+    const tenantId = getTenantId(req);
+    if (!pool || !tenantId) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const id = req.params.id ?? '';
+    const body = req.body as {
+      hashSha256?: string;
+      sizeBytes?: number;
+      assertionType?: string;
+      mimeType?: string;
+      externalUri?: string;
+      externalProvider?: string;
+      label?: string;
+      role?: string;
+      requiredness?: 'optional' | 'required';
+      attachedBy?: string;
+      claimedAmount?: string;
+      claimedCurrency?: string;
+      claimedPeriod?: string;
+      note?: string;
+    };
+    if (!body?.hashSha256 || body?.sizeBytes == null) {
+      res.status(400).json({ error: 'hashSha256 and sizeBytes required' });
+      return;
+    }
+    const validAssertionTypes = ['invoice_support', 'bank_support', 'reconciliation', 'approval', 'contract_support', 'calc_support', 'other'];
+    if (!body?.assertionType || !validAssertionTypes.includes(body.assertionType)) {
+      res.status(400).json({ error: 'assertionType required; must be one of: ' + validAssertionTypes.join(', ') });
+      return;
+    }
+    const attachedBy = body.attachedBy ?? (req as AuthRequest).userId ?? 'anonymous';
+    const result = await attachEvidenceToJournalEntry(pool, tenantId, id, {
+      hashSha256: body.hashSha256,
+      sizeBytes: Number(body.sizeBytes),
+      assertionType: body.assertionType as import('../../types/evidence.js').AssertionType,
+      mimeType: body.mimeType,
+      externalUri: body.externalUri,
+      externalProvider: body.externalProvider,
+      label: body.label,
+      role: body.role ?? 'support',
+      requiredness: body.requiredness ?? 'optional',
+      attachedBy,
+      claimedAmount: body.claimedAmount,
+      claimedCurrency: body.claimedCurrency,
+      claimedPeriod: body.claimedPeriod,
+      note: body.note,
+    });
+    res.status(201).json(result);
+  } catch (e) {
+    if (e instanceof EvidenceAttachmentError) {
+      const status = e.code === 'NOT_FOUND' ? 404 : e.code === 'PERIOD_LOCKED' ? 409 : 400;
+      res.status(status).json({ error: e.message, code: e.code });
+      return;
+    }
+    send500(res, e, 'Attach evidence failed');
   }
 });
 

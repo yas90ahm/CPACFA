@@ -15,6 +15,7 @@ import * as jeRepo from '../db/repositories/journal_entry_repository.js';
 import { verifyChain } from './audit_ledger_service.js';
 import { getPeriodExportChecks } from '../db/repositories/period_export_checks_repository.js';
 import { createIssue } from './issue_item_service.js';
+import { checkEvidencePolicyForCertification } from './evidence_policy_service.js';
 
 const DEFAULT_ITEMS: { code: CloseChecklistItemCode; name: string; required: boolean }[] = [
   { code: 'CASH_REC', name: 'Cash reconciliation complete', required: true },
@@ -141,6 +142,15 @@ export async function computeReadiness(
   if (exportChecks?.aggregateRoundingExceedsMateriality === true) {
     integrityChecksPass = false;
     hardBlockers.push('Aggregate rounding exceeds materiality; resolve before close.');
+  }
+
+  // Evidence policy (Phase 2A): warn_only adds softWarnings; hard_block adds hardBlockers with EVIDENCE_REQUIRED
+  const evidenceResult = await checkEvidencePolicyForCertification(pool, tenantId, closeSessionId);
+  for (const b of evidenceResult.hardBlockers) {
+    hardBlockers.push(b.message);
+  }
+  for (const w of evidenceResult.softWarnings) {
+    softWarnings.push(w.message);
   }
 
   const ready = hardBlockers.length === 0;

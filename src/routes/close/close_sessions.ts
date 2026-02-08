@@ -58,6 +58,10 @@ function handleSessionError(res: Response, err: unknown, fallbackLabel: string):
       res.status(409).json({ error: err.message });
       return;
     }
+    if (err.code === 'NOT_READY') {
+      res.status(422).json({ error: err.message, code: 'NOT_READY' });
+      return;
+    }
     if (err.code === 'VALIDATION') {
       res.status(400).json({ error: err.message });
       return;

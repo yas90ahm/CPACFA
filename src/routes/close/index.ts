@@ -23,6 +23,7 @@ import closeIssuesRouter from './close_issues.js';
 import closeDecisionRecordsRouter from './close_decision_records.js';
 import closeReconRunsRouter from './close_recon_runs.js';
 import closeJournalEntriesRouter from './close_journal_entries.js';
+import closeEvidencePolicyRouter from './close_evidence_policy.js';
 
 const router = Router();
 router.use(closeJeAccrualsRouter);
@@ -31,6 +32,7 @@ router.use(closeIssuesRouter);
 router.use(closeDecisionRecordsRouter);
 router.use(closeReconRunsRouter);
 router.use(closeJournalEntriesRouter);
+router.use(closeEvidencePolicyRouter);
 router.use(closeChecklistRouter);
 router.use(closePeriodRouter);
 router.use(closeReconciliationRouter);

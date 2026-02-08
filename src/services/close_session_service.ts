@@ -13,8 +13,11 @@ import { canPerform } from './segregation_service.js';
 import { recordMaterialEvent } from './audit_ledger_service.js';
 import { getAdjustedTrialBalance } from './adjusted_trial_balance_service.js';
 import { createSnapshotFromTrialBalanceAndEntries } from './ledger_snapshot_service.js';
+import { buildEvidenceManifest } from './evidence_manifest_service.js';
+import { checkEvidencePolicyForCertification } from './evidence_policy_service.js';
 import { withTransaction } from '../db/transaction.js';
 import { buildCertifiedStatementsFromSnapshot } from './certified_statements_service.js';
+import { sumRound2 } from '../utils/decimal.js';
 import type { LedgerSnapshotPayload } from '../types/ledger_snapshot.js';
 import { getLedgerSnapshotById } from '../db/repositories/ledger_snapshot_repository.js';
 
@@ -30,7 +33,7 @@ const ALLOWED_TRANSITIONS: Record<CloseSessionStatus, CloseSessionStatus[]> = {
 export class CloseSessionError extends Error {
   constructor(
     message: string,
-    public readonly code: 'OVERLAP' | 'INVALID_TRANSITION' | 'NOT_FOUND' | 'VALIDATION' | 'INSUFFICIENT_ROLE' | 'NOT_LOCKED' | 'HARD_BLOCKERS'
+    public readonly code: 'OVERLAP' | 'INVALID_TRANSITION' | 'NOT_FOUND' | 'VALIDATION' | 'INSUFFICIENT_ROLE' | 'NOT_LOCKED' | 'HARD_BLOCKERS' | 'NOT_READY'
   ) {
     super(message);
     this.name = 'CloseSessionError';
@@ -226,9 +229,19 @@ export async function certifyCloseSession(
   }
   const readiness = await computeReadiness(pool, input.tenantId, session);
   if (readiness.hardBlockers.length > 0) {
+    const evidenceCheck = await checkEvidencePolicyForCertification(
+      pool,
+      input.tenantId,
+      input.closeSessionId
+    );
+    const isEvidenceBlock =
+      evidenceCheck.hardBlockers.length > 0 &&
+      readiness.hardBlockers.some((m) =>
+        evidenceCheck.hardBlockers.some((eb) => eb.message === m)
+      );
     throw new CloseSessionError(
       `Cannot certify: ${readiness.hardBlockers.join('; ')}`,
-      'HARD_BLOCKERS'
+      isEvidenceBlock ? 'NOT_READY' : 'HARD_BLOCKERS'
     );
   }
   if (!canPerform(actorRole, 'certify_close')) {
@@ -251,8 +264,8 @@ export async function certifyCloseSession(
       'VALIDATION'
     );
   }
-  const totalDebits = adjustedEntries.reduce((s, e) => s + (e.debit ?? 0), 0);
-  const totalCredits = adjustedEntries.reduce((s, e) => s + (e.credit ?? 0), 0);
+  const totalDebits = sumRound2(adjustedEntries.map((e) => e.debit ?? 0));
+  const totalCredits = sumRound2(adjustedEntries.map((e) => e.credit ?? 0));
   const snapshotPayload: LedgerSnapshotPayload = {
     trialBalance: {
       entries: adjustedEntries.map((e) => ({
@@ -275,6 +288,7 @@ export async function certifyCloseSession(
     );
   }
   return withTransaction(pool, async (client) => {
+    const evidenceManifest = await buildEvidenceManifest(client, input.tenantId, input.closeSessionId);
     const snapshot = await createSnapshotFromTrialBalanceAndEntries(client, {
       tenantId: input.tenantId,
       periodLabel,
@@ -291,6 +305,7 @@ export async function certifyCloseSession(
         totalDebits: snapshotPayload.trialBalance.totalDebits,
         totalCredits: snapshotPayload.trialBalance.totalCredits,
       },
+      evidenceManifest,
     });
 
     const certifiedAt = new Date().toISOString();

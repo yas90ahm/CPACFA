@@ -9,7 +9,7 @@
 
 import { createHash } from 'crypto';
 import { generateText } from '../llm/provider.js';
-import { round2 } from '../utils/decimal.js';
+import { round2, normalizeMoney } from '../utils/decimal.js';
 
 /** One step in the Reasoning Chain (Thought or Action from ReAct). */
 export interface ReasoningChainEntry {
@@ -269,6 +269,7 @@ export async function buildReportPayloadWithAgent(params: {
 
 /**
  * Compute SHA-256 hash of canonical ledger representation (sorted by account_code then account_name, stable string).
+ * Uses normalizeMoney for debit/credit to eliminate JS float stringification drift.
  * Used in Compliance Package to prove ledger has not been tampered with since last CPA review.
  */
 export function computeLedgerHash(
@@ -281,7 +282,10 @@ export function computeLedgerHash(
     return (a.account_name ?? '').trim().localeCompare((b.account_name ?? '').trim());
   });
   const canonical = rows
-    .map((r) => `${r.account_code ?? ''}|${r.account_name ?? ''}|${r.debit}|${r.credit}|${r.account_type ?? ''}`)
+    .map(
+      (r) =>
+        `${r.account_code ?? ''}|${r.account_name ?? ''}|${normalizeMoney(r.debit)}|${normalizeMoney(r.credit)}|${r.account_type ?? ''}`
+    )
     .join('\n');
   return createHash('sha256').update(canonical, 'utf8').digest('hex');
 }

@@ -182,11 +182,14 @@ router.post('/board-ready-pack', async (req: Request, res: Response) => {
       };
     }
 
+    const evidenceSummary = pbcIndex?.evidenceSummary ?? null;
+
     res.json({
       contractVersion: PACK_CONTRACT_VERSION,
       precheck,
       pbcIndex,
       trustTokens,
+      evidenceSummary,
     });
     criticalLog(req, ROUTE_BOARD_READY_PACK, 'ok', { closeSessionId: closeSessionId || undefined, startMs });
   } catch (err) {

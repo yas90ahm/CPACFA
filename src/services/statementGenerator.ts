@@ -21,7 +21,7 @@ import { buildNotesAndPolicies } from './notesPolicies.js';
 import type { CashFlowStatement, EquityChangesStatement, NotesAndPolicies } from '../types/financial.js';
 import type { Pool } from 'pg';
 import type { IntegrityContractFact } from '../types/integrity.js';
-import { runIntegrityGate } from './integrity_gate_service.js';
+import { assertIntegrityGateOrThrow } from './integrity_gate_service.js';
 import { recordOverride } from './audit_ledger_service.js';
 
 export interface StatementGeneratorOptions {
@@ -94,7 +94,7 @@ export async function generateStatements(
     const totalDebits = classified.reduce((s, e) => s + (e.debit ?? 0), 0);
     const totalCredits = classified.reduce((s, e) => s + (e.credit ?? 0), 0);
     const balanceSheet = buildBalanceSheet(classified);
-    runIntegrityGate({
+    assertIntegrityGateOrThrow({
       trialBalance: { totalDebits, totalCredits },
       balanceSheet: {
         totalAssets: balanceSheet.totalAssets,

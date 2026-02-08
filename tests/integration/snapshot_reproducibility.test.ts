@@ -29,7 +29,12 @@ import {
 } from '../../src/db/index.js';
 import { getAdjustedTrialBalance } from '../../src/services/adjusted_trial_balance_service.js';
 import { buildSnapshotPayloadFromInput } from '../../src/services/ledger_snapshot_service.js';
-import { hashSnapshotPayload } from '../../src/lib/snapshot_hash.js';
+import { buildEvidenceManifest } from '../../src/services/evidence_manifest_service.js';
+import {
+  hashSnapshotPayload,
+  HASH_VERSION_WITH_EVIDENCE_MANIFEST,
+} from '../../src/lib/snapshot_hash.js';
+import { sumRound2 } from '../../src/utils/decimal.js';
 import type { CreateLedgerSnapshotInput } from '../../src/types/ledger_snapshot.js';
 import { getSession } from '../../src/services/close_session_service.js';
 import { getLedgerSnapshotById } from '../../src/db/repositories/ledger_snapshot_repository.js';
@@ -178,14 +183,13 @@ describe('Snapshot reproducibility', () => {
         pool,
         closeSessionId
       );
-      const totalDebits = adjustedEntries.reduce(
-        (s, e) => s + (e.debit ?? 0),
-        0
-      );
-      const totalCredits = adjustedEntries.reduce(
-        (s, e) => s + (e.credit ?? 0),
-        0
-      );
+      const totalDebits = sumRound2(adjustedEntries.map((e) => e.debit ?? 0));
+      const totalCredits = sumRound2(adjustedEntries.map((e) => e.credit ?? 0));
+      const evidenceManifest =
+        snapshot!.hashVersion >= HASH_VERSION_WITH_EVIDENCE_MANIFEST
+          ? await buildEvidenceManifest(pool, testTenantId, closeSessionId)
+          : undefined;
+
       const input: CreateLedgerSnapshotInput = {
         tenantId: testTenantId,
         periodLabel: PERIOD_LABEL,
@@ -201,10 +205,13 @@ describe('Snapshot reproducibility', () => {
           totalDebits,
           totalCredits,
         },
+        evidenceManifest,
       };
 
       const rebuiltPayload = buildSnapshotPayloadFromInput(input);
-      const recomputedHash = hashSnapshotPayload(rebuiltPayload);
+      const recomputedHash = hashSnapshotPayload(rebuiltPayload, {
+        hashVersion: snapshot!.hashVersion,
+      });
 
       // If this fails: nondeterministic drift (key order, timestamps, or extra fields in hashed payload).
       expect(recomputedHash).toBe(storedHash);

@@ -19,6 +19,33 @@ export interface LedgerSnapshotEntry {
   amountProvenance?: AmountProvenance;
 }
 
+/** One evidence link in the certified manifest (proof + reference metadata only). */
+export interface EvidenceLinkInManifest {
+  evidenceId: string;
+  hashSha256: string;
+  sizeBytes: number;
+  mimeType?: string;
+  externalUri?: string;
+  externalProvider?: string;
+  label?: string;
+  role?: string;
+  requiredness?: string;
+  assertionType?: string;
+  attachedBy: string;
+  attachedAt: string;
+}
+
+/** One journal entry with its evidence links in the manifest. */
+export interface EvidenceManifestJournalEntry {
+  journalEntryId: string;
+  evidenceLinks: EvidenceLinkInManifest[];
+}
+
+/** Certified evidence manifest: deterministic, sorted by journalEntryId then evidenceId. */
+export interface EvidenceManifest {
+  journalEntries: EvidenceManifestJournalEntry[];
+}
+
 /** Canonical payload stored in snapshot_payload_json. */
 export interface LedgerSnapshotPayload {
   trialBalance: {
@@ -28,6 +55,8 @@ export interface LedgerSnapshotPayload {
   };
   /** Additional entries (e.g. applied adjustments) in deterministic order. */
   entries?: LedgerSnapshotEntry[];
+  /** Certified evidence manifest (v3+). Sorted by journalEntryId, then evidenceId. Empty when no evidence. */
+  evidenceManifest?: EvidenceManifest;
 }
 
 export interface LedgerSnapshot {
@@ -66,4 +95,6 @@ export interface CreateLedgerSnapshotInput {
   };
   entries?: CreateLedgerSnapshotEntryInput[];
   closeSessionId?: string;
+  /** Evidence manifest for v3+ snapshots. Built at certification time. */
+  evidenceManifest?: EvidenceManifest;
 }

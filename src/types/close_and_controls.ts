@@ -119,13 +119,20 @@ export interface CloseCalendarEntry {
 /** Unified close adjustment: JE or accrual suggestion with workflow status (FW1) */
 export type CloseAdjustmentStatus = 'pending' | 'approved' | 'rejected' | 'posted';
 
+/** One debit or credit line in a close adjustment. lineId is deterministic (SHA-256 of account|amount) for audit. */
+export interface CloseAdjustmentLine {
+  account: string;
+  amount: number;
+  lineId?: string;
+}
+
 export interface CloseAdjustment {
   id: string;
   periodLabel: string;
   source: 'gap' | 'reconciliation' | 'accrual' | 'manual';
   description: string;
-  debits: { account: string; amount: number }[];
-  credits: { account: string; amount: number }[];
+  debits: CloseAdjustmentLine[];
+  credits: CloseAdjustmentLine[];
   sourceDetail?: string;
   status: CloseAdjustmentStatus;
   createdAt: string;

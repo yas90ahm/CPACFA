@@ -7,6 +7,7 @@
 import type { TrialBalanceEntry } from '../types/financial.js';
 import type { TrialBalanceResult } from '../types/financial.js';
 import { parseTrialBalance } from './trialBalanceParser.js';
+import { computeLineId } from '../utils/line_id.js';
 import type { RawTrialBalanceRow } from './trialBalanceParser.js';
 import { buildFinancialStatements } from './financialStatements.js';
 import { finalIntegrityCheck } from './integrity_check.js';
@@ -107,12 +108,14 @@ function toRawRow(r: PrecheckTrialBalanceRow): RawTrialBalanceRow {
 }
 
 function toTrialBalanceEntry(r: PrecheckJournalEntryLine): TrialBalanceEntry {
+  const accountName = String(r?.accountRef ?? '').trim();
   const debit = typeof r?.debit === 'number' ? r.debit : Number(r?.debit) || 0;
   const credit = typeof r?.credit === 'number' ? r.credit : Number(r?.credit) || 0;
   return {
-    accountName: String(r?.accountRef ?? '').trim(),
+    accountName,
     debit,
     credit,
+    lineId: computeLineId({ accountName, debit, credit }),
   };
 }
 

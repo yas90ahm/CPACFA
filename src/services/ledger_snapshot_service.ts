@@ -26,22 +26,27 @@ import {
   hashSnapshotPayloadLegacy,
   getHashVersion,
   getHashVersionForStorage,
+  HASH_VERSION_LEGACY,
+  HASH_VERSION_CANONICAL_MONEY,
+  HASH_VERSION_WITH_EVIDENCE_MANIFEST,
 } from '../lib/snapshot_hash.js';
+import { canonicalStringifyKeysOnly } from '../lib/canonical_json.js';
+import { round2 } from '../utils/decimal.js';
 import { insertLedgerSnapshot, getLedgerSnapshotById } from '../db/repositories/ledger_snapshot_repository.js';
 
 /** Allowed top-level keys in LedgerSnapshotPayload. No other keys permitted (structural drift protection). */
-export const SNAPSHOT_PAYLOAD_ALLOWED_TOP_LEVEL_KEYS = new Set<string>(['trialBalance', 'entries']);
+export const SNAPSHOT_PAYLOAD_ALLOWED_TOP_LEVEL_KEYS = new Set<string>(['trialBalance', 'entries', 'evidenceManifest']);
 
 /** Required top-level key; every payload must have trialBalance. */
 export const SNAPSHOT_PAYLOAD_REQUIRED_TOP_LEVEL_KEYS = new Set<string>(['trialBalance']);
 
-/** Normalize to snapshot entry shape; preserve lineId and amountProvenance for audit trail. */
+/** Normalize to snapshot entry shape; preserve lineId and amountProvenance for audit trail. Uses round2 for deterministic debit/credit. */
 function toSnapshotEntry(row: CreateLedgerSnapshotEntryInput): LedgerSnapshotEntry {
   return {
     ...(row.lineId != null && row.lineId !== '' && { lineId: row.lineId }),
     accountName: String(row.accountName ?? '').trim(),
-    debit: Number(row.debit) || 0,
-    credit: Number(row.credit) || 0,
+    debit: round2(Number(row.debit) || 0),
+    credit: round2(Number(row.credit) || 0),
     ...(row.accountCode != null && { accountCode: String(row.accountCode).trim() }),
     ...(row.description != null && row.description !== '' && { description: String(row.description).trim() }),
     ...(row.amountProvenance != null && { amountProvenance: row.amountProvenance }),
@@ -55,14 +60,18 @@ function toSnapshotEntry(row: CreateLedgerSnapshotEntryInput): LedgerSnapshotEnt
 export function buildSnapshotPayloadFromInput(input: CreateLedgerSnapshotInput): LedgerSnapshotPayload {
   const tbEntries = (input.trialBalance.entries ?? []).map(toSnapshotEntry);
   const extraEntries = (input.entries ?? []).map(toSnapshotEntry);
-  return {
+  const payload: LedgerSnapshotPayload = {
     trialBalance: {
       entries: tbEntries,
-      totalDebits: input.trialBalance.totalDebits,
-      totalCredits: input.trialBalance.totalCredits,
+      totalDebits: round2(input.trialBalance.totalDebits ?? 0),
+      totalCredits: round2(input.trialBalance.totalCredits ?? 0),
     },
     ...(extraEntries.length > 0 && { entries: extraEntries }),
   };
+  if (input.evidenceManifest != null) {
+    payload.evidenceManifest = JSON.parse(canonicalStringifyKeysOnly(input.evidenceManifest)) as LedgerSnapshotPayload['evidenceManifest'];
+  }
+  return payload;
 }
 
 /**
@@ -74,7 +83,7 @@ export async function createSnapshotFromTrialBalanceAndEntries(
 ): Promise<LedgerSnapshot> {
   const payload = buildSnapshotPayloadFromInput(input);
 
-  const snapshotHash = hashSnapshotPayload(payload);
+  const snapshotHash = hashSnapshotPayload(payload, { hashVersion: getHashVersionForStorage() });
   const hashVersion = getHashVersionForStorage();
 
   return insertLedgerSnapshot(client, {
@@ -95,12 +104,34 @@ export async function createSnapshotFromTrialBalanceAndEntries(
  * Returns true if valid; false if tampered or hash version unsupported.
  */
 export function verifySnapshotHash(snapshot: LedgerSnapshot): boolean {
-  if (snapshot.hashVersion !== getHashVersionForStorage()) {
+  const v = snapshot.hashVersion;
+  if (v !== HASH_VERSION_LEGACY && v !== HASH_VERSION_CANONICAL_MONEY && v !== HASH_VERSION_WITH_EVIDENCE_MANIFEST) {
     return false;
   }
-  const computed = hashSnapshotPayload(snapshot.snapshotPayloadJson);
+  const computed = hashSnapshotPayload(snapshot.snapshotPayloadJson, { hashVersion: v });
   if (computed === snapshot.snapshotHash) return true;
-  const legacyComputed = hashSnapshotPayloadLegacy(snapshot.snapshotPayloadJson);
-  return legacyComputed === snapshot.snapshotHash;
+  if (v === HASH_VERSION_LEGACY) {
+    const legacyComputed = hashSnapshotPayloadLegacy(snapshot.snapshotPayloadJson);
+    return legacyComputed === snapshot.snapshotHash;
+  }
+  return false;
+}
+
+/**
+ * Recompute the snapshot hash using the same implementation as certification.
+ * Returns { recomputedHash, hashMatches } for auditor verification.
+ * Uses primary format for the snapshot's hashVersion; hashMatches uses same logic as verifySnapshotHash.
+ */
+export function recomputeAndVerifySnapshotHash(snapshot: LedgerSnapshot): {
+  recomputedHash: string;
+  hashMatches: boolean;
+} {
+  const v = snapshot.hashVersion;
+  const recomputedHash =
+    v === HASH_VERSION_LEGACY
+      ? hashSnapshotPayloadLegacy(snapshot.snapshotPayloadJson)
+      : hashSnapshotPayload(snapshot.snapshotPayloadJson, { hashVersion: v });
+  const hashMatches = verifySnapshotHash(snapshot);
+  return { recomputedHash, hashMatches };
 }
 

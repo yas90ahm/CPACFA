@@ -176,14 +176,14 @@ export function runIntegrityGate(input: IntegrityGateInput): IntegrityGateResult
 
 /**
  * Validate trial balance and balance sheet (throw if gate fails). Used by audit_export_service.
+ * Throws MathematicalIntegrityError for consistent 422 handling at route layer.
  */
 export function validateTrialBalanceAndBalanceSheet(
   trialBalance: IntegrityGateInput['trialBalance'],
   balanceSheet: IntegrityGateInput['balanceSheet'],
   tolerance?: number
 ): void {
-  const result = runIntegrityGate({ trialBalance, balanceSheet, tolerance });
-  if (!result.passed) throw new Error(result.error ?? INTEGRITY_GATE_CRITICAL_MESSAGE);
+  assertIntegrityGateOrThrow({ trialBalance, balanceSheet, tolerance });
 }
 
 /**

@@ -727,6 +727,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       }
       return res.status(422).json({
         error: 'MathematicalIntegrityError',
+        code: 'FINAL_INTEGRITY_CHECK_FAILED',
         message: integrityErr.message,
         check: integrityErr.check,
         imbalanceAmount: integrityErr.imbalanceAmount,

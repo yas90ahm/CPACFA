@@ -1,10 +1,10 @@
 /**
  * Trial Balance parser — normalizes raw rows to TrialBalanceEntry[]
  * Zero tolerance for balancing errors (CPA mode).
- * Assigns stable lineId (UUID) per line at parse time for durable audit trail.
+ * Assigns deterministic lineId per line (SHA-256 of accountName|debit|credit|accountCode) for audit trail.
  */
 
-import { randomUUID } from 'crypto';
+import { computeLineId } from '../utils/line_id.js';
 import type { TrialBalanceEntry, TrialBalanceResult } from '../types/financial.js';
 
 export interface RawTrialBalanceRow {
@@ -49,7 +49,7 @@ export function parseTrialBalance(rows: RawTrialBalanceRow[]): TrialBalanceResul
     totalCredits += credit;
 
     entries.push({
-      lineId: randomUUID(),
+      lineId: computeLineId({ accountName, debit, credit, accountCode: row?.accountCode != null ? String(row.accountCode).trim() : undefined }),
       accountCode: row?.accountCode != null ? String(row.accountCode).trim() : undefined,
       accountName,
       debit,

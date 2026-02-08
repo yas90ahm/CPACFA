@@ -25,6 +25,8 @@ const REQUIRED: Array<{ table: string; columns: string[] }> = [
   { table: 'tenants', columns: ['id', 'name', 'database_url'] },
   { table: 'ai_call_log', columns: ['id', 'tenant_id', 'pillar', 'prompt_version', 'model', 'ok', 'created_at'] },
   { table: 'tenant_ai_proposals', columns: ['id', 'tenant_id', 'period_label', 'proposal', 'created_at'] },
+  { table: 'evidence_records', columns: ['id', 'tenant_id', 'hash_sha256', 'size_bytes', 'attached_by', 'attached_at'] },
+  { table: 'evidence_links', columns: ['id', 'tenant_id', 'evidence_id', 'object_type', 'object_id', 'created_by'] },
 ];
 
 /**

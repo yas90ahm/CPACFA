@@ -87,7 +87,7 @@ describe('POST /api/precheck/board-ready-pack', () => {
     }
   });
 
-  it('A) pack without closeSessionId returns precheck + null pbcIndex and trustTokens certifiedSource none', async () => {
+  it('A) pack without closeSessionId returns precheck + null pbcIndex, trustTokens certifiedSource none, evidenceSummary null', async () => {
     const res = await request(app)
       .post('/api/precheck/board-ready-pack')
       .set('Authorization', `Bearer ${authToken}`)
@@ -103,6 +103,7 @@ describe('POST /api/precheck/board-ready-pack', () => {
     expect(res.body?.precheck?.periodLabel).toBe('2025-01');
     expect(res.body?.precheck?.status).toBe('ready');
     expect(res.body?.pbcIndex).toBeNull();
+    expect(res.body?.evidenceSummary).toBeNull();
     expect(res.body?.trustTokens).toEqual({
       certifiedSnapshotId: null,
       snapshotHash: null,
@@ -111,7 +112,7 @@ describe('POST /api/precheck/board-ready-pack', () => {
     });
   });
 
-  it('B) pack with certified closeSessionId returns precheck + pbcIndex + trustTokens', async () => {
+  it('B) pack with certified closeSessionId returns precheck + pbcIndex + trustTokens + evidenceSummary', async () => {
     if (!isDbConfigured() || !closeSessionIdCertified) return;
     const res = await request(app)
       .post('/api/precheck/board-ready-pack')
@@ -135,6 +136,11 @@ describe('POST /api/precheck/board-ready-pack', () => {
     expect(res.body?.trustTokens?.snapshotHash).toBeTruthy();
     expect(res.body?.trustTokens?.certifiedSource).toBe('certified_snapshot');
     expect(res.body?.pbcIndex?.evidence?.binder?.endpoints?.json).toMatch(/^\/api\//);
+    expect(res.body?.evidenceSummary).toBeDefined();
+    expect(['off', 'warn_only', 'hard_block']).toContain(res.body?.evidenceSummary?.enforcementMode);
+    expect(typeof res.body?.evidenceSummary?.totalJournalEntries).toBe('number');
+    expect(typeof res.body?.evidenceSummary?.materialJournalEntries).toBe('number');
+    expect(Array.isArray(res.body?.evidenceSummary?.missingEvidenceDetails)).toBe(true);
   });
 
   it('pack with closeSessionId returns relative URLs by default', async () => {

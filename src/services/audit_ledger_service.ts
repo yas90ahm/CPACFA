@@ -87,6 +87,7 @@ export interface RecordMaterialEventInput {
     | 'close_lock'
     | 'certify_close'
     | 'bridge_command'
+    | 'evidence_link'
   >;
   /** Snapshot of the event for audit trail. */
   deterministicFlagSnapshot: Record<string, unknown>;

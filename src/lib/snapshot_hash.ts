@@ -2,6 +2,8 @@
  * Deterministic canonical JSON and SHA-256 hash for ledger snapshots.
  * Hash contract: hash_version (required, "v1"), trialBalance, entries (optional). No timestamps, ids, createdAt.
  * Ordering: trialBalance.entries and entries are sorted by explicit entrySortKey before hashing; serializer does NOT sort arrays.
+ *
+ * Hash version 2: amounts (debit, credit, totalDebits, totalCredits) are canonical strings ("1234.56") to eliminate JS float drift.
  */
 
 import { createHash } from 'crypto';
@@ -9,10 +11,20 @@ import {
   canonicalStringifyKeysOnly,
   canonicalStringifyLegacy,
 } from './canonical_json.js';
-import type { LedgerSnapshotPayload, LedgerSnapshotEntry } from '../types/ledger_snapshot.js';
+import { normalizeMoney } from '../utils/decimal.js';
+import type {
+  LedgerSnapshotPayload,
+  LedgerSnapshotEntry,
+  EvidenceManifest,
+} from '../types/ledger_snapshot.js';
 
 const HASH_VERSION = 'v1';
 const ALLOWED_HASH_VERSIONS = new Set<string>(['v1']);
+
+/** Hash version for DB: 1 = legacy (numbers), 2 = canonical money strings, 3 = + evidence manifest. */
+export const HASH_VERSION_LEGACY = 1;
+export const HASH_VERSION_CANONICAL_MONEY = 2;
+export const HASH_VERSION_WITH_EVIDENCE_MANIFEST = 3;
 
 export class InvalidHashVersionError extends Error {
   constructor(version: unknown) {
@@ -27,19 +39,19 @@ function isEntryLike(obj: unknown): obj is LedgerSnapshotEntry {
     obj !== null &&
     'accountName' in obj &&
     typeof (obj as LedgerSnapshotEntry).accountName === 'string' &&
-    typeof (obj as LedgerSnapshotEntry).debit === 'number' &&
-    typeof (obj as LedgerSnapshotEntry).credit === 'number'
+    (typeof (obj as LedgerSnapshotEntry).debit === 'number' || typeof (obj as LedgerSnapshotEntry).debit === 'string') &&
+    (typeof (obj as LedgerSnapshotEntry).credit === 'number' || typeof (obj as LedgerSnapshotEntry).credit === 'string')
   );
 }
 
-/** Explicit sort key for domain entries: accountName, debit, credit, lineId, accountCode, description, provenance. */
+/** Explicit sort key for domain entries: accountName, debit, credit, lineId, accountCode, description, provenance. Uses normalizeMoney for stable sort. */
 function entrySortKey(e: LedgerSnapshotEntry): string {
   const prov =
     e.amountProvenance != null ? canonicalStringifyLegacy(e.amountProvenance) : '';
   return [
     String(e.accountName ?? ''),
-    String(e.debit ?? 0),
-    String(e.credit ?? 0),
+    normalizeMoney(e.debit ?? 0),
+    normalizeMoney(e.credit ?? 0),
     String(e.lineId ?? ''),
     String(e.accountCode ?? ''),
     String(e.description ?? ''),
@@ -82,7 +94,12 @@ export function canonicalSnapshotJson(payload: LedgerSnapshotPayload): string {
 }
 
 /** Allowed top-level keys in the object we hash. No other keys permitted (structural drift protection). */
-export const HASH_INPUT_ALLOWED_TOP_LEVEL_KEYS = new Set<string>(['hash_version', 'trialBalance', 'entries']);
+export const HASH_INPUT_ALLOWED_TOP_LEVEL_KEYS = new Set<string>([
+  'hash_version',
+  'trialBalance',
+  'entries',
+  'evidenceManifest',
+]);
 
 /** Required top-level keys in hash input. */
 export const HASH_INPUT_REQUIRED_TOP_LEVEL_KEYS = new Set<string>(['hash_version', 'trialBalance']);
@@ -108,14 +125,48 @@ function normalizePayloadForHash(payload: LedgerSnapshotPayload): LedgerSnapshot
 }
 
 /**
- * Hash input: hash_version (required, default "v1") + payload. No id, createdAt, or DB-generated fields.
+ * Transform amounts to canonical strings for hash input (eliminates JS float drift).
+ * Used when hashVersion >= HASH_VERSION_CANONICAL_MONEY.
  */
-function buildHashInput(payload: LedgerSnapshotPayload): Record<string, unknown> {
-  const normalized = normalizePayloadForHash(payload);
-  return {
-    hash_version: HASH_VERSION,
-    ...normalized,
+function toCanonicalMoneyPayload(payload: LedgerSnapshotPayload): Record<string, unknown> {
+  const mapEntry = (e: LedgerSnapshotEntry): Record<string, unknown> => {
+    const out: Record<string, unknown> = {
+      accountName: e.accountName ?? '',
+      debit: normalizeMoney(e.debit ?? 0),
+      credit: normalizeMoney(e.credit ?? 0),
+    };
+    if (e.lineId != null && e.lineId !== '') out.lineId = e.lineId;
+    if (e.accountCode != null) out.accountCode = e.accountCode;
+    if (e.description != null && e.description !== '') out.description = e.description;
+    if (e.amountProvenance != null) out.amountProvenance = e.amountProvenance;
+    return out;
   };
+  const tb = payload.trialBalance;
+  const trialBalance = {
+    entries: tb.entries.map(mapEntry),
+    totalDebits: normalizeMoney(tb.totalDebits),
+    totalCredits: normalizeMoney(tb.totalCredits),
+  };
+  const result: Record<string, unknown> = { hash_version: HASH_VERSION, trialBalance };
+  if (payload.entries && payload.entries.length > 0) {
+    result.entries = payload.entries.map(mapEntry);
+  }
+  return result;
+}
+
+/**
+ * Hash input: hash_version (required, default "v1") + payload. No id, createdAt, or DB-generated fields.
+ * When useCanonicalMoney, amounts are canonical strings for deterministic hashing.
+ */
+function buildHashInput(
+  payload: LedgerSnapshotPayload,
+  options?: { useCanonicalMoney?: boolean }
+): Record<string, unknown> {
+  const normalized = normalizePayloadForHash(payload);
+  if (options?.useCanonicalMoney) {
+    return toCanonicalMoneyPayload(normalized);
+  }
+  return { hash_version: HASH_VERSION, ...normalized };
 }
 
 /**
@@ -128,12 +179,28 @@ export function validateHashInput(hashInput: Record<string, unknown>): void {
   }
 }
 
+export interface HashSnapshotPayloadOptions {
+  /** When provided, use canonical money strings for hash (v2). When 1, use legacy number format for backward compat. */
+  hashVersion?: number;
+}
+
 /**
  * Compute SHA-256 hex hash of canonical snapshot JSON.
  * Payload is normalized (entries sorted by entrySortKey), then keys-only serialization (no generic array sort).
+ * For hashVersion 2 (default), amounts are canonical strings ("1234.56") to eliminate JS float drift.
+ * For hashVersion 3+, evidenceManifest is included in hash input.
  */
-export function hashSnapshotPayload(payload: LedgerSnapshotPayload): string {
-  const hashInput = buildHashInput(payload);
+export function hashSnapshotPayload(
+  payload: LedgerSnapshotPayload,
+  options?: HashSnapshotPayloadOptions
+): string {
+  const hashVersion = options?.hashVersion ?? HASH_VERSION_CANONICAL_MONEY;
+  const useCanonicalMoney = hashVersion !== HASH_VERSION_LEGACY;
+  const hashInput = buildHashInput(payload, { useCanonicalMoney });
+  if (hashVersion >= HASH_VERSION_WITH_EVIDENCE_MANIFEST) {
+    const manifest = payload.evidenceManifest ?? { journalEntries: [] };
+    hashInput.evidenceManifest = manifest;
+  }
   validateHashInput(hashInput);
   const json = canonicalStringifyKeysOnly(hashInput);
   return createHash('sha256').update(json, 'utf8').digest('hex');
@@ -151,7 +218,17 @@ export function getHashVersion(): string {
   return HASH_VERSION;
 }
 
-/** Numeric version for DB storage (hash_version column). v1 → 1. */
+/** Numeric version for DB storage (hash_version column). New snapshots use v3 (canonical money + evidence manifest). */
 export function getHashVersionForStorage(): number {
-  return HASH_VERSION === 'v1' ? 1 : 1;
+  return HASH_VERSION_WITH_EVIDENCE_MANIFEST;
+}
+
+/**
+ * Deterministic hash of evidence manifest content only.
+ * Uses same canonicalization as snapshot hash (canonicalStringifyKeysOnly).
+ * For auditor verification: manifest is deterministic and independently verifiable.
+ */
+export function hashManifestContent(manifest: EvidenceManifest): string {
+  const json = canonicalStringifyKeysOnly(manifest);
+  return createHash('sha256').update(json, 'utf8').digest('hex');
 }

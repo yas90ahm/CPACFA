@@ -11,6 +11,7 @@ import { getLedgerSnapshotById } from '../../db/repositories/ledger_snapshot_rep
 import { verifySnapshotHash } from '../../services/ledger_snapshot_service.js';
 import { verifyChain } from '../../services/audit_ledger_service.js';
 import { getCertifiedStatementsForBinder } from '../../services/audit_export_service.js';
+import { computeEvidenceSummary } from '../../services/evidence_policy_service.js';
 import { send500 } from '../../lib/errorHandler.js';
 
 const router = Router();
@@ -117,6 +118,7 @@ export interface PbcIndexPayload {
       certifiedCsv: { available: boolean; endpoint: string };
     };
   };
+  evidenceSummary: import('../../services/evidence_policy_service.js').EvidenceSummary;
   missing: MissingItem[];
 }
 
@@ -181,6 +183,8 @@ export async function buildPbcIndexPayload(
     certifiedStatementsAvailable
   );
 
+  const evidenceSummary = await computeEvidenceSummary(pool, tenantId, closeSessionId);
+
   const base = options.baseUrl ? options.baseUrl.replace(/\/$/, '') : '';
   const q = `closeSessionId=${encodeURIComponent(closeSessionId)}`;
   const prefix = base ? `${base}` : '';
@@ -230,6 +234,7 @@ export async function buildPbcIndexPayload(
         },
       },
     },
+    evidenceSummary,
     missing,
   };
 }

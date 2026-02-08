@@ -28,6 +28,7 @@ import integrationsRouter from './routes/integrations.js';
 import pipelinesRouter from './routes/pipelines.js';
 import closeRouter from './routes/close/index.js';
 import precheckRouter from './routes/precheck.js';
+import verificationRouter from './routes/verification/index.js';
 import coaMappingRouter from './routes/coa_mapping.js';
 import dataQualityRouter from './routes/data_quality.js';
 import approvalsRouter from './routes/approvals.js';
@@ -149,6 +150,9 @@ app.use('/api/close', closeRouter);
 
 // API: Pre-certification structural check (board-ready) — stateless, no DB/AI
 app.use('/api/precheck', precheckRouter);
+
+// API: Auditor verification — read-only snapshot hash verification
+app.use('/api/verification', verificationRouter);
 
 // API: COA Mapping — FS taxonomy lines, mapping rules, apply rules to accounts
 app.use('/api/coa-mapping', coaMappingRouter);

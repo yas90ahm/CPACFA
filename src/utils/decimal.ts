@@ -80,3 +80,14 @@ export function absGt(a: number | string, b: number | string, tolerance: number)
 export function absLt(a: number | string, b: number | string, tolerance: number): boolean {
   return from(a).minus(b).abs().lessThanOrEqualTo(tolerance);
 }
+
+/**
+ * Canonical string for monetary amounts: fixed 2 decimals (e.g. "1234.56", "0.00").
+ * Use for hash inputs to eliminate JS float stringification drift.
+ * 0.1 + 0.2 and 0.3 both normalize to "0.30"; 1000 and 1000.000 both to "1000.00".
+ */
+export function normalizeMoney(value: number | string | null | undefined): string {
+  const n = value == null || value === '' ? 0 : Number(value);
+  if (!Number.isFinite(n)) return '0.00';
+  return from(n).toDecimalPlaces(DP).toFixed(2);
+}
