@@ -501,7 +501,7 @@ export async function advanceSession(
         input.actorRole
       );
       const snapshot = certified.certifiedSnapshotId
-        ? await getLedgerSnapshotById(pool, certified.certifiedSnapshotId)
+        ? await getLedgerSnapshotById(pool, input.tenantId, certified.certifiedSnapshotId)
         : null;
       return {
         success: true,

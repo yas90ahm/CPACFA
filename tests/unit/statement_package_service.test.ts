@@ -202,7 +202,7 @@ describe('Statement package — getStatementPackage / listStatementPackages / ge
 
   it('getStatementPackage returns null when not found', async () => {
     jest.spyOn(repo, 'getStatementPackageById').mockResolvedValue(null);
-    const result = await getStatementPackage(mockPool, 'pkg-missing');
+    const result = await getStatementPackage(mockPool, 'tenant-1', 'pkg-missing');
     expect(result).toBeNull();
   });
 
@@ -210,14 +210,14 @@ describe('Statement package — getStatementPackage / listStatementPackages / ge
     jest.spyOn(repo, 'listStatementPackagesByCloseSessionId').mockResolvedValue([
       { ...samplePackage },
     ]);
-    const result = await listStatementPackages(mockPool, 'sess-1', 10);
+    const result = await listStatementPackages(mockPool, 'tenant-1', 'sess-1', 10);
     expect(result).toHaveLength(1);
     expect(result[0].closeSessionId).toBe('sess-1');
   });
 
   it('getStatementDiff returns null when diff not found', async () => {
     jest.spyOn(repo, 'getStatementDiff').mockResolvedValue(null);
-    const result = await getStatementDiff(mockPool, 'pkg-1', 'pkg-2');
+    const result = await getStatementDiff(mockPool, 'tenant-1', 'pkg-1', 'pkg-2');
     expect(result).toBeNull();
   });
 });

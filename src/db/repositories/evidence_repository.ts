@@ -107,8 +107,8 @@ export async function createEvidenceRecord(
   const r = await pool.query<EvidenceRecordRow>(
     `SELECT id, tenant_id, hash_sha256, size_bytes::text, mime_type, external_uri, external_provider,
             label, attached_by, attached_at, integrity_version
-     FROM evidence_records WHERE id = $1`,
-    [id]
+     FROM evidence_records WHERE id = $1 AND tenant_id = $2`,
+    [id, tenantId]
   );
   return rowToRecord(r.rows[0]);
 }
@@ -161,8 +161,8 @@ export async function linkEvidenceToJournalEntry(
   const r = await pool.query<EvidenceLinkRow>(
     `SELECT id, tenant_id, evidence_id, object_type, object_id, role, requiredness, created_by, created_at,
             assertion_type, claimed_amount, claimed_currency, claimed_period, note
-     FROM evidence_links WHERE id = $1`,
-    [id]
+     FROM evidence_links WHERE id = $1 AND tenant_id = $2`,
+    [id, tenantId]
   );
   return rowToLink(r.rows[0]);
 }

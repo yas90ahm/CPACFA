@@ -303,7 +303,7 @@ router.post('/sessions/:id/certify', async (req: Request, res: Response) => {
     const payload: Record<string, unknown> = { ...session };
     if (session.certifiedSnapshotId) {
       const { getLedgerSnapshotById } = await import('../../db/repositories/ledger_snapshot_repository.js');
-      const snapshot = await getLedgerSnapshotById(pool, session.certifiedSnapshotId);
+      const snapshot = await getLedgerSnapshotById(pool, tenantId, session.certifiedSnapshotId);
       if (snapshot) {
         payload.snapshotHash = snapshot.snapshotHash;
         payload.snapshotHashVersion = snapshot.hashVersion;
@@ -340,7 +340,7 @@ router.get('/sessions/:id/certified-source', async (req: Request, res: Response)
     let certifiedSource: 'certified_snapshot' | 'legacy' | 'none' = 'none';
     if (certifiedSnapshotId) {
       const { getLedgerSnapshotById } = await import('../../db/repositories/ledger_snapshot_repository.js');
-      const snapshot = await getLedgerSnapshotById(pool, certifiedSnapshotId);
+      const snapshot = await getLedgerSnapshotById(pool, tenantId, certifiedSnapshotId);
       if (snapshot) {
         snapshotHash = snapshot.snapshotHash;
         snapshotHashVersion = snapshot.hashVersion;
@@ -381,7 +381,7 @@ router.post('/sessions/:id/checklist/initialize', async (req: Request, res: Resp
       res.status(404).json({ error: 'Close session not found' });
       return;
     }
-    const { items, created } = await initializeChecklistTemplate(pool, id);
+    const { items, created } = await initializeChecklistTemplate(pool, tenantId, id);
     res.status(created ? 201 : 200).json({ items });
   } catch (e) {
     send500(res, e, 'Initialize checklist failed');
@@ -391,13 +391,14 @@ router.post('/sessions/:id/checklist/initialize', async (req: Request, res: Resp
 /** GET /api/close/sessions/:id/checklist — list checklist items */
 router.get('/sessions/:id/checklist', async (req: Request, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    if (!pool) {
+    if (!tenantId || !pool) {
       res.status(400).json({ error: 'Tenant context required' });
       return;
     }
     const id = req.params.id ?? '';
-    const items = await getChecklistItems(pool, id);
+    const items = await getChecklistItems(pool, tenantId, id);
     res.json({ items });
   } catch (e) {
     send500(res, e, 'List checklist failed');
@@ -429,8 +430,9 @@ router.post('/sessions/:id/checklist/emit-stuck-issues', async (req: Request, re
 /** POST /api/close/checklist-items/:itemId/complete */
 router.post('/checklist-items/:itemId/complete', async (req: Request, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    if (!pool) {
+    if (!tenantId || !pool) {
       res.status(400).json({ error: 'Tenant context required' });
       return;
     }
@@ -440,7 +442,7 @@ router.post('/checklist-items/:itemId/complete', async (req: Request, res: Respo
       res.status(400).json({ error: 'completedBy required' });
       return;
     }
-    const item = await completeChecklistItem(pool, itemId, body.completedBy, body.notes);
+    const item = await completeChecklistItem(pool, tenantId, itemId, body.completedBy, body.notes);
     if (!item) {
       res.status(404).json({ error: 'Checklist item not found' });
       return;
@@ -454,8 +456,9 @@ router.post('/checklist-items/:itemId/complete', async (req: Request, res: Respo
 /** POST /api/close/checklist-items/:itemId/skip */
 router.post('/checklist-items/:itemId/skip', async (req: Request, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    if (!pool) {
+    if (!tenantId || !pool) {
       res.status(400).json({ error: 'Tenant context required' });
       return;
     }
@@ -465,7 +468,7 @@ router.post('/checklist-items/:itemId/skip', async (req: Request, res: Response)
       res.status(400).json({ error: 'completedBy required' });
       return;
     }
-    const item = await skipChecklistItem(pool, itemId, body.completedBy, body.notes);
+    const item = await skipChecklistItem(pool, tenantId, itemId, body.completedBy, body.notes);
     if (!item) {
       res.status(404).json({ error: 'Checklist item not found' });
       return;
@@ -600,14 +603,15 @@ router.post('/sessions/:id/statement-packages/generate', async (req: Request, re
 /** GET /api/close/sessions/:id/statement-packages — list versioned packages for session */
 router.get('/sessions/:id/statement-packages', async (req: Request, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    if (!pool) {
+    if (!tenantId || !pool) {
       res.status(400).json({ error: 'Tenant context required' });
       return;
     }
     const id = req.params.id ?? '';
     const limit = req.query.limit != null ? Number(req.query.limit) : undefined;
-    const packages = await listStatementPackages(pool, id, Number.isNaN(limit) ? undefined : limit);
+    const packages = await listStatementPackages(pool, tenantId, id, Number.isNaN(limit) ? undefined : limit);
     res.json({ packages });
   } catch (e) {
     send500(res, e, 'List statement packages failed');
@@ -617,8 +621,9 @@ router.get('/sessions/:id/statement-packages', async (req: Request, res: Respons
 /** GET /api/close/statement-packages/diff — get diff between two packages (query: from, to) — must be before :id */
 router.get('/statement-packages/diff', async (req: Request, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    if (!pool) {
+    if (!tenantId || !pool) {
       res.status(400).json({ error: 'Tenant context required' });
       return;
     }
@@ -628,7 +633,7 @@ router.get('/statement-packages/diff', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Query from and to (package ids) required' });
       return;
     }
-    const diff = await getStatementDiff(pool, fromId, toId);
+    const diff = await getStatementDiff(pool, tenantId, fromId, toId);
     if (!diff) {
       res.status(404).json({ error: 'Diff not found' });
       return;
@@ -642,13 +647,14 @@ router.get('/statement-packages/diff', async (req: Request, res: Response) => {
 /** GET /api/close/statement-packages/:id — get package by id */
 router.get('/statement-packages/:id', async (req: Request, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    if (!pool) {
+    if (!tenantId || !pool) {
       res.status(400).json({ error: 'Tenant context required' });
       return;
     }
     const id = req.params.id ?? '';
-    const pkg = await getStatementPackage(pool, id);
+    const pkg = await getStatementPackage(pool, tenantId, id);
     if (!pkg) {
       res.status(404).json({ error: 'Statement package not found' });
       return;
@@ -662,13 +668,14 @@ router.get('/statement-packages/:id', async (req: Request, res: Response) => {
 /** GET /api/close/statement-packages/:id/lines — get package with lines */
 router.get('/statement-packages/:id/lines', async (req: Request, res: Response) => {
   try {
+    const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    if (!pool) {
+    if (!tenantId || !pool) {
       res.status(400).json({ error: 'Tenant context required' });
       return;
     }
     const id = req.params.id ?? '';
-    const result = await getStatementPackageWithLines(pool, id);
+    const result = await getStatementPackageWithLines(pool, tenantId, id);
     if (!result) {
       res.status(404).json({ error: 'Statement package not found' });
       return;

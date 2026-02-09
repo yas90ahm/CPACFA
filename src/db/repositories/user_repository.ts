@@ -22,7 +22,10 @@ export async function getUserByEmail(tenantId: string, email: string): Promise<U
   return r.rows[0] ?? null;
 }
 
-/** Find user by email (first match). Use when tenantId is not provided (e.g. wedge login). */
+/**
+ * Find user by email (first match). Use when tenantId is not provided (e.g. wedge login).
+ * Intentional: No tenant_id filter for wedge login.
+ */
 export async function getUserByEmailOnly(email: string): Promise<UserRow | null> {
   const r = await queryControl<UserRow>(
     'SELECT id, tenant_id, email, password_hash, role, created_at, updated_at FROM users WHERE email = $1 LIMIT 1',
@@ -31,7 +34,14 @@ export async function getUserByEmailOnly(email: string): Promise<UserRow | null>
   return r.rows[0] ?? null;
 }
 
-export async function getUserById(id: string): Promise<UserRow | null> {
+export async function getUserById(id: string, tenantId?: string): Promise<UserRow | null> {
+  if (tenantId != null) {
+    const r = await queryControl<UserRow>(
+      'SELECT id, tenant_id, email, password_hash, role, created_at, updated_at FROM users WHERE id = $1 AND tenant_id = $2',
+      [id, tenantId]
+    );
+    return r.rows[0] ?? null;
+  }
   const r = await queryControl<UserRow>(
     'SELECT id, tenant_id, email, password_hash, role, created_at, updated_at FROM users WHERE id = $1',
     [id]
@@ -51,7 +61,7 @@ export async function createUser(
     'INSERT INTO users (id, tenant_id, email, password_hash, role, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7)',
     [id, tenantId, email, passwordHash, role, now, now]
   );
-  const row = await getUserById(id);
+  const row = await getUserById(id, tenantId);
   if (!row) throw new Error('Failed to create user');
   return row;
 }

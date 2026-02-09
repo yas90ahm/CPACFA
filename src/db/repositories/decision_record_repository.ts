@@ -80,7 +80,10 @@ export async function insertDecisionRecord(
       input.promptSnapshot ?? null,
     ]
   );
-  const r = await pool.query<DecisionRecordRow>(`SELECT ${SELECT_COLS} FROM decision_records WHERE id = $1`, [id]);
+  const r = await pool.query<DecisionRecordRow>(
+    `SELECT ${SELECT_COLS} FROM decision_records WHERE id = $1 AND tenant_id = $2`,
+    [id, input.tenantId]
+  );
   return rowToRecord(r.rows[0]);
 }
 

@@ -41,17 +41,18 @@ export interface InitializeChecklistResult {
  */
 export async function initializeChecklistTemplate(
   pool: Pool,
+  tenantId: string,
   closeSessionId: string
 ): Promise<InitializeChecklistResult> {
-  const existing = await itemRepo.hasChecklistForSession(pool, closeSessionId);
+  const existing = await itemRepo.hasChecklistForSession(pool, tenantId, closeSessionId);
   if (existing) {
-    const items = await itemRepo.listChecklistItemsBySessionId(pool, closeSessionId);
+    const items = await itemRepo.listChecklistItemsBySessionId(pool, tenantId, closeSessionId);
     return { items, created: false };
   }
   const items: CloseChecklistItem[] = [];
   for (const spec of DEFAULT_ITEMS) {
     const id = randomUUID();
-    const item = await itemRepo.insertChecklistItem(pool, id, closeSessionId, {
+    const item = await itemRepo.insertChecklistItem(pool, tenantId, id, closeSessionId, {
       code: spec.code,
       name: spec.name,
       status: 'pending',
@@ -77,7 +78,7 @@ export async function computeReadiness(
   const softWarnings: string[] = [];
 
   let checklistComplete = true;
-  const items = await itemRepo.listChecklistItemsBySessionId(pool, closeSessionId);
+  const items = await itemRepo.listChecklistItemsBySessionId(pool, tenantId, closeSessionId);
   if (items.length === 0) {
     hardBlockers.push('Checklist not initialized; run initializeChecklistTemplate first.');
     checklistComplete = false;
@@ -92,10 +93,10 @@ export async function computeReadiness(
   }
 
   let cashRecComplete = true;
-  const bankRuns = await reconRepo.listReconRunsByCloseSession(pool, closeSessionId, 'bank');
+  const bankRuns = await reconRepo.listReconRunsByCloseSession(pool, tenantId, closeSessionId, 'bank');
   if (bankRuns.length > 0) {
     const signedOff = await Promise.all(
-      bankRuns.map((r) => reconRepo.getReconSignoffByRunId(pool, r.id))
+      bankRuns.map((r) => reconRepo.getReconSignoffByRunId(pool, tenantId, r.id))
     );
     const anySignedOff = signedOff.some((s) => s != null);
     if (!anySignedOff) {
@@ -174,7 +175,7 @@ export async function emitIssuesForStuckChecklist(
   pool: Pool,
   opts: { tenantId: string; closeSessionId: string; createdBy?: string }
 ): Promise<{ issueId: string } | null> {
-  const items = await itemRepo.listChecklistItemsBySessionId(pool, opts.closeSessionId);
+  const items = await itemRepo.listChecklistItemsBySessionId(pool, opts.tenantId, opts.closeSessionId);
   const stuck = items.filter((i) => i.required && i.status !== 'completed' && i.status !== 'skipped');
   if (stuck.length === 0) return null;
   const issue = await createIssue(pool, {
@@ -192,18 +193,20 @@ export async function emitIssuesForStuckChecklist(
 
 export async function getChecklistItems(
   pool: Pool,
+  tenantId: string,
   closeSessionId: string
 ): Promise<CloseChecklistItem[]> {
-  return itemRepo.listChecklistItemsBySessionId(pool, closeSessionId);
+  return itemRepo.listChecklistItemsBySessionId(pool, tenantId, closeSessionId);
 }
 
 export async function completeChecklistItem(
   pool: Pool,
+  tenantId: string,
   itemId: string,
   completedBy: string,
   notes?: string
 ): Promise<CloseChecklistItem | null> {
-  return itemRepo.updateChecklistItemStatus(pool, itemId, 'completed', {
+  return itemRepo.updateChecklistItemStatus(pool, tenantId, itemId, 'completed', {
     completedBy,
     completedAt: new Date().toISOString(),
     notes,
@@ -212,11 +215,12 @@ export async function completeChecklistItem(
 
 export async function skipChecklistItem(
   pool: Pool,
+  tenantId: string,
   itemId: string,
   completedBy: string,
   notes?: string
 ): Promise<CloseChecklistItem | null> {
-  return itemRepo.updateChecklistItemStatus(pool, itemId, 'skipped', {
+  return itemRepo.updateChecklistItemStatus(pool, tenantId, itemId, 'skipped', {
     completedBy,
     notes,
   });

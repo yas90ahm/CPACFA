@@ -304,7 +304,7 @@ describe('Certification pipeline E2E', () => {
     // 8b. Contract: certification creates a ledger snapshot and stores it on the close session.
     const sessionAfterCert = await getSession(pool, testTenantId, closeSessionId);
     expect(sessionAfterCert?.certifiedSnapshotId).toBeDefined();
-    const snapshot = await getLedgerSnapshotById(pool, sessionAfterCert!.certifiedSnapshotId!);
+    const snapshot = await getLedgerSnapshotById(pool, testTenantId, sessionAfterCert!.certifiedSnapshotId!);
     expect(snapshot).toBeDefined();
     expect(snapshot?.closeSessionId).toBe(closeSessionId);
 

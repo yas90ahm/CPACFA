@@ -101,8 +101,8 @@ export async function insertCoaMappingRule(
     ]
   );
   const r = await pool.query<CoaRuleRow>(
-    'SELECT id, tenant_id, entity_id, effective_from, effective_to, version, source_account_name_pattern, source_account_number_pattern, mapped_fs_line_id, confidence_default, created_at FROM coa_mapping_rules WHERE id = $1',
-    [id]
+    'SELECT id, tenant_id, entity_id, effective_from, effective_to, version, source_account_name_pattern, source_account_number_pattern, mapped_fs_line_id, confidence_default, created_at FROM coa_mapping_rules WHERE id = $1 AND tenant_id = $2',
+    [id, tenantId]
   );
   return rowToRule(r.rows[0]);
 }

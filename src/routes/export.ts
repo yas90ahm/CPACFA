@@ -113,8 +113,10 @@ router.post('/pdf', async (req: Request, res: Response) => {
       const bodyGate = req.body as Record<string, unknown> & { periodLabel?: string };
       if ('roundingGapExceedsMateriality' in bodyGate || 'aggregateRoundingExceedsMateriality' in bodyGate) {
         res.status(403).json({
-          error: 'Tampering attempt detected',
+          allowed: false,
+          alert: TAMPERING_ATTEMPT_DETECTED,
           code: TAMPERING_ATTEMPT_DETECTED,
+          error: 'Tampering attempt detected',
           message: 'Materiality flags cannot be supplied by client.',
         });
         return;
@@ -179,6 +181,8 @@ router.post('/pdf', async (req: Request, res: Response) => {
         if (!gateResult.allowed) {
           if (gateResult.alert === RESOLUTION_MISMATCH && gateResult.details) {
             res.status(422).json({
+              allowed: false,
+              alert: RESOLUTION_MISMATCH,
               code: 'RESOLUTION_MISMATCH',
               message: gateResult.message ?? 'Ledger resolution mismatch: export blocked.',
               details: gateResult.details,
@@ -186,8 +190,10 @@ router.post('/pdf', async (req: Request, res: Response) => {
             return;
           }
           res.status(403).json({
-            error: gateResult.alert ?? 'Export blocked',
+            allowed: false,
+            alert: gateResult.alert ?? 'CRITICAL_TAMPER_ALERT',
             code: gateResult.alert,
+            error: gateResult.alert ?? 'Export blocked',
             message: gateResult.message ?? 'Financial export blocked.',
           });
           return;
@@ -498,8 +504,10 @@ router.post('/csv', async (req: Request, res: Response) => {
       const bodyGate = req.body as Record<string, unknown> & { periodLabel?: string };
       if ('roundingGapExceedsMateriality' in bodyGate || 'aggregateRoundingExceedsMateriality' in bodyGate) {
         res.status(403).json({
-          error: 'Tampering attempt detected',
+          allowed: false,
+          alert: TAMPERING_ATTEMPT_DETECTED,
           code: TAMPERING_ATTEMPT_DETECTED,
+          error: 'Tampering attempt detected',
           message: 'Materiality flags cannot be supplied by client.',
         });
         return;
@@ -550,6 +558,8 @@ router.post('/csv', async (req: Request, res: Response) => {
         if (!gateResult.allowed) {
           if (gateResult.alert === RESOLUTION_MISMATCH && gateResult.details) {
             res.status(422).json({
+              allowed: false,
+              alert: RESOLUTION_MISMATCH,
               code: 'RESOLUTION_MISMATCH',
               message: gateResult.message ?? 'Ledger resolution mismatch: export blocked.',
               details: gateResult.details,
@@ -557,8 +567,10 @@ router.post('/csv', async (req: Request, res: Response) => {
             return;
           }
           res.status(403).json({
-            error: gateResult.alert ?? 'Export blocked',
+            allowed: false,
+            alert: gateResult.alert ?? 'CRITICAL_TAMPER_ALERT',
             code: gateResult.alert,
+            error: gateResult.alert ?? 'Export blocked',
             message: gateResult.message ?? 'Financial export blocked.',
           });
           return;

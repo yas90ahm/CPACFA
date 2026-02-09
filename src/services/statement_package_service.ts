@@ -86,9 +86,9 @@ export async function generateStatements(
   };
   const result = buildValidatedStatements(trialBalance);
   const inputHash = hashStatementInput(closeSessionId, entries);
-  const nextVersion = (await repo.getMaxVersionByCloseSessionId(pool, closeSessionId)) + 1;
+  const nextVersion = (await repo.getMaxVersionByCloseSessionId(pool, tenantId, closeSessionId)) + 1;
   const id = randomUUID();
-  const pkg = await repo.insertStatementPackage(pool, id, {
+  const pkg = await repo.insertStatementPackage(pool, tenantId, id, {
     closeSessionId,
     version: nextVersion,
     inputHash,
@@ -107,7 +107,7 @@ export async function generateStatements(
       metadata: line.metadata,
     });
   }
-  const previousPackages = await repo.listStatementPackagesByCloseSessionId(pool, closeSessionId, 2);
+  const previousPackages = await repo.listStatementPackagesByCloseSessionId(pool, tenantId, closeSessionId, 2);
   const prevPkg = previousPackages.length >= 2 ? previousPackages[1] : undefined;
   if (prevPkg) {
     const prevLines = await repo.listStatementLinesByPackageId(pool, prevPkg.id);
@@ -163,15 +163,16 @@ export function computeDiff(prevLines: StatementLine[], nextLines: StatementLine
   return { added, removed, changed };
 }
 
-export async function getStatementPackage(pool: Pool, id: string): Promise<StatementPackage | null> {
-  return repo.getStatementPackageById(pool, id);
+export async function getStatementPackage(pool: Pool, tenantId: string, id: string): Promise<StatementPackage | null> {
+  return repo.getStatementPackageById(pool, tenantId, id);
 }
 
 export async function getStatementPackageWithLines(
   pool: Pool,
+  tenantId: string,
   id: string
 ): Promise<{ package: StatementPackage; lines: StatementLine[] } | null> {
-  const pkg = await repo.getStatementPackageById(pool, id);
+  const pkg = await repo.getStatementPackageById(pool, tenantId, id);
   if (!pkg) return null;
   const lines = await repo.listStatementLinesByPackageId(pool, id);
   return { package: pkg, lines };
@@ -179,18 +180,20 @@ export async function getStatementPackageWithLines(
 
 export async function listStatementPackages(
   pool: Pool,
+  tenantId: string,
   closeSessionId: string,
   limit?: number
 ): Promise<StatementPackage[]> {
-  return repo.listStatementPackagesByCloseSessionId(pool, closeSessionId, limit);
+  return repo.listStatementPackagesByCloseSessionId(pool, tenantId, closeSessionId, limit);
 }
 
 export async function getStatementDiff(
   pool: Pool,
+  tenantId: string,
   fromPackageId: string,
   toPackageId: string
 ): Promise<{ fromPackageId: string; toPackageId: string; diffJson: StatementDiffJson; createdAt: string } | null> {
-  const rec = await repo.getStatementDiff(pool, fromPackageId, toPackageId);
+  const rec = await repo.getStatementDiff(pool, tenantId, fromPackageId, toPackageId);
   if (!rec) return null;
   return {
     fromPackageId: rec.fromPackageId,

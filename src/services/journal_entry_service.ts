@@ -353,5 +353,5 @@ export async function addJEAttachment(
   const je = await repo.getJournalEntryById(pool, jeId, tenantId);
   if (!je) throw new JournalEntryError('Journal entry not found', 'NOT_FOUND');
   const id = randomUUID();
-  return repo.insertJEAttachment(pool, id, jeId, fileRef);
+  return repo.insertJEAttachment(pool, id, jeId, fileRef, tenantId);
 }

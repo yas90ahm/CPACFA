@@ -168,6 +168,7 @@ describe('Snapshot reproducibility', () => {
       expect(session?.certifiedSnapshotId).toBeDefined();
       const snapshot = await getLedgerSnapshotById(
         pool,
+        testTenantId,
         session!.certifiedSnapshotId!
       );
       expect(snapshot).toBeDefined();

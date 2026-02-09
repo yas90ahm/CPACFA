@@ -182,7 +182,7 @@ export async function getOrComputeTriage(
   };
 
   if (opts.persist) {
-    await repo.insertTriageAssessment(pool, {
+    await repo.insertTriageAssessment(pool, tenantId, {
       id: assessment.id,
       closeSessionId,
       riskScore: assessment.riskScore,
@@ -201,5 +201,5 @@ export async function getLatestTriage(
   tenantId: string,
   closeSessionId: string
 ): Promise<TriageAssessment | null> {
-  return repo.getLatestTriageByCloseSessionId(pool, closeSessionId);
+  return repo.getLatestTriageByCloseSessionId(pool, tenantId, closeSessionId);
 }

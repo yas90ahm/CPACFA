@@ -32,7 +32,7 @@ import {
 } from '../lib/snapshot_hash.js';
 import { canonicalStringifyKeysOnly } from '../lib/canonical_json.js';
 import { round2 } from '../utils/decimal.js';
-import { insertLedgerSnapshot, getLedgerSnapshotById } from '../db/repositories/ledger_snapshot_repository.js';
+import { insertLedgerSnapshot } from '../db/repositories/ledger_snapshot_repository.js';
 
 /** Allowed top-level keys in LedgerSnapshotPayload. No other keys permitted (structural drift protection). */
 export const SNAPSHOT_PAYLOAD_ALLOWED_TOP_LEVEL_KEYS = new Set<string>(['trialBalance', 'entries', 'evidenceManifest']);

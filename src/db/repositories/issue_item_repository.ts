@@ -119,7 +119,10 @@ export async function insertIssueItem(
       now,
     ]
   );
-  const r = await pool.query<IssueItemRow>(`SELECT ${SELECT_COLS} FROM issue_items WHERE id = $1`, [id]);
+  const r = await pool.query<IssueItemRow>(
+    `SELECT ${SELECT_COLS} FROM issue_items WHERE id = $1 AND tenant_id = $2`,
+    [id, input.tenantId]
+  );
   return rowToIssue(r.rows[0]);
 }
 

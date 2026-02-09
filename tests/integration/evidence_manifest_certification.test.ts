@@ -182,7 +182,7 @@ describe('Certified Evidence Manifest', () => {
     const certifiedSnapshotId = certifyRes.body?.certifiedSnapshotId;
     expect(certifiedSnapshotId).toBeDefined();
 
-    const snapshot = await getLedgerSnapshotById(pool, certifiedSnapshotId);
+    const snapshot = await getLedgerSnapshotById(pool, testTenantId, certifiedSnapshotId);
     expect(snapshot).toBeDefined();
     expect(snapshot!.snapshotPayloadJson.evidenceManifest).toBeDefined();
     expect(snapshot!.snapshotPayloadJson.evidenceManifest!.journalEntries.length).toBeGreaterThanOrEqual(1);
@@ -285,7 +285,7 @@ describe('Certified Evidence Manifest', () => {
     const certifiedSnapshotId = certifyRes.body?.certifiedSnapshotId;
     expect(certifiedSnapshotId).toBeDefined();
 
-    const snapshot = await getLedgerSnapshotById(pool, certifiedSnapshotId);
+    const snapshot = await getLedgerSnapshotById(pool, testTenantId, certifiedSnapshotId);
     expect(snapshot).toBeDefined();
     expect(snapshot!.snapshotPayloadJson.evidenceManifest).toBeDefined();
     expect(snapshot!.snapshotPayloadJson.evidenceManifest!.journalEntries).toEqual([]);

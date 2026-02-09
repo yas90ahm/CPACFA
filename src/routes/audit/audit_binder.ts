@@ -110,6 +110,8 @@ async function runBinderExportGates(
   if (!gateResult.allowed) {
     if (gateResult.alert === RESOLUTION_MISMATCH && gateResult.details) {
       res.status(422).json({
+        allowed: false,
+        alert: RESOLUTION_MISMATCH,
         code: 'RESOLUTION_MISMATCH',
         message: gateResult.message ?? 'Ledger resolution mismatch: export blocked.',
         details: gateResult.details,
@@ -117,8 +119,10 @@ async function runBinderExportGates(
       return false;
     }
     res.status(403).json({
-      error: gateResult.alert ?? 'Export blocked',
+      allowed: false,
+      alert: gateResult.alert ?? 'CRITICAL_TAMPER_ALERT',
       code: gateResult.alert,
+      error: gateResult.alert ?? 'Export blocked',
       message: gateResult.message ?? 'Binder export blocked. Truth Gate or audit chain check failed.',
     });
     return false;

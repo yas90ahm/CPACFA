@@ -16,16 +16,13 @@ export async function handleIngestionPipeline(ctx: JobHandlerContext): Promise<v
 
 /**
  * Agentic cleanup/classification for a context (tenant/session/document).
- * Placeholder: wire to agenticLedgerToTrialBalance or classifyIngestionAgentic when needed.
+ * FUTURE: agenticLedgerToTrialBalance, classifyIngestionAgentic not implemented.
+ * Currently a no-op; jobs complete without error.
  */
 export async function handleAgenticCleanup(_ctx: JobHandlerContext): Promise<void> {
   const tenantId = _ctx.job.payload?.tenantId as string | undefined;
-  const sessionId = _ctx.job.payload?.sessionId as string | undefined;
   if (!tenantId) return;
-  // TODO: load session/document and run agentic cleanup (e.g. agenticLedgerToTrialBalance, classifyIngestionAgentic)
-  if (sessionId) {
-    // Placeholder: no-op until we have runAgenticCleanupForSession(tenantId, sessionId)
-  }
+  // FUTURE: Load session/document and run agentic cleanup (e.g. agenticLedgerToTrialBalance, classifyIngestionAgentic)
 }
 
 /** Generate statement package for a close session (adjusted TB → BS/P&L). */

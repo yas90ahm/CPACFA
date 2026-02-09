@@ -100,7 +100,10 @@ export async function insertJournalEntry(
       now,
     ]
   );
-  const r = await pool.query<JournalEntryRow>(`SELECT ${JE_COLS} FROM journal_entries WHERE id = $1`, [id]);
+  const r = await pool.query<JournalEntryRow>(
+    `SELECT ${JE_COLS} FROM journal_entries WHERE id = $1 AND tenant_id = $2`,
+    [id, input.tenantId]
+  );
   return rowToJE(r.rows[0]);
 }
 
@@ -215,24 +218,31 @@ export async function insertJEAttachment(
   pool: Pool,
   id: string,
   jeId: string,
-  fileRef: string
+  fileRef: string,
+  tenantId: string
 ): Promise<JournalEntryAttachment> {
   await pool.query(
     `INSERT INTO je_attachments (id, je_id, file_ref) VALUES ($1, $2, $3)`,
     [id, jeId, fileRef]
   );
   const r = await pool.query<{ id: string; je_id: string; file_ref: string; uploaded_at: string }>(
-    `SELECT id, je_id, file_ref, uploaded_at FROM je_attachments WHERE id = $1`,
-    [id]
+    `SELECT a.id, a.je_id, a.file_ref, a.uploaded_at
+     FROM je_attachments a
+     JOIN journal_entries je ON a.je_id = je.id
+     WHERE je.tenant_id = $1 AND a.id = $2`,
+    [tenantId, id]
   );
   const row = r.rows[0];
   return { id: row.id, jeId: row.je_id, fileRef: row.file_ref, uploadedAt: row.uploaded_at };
 }
 
-export async function getJEAttachmentById(pool: Pool, attachmentId: string): Promise<JournalEntryAttachment | null> {
+export async function getJEAttachmentById(pool: Pool, tenantId: string, attachmentId: string): Promise<JournalEntryAttachment | null> {
   const r = await pool.query<{ id: string; je_id: string; file_ref: string; uploaded_at: string }>(
-    `SELECT id, je_id, file_ref, uploaded_at FROM je_attachments WHERE id = $1`,
-    [attachmentId]
+    `SELECT a.id, a.je_id, a.file_ref, a.uploaded_at
+     FROM je_attachments a
+     JOIN journal_entries je ON a.je_id = je.id
+     WHERE je.tenant_id = $1 AND a.id = $2`,
+    [tenantId, attachmentId]
   );
   const row = r.rows[0];
   if (!row) return null;

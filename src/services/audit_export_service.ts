@@ -172,8 +172,8 @@ export async function getCertifiedStatementsForBinder(
     const session = await getCloseSessionById(pool, tenantId, closeSessionId);
     const snapshotId = session?.certifiedSnapshotId;
     const snapshot = snapshotId
-      ? await getLedgerSnapshotById(pool, snapshotId)
-      : await getLatestSnapshotByCloseSessionId(pool, closeSessionId);
+      ? await getLedgerSnapshotById(pool, tenantId, snapshotId)
+      : await getLatestSnapshotByCloseSessionId(pool, tenantId, closeSessionId);
     if (snapshot) {
       try {
         const statements = buildCertifiedStatementsFromSnapshot(snapshot.snapshotPayloadJson);

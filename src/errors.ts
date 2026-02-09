@@ -23,6 +23,18 @@ export class MathematicalIntegrityError extends Error {
   }
 }
 
+/** Thrown when a feature is intentionally not implemented. Caller should handle or surface a clear message. */
+export class NotImplementedError extends Error {
+  readonly feature: string;
+
+  constructor(feature: string, message?: string) {
+    super(message ?? `Not implemented: ${feature}`);
+    this.name = 'NotImplementedError';
+    this.feature = feature;
+    Object.setPrototypeOf(this, NotImplementedError.prototype);
+  }
+}
+
 /** Thrown when reasoning log, observation, or session update persistence fails. No silent green. */
 export class SessionPersistenceError extends Error {
   readonly operation: 'reasoning_log' | 'observation' | 'message_history';

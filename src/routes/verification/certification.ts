@@ -97,7 +97,7 @@ router.post('/verify', async (req: Request, res: Response) => {
   if (tenantId && body.artifact.snapshot?.snapshotId) {
     try {
       const pool = await getTenantPoolWithMigrations(tenantId);
-      const snapshot = await getLedgerSnapshotById(pool, body.artifact.snapshot.snapshotId);
+      const snapshot = await getLedgerSnapshotById(pool, tenantId, body.artifact.snapshot.snapshotId);
       if (snapshot) {
         result.snapshotHashMatches =
           snapshot.snapshotHash === body.artifact.snapshot.snapshotHash;

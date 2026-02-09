@@ -127,8 +127,8 @@ export async function insertCloseSession(
     [id, tenantId, entityId, periodStart, periodEnd, basis, standard, status, now]
   );
   const r = await pool.query<CloseSessionRow>(
-    `SELECT ${SESSION_COLUMNS} FROM close_sessions WHERE id = $1`,
-    [id]
+    `SELECT ${SESSION_COLUMNS} FROM close_sessions WHERE id = $1 AND tenant_id = $2`,
+    [id, tenantId]
   );
   return rowToSession(r.rows[0]);
 }

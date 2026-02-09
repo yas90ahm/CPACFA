@@ -257,7 +257,7 @@ router.post('/journal-entries/:id/approve', async (req: Request, res: Response) 
   } catch (e) {
     if (e instanceof JournalEntryError) {
       const status = e.code === 'NOT_FOUND' ? 404 : e.code === 'SEGREGATION' ? 403 : 400;
-      res.status(status).json({ error: e.message });
+      res.status(status).json({ error: e.message, code: e.code });
       return;
     }
     send500(res, e, 'Approve JE failed');
@@ -528,7 +528,7 @@ router.get('/journal-entries/:jeId/attachments/:attachmentId/download', async (r
     }
     const jeId = req.params.jeId ?? '';
     const attachmentId = req.params.attachmentId ?? '';
-    const attachment = await jeRepo.getJEAttachmentById(pool, attachmentId);
+    const attachment = await jeRepo.getJEAttachmentById(pool, tenantId, attachmentId);
     if (!attachment || attachment.jeId !== jeId) {
       res.status(404).json({ error: 'Attachment not found' });
       return;

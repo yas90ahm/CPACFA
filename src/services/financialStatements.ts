@@ -19,11 +19,15 @@ import type {
   AccountType,
 } from '../types/financial.js';
 import { BALANCE_SHEET, COMPREHENSIVE_INCOME } from '../constants/codification.js';
-import { round2, sumRound2, absLt, absGt } from '../utils/decimal.js';
+import { round2, sumRound2 } from '../utils/decimal.js';
 import { classifyTrialBalanceDeterministic } from './accountClassifier.js';
-import { getRoundingTolerance } from './rules_registry.js';
 import { MathematicalIntegrityError } from '../errors.js';
-import { detectSuspiciousPlugs, type SuspiciousPlugResult } from './integrity_gate_service.js';
+import {
+  assertIntegrityGateOrThrow,
+  detectSuspiciousPlugs,
+  runIntegrityGate,
+  type SuspiciousPlugResult,
+} from './integrity_gate_service.js';
 
 /** Re-export for backward compatibility. Primary gatekeeper: totalDebits !== totalCredits → MUST throw this (422). */
 export { MathematicalIntegrityError };
@@ -103,9 +107,16 @@ export function buildBalanceSheet(
   const totalAssets = sumLines(assets);
   const totalLiabilities = sumLines(liabilities);
   const totalEquity = sumLines(equity);
-  const liabilitiesPlusEquity = sumRound2([totalLiabilities, totalEquity]);
-  const balances = absLt(totalAssets, liabilitiesPlusEquity, materiality);
-  /* decimal sums already applied via sumLines (sumRound2) */
+
+  const totalDebits = entries.reduce((s, e) => s + (e.debit ?? 0), 0);
+  const totalCredits = entries.reduce((s, e) => s + (e.credit ?? 0), 0);
+
+  const gateResult = runIntegrityGate({
+    trialBalance: { totalDebits, totalCredits },
+    balanceSheet: { totalAssets, totalLiabilities, totalEquity },
+    tolerance: materiality,
+  });
+  const balances = gateResult.checks?.balanceSheetBalances ?? false;
 
   return {
     assets,
@@ -177,19 +188,9 @@ export function buildFinancialStatements(
   return { balanceSheet, profitAndLoss, classifiedEntries: classified };
 }
 
-/** Sum debits and credits from entries (for Kill Switch check A). */
-function getTrialBalanceTotals(entries: TrialBalanceEntry[]): { totalDebits: number; totalCredits: number } {
-  let totalDebits = 0;
-  let totalCredits = 0;
-  for (const e of entries) {
-    totalDebits += e.debit ?? 0;
-    totalCredits += e.credit ?? 0;
-  }
-  return { totalDebits, totalCredits };
-}
-
 /**
  * Validate already-built trial balance and balance sheet (Kill Switch).
+ * Delegates to runIntegrityGate via assertIntegrityGateOrThrow.
  * Throws MathematicalIntegrityError if (A) Sum(Debits) != Sum(Credits) or (B) Assets != L+E.
  * Use when returning stored statements (e.g. audit binder) to ensure we never serve illegal data.
  */
@@ -198,7 +199,6 @@ export function validateTrialBalanceAndBalanceSheet(
   balanceSheet: BalanceSheet,
   tolerance?: number
 ): void {
-  const tol = tolerance ?? getRoundingTolerance();
   const entries = trialBalance.entries ?? [];
   const totalDebits =
     'totalDebits' in trialBalance && typeof trialBalance.totalDebits === 'number'
@@ -209,20 +209,15 @@ export function validateTrialBalanceAndBalanceSheet(
       ? trialBalance.totalCredits
       : entries.reduce((s, e) => s + (e.credit ?? 0), 0);
 
-  if (absGt(totalDebits, totalCredits, tol)) {
-    const imbalanceAmount = round2(Math.abs(totalDebits - totalCredits));
-    throw new MathematicalIntegrityError('A', imbalanceAmount, { totalDebits, totalCredits });
-  }
-
-  const rhs = sumRound2([balanceSheet.totalLiabilities, balanceSheet.totalEquity]);
-  if (absGt(balanceSheet.totalAssets, rhs, tol)) {
-    const imbalanceAmount = round2(Math.abs(balanceSheet.totalAssets - rhs));
-    throw new MathematicalIntegrityError('B', imbalanceAmount, {
+  assertIntegrityGateOrThrow({
+    trialBalance: { totalDebits, totalCredits },
+    balanceSheet: {
       totalAssets: balanceSheet.totalAssets,
       totalLiabilities: balanceSheet.totalLiabilities,
       totalEquity: balanceSheet.totalEquity,
-    });
-  }
+    },
+    tolerance,
+  });
 }
 
 /** Risk level for validated statements; 'balanced_but_high_risk' when suspicious plug accounts detected. */
@@ -240,6 +235,7 @@ export interface BuildValidatedStatementsResult {
 
 /**
  * Unified validated builder: (A) Sum(Debits)==Sum(Credits), (B) Total Assets==Total Liabilities+Total Equity.
+ * Delegates to runIntegrityGate (assertIntegrityGateOrThrow) — single source of truth for integrity checks.
  * If either check fails, throws MathematicalIntegrityError and returns no data. Use for all API paths that return financials.
  * When plug accounts (Miscellaneous, Suspense, Other) absorb >= 90% of net activity, flags report as 'Balanced but High Risk'
  * and returns plugAlert for mandatory audit alert in tenant_hitl_staging.
@@ -248,7 +244,6 @@ export function buildValidatedStatements(
   trialBalanceResult: TrialBalanceResult,
   options?: { preClassifiedEntries?: TrialBalanceEntry[]; materiality?: number; tolerance?: number }
 ): BuildValidatedStatementsResult {
-  const tol = options?.tolerance ?? getRoundingTolerance();
   const entries = trialBalanceResult.entries ?? [];
   const totalDebits =
     trialBalanceResult.totalDebits != null
@@ -259,21 +254,17 @@ export function buildValidatedStatements(
       ? trialBalanceResult.totalCredits
       : entries.reduce((s, e) => s + (e.credit ?? 0), 0);
 
-  if (absGt(totalDebits, totalCredits, tol)) {
-    const imbalanceAmount = round2(Math.abs(totalDebits - totalCredits));
-    throw new MathematicalIntegrityError('A', imbalanceAmount, { totalDebits, totalCredits });
-  }
-
   const result = buildFinancialStatements(trialBalanceResult, options);
-  const rhs = sumRound2([result.balanceSheet.totalLiabilities, result.balanceSheet.totalEquity]);
-  if (absGt(result.balanceSheet.totalAssets, rhs, tol)) {
-    const imbalanceAmount = round2(Math.abs(result.balanceSheet.totalAssets - rhs));
-    throw new MathematicalIntegrityError('B', imbalanceAmount, {
+
+  assertIntegrityGateOrThrow({
+    trialBalance: { totalDebits, totalCredits },
+    balanceSheet: {
       totalAssets: result.balanceSheet.totalAssets,
       totalLiabilities: result.balanceSheet.totalLiabilities,
       totalEquity: result.balanceSheet.totalEquity,
-    });
-  }
+    },
+    tolerance: options?.tolerance,
+  });
 
   const classifiedEntries = result.classifiedEntries ?? entries;
   const plugResult = detectSuspiciousPlugs(

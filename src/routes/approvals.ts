@@ -78,7 +78,11 @@ router.post('/submit', validateBody(submitApprovalBodySchema), async (req: Reque
     const body = req.body;
     const workflow = await getWorkflowForResourceType(pool, tenantId, body.resourceType);
     if (!workflow) {
-      res.status(404).json({ error: 'No approval workflow for this resource type' });
+      res.status(403).json({
+        error: 'No approval workflow for this resource type',
+        code: 'WORKFLOW_NOT_CONFIGURED',
+        message: 'Approval workflow is not configured for this resource type. Create a workflow first.',
+      });
       return;
     }
     const existing = await getRequestByResource(pool, tenantId, body.resourceType, body.resourceId);
@@ -124,7 +128,7 @@ router.get('/requests/:id', async (req: Request, res: Response) => {
     const tenantId = getTenantId(req) ?? 'default';
     const pool = getTenantPool(req);
     if (!pool) {
-      res.status(404).json({ error: 'Request not found' });
+      res.status(503).json({ error: 'Tenant database required' });
       return;
     }
     const request = await getRequest(pool, req.params.id, tenantId);

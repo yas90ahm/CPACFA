@@ -51,7 +51,7 @@ async function getReconRunWithOwnershipCheck(
   runId: string,
   res: Response
 ): Promise<ReturnType<typeof getReconRun> | null> {
-  const run = await getReconRun(pool, runId);
+  const run = await getReconRun(pool, tenantId, runId);
   if (!run) {
     res.status(404).json({ error: 'Recon run not found' });
     return null;
@@ -67,7 +67,7 @@ async function getMatchGroupWithOwnershipCheck(
   groupId: string,
   res: Response
 ): Promise<ReconMatchGroup | null> {
-  const group = await getReconMatchGroupById(pool, groupId);
+  const group = await getReconMatchGroupById(pool, tenantId, groupId);
   if (!group) {
     res.status(404).json({ error: 'Match group not found' });
     return null;
@@ -91,7 +91,7 @@ router.post('/recon-runs', async (req: Request, res: Response) => {
       return;
     }
     if (!(await ensureCloseSessionOwnership(pool, tenantId, body.closeSessionId, res))) return;
-    const run = await createReconRun(pool, body.closeSessionId, body.type);
+    const run = await createReconRun(pool, tenantId, body.closeSessionId, body.type);
     res.status(201).json(run);
   } catch (e) {
     if (e instanceof ReconError) {
@@ -118,7 +118,7 @@ router.get('/recon-runs', async (req: Request, res: Response) => {
     }
     if (!(await ensureCloseSessionOwnership(pool, tenantId, closeSessionId, res))) return;
     const type = req.query.type as ReconRunType | undefined;
-    const runs = await listReconRunsByCloseSession(pool, closeSessionId, type);
+    const runs = await listReconRunsByCloseSession(pool, tenantId, closeSessionId, type);
     res.json({ runs });
   } catch (e) {
     send500(res, e, 'List recon runs failed');
@@ -161,6 +161,7 @@ router.post('/recon-runs/:id/items', async (req: Request, res: Response) => {
     }
     const items = await ingestReconItems(
       pool,
+      tenantId,
       id,
       body.items.map((i) => ({
         source: i.source as 'bank' | 'gl' | 'subledger',
@@ -191,7 +192,7 @@ router.get('/recon-runs/:id/items', async (req: Request, res: Response) => {
     }
     const id = req.params.id ?? '';
     if (!(await getReconRunWithOwnershipCheck(pool, tenantId, id, res))) return;
-    const items = await listReconItemsByRunId(pool, id);
+    const items = await listReconItemsByRunId(pool, tenantId, id);
     res.json({ items });
   } catch (e) {
     send500(res, e, 'List recon items failed');
@@ -209,7 +210,7 @@ router.get('/recon-runs/:id/match-groups', async (req: Request, res: Response) =
     }
     const id = req.params.id ?? '';
     if (!(await getReconRunWithOwnershipCheck(pool, tenantId, id, res))) return;
-    const matchGroups = await listReconMatchGroupsByRunId(pool, id);
+    const matchGroups = await listReconMatchGroupsByRunId(pool, tenantId, id);
     res.json({ matchGroups });
   } catch (e) {
     send500(res, e, 'List recon match groups failed');
@@ -227,7 +228,7 @@ router.get('/recon-runs/:id/unmatched', async (req: Request, res: Response) => {
     }
     const id = req.params.id ?? '';
     if (!(await getReconRunWithOwnershipCheck(pool, tenantId, id, res))) return;
-    const items = await getUnmatchedReconItems(pool, id);
+    const items = await getUnmatchedReconItems(pool, tenantId, id);
     res.json({ items });
   } catch (e) {
     send500(res, e, 'List unmatched recon items failed');
@@ -250,7 +251,7 @@ router.post('/recon-runs/:id/propose-matches', async (req: Request, res: Respons
       res.status(400).json({ error: 'reconItemIds array required' });
       return;
     }
-    const group = await proposeMatches(pool, id, {
+    const group = await proposeMatches(pool, tenantId, id, {
       reconItemIds: body.reconItemIds,
       matchConfidence: body.matchConfidence,
       decisionRecordId: body.decisionRecordId,
@@ -312,7 +313,7 @@ router.post('/recon-runs/:id/timing-difference', async (req: Request, res: Respo
       res.status(400).json({ error: 'reason required' });
       return;
     }
-    const exception = await markTimingDifference(pool, id, body.reason, body.linkedIssueId);
+    const exception = await markTimingDifference(pool, tenantId, id, body.reason, body.linkedIssueId);
     res.status(201).json(exception);
   } catch (e) {
     if (e instanceof ReconError) {
@@ -339,7 +340,7 @@ router.post('/recon-runs/:id/signoff', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'signedBy required' });
       return;
     }
-    const signoff = await signOffReconRun(pool, id, body.signedBy, body.notes);
+    const signoff = await signOffReconRun(pool, tenantId, id, body.signedBy, body.notes);
     res.json(signoff);
   } catch (e) {
     if (e instanceof ReconError) {
@@ -361,7 +362,7 @@ router.post('/recon-match-groups/:id/confirm', async (req: Request, res: Respons
     }
     const id = req.params.id ?? '';
     if (!(await getMatchGroupWithOwnershipCheck(pool, tenantId, id, res))) return;
-    const group = await confirmMatchGroup(pool, id);
+    const group = await confirmMatchGroup(pool, tenantId, id);
     res.json(group);
   } catch (e) {
     if (e instanceof ReconError) {
@@ -383,7 +384,7 @@ router.post('/recon-match-groups/:id/reject', async (req: Request, res: Response
     }
     const id = req.params.id ?? '';
     if (!(await getMatchGroupWithOwnershipCheck(pool, tenantId, id, res))) return;
-    const group = await rejectMatchGroup(pool, id);
+    const group = await rejectMatchGroup(pool, tenantId, id);
     res.json(group);
   } catch (e) {
     if (e instanceof ReconError) {

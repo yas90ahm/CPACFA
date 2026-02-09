@@ -21,7 +21,7 @@ import { buildNotesAndPolicies } from './notesPolicies.js';
 import type { CashFlowStatement, EquityChangesStatement, NotesAndPolicies } from '../types/financial.js';
 import type { Pool } from 'pg';
 import type { IntegrityContractFact } from '../types/integrity.js';
-import { assertIntegrityGateOrThrow } from './integrity_gate_service.js';
+import { assertIntegrityGateOrThrow, runIntegrityGate } from './integrity_gate_service.js';
 import { recordOverride } from './audit_ledger_service.js';
 
 export interface StatementGeneratorOptions {
@@ -164,16 +164,21 @@ export async function generateStatements(
           codificationRef: { framework: 'IASB', citation: 'IFRS 16.26', description: 'Lease liability at commencement' },
         };
 
+    const adjTotalAssets = balanceSheet.totalAssets + leaseResult.rightOfUseAsset;
+    const adjTotalLiabilities = balanceSheet.totalLiabilities + leaseResult.leaseLiability;
+    const totalDebits = classified.reduce((s, e) => s + (e.debit ?? 0), 0);
+    const totalCredits = classified.reduce((s, e) => s + (e.credit ?? 0), 0);
+    const gateResult = runIntegrityGate({
+      trialBalance: { totalDebits, totalCredits },
+      balanceSheet: { totalAssets: adjTotalAssets, totalLiabilities: adjTotalLiabilities, totalEquity: balanceSheet.totalEquity },
+    });
     balanceSheet = {
       ...balanceSheet,
       assets: [...balanceSheet.assets, rouLine],
       liabilities: [...balanceSheet.liabilities, leaseLiaLine],
-      totalAssets: balanceSheet.totalAssets + leaseResult.rightOfUseAsset,
-      totalLiabilities: balanceSheet.totalLiabilities + leaseResult.leaseLiability,
-      balances: Math.abs(
-        balanceSheet.totalAssets + leaseResult.rightOfUseAsset -
-        (balanceSheet.totalLiabilities + leaseResult.leaseLiability + balanceSheet.totalEquity)
-      ) < 0.02,
+      totalAssets: adjTotalAssets,
+      totalLiabilities: adjTotalLiabilities,
+      balances: gateResult.checks?.balanceSheetBalances ?? false,
     };
   }
 

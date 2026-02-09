@@ -40,7 +40,7 @@ router.get('/snapshots/:snapshotId', async (req: Request, res: Response) => {
       return;
     }
 
-    const snapshot = await getLedgerSnapshotById(pool, snapshotId);
+    const snapshot = await getLedgerSnapshotById(pool, tenantId, snapshotId);
     if (!snapshot || snapshot.tenantId !== tenantId) {
       res.status(404).json({
         error: 'Snapshot not found',

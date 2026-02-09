@@ -70,12 +70,12 @@ export async function insertLedgerSnapshot(client: Queryable, params: InsertLedg
   return rowToSnapshot(r.rows[0]);
 }
 
-export async function getLedgerSnapshotById(pool: Pool, id: string): Promise<LedgerSnapshot | null> {
+export async function getLedgerSnapshotById(pool: Pool, tenantId: string, id: string): Promise<LedgerSnapshot | null> {
   const r = await pool.query<LedgerSnapshotRow>(
     `SELECT id, tenant_id, period_label, created_at, created_by, source,
       snapshot_payload_json, snapshot_hash, hash_version, close_session_id
-     FROM ledger_snapshots WHERE id = $1`,
-    [id]
+     FROM ledger_snapshots WHERE id = $1 AND tenant_id = $2`,
+    [id, tenantId]
   );
   if (r.rows.length === 0) return null;
   return rowToSnapshot(r.rows[0]);
@@ -84,14 +84,15 @@ export async function getLedgerSnapshotById(pool: Pool, id: string): Promise<Led
 /** Get the latest snapshot for a close session (for certified binder/export). */
 export async function getLatestSnapshotByCloseSessionId(
   pool: Pool,
+  tenantId: string,
   closeSessionId: string
 ): Promise<LedgerSnapshot | null> {
   const r = await pool.query<LedgerSnapshotRow>(
     `SELECT id, tenant_id, period_label, created_at, created_by, source,
       snapshot_payload_json, snapshot_hash, hash_version, close_session_id
-     FROM ledger_snapshots WHERE close_session_id = $1
+     FROM ledger_snapshots WHERE close_session_id = $1 AND tenant_id = $2
      ORDER BY created_at DESC LIMIT 1`,
-    [closeSessionId]
+    [closeSessionId, tenantId]
   );
   if (r.rows.length === 0) return null;
   return rowToSnapshot(r.rows[0]);

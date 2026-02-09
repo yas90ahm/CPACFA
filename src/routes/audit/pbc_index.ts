@@ -145,7 +145,7 @@ export async function buildPbcIndexPayload(
   let hashVersion: string | null = null;
   let hashVerified: boolean | null = null;
   if (session.certifiedSnapshotId) {
-    const snapshot = await getLedgerSnapshotById(pool, session.certifiedSnapshotId);
+    const snapshot = await getLedgerSnapshotById(pool, tenantId, session.certifiedSnapshotId);
     if (snapshot) {
       snapshotId = snapshot.id;
       snapshotHash = snapshot.snapshotHash;
