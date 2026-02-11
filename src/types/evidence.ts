@@ -27,6 +27,8 @@ export interface EvidenceRecord {
   attachedBy: string;
   attachedAt: string;
   integrityVersion: string;
+  storagePath?: string;
+  originalFilename?: string;
 }
 
 export interface EvidenceLink {
@@ -54,6 +56,8 @@ export interface CreateEvidenceRecordInput {
   externalProvider?: string;
   label?: string;
   attachedBy: string;
+  storagePath?: string;
+  originalFilename?: string;
 }
 
 export interface LinkEvidenceInput {

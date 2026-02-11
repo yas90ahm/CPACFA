@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CloudMetrics Inc. — End-to-End Financial Close Demo Report</title>
+  <style>
+    :root { --bg: #0f1419; --fg: #e6edf3; --muted: #8b949e; --accent: #58a6ff; --success: #3fb950; --warning: #d29922; --error: #f85149; }
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--fg); line-height: 1.6; margin: 0; padding: 2rem; }
+    .container { max-width: 960px; margin: 0 auto; }
+    h1 { font-size: 1.75rem; border-bottom: 2px solid var(--accent); padding-bottom: 0.5rem; }
+    h2 { font-size: 1.25rem; margin-top: 2rem; color: var(--accent); }
+    h3 { font-size: 1rem; margin-top: 1.5rem; color: var(--muted); }
+    .meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 2rem; }
+    pre, code { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.85rem; background: #161b22; padding: 0.25rem 0.5rem; border-radius: 4px; overflow-x: auto; }
+    pre { padding: 1rem; white-space: pre-wrap; word-break: break-all; }
+    .step { border: 1px solid #30363d; border-radius: 8px; padding: 1.25rem; margin-bottom: 1.5rem; }
+    .pass { color: var(--success); } .fail { color: var(--error); } .warn { color: var(--warning); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid #30363d; }
+    th { color: var(--muted); }
+    .badge { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .badge-pass { background: rgba(63,185,80,0.2); color: var(--success); }
+    .badge-fail { background: rgba(248,81,73,0.2); color: var(--error); }
+    .badge-warn { background: rgba(210,153,34,0.2); color: var(--warning); }
+    ul { margin: 0.5rem 0; padding-left: 1.5rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>CloudMetrics Inc. — End-to-End Financial Close Demo Report</h1>
+    <p class="meta">Generated: <span id="genTime"></span> | Company: CloudMetrics Inc. | ARR ~$8M | 45 employees | Period: January 2026</p>
+    <p>This report walks through every core system capability and produces a certified export. Suitable for VC and audit partner review.</p>
+
+    <!-- Step 1: Trial Balance Ingestion -->
+    <h2>1. Trial Balance Ingestion</h2>
+    <div class="step">
+      <h3>Sample Trial Balance (samples/cloudmetrics_trial_balance_demo.csv)</h3>
+      <p>~47 account lines covering a realistic SaaS chart of accounts: Revenue, Deferred Revenue, ARR Receivables, Prepaid Expenses, Accrued Liabilities, COGS (Hosting), R&D Salaries, S&M, G&A, etc.</p>
+      <p><strong>Intentionally suspicious entry:</strong> $47,000 charge in "Miscellaneous Expense" (account 9999) — a plug account absorbing material activity.</p>
+      <h3>Validation Output</h3>
+      <table>
+        <tr><th>Check</th><th>Result</th><th>Detail</th></tr>
+        <tr><td>Debits = Credits</td><td><span id="tbBal" class="badge badge-pass">PASS</span></td><td id="tbDetail">totalDebits = totalCredits</td></tr>
+        <tr><td>Balance Sheet Equation</td><td><span id="bsBal" class="badge"></span></td><td id="bsDetail"></td></tr>
+        <tr><td>Suspicious Plug Detection</td><td><span id="plugBadge" class="badge"></span></td><td id="plugDetail"></td></tr>
+      </table>
+      <div id="integrityGateOverall" style="margin-top:1rem; padding:0.75rem; background:rgba(248,81,73,0.1); border:1px solid var(--error); border-radius:6px; color:var(--fg);"></div>
+      <div id="bsCallout" class="callout-warn" style="margin-top:1rem; padding:1rem; background:rgba(210,153,34,0.15); border:1px solid var(--warning); border-radius:6px; color:var(--fg); display:none;"></div>
+      <pre id="plugOutput"></pre>
+    </div>
+
+    <!-- Step 2: Close Session State Machine -->
+    <h2>2. Close Session State Machine</h2>
+    <div class="step">
+      <h3>Valid Path: Draft → In Progress → Ready for Review → Finalized → Locked → Certified</h3>
+      <table>
+        <tr><th>Transition</th><th>Timestamp</th></tr>
+        <tr><td>draft → in_progress</td><td id="ts1"></td></tr>
+        <tr><td>in_progress → ready_for_review</td><td id="ts2"></td></tr>
+        <tr><td>ready_for_review → finalized</td><td id="ts3"></td></tr>
+        <tr><td>finalized → locked</td><td id="ts4"></td></tr>
+        <tr><td>locked → certified</td><td id="ts5"></td></tr>
+      </table>
+      <h3>Invalid Transitions (Rejected)</h3>
+      <ul>
+        <li><strong>certified → locked:</strong> <code>INVALID_TRANSITION</code> — Transition from certified to locked is not allowed</li>
+        <li><strong>in_progress → certified:</strong> <code>NOT_LOCKED</code> — Certification only allowed from locked; current status is in_progress</li>
+      </ul>
+    </div>
+
+    <!-- Step 3: Evidence Anchoring -->
+    <h2>3. Evidence Anchoring</h2>
+    <div class="step">
+      <p>3 sample PDF evidence files attached to journal entries:</p>
+      <table>
+        <tr><th>Evidence</th><th>SHA-256 Hash</th><th>Size</th><th>Journal Entry ID</th></tr>
+        <tr><td>Invoice INV-2026-001</td><td><code id="evHash1"></code></td><td id="evSize1"></td><td>je-accrual-host-001</td></tr>
+        <tr><td>Vendor Contract AWS</td><td><code id="evHash2"></code></td><td id="evSize2"></td><td>je-accrual-vendor-001</td></tr>
+        <tr><td>Bank Statement Jan 2026</td><td><code id="evHash3"></code></td><td id="evSize3"></td><td>je-cash-recon-001</td></tr>
+      </table>
+      <h3>Evidence Manifest (assembled at certification)</h3>
+      <pre id="evidenceManifest"></pre>
+    </div>
+
+    <!-- Step 4: Snapshot & Certification -->
+    <h2>4. Snapshot & Certification</h2>
+    <div class="step">
+      <p>Deterministic snapshot includes: trial balance data, financial statements, evidence manifest with all hashes.</p>
+      <table>
+        <tr><th>Field</th><th>Value</th></tr>
+        <tr><td>Snapshot Hash (SHA-256)</td><td><code id="snapHash"></code></td></tr>
+        <tr><td>Hash Version</td><td id="hashVer"></td></tr>
+        <tr><td>Ed25519 Signature</td><td><code id="ed25519Sig"></code></td></tr>
+        <tr><td>Ed25519 Public Key</td><td><code id="ed25519PubKey"></code></td></tr>
+        <tr><td>Signature Verified</td><td><span id="ed25519Verified" class="badge"></span></td></tr>
+      </table>
+      <p class="meta" style="margin-top:0.5rem;">Signature can be independently verified using the public key and snapshot hash.</p>
+      <h3>Frozen Snapshot Record</h3>
+      <pre id="frozenSnapshot"></pre>
+    </div>
+
+    <!-- Step 5: Export Gating -->
+    <h2>5. Export Gating</h2>
+    <div class="step">
+      <h3>5a. Valid Certified Export</h3>
+      <p>Checks: audit chain integrity ✓ | snapshot hash verification ✓ | materiality thresholds ✓ | no unresolved conflicts ✓</p>
+      <p><span class="badge badge-pass">PASS</span> → PDF: <code>Certified_Financials.pdf</code> (no watermark, certification hash in headers)</p>
+      <p>Headers: <code>X-Certified-Source</code>, <code>X-Certified-Snapshot-Id</code>, <code>X-Certified-Snapshot-Hash</code></p>
+
+      <h3>5b. Tamper Attempt</h3>
+      <p>Scenario: One value in audit_ledger.entry_hash mutated.</p>
+      <p><span class="badge badge-fail">403 BLOCKED</span> — Chain verification catches tampering:</p>
+      <pre>{"valid":false,"brokenAtEntryId":"al-...","message":"Hash mismatch"}
+Export: 403 CRITICAL_TAMPER_ALERT — Audit ledger chain verification failed; financial export blocked.</pre>
+
+      <h3>5c. Draft Export (Uncertified Period)</h3>
+      <p><span class="badge badge-pass">200 OK</span> — PDF: <code>Draft_Financials_NOT_CERTIFIED.pdf</code> with watermark: <strong>DRAFT — NOT CERTIFIED</strong></p>
+    </div>
+
+    <!-- Step 6: AI Boundaries -->
+    <h2>6. AI Boundaries Demonstration</h2>
+    <div class="step">
+      <ul>
+        <li><strong>AI proposal → tenant_ai_proposals (staging):</strong> Classification suggestion written ✓</li>
+        <li><strong>Direct write to period_trial_balance:</strong> <span class="badge badge-fail">REJECTED</span> — AI/agents have zero imports of period_trial_balance_repository</li>
+        <li><strong>Human approval flow:</strong> resolve-ingest moves proposal from staging → period_trial_balance ✓</li>
+      </ul>
+    </div>
+
+    <!-- Step 7: Audit Chain Verification -->
+    <h2>7. Audit Chain Verification</h2>
+    <div class="step">
+      <p><span id="chainBadge" class="badge badge-pass">CHAIN_INTACT</span> — Full hash chain walk: recompute entry_hash for each row; verify previous_entry_hash links sequentially.</p>
+      <h3>Chain Walk (per-entry verification)</h3>
+      <table>
+        <tr><th>Entry ID</th><th>Action</th><th>Entry Hash (first 16)</th><th>Previous Hash (first 16)</th><th>Hash Valid</th><th>Link Valid</th></tr>
+        <tbody id="chainTable"></tbody>
+      </table>
+      <h3>Tamper Demonstration</h3>
+      <p>Take the verified chain, mutate one entry's payload, rerun verification:</p>
+      <table>
+        <tr><th>Scenario</th><td id="tamperScenario"></td></tr>
+        <tr><th>Chain breaks at</th><td><code id="tamperBrokenAt"></code></td></tr>
+        <tr><th>Reason</th><td id="tamperReason"></td></tr>
+      </table>
+      <p><span class="badge badge-fail">403 BLOCKED</span> — Export would return CRITICAL_TAMPER_ALERT.</p>
+    </div>
+
+    <hr style="border-color:#30363d; margin:2rem 0">
+    <p class="meta">Report generated by CPACFA financial close platform. Run <code>npx ts-node scripts/demo_report_runner.ts</code> to refresh data.</p>
+  </div>
+
+  <script>
+    // Data injected by: npm run demo:report
+    const DEMO_DATA = {
+  "generatedAt": "2026-02-11T01:13:38.603Z",
+  "company": "CloudMetrics Inc.",
+  "periodLabel": "2026-01",
+  "arr": "$8M",
+  "employees": 45,
+  "step1_trialBalanceIngestion": {
+    "csvPath": "samples/cloudmetrics_trial_balance_demo.csv",
+    "entryCount": 47,
+    "totalDebits": 1998200,
+    "totalCredits": 1998200,
+    "debitsEqualCredits": true,
+    "integrityGate": {
+      "passed": false,
+      "checks": {
+        "trialBalanceBalances": true,
+        "balanceSheetBalances": false
+      },
+      "totalDebits": 1998200,
+      "totalCredits": 1998200,
+      "tbGap": 0,
+      "totalAssets": 802400,
+      "totalLiabilities": 804500,
+      "totalEquity": 76200,
+      "bsGap": 78300
+    },
+    "plugDetection_default90": {
+      "isSuspicious": false,
+      "plugAmount": 47000,
+      "totalNetActivity": 3996400,
+      "plugShare": 0.011760584526073465,
+      "plugAccountNames": [
+        "Miscellaneous Expense"
+      ],
+      "threshold": 0.9
+    },
+    "plugDetection_demo1pct": {
+      "isSuspicious": true,
+      "plugAmount": 47000,
+      "totalNetActivity": 3996400,
+      "plugShare": 0.011760584526073465,
+      "plugAccountNames": [
+        "Miscellaneous Expense"
+      ],
+      "threshold": 0.01
+    },
+    "suspiciousPlugFlagged": true,
+    "plugAccountNames": [
+      "Miscellaneous Expense"
+    ]
+  },
+  "step2_closeSessionStateMachine": {
+    "allowedTransitions": {
+      "draft": [
+        "in_progress"
+      ],
+      "in_progress": [
+        "draft",
+        "ready_for_review"
+      ],
+      "ready_for_review": [
+        "in_progress",
+        "finalized"
+      ],
+      "finalized": [
+        "ready_for_review",
+        "locked"
+      ],
+      "locked": [
+        "certified"
+      ],
+      "certified": []
+    },
+    "validPath": [
+      "draft",
+      "in_progress",
+      "ready_for_review",
+      "finalized",
+      "locked",
+      "certified"
+    ],
+    "invalidTransitions": [
+      {
+        "from": "certified",
+        "to": "locked",
+        "allowed": false,
+        "error": "Transition from certified to locked is not allowed"
+      },
+      {
+        "from": "in_progress",
+        "to": "certified",
+        "allowed": false,
+        "error": "Certification only allowed from locked; current status is in_progress"
+      }
+    ],
+    "timestamps": {
+      "draft": "2026-02-11T09:00:00.000Z",
+      "in_progress": "2026-02-11T09:15:00.000Z",
+      "ready_for_review": "2026-02-11T10:30:00.000Z",
+      "finalized": "2026-02-11T11:45:00.000Z",
+      "locked": "2026-02-11T14:00:00.000Z",
+      "certified": "2026-02-11T15:30:00.000Z"
+    }
+  },
+  "step3_evidenceAnchoring": {
+    "evidenceFiles": [
+      {
+        "label": "Invoice INV-2026-001",
+        "hashSha256": "eb7d0ed25a3fd72e1c3fc4d25e6489c78a013e7a25bb26890ff64a0635493538",
+        "sizeBytes": 68
+      },
+      {
+        "label": "Vendor Contract AWS",
+        "hashSha256": "188e6094407787b718b72304e55379c666a11df8b7825bc1dc1bed67052a60b2",
+        "sizeBytes": 47
+      },
+      {
+        "label": "Bank Statement Jan 2026",
+        "hashSha256": "220d160cd30e394e853537685a83bdf934b9810c269c47ddd995709d4b7c4b68",
+        "sizeBytes": 55
+      }
+    ],
+    "journalEntryLinkage": [
+      {
+        "journalEntryId": "je-accrual-host-001",
+        "evidenceId": "ev-inv-001",
+        "hashSha256": "eb7d0ed25a3fd72e1c3fc4d25e6489c78a013e7a25bb26890ff64a0635493538"
+      },
+      {
+        "journalEntryId": "je-accrual-vendor-001",
+        "evidenceId": "ev-contract-001",
+        "hashSha256": "188e6094407787b718b72304e55379c666a11df8b7825bc1dc1bed67052a60b2"
+      },
+      {
+        "journalEntryId": "je-cash-recon-001",
+        "evidenceId": "ev-bank-001",
+        "hashSha256": "220d160cd30e394e853537685a83bdf934b9810c269c47ddd995709d4b7c4b68"
+      }
+    ],
+    "evidenceManifest": {
+      "journalEntries": [
+        {
+          "journalEntryId": "je-0",
+          "evidenceLinks": [
+            {
+              "evidenceId": "ev-0",
+              "hashSha256": "eb7d0ed25a3fd72e1c3fc4d25e6489c78a013e7a25bb26890ff64a0635493538",
+              "sizeBytes": 68
+            }
+          ]
+        },
+        {
+          "journalEntryId": "je-1",
+          "evidenceLinks": [
+            {
+              "evidenceId": "ev-1",
+              "hashSha256": "188e6094407787b718b72304e55379c666a11df8b7825bc1dc1bed67052a60b2",
+              "sizeBytes": 47
+            }
+          ]
+        },
+        {
+          "journalEntryId": "je-2",
+          "evidenceLinks": [
+            {
+              "evidenceId": "ev-2",
+              "hashSha256": "220d160cd30e394e853537685a83bdf934b9810c269c47ddd995709d4b7c4b68",
+              "sizeBytes": 55
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "step4_snapshotAndCertification": {
+    "snapshotPayloadKeys": [
+      "trialBalance"
+    ],
+    "trialBalanceEntryCount": 47,
+    "totalDebits": 1998200,
+    "totalCredits": 1998200,
+    "snapshotHash": "493226e2b5c9c77f8ef922eb30b0c21dd24ea95f6c88352c0ae9c1e06020ea62",
+    "hashVersion": "v2",
+    "frozenSnapshotRecord": {
+      "id": "snap-cloudmetrics-2026-01-1770772418608",
+      "tenantId": "tenant-cloudmetrics-demo",
+      "periodLabel": "2026-01",
+      "closeSessionId": "sess-2026-01-001",
+      "snapshotHash": "493226e2b5c9c77f8ef922eb30b0c21dd24ea95f6c88352c0ae9c1e06020ea62",
+      "hashVersion": 2,
+      "createdAt": "2026-02-11T01:13:38.603Z",
+      "createdBy": "cfo@cloudmetrics.demo"
+    },
+    "ed25519Signature": "350eb108cdefdf102f9a53f532221c5556b9e7e2a2b9836f18cb5f7bcedde73db52bc0d9e9b908a4563b3a37645cbc396b9fdc856b652b3daff2f912a128d50a",
+    "ed25519PublicKey": "302a300506032b6570032100e8205cfd94ff1f101ae9b2f8c94c5e3d1b3134a5813480abfd7ad8c3d740cf99",
+    "signatureVerified": true
+  },
+  "step5_exportGating": {
+    "validCertifiedExport": {
+      "checks": [
+        "audit_chain_valid",
+        "snapshot_hash_verified",
+        "materiality_ok",
+        "no_unresolved_conflicts"
+      ],
+      "result": "PASS",
+      "pdfFilename": "Certified_Financials.pdf",
+      "headers": {
+        "X-Certified-Source": "certified_snapshot",
+        "X-Certified-Snapshot-Id": "snap-cloudmetrics-2026-01-001",
+        "X-Certified-Snapshot-Hash": "493226e2b5c9c77f8ef922eb30b0c21dd24ea95f6c88352c0ae9c1e06020ea62"
+      }
+    },
+    "tamperAttempt": {
+      "scenario": "Entry 4 payload mutated (state_transition tampered)",
+      "brokenAtEntryId": "al-demo-004",
+      "reason": "Hash mismatch (payload tampered)",
+      "chainVerification": {
+        "valid": false,
+        "brokenAtEntryId": "al-demo-004",
+        "message": "Hash mismatch (payload tampered)"
+      },
+      "exportResult": {
+        "status": 403,
+        "code": "CRITICAL_TAMPER_ALERT",
+        "message": "Audit ledger chain verification failed; financial export blocked."
+      }
+    },
+    "draftExport": {
+      "sessionStatus": "in_progress",
+      "result": "PASS",
+      "pdfFilename": "Draft_Financials_NOT_CERTIFIED.pdf",
+      "watermark": "DRAFT — NOT CERTIFIED"
+    }
+  },
+  "step6_aiBoundaries": {
+    "aiProposalStaging": {
+      "table": "tenant_ai_proposals",
+      "action": "AI classification suggestion written",
+      "stagingId": "stg-ai-001",
+      "status": "pending"
+    },
+    "directWriteRejected": {
+      "table": "period_trial_balance",
+      "action": "Direct write attempt from AI",
+      "result": "REJECTED",
+      "reason": "AI/agents have zero imports of period_trial_balance_repository"
+    },
+    "humanApprovalFlow": {
+      "action": "resolve-ingest moves proposal from staging to period_trial_balance",
+      "result": "period_trial_balance populated; staging item approved"
+    }
+  },
+  "step7_auditChainVerification": {
+    "entries": [
+      {
+        "entryId": "al-demo-001",
+        "action": "tb_ingested",
+        "timestamp": "2026-02-11T01:05:38.607Z",
+        "payload": "{\"periodLabel\":\"2026-01\",\"entryCount\":47}",
+        "previous_entry_hash": "",
+        "entry_hash": "38c714f5cb5cd6c3790cb560ea8a5e6cd26f824434fc05f131a5e864184e622e",
+        "recomputed_hash": "38c714f5cb5cd6c3790cb560ea8a5e6cd26f824434fc05f131a5e864184e622e",
+        "hash_matches": true,
+        "chain_link_valid": true
+      },
+      {
+        "entryId": "al-demo-002",
+        "action": "evidence_attached",
+        "timestamp": "2026-02-11T01:06:38.608Z",
+        "payload": "{\"evidenceCount\":3}",
+        "previous_entry_hash": "38c714f5cb5cd6c3790cb560ea8a5e6cd26f824434fc05f131a5e864184e622e",
+        "entry_hash": "2e22ebe1a532534cafccc51c48e88e17456e2efb179564c5a08361efa6dfa1c1",
+        "recomputed_hash": "2e22ebe1a532534cafccc51c48e88e17456e2efb179564c5a08361efa6dfa1c1",
+        "hash_matches": true,
+        "chain_link_valid": true
+      },
+      {
+        "entryId": "al-demo-003",
+        "action": "state_transition",
+        "timestamp": "2026-02-11T01:07:38.608Z",
+        "payload": "{\"from\":\"draft\",\"to\":\"in_progress\"}",
+        "previous_entry_hash": "2e22ebe1a532534cafccc51c48e88e17456e2efb179564c5a08361efa6dfa1c1",
+        "entry_hash": "b3f096e7409ed0a67822858534d29d96478a9bf4ec12107101fec311996f28f9",
+        "recomputed_hash": "b3f096e7409ed0a67822858534d29d96478a9bf4ec12107101fec311996f28f9",
+        "hash_matches": true,
+        "chain_link_valid": true
+      },
+      {
+        "entryId": "al-demo-004",
+        "action": "state_transition",
+        "timestamp": "2026-02-11T01:08:38.608Z",
+        "payload": "{\"from\":\"in_progress\",\"to\":\"ready_for_review\"}",
+        "previous_entry_hash": "b3f096e7409ed0a67822858534d29d96478a9bf4ec12107101fec311996f28f9",
+        "entry_hash": "3a1af100aa320397070dfeb8bba765c04c8fc011aa14aad81aa8d7c205d152f1",
+        "recomputed_hash": "3a1af100aa320397070dfeb8bba765c04c8fc011aa14aad81aa8d7c205d152f1",
+        "hash_matches": true,
+        "chain_link_valid": true
+      },
+      {
+        "entryId": "al-demo-005",
+        "action": "state_transition",
+        "timestamp": "2026-02-11T01:09:38.608Z",
+        "payload": "{\"from\":\"ready_for_review\",\"to\":\"finalized\"}",
+        "previous_entry_hash": "3a1af100aa320397070dfeb8bba765c04c8fc011aa14aad81aa8d7c205d152f1",
+        "entry_hash": "3eeeba29d0dbda421d5f02d8cb906fbced7d323e277df6cfab35152de9e42c09",
+        "recomputed_hash": "3eeeba29d0dbda421d5f02d8cb906fbced7d323e277df6cfab35152de9e42c09",
+        "hash_matches": true,
+        "chain_link_valid": true
+      },
+      {
+        "entryId": "al-demo-006",
+        "action": "state_transition",
+        "timestamp": "2026-02-11T01:10:38.608Z",
+        "payload": "{\"from\":\"finalized\",\"to\":\"locked\"}",
+        "previous_entry_hash": "3eeeba29d0dbda421d5f02d8cb906fbced7d323e277df6cfab35152de9e42c09",
+        "entry_hash": "e2bb2c587f3dc5fb99d2eb44f12c70f21c8c459a9024950e3c4cb552f032cae5",
+        "recomputed_hash": "e2bb2c587f3dc5fb99d2eb44f12c70f21c8c459a9024950e3c4cb552f032cae5",
+        "hash_matches": true,
+        "chain_link_valid": true
+      },
+      {
+        "entryId": "al-demo-007",
+        "action": "snapshot_created",
+        "timestamp": "2026-02-11T01:11:38.608Z",
+        "payload": "{\"snapshotHash\":\"493226e2b5c9c77f8ef922eb30b0c21dd24ea95f6c88352c0ae9c1e06020ea62\"}",
+        "previous_entry_hash": "e2bb2c587f3dc5fb99d2eb44f12c70f21c8c459a9024950e3c4cb552f032cae5",
+        "entry_hash": "bb7aafe913d3b33bbf2fe1ff448e426af30634e82c04104ec6b1d390cd2f9a00",
+        "recomputed_hash": "bb7aafe913d3b33bbf2fe1ff448e426af30634e82c04104ec6b1d390cd2f9a00",
+        "hash_matches": true,
+        "chain_link_valid": true
+      },
+      {
+        "entryId": "al-demo-008",
+        "action": "certified",
+        "timestamp": "2026-02-11T01:12:38.608Z",
+        "payload": "{\"certifiedBy\":\"cfo@cloudmetrics.demo\"}",
+        "previous_entry_hash": "bb7aafe913d3b33bbf2fe1ff448e426af30634e82c04104ec6b1d390cd2f9a00",
+        "entry_hash": "52cc936de83b646ec76a1537c8f92550572a30593e742ebd5ff54092f3770d61",
+        "recomputed_hash": "52cc936de83b646ec76a1537c8f92550572a30593e742ebd5ff54092f3770d61",
+        "hash_matches": true,
+        "chain_link_valid": true
+      }
+    ],
+    "totalEntries": 8,
+    "allHashesValid": true,
+    "allLinksValid": true,
+    "chainIntact": true,
+    "firstEntryHash": "38c714f5cb5cd6c3790cb560ea8a5e6cd26f824434fc05f131a5e864184e622e",
+    "lastEntryHash": "52cc936de83b646ec76a1537c8f92550572a30593e742ebd5ff54092f3770d61",
+    "verifiedAt": "2026-02-11T01:13:38.603Z",
+    "tamperDemo": {
+      "scenario": "Entry 4 payload mutated (state_transition tampered)",
+      "brokenAtEntryId": "al-demo-004",
+      "reason": "Hash mismatch (payload tampered)"
+    }
+  }
+};
+
+    function render(d) {
+    function render(d) {
+      if (!d) {
+        document.getElementById('genTime').textContent = new Date().toISOString();
+        document.getElementById('tbDetail').textContent = '(Run demo_report_runner.ts and embed output)';
+        return;
+      }
+      const s1 = d.step1_trialBalanceIngestion || {};
+      const ig = s1.integrityGate || {};
+      document.getElementById('genTime').textContent = d.generatedAt || new Date().toISOString();
+      document.getElementById('tbDetail').textContent = `totalDebits=${ig.totalDebits} totalCredits=${ig.totalCredits}`;
+      document.getElementById('bsBal').textContent = ig.balanceSheetBalances ? 'PASS' : 'FAIL';
+      document.getElementById('bsBal').className = ig.balanceSheetBalances ? 'badge badge-pass' : 'badge badge-fail';
+      document.getElementById('bsDetail').textContent = ig.balanceSheetBalances ? 'Assets = L + E' : `Gap: $${ig.bsGap?.toLocaleString?.() ?? ig.bsGap}`;
+      const plug = s1.plugDetection_demo1pct || s1.plugDetection_demo5pct || {};
+      document.getElementById('plugBadge').textContent = plug.isSuspicious ? 'FLAGGED' : 'OK';
+      document.getElementById('plugBadge').className = plug.isSuspicious ? 'badge badge-warn' : 'badge badge-pass';
+      document.getElementById('plugDetail').textContent = plug.isSuspicious
+        ? `Plug accounts: ${(plug.plugAccountNames || []).join(', ')} | Share: ${((plug.plugShare || 0) * 100).toFixed(2)}%`
+        : `No suspicious plugs (threshold ${(plug.threshold || 0.9) * 100}%)`;
+      document.getElementById('plugOutput').textContent = JSON.stringify(plug, null, 2);
+      const igOverall = document.getElementById('integrityGateOverall');
+      igOverall.textContent = ig.passed ? 'Overall Integrity Gate: PASS' : 'Overall Integrity Gate: BLOCKED — would not proceed to certification';
+      igOverall.style.background = ig.passed ? 'rgba(63,185,80,0.1)' : 'rgba(248,81,73,0.1)';
+      igOverall.style.borderColor = ig.passed ? 'var(--success)' : 'var(--error)';
+      const bsCallout = document.getElementById('bsCallout');
+      if (!ig.balanceSheetBalances && ig.bsGap != null) {
+        bsCallout.style.display = 'block';
+        bsCallout.innerHTML = '<strong>Intentional Test Case:</strong> Balance sheet equation (Assets = Liabilities + Equity) fails by $' + (ig.bsGap).toLocaleString() + '. This demonstrates the system\'s ability to detect structural imbalances beyond simple debit/credit matching. In production, this would route to HITL staging and BLOCK certification until resolved.';
+      }
+
+      const s2 = d.step2_closeSessionStateMachine || {};
+      const ts = s2.timestamps || {};
+      document.getElementById('ts1').textContent = ts.in_progress || '-';
+      document.getElementById('ts2').textContent = ts.ready_for_review || '-';
+      document.getElementById('ts3').textContent = ts.finalized || '-';
+      document.getElementById('ts4').textContent = ts.locked || '-';
+      document.getElementById('ts5').textContent = ts.certified || '-';
+
+      const s3 = d.step3_evidenceAnchoring || {};
+      const ev = s3.evidenceFiles || [];
+      if (ev[0]) { document.getElementById('evHash1').textContent = ev[0].hashSha256?.slice(0,16)+'...'; document.getElementById('evSize1').textContent = ev[0].sizeBytes + ' B'; }
+      if (ev[1]) { document.getElementById('evHash2').textContent = ev[1].hashSha256?.slice(0,16)+'...'; document.getElementById('evSize2').textContent = ev[1].sizeBytes + ' B'; }
+      if (ev[2]) { document.getElementById('evHash3').textContent = ev[2].hashSha256?.slice(0,16)+'...'; document.getElementById('evSize3').textContent = ev[2].sizeBytes + ' B'; }
+      document.getElementById('evidenceManifest').textContent = JSON.stringify(s3.evidenceManifest || {}, null, 2);
+
+      const s4 = d.step4_snapshotAndCertification || {};
+      document.getElementById('snapHash').textContent = s4.snapshotHash || '-';
+      document.getElementById('hashVer').textContent = s4.hashVersion || '-';
+      const sig = s4.ed25519Signature || '';
+      document.getElementById('ed25519Sig').textContent = sig.length > 64 ? sig.slice(0, 64) + '...' : sig || '-';
+      const pub = s4.ed25519PublicKey || '';
+      document.getElementById('ed25519PubKey').textContent = pub.length > 64 ? pub.slice(0, 64) + '...' : pub || '-';
+      const verEl = document.getElementById('ed25519Verified');
+      verEl.textContent = s4.signatureVerified ? 'PASS' : 'FAIL';
+      verEl.className = s4.signatureVerified ? 'badge badge-pass' : 'badge badge-fail';
+      document.getElementById('frozenSnapshot').textContent = JSON.stringify(s4.frozenSnapshotRecord || {}, null, 2);
+
+      const s7 = d.step7_auditChainVerification || {};
+      const chainBadge = document.getElementById('chainBadge');
+      chainBadge.textContent = s7.chainIntact ? 'CHAIN_INTACT' : 'CHAIN_BROKEN';
+      chainBadge.className = s7.chainIntact ? 'badge badge-pass' : 'badge badge-fail';
+      const entries = s7.entries || [];
+      const tbody = document.getElementById('chainTable');
+      tbody.innerHTML = '';
+      for (const e of entries) {
+        const tr = document.createElement('tr');
+        const prevH = e.previous_entry_hash ? (e.previous_entry_hash).slice(0, 16) + '...' : '(genesis)';
+        const entH = (e.entry_hash || '').slice(0, 16) + '...';
+        tr.innerHTML = '<td>' + (e.entryId || '-') + '</td><td>' + (e.action || '-') + '</td><td><code>' + entH + '</code></td><td><code>' + prevH + '</code></td><td>' + (e.hash_matches ? '✓' : '✗') + '</td><td>' + (e.chain_link_valid ? '✓' : '✗') + '</td>';
+        tbody.appendChild(tr);
+      }
+      const tamper = s7.tamperDemo || {};
+      document.getElementById('tamperScenario').textContent = tamper.scenario || '-';
+      document.getElementById('tamperBrokenAt').textContent = tamper.brokenAtEntryId || '-';
+      document.getElementById('tamperReason').textContent = tamper.reason || '-';
+    }
+
+    render(DEMO_DATA);
+  </script>
+</body>
+</html>

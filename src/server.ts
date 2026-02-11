@@ -7,6 +7,8 @@
 import 'dotenv/config';
 import { assertNoDestructiveInStagingOrProduction } from './db/destructive_guards.js';
 import { applyModeDefaults, getMode } from './lib/runtime_mode.js';
+import { runStartupValidation, printStartupBanner } from './startup_validation.js';
+import { seedDemo } from './scripts/seed_demo.js';
 import { assertDeploymentConfigSafe, printDevModeEnforcementWarning } from './lib/deployment_config_guard.js';
 import { assertSigningKeysInStrictMode } from './lib/cert_signing.js';
 
@@ -20,7 +22,6 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { optionalAuth, requireAuth, attachTenantPool, requireTenantContext, type AuthRequest } from './auth/middleware.js';
 import { isDbConfigured, getPool, queryControl } from './db/index.js';
-import { runMigrations } from './db/migrate.js';
 import authRouter from './routes/auth.js';
 import trialBalanceRouter from './routes/trial-balance/index.js';
 import justificationRouter from './routes/justification.js';
@@ -100,10 +101,19 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Require auth for all other /api routes. In prod/demo ALWAYS require auth (no bypass).
-const useRequireAuth = process.env.REQUIRE_AUTH !== 'false';
+// Require auth for all other /api routes. In demo/production ALWAYS require auth (override REQUIRE_AUTH).
+const useRequireAuth = (() => {
+  const mode = getMode();
+  if (mode === 'prod' || mode === 'demo') {
+    if (process.env.REQUIRE_AUTH === 'false') {
+      console.warn('[FATAL] REQUIRE_AUTH=false is ignored in demo/production. Auth is always enforced.');
+    }
+    return true;
+  }
+  return process.env.REQUIRE_AUTH !== 'false';
+})();
 
-/** For tests: in prod/demo, /api must always use requireAuth (bypass impossible). */
+/** For tests: in demo/production, /api must always use requireAuth (bypass impossible). */
 export function useRequireAuthForApi(): boolean {
   const mode = getMode();
   if (mode === 'prod' || mode === 'demo') return true;
@@ -220,14 +230,10 @@ export function ensureProductionHasDatabase(): void {
 async function start(): Promise<void> {
   assertDeploymentConfigSafe();
   printDevModeEnforcementWarning();
-  ensureProductionHasDatabase();
-  if (isDbConfigured()) {
-    try {
-      await runMigrations();
-    } catch (e) {
-      console.error('Migrations failed:', e);
-      process.exit(1);
-    }
+  await runStartupValidation();
+  printStartupBanner();
+  if (getMode() === 'demo' && isDbConfigured()) {
+    await seedDemo();
   }
   app.listen(PORT, () => {
     console.log(`FinOS Agent API listening on http://localhost:${PORT}`);

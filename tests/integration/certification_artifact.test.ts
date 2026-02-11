@@ -174,21 +174,25 @@ describe('Certification Artifact v1', () => {
     expect(valid).toBe(false);
   });
 
-  it('D) MODE=demo: missing keys causes assertSigningKeysInStrictMode to throw', async () => {
+  it('D) MODE=demo with NODE_ENV=production: missing keys causes assertSigningKeysInStrictMode to throw', async () => {
     const { resetSigningKeysCache } = await import('../../src/lib/cert_signing.js');
     const { resetModeCache } = await import('../../src/lib/runtime_mode.js');
     const origMode = process.env.MODE;
+    const origNodeEnv = process.env.NODE_ENV;
     const origPriv = process.env.CERT_SIGNING_PRIVATE_KEY;
     const origPub = process.env.CERT_SIGNING_PUBLIC_KEY;
     resetSigningKeysCache();
     process.env.MODE = 'demo';
+    process.env.NODE_ENV = 'production';
     delete process.env.CERT_SIGNING_PRIVATE_KEY;
     delete process.env.CERT_SIGNING_PUBLIC_KEY;
     resetModeCache();
 
-    expect(() => assertSigningKeysInStrictMode()).toThrow(/CERT_SIGNING_PRIVATE_KEY/);
+    expect(() => assertSigningKeysInStrictMode()).toThrow(/Ed25519 signing keys required/);
 
     process.env.MODE = origMode;
+    if (origNodeEnv !== undefined) process.env.NODE_ENV = origNodeEnv;
+    else delete process.env.NODE_ENV;
     if (origPriv !== undefined) process.env.CERT_SIGNING_PRIVATE_KEY = origPriv;
     else delete process.env.CERT_SIGNING_PRIVATE_KEY;
     if (origPub !== undefined) process.env.CERT_SIGNING_PUBLIC_KEY = origPub;

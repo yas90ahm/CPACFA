@@ -38,6 +38,7 @@ export function parseCsvToTrialBalance(buffer: Buffer): IngestTrialBalanceResult
     skip_empty_lines: true,
     trim: true,
     relax_column_count: true,
+    bom: true, // strip BOM so first column is not "\ufeffAccountName"
   }) as Record<string, unknown>[];
   if (records.length === 0) return { rows: [], needsAgenticMapping: false };
   const standardized = standardizeColumns(records);

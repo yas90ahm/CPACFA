@@ -33,6 +33,8 @@ export interface EvidenceLinkInManifest {
   assertionType?: string;
   attachedBy: string;
   attachedAt: string;
+  storagePath?: string;
+  verified?: boolean;
 }
 
 /** One journal entry with its evidence links in the manifest. */

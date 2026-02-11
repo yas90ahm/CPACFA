@@ -193,8 +193,11 @@ export function standardizedRowsToTrialBalanceRows(
     let credit = 0;
 
     if (hasDebit && hasCredit) {
-      debit = parseAmount(row[CANONICAL_DEBIT]);
-      credit = parseAmount(row[CANONICAL_CREDIT]);
+      // Parentheses in separate columns: (1000) = 1000 in that column (accounting display convention)
+      const rawDebit = parseAmount(row[CANONICAL_DEBIT]);
+      const rawCredit = parseAmount(row[CANONICAL_CREDIT]);
+      debit = rawDebit >= 0 ? rawDebit : Math.abs(rawDebit);
+      credit = rawCredit >= 0 ? rawCredit : Math.abs(rawCredit);
     } else if (hasAmount) {
       const amt = parseAmount(row[CANONICAL_AMOUNT] ?? row[CANONICAL_PRICE]);
       if (amt >= 0) debit = amt;

@@ -64,6 +64,7 @@ describe('Evidence attachment API', () => {
       .send({
         hashSha256: 'abc123hash',
         sizeBytes: 2048,
+        assertionType: 'bank_support',
         mimeType: 'application/pdf',
         externalUri: 'https://drive.example.com/file/1',
         label: 'Bank statement March',
@@ -113,6 +114,7 @@ describe('Evidence attachment API', () => {
       .send({
         hashSha256: 'hash-after-lock',
         sizeBytes: 1024,
+        assertionType: 'other',
         attachedBy: 'user@test.com',
       });
 
@@ -154,6 +156,7 @@ describe('Evidence attachment API', () => {
       .send({
         hashSha256: 'hash-db-check',
         sizeBytes: 4096,
+        assertionType: 'invoice_support',
         attachedBy: 'user@test.com',
       });
 

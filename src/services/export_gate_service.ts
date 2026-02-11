@@ -19,6 +19,8 @@ import { getUnresolvedConflicts } from './risk_context_store.js';
 import * as conflictsRepo from '../db/repositories/risk_context_conflicts_repository.js';
 import * as auditLedgerRepo from '../db/repositories/audit_ledger_repository.js';
 import { getPeriodExportChecks } from '../db/repositories/period_export_checks_repository.js';
+import { listStoredEvidenceForPeriod } from '../db/repositories/evidence_repository.js';
+import { getEvidenceStorageAdapterAsync, verifyEvidenceIntegrity } from './evidence_storage_service.js';
 
 export const CRITICAL_TAMPER_ALERT = 'CRITICAL_TAMPER_ALERT';
 export const TAMPERING_ATTEMPT_DETECTED = 'TAMPERING_ATTEMPT_DETECTED';
@@ -73,6 +75,21 @@ export async function checkExportGate(input: ExportGateInput): Promise<ExportGat
       alert: CRITICAL_TAMPER_ALERT,
       message: chainResult.message ?? 'Audit ledger chain verification failed; financial export blocked.',
     };
+  }
+
+  if (input.periodLabel) {
+    const storedEvidence = await listStoredEvidenceForPeriod(input.pool, input.tenantId, input.periodLabel);
+    const adapter = await getEvidenceStorageAdapterAsync();
+    for (const ev of storedEvidence) {
+      const verify = await verifyEvidenceIntegrity(adapter, input.tenantId, ev.id, ev.hashSha256);
+      if (!verify.valid) {
+        return {
+          allowed: false,
+          alert: CRITICAL_TAMPER_ALERT,
+          message: `Evidence integrity check failed for ${ev.id}; hash mismatch. Financial export blocked.`,
+        };
+      }
+    }
   }
 
   if (ENABLE_INTEGRATED_SUPERVISOR) {

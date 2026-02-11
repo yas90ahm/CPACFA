@@ -25,9 +25,12 @@ import {
 } from '../../services/journal_entry_service.js';
 import {
   attachEvidenceToJournalEntry,
+  attachEvidenceWithFile,
   EvidenceAttachmentError,
 } from '../../services/evidence_attachment_service.js';
 import * as jeRepo from '../../db/repositories/journal_entry_repository.js';
+import * as evidenceRepo from '../../db/repositories/evidence_repository.js';
+import { getEvidenceStorageAdapterAsync } from '../../services/evidence_storage_service.js';
 import type { JournalEntrySource } from '../../types/journal_entry.js';
 import { executeBridgeCommand } from '../../bridge/index.js';
 import type { AuthRequest } from '../../auth/middleware.js';
@@ -46,9 +49,13 @@ const ATTACHMENT_ALLOWED_MIMES = (
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ];
 
+/** Max file size for JE attachments (20 MB). Configurable via EVIDENCE_ATTACHMENT_MAX_BYTES. */
+const ATTACHMENT_MAX_BYTES =
+  Number(process.env.EVIDENCE_ATTACHMENT_MAX_BYTES) || 20 * 1024 * 1024;
+
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
+  limits: { fileSize: ATTACHMENT_MAX_BYTES },
   fileFilter: (_req, file, cb) => {
     const mime = (file.mimetype ?? '').toLowerCase();
     const ext = (file.originalname ?? '').toLowerCase().split('.').pop();
@@ -59,6 +66,25 @@ const upload = multer({
     else cb(new Error('Allowed attachment types: pdf, png, jpg, jpeg, csv, xlsx only.'));
   },
 });
+
+/** Reject oversized requests before body is read (Content-Length check). */
+function contentLengthLimit(maxBytes: number) {
+  return (req: Request, res: Response, next: import('express').NextFunction): void => {
+    const cl = req.headers['content-length'];
+    if (cl) {
+      const len = parseInt(cl, 10);
+      if (!Number.isNaN(len) && len > maxBytes) {
+        res.status(413).json({
+          error: 'File too large',
+          message: `File too large, maximum ${Math.round(maxBytes / (1024 * 1024))}MB.`,
+        });
+        req.resume();
+        return;
+      }
+    }
+    next();
+  };
+}
 
 /** POST /api/close/journal-entries — create draft JE (via bridge) */
 router.post('/journal-entries', async (req: Request, res: Response) => {
@@ -416,6 +442,75 @@ router.post('/journal-entries/validate-materiality', async (req: Request, res: R
   }
 });
 
+/** POST /api/close/journal-entries/:id/evidence/upload — attach evidence with file upload (multipart) */
+router.post(
+  '/journal-entries/:id/evidence/upload',
+  contentLengthLimit(ATTACHMENT_MAX_BYTES),
+  (req: Request, res: Response, next: import('express').NextFunction) => {
+    upload.single('file')(req, res, (err: unknown) => {
+      if (err) {
+        const code = (err as { code?: string })?.code;
+        const message = err instanceof Error ? err.message : String(err);
+        if (code === 'LIMIT_FILE_SIZE') {
+          res.status(413).json({
+            error: 'File too large',
+            message: `File too large, maximum ${Math.round(ATTACHMENT_MAX_BYTES / (1024 * 1024))}MB.`,
+          });
+          return;
+        }
+        if (message.includes('Allowed attachment types')) {
+          res.status(400).json({ error: message });
+          return;
+        }
+        next(err);
+        return;
+      }
+      next();
+    });
+  },
+  async (req: Request, res: Response) => {
+    try {
+      const pool = getTenantPool(req);
+      const tenantId = getTenantId(req);
+      if (!pool || !tenantId) {
+        res.status(400).json({ error: 'Tenant context required' });
+        return;
+      }
+      const id = req.params.id ?? '';
+      const file = (req as Request & { file?: { buffer: Buffer; originalname?: string; mimetype?: string } }).file;
+      if (!file?.buffer) {
+        res.status(400).json({ error: 'file (multipart) required' });
+        return;
+      }
+      const body = req.body as { assertionType?: string; role?: string; requiredness?: 'optional' | 'required'; label?: string };
+      const validAssertionTypes = ['invoice_support', 'bank_support', 'reconciliation', 'approval', 'contract_support', 'calc_support', 'other'];
+      const assertionType = body?.assertionType ?? 'other';
+      if (!validAssertionTypes.includes(assertionType)) {
+        res.status(400).json({ error: 'assertionType must be one of: ' + validAssertionTypes.join(', ') });
+        return;
+      }
+      const attachedBy = (req as AuthRequest).userId ?? 'anonymous';
+      const result = await attachEvidenceWithFile(pool, tenantId, id, {
+        buffer: file.buffer,
+        mimeType: file.mimetype,
+        originalFilename: file.originalname,
+        assertionType: assertionType as import('../../types/evidence.js').AssertionType,
+        role: body?.role ?? 'support',
+        requiredness: body?.requiredness ?? 'optional',
+        attachedBy,
+      });
+      res.status(201).json(result);
+    } catch (e) {
+      if (e instanceof EvidenceAttachmentError) {
+        const status = e.code === 'NOT_FOUND' ? 404 : e.code === 'PERIOD_LOCKED' ? 409 : 400;
+        res.status(status).json({ error: e.message, code: e.code });
+        return;
+      }
+      send500(res, e, 'Evidence upload failed');
+    }
+  }
+);
+
 /** POST /api/close/journal-entries/:id/evidence — attach evidence (proof + reference metadata only; no file storage) */
 router.post('/journal-entries/:id/evidence', async (req: Request, res: Response) => {
   try {
@@ -480,7 +575,71 @@ router.post('/journal-entries/:id/evidence', async (req: Request, res: Response)
 });
 
 /** POST /api/close/journal-entries/:id/attachments — add attachment (multipart file or body.fileRef) */
-router.post('/journal-entries/:id/attachments', upload.single('file'), async (req: Request, res: Response) => {
+router.post(
+  '/journal-entries/:id/attachments',
+  contentLengthLimit(ATTACHMENT_MAX_BYTES),
+  (req: Request, res: Response, next: import('express').NextFunction) => {
+    upload.single('file')(req, res, (err: unknown) => {
+      if (err) {
+        const code = (err as { code?: string })?.code;
+        const message = err instanceof Error ? err.message : String(err);
+        if (code === 'LIMIT_FILE_SIZE') {
+          res.status(413).json({
+            error: 'File too large',
+            message: `File too large, maximum ${Math.round(ATTACHMENT_MAX_BYTES / (1024 * 1024))}MB.`,
+          });
+          return;
+        }
+        if (message.includes('Allowed attachment types')) {
+          res.status(400).json({ error: message });
+          return;
+        }
+        next(err);
+        return;
+      }
+      next();
+    });
+  },
+  async (req: Request, res: Response) => {
+    try {
+      const pool = getTenantPool(req);
+      const tenantId = getTenantId(req);
+      if (!pool || !tenantId) {
+        res.status(400).json({ error: 'Tenant context required' });
+        return;
+      }
+      const id = req.params.id ?? '';
+      let fileRef: string;
+      const file = (req as Request & { file?: { buffer: Buffer; originalname?: string; mimetype?: string } }).file;
+      if (file?.buffer) {
+        const ext = (file.originalname && /\.\w+$/.test(file.originalname))
+          ? file.originalname.replace(/^.*\./, '')
+          : 'bin';
+        const key = `${tenantId}/attachments/je/${id}/${randomUUID()}.${ext}`;
+        await getStorage().putObject(key, file.buffer, { contentType: file.mimetype });
+        fileRef = key;
+      } else {
+        const body = req.body as { fileRef?: string };
+        if (!body?.fileRef) {
+          res.status(400).json({ error: 'file (multipart) or fileRef required' });
+          return;
+        }
+        fileRef = body.fileRef;
+      }
+      const attachment = await addJEAttachment(pool, tenantId, id, fileRef);
+      res.status(201).json(attachment);
+    } catch (e) {
+      if (e instanceof JournalEntryError) {
+        res.status(e.code === 'NOT_FOUND' ? 404 : 400).json({ error: e.message });
+        return;
+      }
+      send500(res, e, 'Add JE attachment failed');
+    }
+  }
+);
+
+/** GET /api/close/journal-entries/:jeId/evidence/:evidenceId/download — stream evidence file from storage */
+router.get('/journal-entries/:jeId/evidence/:evidenceId/download', async (req: Request, res: Response) => {
   try {
     const pool = getTenantPool(req);
     const tenantId = getTenantId(req);
@@ -488,32 +647,36 @@ router.post('/journal-entries/:id/attachments', upload.single('file'), async (re
       res.status(400).json({ error: 'Tenant context required' });
       return;
     }
-    const id = req.params.id ?? '';
-    let fileRef: string;
-    const file = (req as Request & { file?: { buffer: Buffer; originalname?: string; mimetype?: string } }).file;
-    if (file?.buffer) {
-      const ext = (file.originalname && /\.\w+$/.test(file.originalname))
-        ? file.originalname.replace(/^.*\./, '')
-        : 'bin';
-      const key = `${tenantId}/attachments/je/${id}/${randomUUID()}.${ext}`;
-      await getStorage().putObject(key, file.buffer, { contentType: file.mimetype });
-      fileRef = key;
-    } else {
-      const body = req.body as { fileRef?: string };
-      if (!body?.fileRef) {
-        res.status(400).json({ error: 'file (multipart) or fileRef required' });
-        return;
-      }
-      fileRef = body.fileRef;
-    }
-    const attachment = await addJEAttachment(pool, tenantId, id, fileRef);
-    res.status(201).json(attachment);
-  } catch (e) {
-    if (e instanceof JournalEntryError) {
-      res.status(e.code === 'NOT_FOUND' ? 404 : 400).json({ error: e.message });
+    const jeId = req.params.jeId ?? '';
+    const evidenceId = req.params.evidenceId ?? '';
+    const evidence = await evidenceRepo.getEvidenceById(pool, tenantId, evidenceId);
+    if (!evidence) {
+      res.status(404).json({ error: 'Evidence not found' });
       return;
     }
-    send500(res, e, 'Add JE attachment failed');
+    const linked = await evidenceRepo.isEvidenceLinkedToJournalEntry(pool, tenantId, evidenceId, jeId);
+    if (!linked) {
+      res.status(404).json({ error: 'Evidence not found for this journal entry' });
+      return;
+    }
+    if (!evidence.storagePath) {
+      res.status(404).json({ error: 'Evidence file not stored (metadata-only)' });
+      return;
+    }
+    const adapter = await getEvidenceStorageAdapterAsync();
+    const result = await adapter.retrieve(tenantId, evidenceId);
+    if (!result) {
+      res.status(404).json({ error: 'Evidence file not found in storage' });
+      return;
+    }
+    const contentType = result.metadata.mimeType ?? 'application/octet-stream';
+    const filename = evidence.originalFilename ?? result.metadata.originalFilename ?? `evidence-${evidenceId}`;
+    const safeFilename = filename.replace(/[^\w.-]/g, '_');
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
+    res.send(result.buffer);
+  } catch (e) {
+    send500(res, e, 'Download evidence failed');
   }
 });
 

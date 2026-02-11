@@ -1,21 +1,35 @@
 /**
- * Runtime mode: single top-level MODE = "dev" | "demo" | "prod"
- * Derives defaults for security/behavior flags from MODE.
+ * Runtime mode: APP_MODE = "development" | "demo" | "production" (primary),
+ * or legacy MODE = "dev" | "demo" | "prod".
+ * Derives defaults for security/behavior flags.
  * In prod/demo, overrides that reduce security posture are forbidden.
- * In dev, overrides allowed but logged.
+ * In development, overrides allowed but logged.
  */
 
 export type RuntimeMode = 'dev' | 'demo' | 'prod';
 
 const VALID_MODES: RuntimeMode[] = ['dev', 'demo', 'prod'];
 
+/** APP_MODE values; maps to RuntimeMode. */
+export type AppMode = 'development' | 'demo' | 'production';
+
+const APP_MODE_TO_RUNTIME: Record<string, RuntimeMode> = {
+  development: 'dev',
+  demo: 'demo',
+  production: 'prod',
+};
+
 let _resolvedMode: RuntimeMode | null = null;
 
 /**
- * Parse MODE from env. Default: NODE_ENV=production => 'prod', else 'dev'.
- * MODE env var overrides: MODE=demo|prod|dev.
+ * Parse mode from env. APP_MODE (development|demo|production) takes precedence.
+ * Fallback: MODE (dev|demo|prod), then NODE_ENV=production => 'prod', else 'dev'.
  */
 function parseMode(): RuntimeMode {
+  const appMode = process.env.APP_MODE?.toLowerCase().trim() ?? '';
+  const mapped = appMode ? APP_MODE_TO_RUNTIME[appMode] : undefined;
+  if (mapped) return mapped;
+
   const raw = process.env.MODE?.toLowerCase().trim();
   if (raw && VALID_MODES.includes(raw as RuntimeMode)) {
     return raw as RuntimeMode;
@@ -24,6 +38,14 @@ function parseMode(): RuntimeMode {
     return 'prod';
   }
   return 'dev';
+}
+
+/** Current APP_MODE string (development | demo | production). */
+export function getAppMode(): AppMode {
+  const m = getMode();
+  if (m === 'dev') return 'development';
+  if (m === 'demo') return 'demo';
+  return 'production';
 }
 
 /** Get the resolved runtime mode (after applyModeDefaults). */
@@ -110,8 +132,10 @@ export function applyModeDefaults(): ModeConfig {
 
     // Fail fast: prod/demo cannot run with reduced security
     if (process.env.REQUIRE_AUTH === 'false') {
+      const appModeStr = mode === 'prod' ? 'production' : 'demo';
+      console.warn(`[FATAL] APP_MODE=${appModeStr}: REQUIRE_AUTH=false is not allowed. Auth is always enforced.`);
       throw new Error(
-        `[FATAL] MODE=${mode}: REQUIRE_AUTH must not be false. Refusing to start.`
+        `[FATAL] APP_MODE=${appModeStr}: REQUIRE_AUTH must not be false. Refusing to start.`
       );
     }
     if (process.env.REQUIRE_TENANT_CONTEXT === 'false') {
@@ -149,7 +173,7 @@ export function applyModeDefaults(): ModeConfig {
 
     if (mode === 'demo') {
       console.warn('\n╔══════════════════════════════════════════════════════════════╗');
-      console.warn('║  DEMO MODE (STRICT) — Auth and tenant context enforced       ║');
+      console.warn('║  Running in DEMO mode — auth enforced, demo user seeded      ║');
       console.warn('╚══════════════════════════════════════════════════════════════╝\n');
     }
 

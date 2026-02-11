@@ -1,10 +1,15 @@
 /**
  * Evidence attachment service — attach evidence to journal entries.
- * No file storage; stores proof + reference metadata only.
+ * Supports metadata-only (external) and file-upload (storage) evidence.
  * Enforces period lock / certified session rules.
  */
 
+import { randomUUID } from 'crypto';
 import type { Pool } from 'pg';
+import {
+  getEvidenceStorageAdapterAsync,
+  computeSha256,
+} from './evidence_storage_service.js';
 import * as jeRepo from '../db/repositories/journal_entry_repository.js';
 import * as closeSessionRepo from '../db/repositories/close_session_repository.js';
 import {
@@ -31,6 +36,8 @@ export interface AttachEvidenceInput {
   claimedCurrency?: string;
   claimedPeriod?: string;
   note?: string;
+  storagePath?: string;
+  originalFilename?: string;
 }
 
 export interface AttachEvidenceResult {
@@ -98,6 +105,8 @@ export async function attachEvidenceToJournalEntry(
     externalProvider: input.externalProvider,
     label: input.label,
     attachedBy: input.attachedBy,
+    storagePath: input.storagePath,
+    originalFilename: input.originalFilename,
   });
 
   const link = await linkEvidenceToJournalEntry(pool, tenantId, {
@@ -123,6 +132,115 @@ export async function attachEvidenceToJournalEntry(
       evidenceId: record.id,
       linkId: link.id,
       hashSha256: input.hashSha256,
+    },
+    createdBy: input.attachedBy,
+  });
+
+  return {
+    evidenceId: record.id,
+    linkId: link.id,
+  };
+}
+
+export interface AttachEvidenceWithFileInput {
+  buffer: Buffer;
+  mimeType?: string;
+  originalFilename?: string;
+  assertionType: AssertionType;
+  role?: string;
+  requiredness?: 'optional' | 'required';
+  attachedBy: string;
+  claimedAmount?: string;
+  claimedCurrency?: string;
+  claimedPeriod?: string;
+  note?: string;
+}
+
+/**
+ * Attach evidence with file upload: compute hash, store file, create record, link to JE.
+ */
+export async function attachEvidenceWithFile(
+  pool: Pool,
+  tenantId: string,
+  journalEntryId: string,
+  input: AttachEvidenceWithFileInput
+): Promise<AttachEvidenceResult> {
+  const je = await jeRepo.getJournalEntryById(pool, journalEntryId, tenantId);
+  if (!je) {
+    throw new EvidenceAttachmentError('Journal entry not found', 'NOT_FOUND');
+  }
+
+  const session = await closeSessionRepo.getCloseSessionById(pool, tenantId, je.closeSessionId);
+  if (!session) {
+    throw new EvidenceAttachmentError('Close session not found for journal entry', 'NOT_FOUND');
+  }
+
+  if (BLOCKED_SESSION_STATUSES.includes(session.status as CloseSessionStatus)) {
+    throw new EvidenceAttachmentError(
+      `Cannot attach evidence: close session is ${session.status}`,
+      'PERIOD_LOCKED'
+    );
+  }
+
+  const periodLabel = session.periodEnd?.slice(0, 7);
+  if (periodLabel) {
+    const locked = await isPeriodLocked(periodLabel, tenantId, pool);
+    if (locked) {
+      throw new EvidenceAttachmentError(
+        `Cannot attach evidence: period ${periodLabel} is locked`,
+        'PERIOD_LOCKED'
+      );
+    }
+  }
+
+  const hashSha256 = computeSha256(input.buffer);
+  const sizeBytes = input.buffer.length;
+  const evidenceId = randomUUID();
+  const adapter = await getEvidenceStorageAdapterAsync();
+  const { storagePath } = await adapter.store(
+    tenantId,
+    evidenceId,
+    input.buffer,
+    {
+      mimeType: input.mimeType,
+      originalFilename: input.originalFilename,
+    }
+  );
+  const record = await createEvidenceRecord(
+    pool,
+    tenantId,
+    {
+      hashSha256,
+      sizeBytes,
+      mimeType: input.mimeType,
+      attachedBy: input.attachedBy,
+      storagePath,
+      originalFilename: input.originalFilename,
+    },
+    { id: evidenceId }
+  );
+  const link = await linkEvidenceToJournalEntry(pool, tenantId, {
+    evidenceId: record.id,
+    objectType: 'journal_entry',
+    objectId: journalEntryId,
+    assertionType: input.assertionType,
+    role: input.role ?? 'support',
+    requiredness: input.requiredness ?? 'optional',
+    createdBy: input.attachedBy,
+    claimedAmount: input.claimedAmount,
+    claimedCurrency: input.claimedCurrency,
+    claimedPeriod: input.claimedPeriod,
+    note: input.note,
+  });
+  await recordMaterialEvent(pool, {
+    tenantId,
+    periodLabel: periodLabel ?? undefined,
+    eventType: 'evidence_link',
+    deterministicFlagSnapshot: {
+      journalEntryId,
+      evidenceId: record.id,
+      linkId: link.id,
+      hashSha256,
     },
     createdBy: input.attachedBy,
   });

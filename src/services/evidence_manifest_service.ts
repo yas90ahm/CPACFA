@@ -15,6 +15,7 @@ import type {
 } from '../types/ledger_snapshot.js';
 import { listJournalEntries } from '../db/repositories/journal_entry_repository.js';
 import { listEvidenceForCloseSession } from '../db/repositories/evidence_repository.js';
+import { getEvidenceStorageAdapterAsync, verifyEvidenceIntegrity } from './evidence_storage_service.js';
 
 /**
  * Build evidence manifest for a close session.
@@ -31,15 +32,22 @@ export async function buildEvidenceManifest(
     listEvidenceForCloseSession(client as Pool, tenantId, closeSessionId),
   ]);
 
+  const adapter = await getEvidenceStorageAdapterAsync();
   const evidenceByJe = new Map<string, EvidenceLinkInManifest[]>();
   for (const e of evidenceList) {
     const jeId = e.link.objectId;
+    let verified = false;
+    if (e.storagePath) {
+      const verify = await verifyEvidenceIntegrity(adapter, tenantId, e.id, e.hashSha256);
+      verified = verify.valid;
+    }
     const link: EvidenceLinkInManifest = {
       evidenceId: e.id,
       hashSha256: e.hashSha256,
       sizeBytes: e.sizeBytes,
       attachedBy: e.attachedBy,
       attachedAt: e.attachedAt,
+      verified,
       ...(e.mimeType != null && { mimeType: e.mimeType }),
       ...(e.externalUri != null && { externalUri: e.externalUri }),
       ...(e.externalProvider != null && { externalProvider: e.externalProvider }),
@@ -47,6 +55,7 @@ export async function buildEvidenceManifest(
       ...(e.link.role != null && { role: e.link.role }),
       ...(e.link.requiredness != null && { requiredness: e.link.requiredness }),
       ...(e.link.assertionType != null && { assertionType: e.link.assertionType }),
+      ...(e.storagePath != null && { storagePath: e.storagePath }),
     };
     const arr = evidenceByJe.get(jeId) ?? [];
     arr.push(link);

@@ -27,6 +27,8 @@ interface EvidenceRecordRow {
   attached_by: string;
   attached_at: string;
   integrity_version: string;
+  storage_path: string | null;
+  original_filename: string | null;
 }
 
 interface EvidenceLinkRow {
@@ -59,6 +61,8 @@ function rowToRecord(row: EvidenceRecordRow): EvidenceRecord {
     attachedBy: row.attached_by,
     attachedAt: row.attached_at,
     integrityVersion: row.integrity_version,
+    storagePath: row.storage_path ?? undefined,
+    originalFilename: row.original_filename ?? undefined,
   };
 }
 
@@ -84,14 +88,15 @@ function rowToLink(row: EvidenceLinkRow): EvidenceLink {
 export async function createEvidenceRecord(
   pool: Pool,
   tenantId: string,
-  input: CreateEvidenceRecordInput
+  input: CreateEvidenceRecordInput,
+  options?: { id?: string }
 ): Promise<EvidenceRecord> {
-  const id = randomUUID();
+  const id = options?.id ?? randomUUID();
   await pool.query(
     `INSERT INTO evidence_records (
       id, tenant_id, hash_sha256, size_bytes, mime_type, external_uri, external_provider,
-      label, attached_by, attached_at, integrity_version
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), 'v1')`,
+      label, attached_by, attached_at, integrity_version, storage_path, original_filename
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), 'v1', $10, $11)`,
     [
       id,
       tenantId,
@@ -102,11 +107,13 @@ export async function createEvidenceRecord(
       input.externalProvider ?? null,
       input.label ?? null,
       input.attachedBy,
+      input.storagePath ?? null,
+      input.originalFilename ?? null,
     ]
   );
   const r = await pool.query<EvidenceRecordRow>(
     `SELECT id, tenant_id, hash_sha256, size_bytes::text, mime_type, external_uri, external_provider,
-            label, attached_by, attached_at, integrity_version
+            label, attached_by, attached_at, integrity_version, storage_path, original_filename
      FROM evidence_records WHERE id = $1 AND tenant_id = $2`,
     [id, tenantId]
   );
@@ -203,6 +210,37 @@ function mapRowToLink(
   };
 }
 
+/** Get evidence record by id and tenant. Returns null if not found. */
+export async function getEvidenceById(
+  pool: Pool,
+  tenantId: string,
+  evidenceId: string
+): Promise<EvidenceRecord | null> {
+  const r = await pool.query<EvidenceRecordRow>(
+    `SELECT id, tenant_id, hash_sha256, size_bytes::text, mime_type, external_uri, external_provider,
+            label, attached_by, attached_at, integrity_version, storage_path, original_filename
+     FROM evidence_records WHERE id = $1 AND tenant_id = $2`,
+    [evidenceId, tenantId]
+  );
+  if (r.rows.length === 0) return null;
+  return rowToRecord(r.rows[0]);
+}
+
+/** Check if evidence is linked to the given journal entry (tenant-scoped). */
+export async function isEvidenceLinkedToJournalEntry(
+  pool: Pool,
+  tenantId: string,
+  evidenceId: string,
+  journalEntryId: string
+): Promise<boolean> {
+  const r = await pool.query<{ count: string }>(
+    `SELECT COUNT(*)::text FROM evidence_links
+     WHERE tenant_id = $1 AND evidence_id = $2 AND object_type = 'journal_entry' AND object_id = $3`,
+    [tenantId, evidenceId, journalEntryId]
+  );
+  return parseInt(r.rows[0]?.count ?? '0', 10) > 0;
+}
+
 export async function listEvidenceForJournalEntry(
   pool: Pool,
   tenantId: string,
@@ -227,6 +265,7 @@ export async function listEvidenceForJournalEntry(
   >(
     `SELECT er.id, er.tenant_id, er.hash_sha256, er.size_bytes::text, er.mime_type, er.external_uri,
             er.external_provider, er.label, er.attached_by, er.attached_at, er.integrity_version,
+            er.storage_path, er.original_filename,
             el.id AS link_id, el.evidence_id AS link_evidence_id, el.object_type AS link_object_type,
             el.object_id AS link_object_id, el.role AS link_role, el.requiredness AS link_requiredness,
             el.created_by AS link_created_by, el.created_at AS link_created_at,
@@ -269,6 +308,7 @@ export async function listEvidenceForCloseSession(
   >(
     `SELECT er.id, er.tenant_id, er.hash_sha256, er.size_bytes::text, er.mime_type, er.external_uri,
             er.external_provider, er.label, er.attached_by, er.attached_at, er.integrity_version,
+            er.storage_path, er.original_filename,
             el.id AS link_id, el.evidence_id AS link_evidence_id, el.object_type AS link_object_type,
             el.object_id AS link_object_id, el.role AS link_role, el.requiredness AS link_requiredness,
             el.created_by AS link_created_by, el.created_at AS link_created_at,
@@ -286,6 +326,28 @@ export async function listEvidenceForCloseSession(
     ...rowToRecord(row),
     link: mapRowToLink(row, tenantId),
   }));
+}
+
+/** List evidence records with storage_path linked to JEs in close sessions for the given period (YYYY-MM). */
+export async function listStoredEvidenceForPeriod(
+  pool: Pool,
+  tenantId: string,
+  periodLabel: string
+): Promise<EvidenceRecord[]> {
+  const r = await pool.query<EvidenceRecordRow>(
+    `SELECT DISTINCT er.id, er.tenant_id, er.hash_sha256, er.size_bytes::text, er.mime_type,
+            er.external_uri, er.external_provider, er.label, er.attached_by, er.attached_at,
+            er.integrity_version, er.storage_path, er.original_filename
+     FROM evidence_records er
+     JOIN evidence_links el ON el.evidence_id = er.id AND el.tenant_id = er.tenant_id
+     JOIN journal_entries je ON je.id = el.object_id AND je.tenant_id = el.tenant_id
+     JOIN close_sessions cs ON cs.id = je.close_session_id AND cs.tenant_id = je.tenant_id
+     WHERE er.tenant_id = $1
+       AND er.storage_path IS NOT NULL AND er.storage_path != ''
+       AND (cs.period_end::text LIKE $2 OR cs.period_start::text LIKE $2)`,
+    [tenantId, `${periodLabel}%`]
+  );
+  return r.rows.map(rowToRecord);
 }
 
 /** Returns mapping of journal entry ID -> assertion types of linked evidence. */

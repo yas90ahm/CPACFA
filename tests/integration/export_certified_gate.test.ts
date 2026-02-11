@@ -9,7 +9,7 @@ import request from 'supertest';
 import { describe, it, expect, beforeAll } from '@jest/globals';
 import { app } from '../../src/server.js';
 import { getTestAuthToken } from '../helpers/testHelpers.js';
-import { isDbConfigured, getTenantPool } from '../../src/db/index.js';
+import { isDbConfigured, getTenantPool, queryControl } from '../../src/db/index.js';
 import * as closeSessionRepo from '../../src/db/repositories/close_session_repository.js';
 import { createSnapshotFromTrialBalanceAndEntries } from '../../src/services/ledger_snapshot_service.js';
 
@@ -19,6 +19,7 @@ describe('Export certified gate', () => {
   let authToken: string;
   let closeSessionIdLocked: string | undefined;
   let closeSessionIdCertified: string | undefined;
+  let entityId: string;
 
   beforeAll(async () => {
     if (!isDbConfigured()) {
@@ -26,13 +27,18 @@ describe('Export certified gate', () => {
       return;
     }
     authToken = getTestAuthToken(TEST_TENANT_ID);
+    entityId = `entity-export-gate-${Date.now()}`;
+    await queryControl(
+      'INSERT INTO tenants (id, name, database_url) VALUES ($1, $2, NULL) ON CONFLICT (id) DO NOTHING',
+      [TEST_TENANT_ID, `Test ${TEST_TENANT_ID}`]
+    );
     try {
       const pool = await getTenantPool(TEST_TENANT_ID);
       const locked = await closeSessionRepo.insertCloseSession(
         pool,
         `sess-locked-${Date.now()}`,
         TEST_TENANT_ID,
-        'entity-1',
+        entityId,
         '2025-01-01',
         '2025-01-31',
         'accrual',
@@ -44,7 +50,7 @@ describe('Export certified gate', () => {
         pool,
         `sess-cert-${Date.now()}`,
         TEST_TENANT_ID,
-        'entity-1',
+        entityId,
         '2025-02-01',
         '2025-02-28',
         'accrual',
