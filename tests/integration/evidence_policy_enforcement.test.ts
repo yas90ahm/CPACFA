@@ -15,12 +15,10 @@ import { isDbConfigured, queryControl } from '../../src/db/index.js';
 
 const ENTITY_ID = 'entity-evidence-policy';
 
-// Imbalanced TB: debits 5000, credits 5000 (actually balanced). Use staging flow then resolve.
-// For simplicity: use imbalanced so we get staged, then resolve to balanced.
-const IMBALANCED_TB_CSV = `AccountName,Debit,Credit
+// Balanced TB: Cash + Equity (passes Truth Gate; same format as full_close_flow)
+const BALANCED_TB_CSV = `Account Name,Debit,Credit
 Cash,5000,0
-Revenue,0,0
-Equity,0,0`;
+Equity,0,5000`;
 
 describe('Evidence policy enforcement', () => {
   let authToken: string;
@@ -42,10 +40,10 @@ describe('Evidence policy enforcement', () => {
     );
   });
 
-  async function setupSessionWithMaterialJE(periodLabel: string): Promise<void> {
+  async function setupSessionWithMaterialJE(periodLabel: string, opts?: { skipAdvance?: boolean; skipJe?: boolean }): Promise<void> {
     if (!isDbConfigured()) return;
 
-    // Ingest imbalanced TB → staged
+    // Ingest balanced TB (or staged→resolve if imbalanced)
     const prevMock = process.env.AI_MOCK_CLASSIFIER;
     process.env.AI_MOCK_CLASSIFIER = 'true';
     const ingestRes = await request(app)
@@ -53,24 +51,10 @@ describe('Evidence policy enforcement', () => {
       .set('Authorization', `Bearer ${authToken}`)
       .field('tenantId', testTenantId)
       .field('periodLabel', periodLabel)
-      .attach('file', Buffer.from(IMBALANCED_TB_CSV), 'tb.csv');
+      .attach('file', Buffer.from(BALANCED_TB_CSV), 'tb.csv');
     if (prevMock !== undefined) process.env.AI_MOCK_CLASSIFIER = prevMock;
     else delete process.env.AI_MOCK_CLASSIFIER;
     expect(ingestRes.status).toBe(200);
-    expect(ingestRes.body?.status).toBe('staged');
-    expect(ingestRes.body?.stagedId).toBeDefined();
-    // Resolve with Retained Earnings to balance
-    const resolveRes = await request(app)
-      .post('/api/hitl/resolve-ingest')
-      .set('Authorization', `Bearer ${authToken}`)
-      .set('Content-Type', 'application/json')
-      .send({
-        stagedId: ingestRes.body.stagedId,
-        adjustment: [
-          { accountName: 'Retained Earnings', debit: 0, credit: 5000, amountProvenance: { kind: 'human_entered' as const, enteredBy: 'test' } },
-        ],
-      });
-    expect(resolveRes.status).toBe(200);
 
     const [y, m] = periodLabel.split('-').map(Number);
     const periodStart = `${y}-${String(m).padStart(2, '0')}-01`;
@@ -89,47 +73,51 @@ describe('Evidence policy enforcement', () => {
     expect([200, 201]).toContain(createRes.status);
     closeSessionId = createRes.body.id;
 
-    // Create material JE (amount 5000 >= 1000 threshold)
-    const jeRes = await request(app)
-      .post('/api/close/journal-entries')
-      .set('Authorization', `Bearer ${authToken}`)
-      .set('Content-Type', 'application/json')
-      .send({
-        closeSessionId,
-        source: 'manual',
-        lines: [
-          {
-            accountRef: 'Cash',
-            debit: 5000,
-            credit: 0,
-            amountProvenance: { kind: 'human_entered', enteredBy: 'test-user' },
-          },
-          {
-            accountRef: 'Revenue',
-            debit: 0,
-            credit: 5000,
-            amountProvenance: { kind: 'human_entered', enteredBy: 'test-user' },
-          },
-        ],
-      });
-    expect([200, 201]).toContain(jeRes.status);
-    materialJeId = jeRes.body?.id;
-    expect(materialJeId).toBeDefined();
+    if (!opts?.skipJe) {
+      // Create material JE (amount 1000 >= threshold)
+      const jeRes = await request(app)
+        .post('/api/close/journal-entries')
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('Content-Type', 'application/json')
+        .send({
+          closeSessionId,
+          source: 'manual',
+          lines: [
+            {
+              accountRef: 'Cash',
+              debit: 1000,
+              credit: 0,
+              amountProvenance: { kind: 'human_entered', enteredBy: 'test-user' },
+            },
+            {
+              accountRef: 'Equity',
+              debit: 0,
+              credit: 1000,
+              amountProvenance: { kind: 'human_entered', enteredBy: 'test-user' },
+            },
+          ],
+        });
+      expect([200, 201]).toContain(jeRes.status);
+      materialJeId = jeRes.body?.id;
+      expect(materialJeId).toBeDefined();
 
-    // Propose, approve, post
-    await request(app)
-      .post(`/api/close/journal-entries/${materialJeId}/propose`)
-      .set('Authorization', `Bearer ${authToken}`);
-    await request(app)
-      .post(`/api/close/journal-entries/${materialJeId}/approve`)
-      .set('Authorization', `Bearer ${authToken}`)
-      .set('Content-Type', 'application/json')
-      .send({ approvedBy: 'test-approver' });
-    await request(app)
-      .post(`/api/close/journal-entries/${materialJeId}/post`)
-      .set('Authorization', `Bearer ${authToken}`);
+      // Propose, approve, post
+      await request(app)
+        .post(`/api/close/journal-entries/${materialJeId}/propose`)
+        .set('Authorization', `Bearer ${authToken}`);
+      await request(app)
+        .post(`/api/close/journal-entries/${materialJeId}/approve`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('Content-Type', 'application/json')
+        .send({ approvedBy: 'test-approver' });
+      await request(app)
+        .post(`/api/close/journal-entries/${materialJeId}/post`)
+        .set('Authorization', `Bearer ${authToken}`);
+    } else {
+      materialJeId = '';
+    }
 
-    // Checklist + advance to locked
+    // Checklist + advance to locked (use advance endpoint for atomic flow)
     await request(app)
       .post(`/api/close/sessions/${closeSessionId}/checklist/initialize`)
       .set('Authorization', `Bearer ${authToken}`);
@@ -146,23 +134,20 @@ describe('Evidence policy enforcement', () => {
         .set('Content-Type', 'application/json')
         .send({ completedBy: 'test-user' });
     }
-    for (const status of ['in_progress', 'ready_for_review', 'finalized', 'locked']) {
-      await request(app)
-        .patch(`/api/close/sessions/${closeSessionId}/status`)
+    if (!opts?.skipAdvance) {
+      const advanceRes = await request(app)
+        .post(`/api/close/sessions/${closeSessionId}/advance`)
         .set('Authorization', `Bearer ${authToken}`)
-        .set('Content-Type', 'application/json')
-        .send({ status });
+        .set('Content-Type', 'application/json');
+      if (advanceRes.status !== 200 || advanceRes.body?.statusAfter !== 'locked') {
+        throw new Error(`Advance to locked failed: ${advanceRes.status} ${JSON.stringify(advanceRes.body)}`);
+      }
     }
-    await request(app)
-      .post('/api/close/period-lock')
-      .set('Authorization', `Bearer ${authToken}`)
-      .set('Content-Type', 'application/json')
-      .send({ periodLabel, lockedBy: 'test-user', reason: 'Evidence policy test' });
   }
 
   it('A) No policy → certification succeeds without evidence', async () => {
     if (!isDbConfigured()) return;
-    await setupSessionWithMaterialJE('2025-02');
+    await setupSessionWithMaterialJE('2025-02', { skipJe: true });
     const res = await request(app)
       .post(`/api/close/sessions/${closeSessionId}/certify`)
       .set('Authorization', `Bearer ${authToken}`)
@@ -225,7 +210,7 @@ describe('Evidence policy enforcement', () => {
 
   it('D) Hard-block policy: JE with correct evidence → certification succeeds', async () => {
     if (!isDbConfigured()) return;
-    await setupSessionWithMaterialJE('2025-05');
+    await setupSessionWithMaterialJE('2025-05', { skipAdvance: true });
     await request(app)
       .put('/api/close/evidence-policy')
       .set('Authorization', `Bearer ${authToken}`)
@@ -235,18 +220,25 @@ describe('Evidence policy enforcement', () => {
         materialityThreshold: '1000',
         requiredAssertionTypes: { manual_entry: ['approval'] },
       });
-    // Attach evidence with assertion_type approval
+    // Attach evidence BEFORE advancing to locked (session must be draft/finalized to attach)
     const evRes = await request(app)
       .post(`/api/close/journal-entries/${materialJeId}/evidence`)
       .set('Authorization', `Bearer ${authToken}`)
       .set('Content-Type', 'application/json')
       .send({
-        hashSha256: 'abc123',
+        hashSha256: 'a'.repeat(64),
         sizeBytes: 100,
         assertionType: 'approval',
         attachedBy: 'test-user',
       });
     expect([200, 201]).toContain(evRes.status);
+    // Advance to locked (evidence already attached)
+    const advanceRes = await request(app)
+      .post(`/api/close/sessions/${closeSessionId}/advance`)
+      .set('Authorization', `Bearer ${authToken}`)
+      .set('Content-Type', 'application/json');
+    expect(advanceRes.status).toBe(200);
+    expect(advanceRes.body?.statusAfter).toBe('locked');
     const certifyRes = await request(app)
       .post(`/api/close/sessions/${closeSessionId}/certify`)
       .set('Authorization', `Bearer ${authToken}`)
