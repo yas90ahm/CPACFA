@@ -1,9 +1,9 @@
 /**
  * Deployment config guards: fail fast when prod/staging/demo runs with auth/tenant disabled.
- * Uses MODE from runtime_mode. applyModeDefaults() must run first.
+ * Uses getSecurityProfile() / getCurrentSecurityProfile() as single source of truth.
  */
 
-import { getMode, isDev, requireAuth, getEffectiveConfig } from './runtime_mode.js';
+import { getCurrentSecurityProfile, getSecurityProfile } from '../security/security_profile.js';
 
 function isTest(): boolean {
   return process.env.NODE_ENV === 'test';
@@ -11,20 +11,28 @@ function isTest(): boolean {
 
 /**
  * Fail fast at startup if prod/staging/demo has weak config.
- * applyModeDefaults() already enforces; this is a belt-and-suspenders check.
  */
 export function assertDeploymentConfigSafe(): void {
   if (isTest()) return;
 
-  const mode = getMode();
-  if (mode === 'prod' || mode === 'staging' || mode === 'demo') {
-    const cfg = getEffectiveConfig();
-    if (!cfg.REQUIRE_AUTH) {
-      console.error(`[FATAL] MODE=${mode}: REQUIRE_AUTH must be true. Refusing to start.`);
+  const p = getCurrentSecurityProfile();
+  const isDeployment = p.appMode === 'prod' || p.appMode === 'staging' || p.appMode === 'demo';
+
+  if (isDeployment) {
+    if (!p.authRequired) {
+      console.error(`[FATAL] MODE=${p.appMode}: REQUIRE_AUTH must be true. Refusing to start.`);
       process.exit(1);
     }
-    if (!cfg.REQUIRE_TENANT_CONTEXT) {
-      console.error(`[FATAL] MODE=${mode}: REQUIRE_TENANT_CONTEXT must be true. Refusing to start.`);
+    if (!p.tenantContextRequired) {
+      console.error(`[FATAL] MODE=${p.appMode}: REQUIRE_TENANT_CONTEXT must be true. Refusing to start.`);
+      process.exit(1);
+    }
+    if (p.dangerousBypassAllowed) {
+      console.error(`[FATAL] MODE=${p.appMode}: dangerousBypassAllowed must be false. Refusing to start.`);
+      process.exit(1);
+    }
+    if (p.tenantInjectionAllowed) {
+      console.error(`[FATAL] MODE=${p.appMode}: tenantInjectionAllowed must be false. Refusing to start.`);
       process.exit(1);
     }
   }
@@ -34,12 +42,13 @@ export function assertDeploymentConfigSafe(): void {
  * Print warning when dev mode runs with auth/tenant enforcement off.
  */
 export function printDevModeEnforcementWarning(): void {
-  if (isTest() || !isDev()) return;
+  if (isTest()) return;
 
-  const cfg = getEffectiveConfig();
-  const authOff = !cfg.REQUIRE_AUTH;
-  const tenantOff = !cfg.REQUIRE_TENANT_CONTEXT;
+  const p = getCurrentSecurityProfile();
+  if (p.appMode !== 'dev') return;
 
+  const authOff = !p.authRequired;
+  const tenantOff = !p.tenantContextRequired;
   if (!authOff && !tenantOff) return;
 
   const banner = [
@@ -61,18 +70,24 @@ export function printDevModeEnforcementWarning(): void {
   console.warn(banner.join('\n'));
 }
 
-/** For tests: whether guard would pass. */
+/** For tests: whether guard would pass. Checks raw env for invalid config in deployment modes. */
 export function wouldDeploymentConfigPass(): { pass: boolean; reason?: string } {
-  const mode = getMode();
-  if (mode === 'prod' || mode === 'staging' || mode === 'demo') {
-    if (!requireAuth()) {
-      return { pass: false, reason: `MODE=${mode} requires REQUIRE_AUTH=true` };
+  const profile = getSecurityProfile(process.env);
+  const isDeployment = profile.appMode === 'prod' || profile.appMode === 'staging' || profile.appMode === 'demo';
+
+  if (isDeployment) {
+    if (process.env.REQUIRE_AUTH === 'false' || !profile.authRequired) {
+      return { pass: false, reason: `MODE=${profile.appMode} requires REQUIRE_AUTH=true` };
     }
-    const cfg = getEffectiveConfig();
-    if (!cfg.REQUIRE_TENANT_CONTEXT) {
-      return { pass: false, reason: `MODE=${mode} requires REQUIRE_TENANT_CONTEXT=true` };
+    if (process.env.REQUIRE_TENANT_CONTEXT === 'false' || !profile.tenantContextRequired) {
+      return { pass: false, reason: `MODE=${profile.appMode} requires REQUIRE_TENANT_CONTEXT=true` };
+    }
+    if (profile.dangerousBypassAllowed) {
+      return { pass: false, reason: `MODE=${profile.appMode} requires dangerousBypassAllowed=false` };
+    }
+    if (profile.tenantInjectionAllowed) {
+      return { pass: false, reason: `MODE=${profile.appMode} requires tenantInjectionAllowed=false` };
     }
   }
   return { pass: true };
 }
-

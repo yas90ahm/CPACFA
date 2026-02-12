@@ -39,6 +39,8 @@ import { assertNoAiMutationContext } from '../lib/ai_boundary.js';
 
 export interface BridgeContext {
   pool: Pool;
+  /** AI-scoped pool for insertCallLog; when set, postJE uses it for runJustifier. */
+  aiPool?: Pool;
   tenantId: string;
   actor: string;
   actorRole?: CloseRole;
@@ -395,7 +397,7 @@ export async function executeBridgeCommand(
         if (periodLabel) {
           await assertPeriodNotLocked(periodLabel, ctx.tenantId, ctx.pool);
         }
-        const result = await postJE(ctx.pool, ctx.tenantId, cmd.journalEntryId);
+        const result = await postJE(ctx.pool, ctx.tenantId, cmd.journalEntryId, ctx.aiPool);
         await recordBridgeMutation(ctx, 'PostJE', {
           periodLabel: periodLabel ?? undefined,
           journalEntryId: cmd.journalEntryId,

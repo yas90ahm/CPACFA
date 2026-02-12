@@ -62,8 +62,37 @@ jobs:
         run: |
           cd tests && npm ci && npm test
 
+  green-gate:
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Security profile invariants (MODE=demo)
+        env:
+          MODE: demo
+          NODE_ENV: development
+          DATABASE_URL: postgres://localhost/test
+        run: cd tests && npm ci && npm test -- --testPathPattern=security_profile_invariants --runInBand
+
+      - name: Security profile invariants (MODE=prod)
+        env:
+          MODE: prod
+          NODE_ENV: production
+          DATABASE_URL: postgres://localhost/test
+        run: cd tests && npm test -- --testPathPattern=security_profile_invariants --runInBand
+
   build:
     runs-on: ubuntu-latest
+    needs: [green-gate]
     steps:
       - uses: actions/checkout@v4
 

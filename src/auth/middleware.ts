@@ -5,7 +5,7 @@
 import type { Pool } from 'pg';
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken } from './index.js';
-import { isDbConfigured, getTenantPoolWithMigrations } from '../db/index.js';
+import { isDbConfigured, getTenantPoolWithMigrations, getTenantAiPoolWithMigrations, isAiBoundaryDbRolesEnabled } from '../db/index.js';
 import { requireTenantContext as configRequireTenantContext } from '../lib/runtime_mode.js';
 
 export interface AuthRequest extends Request {
@@ -13,6 +13,8 @@ export interface AuthRequest extends Request {
   tenantId?: string;
   role?: string;
   tenantPool?: Pool;
+  /** AI-scoped pool (ai_writer) when AI_BOUNDARY_DB_ROLES=true; else same as tenantPool. */
+  tenantAiPool?: Pool;
 }
 
 export function requireAuth(req: AuthRequest, res: Response, next: NextFunction): void {
@@ -48,15 +50,20 @@ export function optionalAuth(req: AuthRequest, _res: Response, next: NextFunctio
   next();
 }
 
-/** Attach tenant DB pool for BYOD (run after optionalAuth). */
+/** Attach tenant DB pool for BYOD (run after optionalAuth). Also attaches tenantAiPool when AI_BOUNDARY_DB_ROLES. */
 export function attachTenantPool(req: AuthRequest, res: Response, next: NextFunction): void {
   if (!isDbConfigured() || !req.tenantId) {
     next();
     return;
   }
-  getTenantPoolWithMigrations(req.tenantId)
-    .then((pool) => {
+  const loadCore = getTenantPoolWithMigrations(req.tenantId);
+  const loadAi = isAiBoundaryDbRolesEnabled()
+    ? getTenantAiPoolWithMigrations(req.tenantId)
+    : loadCore;
+  Promise.all([loadCore, loadAi])
+    .then(([pool, aiPool]) => {
       req.tenantPool = pool;
+      req.tenantAiPool = aiPool;
       next();
     })
     .catch(next);

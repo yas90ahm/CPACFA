@@ -55,6 +55,8 @@ export type JustifierRelatedType = 'hitl_staging' | 'close_adjustment' | 'journa
 
 export interface RunJustifierParams {
   pool: Pool;
+  /** When set (AI_BOUNDARY_DB_ROLES), used for insertCallLog. */
+  aiPool?: Pool;
   tenantId: string;
   periodLabel: string;
   relatedType: JustifierRelatedType;
@@ -76,7 +78,8 @@ export interface RunJustifierResult {
 const AI_FAILED_MEMO_PREFIX = 'AI justification could not be generated.';
 
 export async function runJustifier(params: RunJustifierParams): Promise<RunJustifierResult> {
-  const { pool, tenantId, periodLabel, relatedType, relatedId, facts } = params;
+  const { pool, aiPool, tenantId, periodLabel, relatedType, relatedId, facts } = params;
+  const logPool = aiPool ?? pool;
   const standards_snippets = getDefaultSnippetsForJustifier();
   const context = { tenantId, periodLabel, relatedType, relatedId };
   const userPrompt = buildJustifierUserPrompt({ facts, standards_snippets, context });
@@ -129,6 +132,7 @@ export type ShadowAuditSubjectType = 'journal_entry' | 'tb_adjustment';
 
 export interface RunShadowAuditParams {
   pool: Pool;
+  aiPool?: Pool;
   tenantId: string;
   periodLabel: string;
   subjectType: ShadowAuditSubjectType;
@@ -152,7 +156,8 @@ const AI_FAILED_FINDING_CODE = 'AI_FAILED';
 
 /** Fail-open: on AI failure return warn + single finding, do not block. */
 export async function runShadowAudit(params: RunShadowAuditParams): Promise<RunShadowAuditResult> {
-  const { pool, tenantId, periodLabel, subjectType, subjectId, facts, materialityThreshold, workflowState } = params;
+  const { pool, aiPool, tenantId, periodLabel, subjectType, subjectId, facts, materialityThreshold, workflowState } = params;
+  const logPool = aiPool ?? pool;
   const standards_snippets = getDefaultSnippetsForShadowAuditor();
   const context = {
     tenantId,
@@ -177,7 +182,7 @@ export async function runShadowAudit(params: RunShadowAuditParams): Promise<RunS
   };
 
   const result = await callAIWithSchema({
-    pool,
+    pool: logPool,
     tenantId,
     pillar: 'shadow_auditor',
     promptVersion: SHADOW_AUDITOR_PROMPT_VERSION,
@@ -221,6 +226,7 @@ export async function runShadowAudit(params: RunShadowAuditParams): Promise<RunS
 
 export interface RunClassifierParams {
   pool: Pool;
+  aiPool?: Pool;
   tenantId: string;
   periodLabel: string;
   sourceLines: NormalizedSourceLine[];
@@ -245,7 +251,8 @@ export interface RunClassifierResult {
 
 /** Fail-open: on AI failure return empty results; do not block ingestion. */
 export async function runClassifier(params: RunClassifierParams): Promise<RunClassifierResult> {
-  const { pool, tenantId, periodLabel, sourceLines, coaTaxonomy = [] } = params;
+  const { pool, aiPool, tenantId, periodLabel, sourceLines, coaTaxonomy = [] } = params;
+  const logPool = aiPool ?? pool;
   const standards_snippets = getDefaultSnippetsForClassifier();
   const context = { tenantId, periodLabel };
   const userPrompt = buildClassifierUserPrompt({
@@ -264,7 +271,7 @@ export async function runClassifier(params: RunClassifierParams): Promise<RunCla
   };
 
   const result = await callAIWithSchema({
-    pool,
+    pool: logPool,
     tenantId,
     pillar: 'classifier',
     promptVersion: CLASSIFIER_PROMPT_VERSION,
@@ -296,6 +303,7 @@ export async function runClassifier(params: RunClassifierParams): Promise<RunCla
 
 export interface RunAdvisorParams {
   pool: Pool;
+  aiPool?: Pool;
   tenantId: string;
   periodLabel: string;
   sourceLines: ClassifiedSourceLine[];
@@ -329,7 +337,8 @@ export interface RunAdvisorResult {
 
 /** Fail-safe: on AI failure return empty proposals; do not block workflow. */
 export async function runAdvisor(params: RunAdvisorParams): Promise<RunAdvisorResult> {
-  const { pool, tenantId, periodLabel, sourceLines, tbSummary = {}, coaTaxonomy = [] } = params;
+  const { pool, aiPool, tenantId, periodLabel, sourceLines, tbSummary = {}, coaTaxonomy = [] } = params;
+  const logPool = aiPool ?? pool;
   const standards_snippets = getDefaultSnippetsForAdvisor();
   const context = { tenantId, periodLabel };
   const userPrompt = buildAdvisorUserPrompt({
@@ -349,7 +358,7 @@ export async function runAdvisor(params: RunAdvisorParams): Promise<RunAdvisorRe
   };
 
   const result = await callAIWithSchema({
-    pool,
+    pool: logPool,
     tenantId,
     pillar: 'advisor',
     promptVersion: ADVISOR_PROMPT_VERSION,

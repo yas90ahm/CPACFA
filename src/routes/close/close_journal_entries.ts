@@ -7,7 +7,7 @@
 import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import { randomUUID } from 'crypto';
-import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
+import { getTenantId, getTenantPool, getTenantAiPool } from '../../lib/tenant_context.js';
 import { send500 } from '../../lib/errorHandler.js';
 import { getStorage } from '../../storage/index.js';
 import {
@@ -322,7 +322,7 @@ router.post('/journal-entries/:id/post', async (req: Request, res: Response) => 
     }
     const id = req.params.id ?? '';
     const result = await executeBridgeCommand(
-      { pool, tenantId, actor: (req as AuthRequest).userId ?? 'anonymous' },
+      { pool, tenantId, actor: (req as AuthRequest).userId ?? 'anonymous', aiPool: getTenantAiPool(req) },
       { commandType: 'PostJE', journalEntryId: id }
     );
     if (!result.ok) {

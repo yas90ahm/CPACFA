@@ -141,7 +141,7 @@ export interface PostJEResult {
 }
 
 /** Post an approved JE (approved → posted). Shadow Auditor runs first; blocks on severity=block. */
-export async function postJE(pool: Pool, tenantId: string, id: string): Promise<PostJEResult> {
+export async function postJE(pool: Pool, tenantId: string, id: string, aiPool?: Pool): Promise<PostJEResult> {
   const je = await repo.getJournalEntryById(pool, id, tenantId);
   if (!je) throw new JournalEntryError('Journal entry not found', 'NOT_FOUND');
   if (je.status !== 'approved') {
@@ -193,6 +193,7 @@ export async function postJE(pool: Pool, tenantId: string, id: string): Promise<
   };
   const justifierResult = await runJustifier({
     pool,
+    aiPool,
     tenantId,
     periodLabel: pl,
     relatedType: 'journal_entry',

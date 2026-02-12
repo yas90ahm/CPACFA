@@ -36,7 +36,7 @@ import type { RuleEvaluationContext } from '../../services/data_quality_rule_ser
 import type { FinancialStatementsOutput } from '../../types/financial.js';
 import type { RawTrialBalanceRow } from '../../services/trialBalanceParser.js';
 import type { AuthRequest } from '../../auth/middleware.js';
-import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
+import { getTenantId, getTenantPool, getTenantAiPool } from '../../lib/tenant_context.js';
 import { listContracts } from '../../db/repositories/revenue_recognition_repository.js';
 import type { Pool } from 'pg';
 import type { StatementGeneratorOptions } from '../../services/statementGenerator.js';
@@ -122,6 +122,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
 
     const tenantIdIngest = getTenantId(req);
     const poolIngest = getTenantPool(req);
+    const poolAi: Pool = (getTenantAiPool(req) ?? poolIngest)!;
     const hasTenantContext = Boolean(tenantIdIngest && poolIngest);
     const ingestSessionId = hasTenantContext
       ? `ingest-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -134,7 +135,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
 
     let uploadId: string | null = null;
     if (hasTenantContext && ingestSessionId && poolIngest && tenantIdIngest) {
-      const uploadRow = await persistence.createSessionUpload(poolIngest, tenantIdIngest, ingestSessionId, {
+      const uploadRow = await persistence.createSessionUpload(poolAi, tenantIdIngest, ingestSessionId, {
         filename: file.originalname || 'upload.csv',
         contentType: file.mimetype,
         metadata: null,
@@ -208,7 +209,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       const aiWarnings: Array<{ ai_status: string; reason: string; pillar: string }> = [];
       if (poolIngest && tenantIdIngest) {
         const periodLabelStaged = body.periodLabel ?? `ingest-${new Date().toISOString().slice(0, 10)}`;
-        const item = await createStagingItem(poolIngest, tenantIdIngest, {
+        const item = await createStagingItem(poolAi, tenantIdIngest, {
           proposedAction: `Trial balance upload out of balance by ${imbalanceAmount}. Fix via HITL resolve-ingest.`,
           justification: `Debits ${totalDebits} != Credits ${totalCredits}. Raw records staged; no save to main ledger.`,
           type: 'journal_entry',
@@ -234,7 +235,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
           credit: r.credit ?? 0,
         }));
         const classifierResult = await runClassifier({
-          pool: poolIngest,
+          pool: poolAi,
           tenantId: tenantIdIngest,
           periodLabel: periodLabelStaged ?? `ingest-${new Date().toISOString().slice(0, 10)}`,
           sourceLines,
@@ -268,7 +269,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
             : {}),
         }));
         const advisorResult = await runAdvisor({
-          pool: poolIngest,
+          pool: poolAi,
           tenantId: tenantIdIngest,
           periodLabel: periodLabelStaged ?? `ingest-${new Date().toISOString().slice(0, 10)}`,
           sourceLines: classifiedSourceLines,
@@ -282,7 +283,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
           });
         }
         if (advisorResult.proposals.length > 0) {
-          await aiProposalsRepo.saveProposals(poolIngest, {
+          await aiProposalsRepo.saveProposals(poolAi, {
             tenantId: tenantIdIngest,
             periodLabel: periodLabelStaged ?? `ingest-${new Date().toISOString().slice(0, 10)}`,
             stagingId: item.id,
@@ -610,7 +611,9 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
               justification: agenticAssessment.summary,
               type: 'other',
             },
-            authReq.tenantId && authReq.tenantPool ? { pool: authReq.tenantPool, tenantId: authReq.tenantId } : undefined
+            authReq.tenantId && authReq.tenantPool
+              ? { pool: getTenantAiPool(req) ?? authReq.tenantPool, tenantId: authReq.tenantId }
+              : undefined
           )
         );
         hitl = { escalated: true, stagingId: item.id };
