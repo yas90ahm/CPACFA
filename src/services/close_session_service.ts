@@ -23,6 +23,7 @@ import { verifyChain } from '../db/repositories/audit_ledger_repository.js';
 import { sumRound2 } from '../utils/decimal.js';
 import type { LedgerSnapshotPayload } from '../types/ledger_snapshot.js';
 import { getLedgerSnapshotById } from '../db/repositories/ledger_snapshot_repository.js';
+import { assertNoAiMutationContext } from '../lib/ai_boundary.js';
 
 const ALLOWED_TRANSITIONS: Record<CloseSessionStatus, CloseSessionStatus[]> = {
   draft: ['in_progress'],
@@ -175,13 +176,19 @@ export async function listSessions(
   return repo.listCloseSessions(pool, input.tenantId, input.entityId, input.status);
 }
 
+/**
+ * Update session status. Call only from within a transaction; acquires row lock (FOR UPDATE) to prevent concurrent advance races.
+ * Logs close_session_transition for draft→in_progress, in_progress→ready_for_review, ready_for_review→finalized.
+ * For finalized→locked and locked→certified, the caller logs close_lock and certify_close respectively (no double-log).
+ */
 export async function updateStatus(
   client: Pool | PoolClient,
   tenantId: string,
   id: string,
-  newStatus: CloseSessionStatus
+  newStatus: CloseSessionStatus,
+  createdBy?: string
 ): Promise<CloseSession> {
-  const current = await repo.getCloseSessionById(client, tenantId, id);
+  const current = await repo.getCloseSessionByIdForUpdate(client, tenantId, id);
   if (!current) {
     throw new CloseSessionError('Close session not found', 'NOT_FOUND');
   }
@@ -196,6 +203,22 @@ export async function updateStatus(
   if (!updated) {
     throw new CloseSessionError('Close session not found', 'NOT_FOUND');
   }
+
+  // Log close_session_transition for every state change (audit firms need full history).
+  // close_lock and certify_close are additional, richer events with operation-specific payload.
+  await recordMaterialEvent(client, {
+    tenantId,
+    periodLabel: updated.periodEnd?.slice(0, 7),
+    eventType: 'close_session_transition',
+    deterministicFlagSnapshot: {
+      from: current.status,
+      to: newStatus,
+      sessionId: id,
+      ...(createdBy != null && { userId: createdBy }),
+    },
+    createdBy: createdBy ?? 'api',
+  });
+
   return updated;
 }
 
@@ -214,93 +237,96 @@ export interface CertifyCloseInput {
 /**
  * Certify a close session: only from locked, no hard blockers, approver role.
  * Sets status to certified and records certify_close in audit ledger.
+ * Uses row-level lock (SELECT FOR UPDATE) inside transaction to prevent concurrent certify races.
  */
 export async function certifyCloseSession(
   pool: Pool,
   input: CertifyCloseInput,
   actorRole: CloseRole
 ): Promise<CloseSession> {
-  const session = await repo.getCloseSessionById(pool, input.tenantId, input.closeSessionId);
-  if (!session) {
-    throw new CloseSessionError('Close session not found', 'NOT_FOUND');
-  }
-  if (session.status !== 'locked') {
-    throw new CloseSessionError(
-      `Certification only allowed from locked; current status is ${session.status}`,
-      'NOT_LOCKED'
-    );
-  }
-  const readiness = await computeReadiness(pool, input.tenantId, session);
-  if (readiness.hardBlockers.length > 0) {
-    const evidenceCheck = await checkEvidencePolicyForCertification(
-      pool,
-      input.tenantId,
-      input.closeSessionId
-    );
-    const isEvidenceBlock =
-      evidenceCheck.hardBlockers.length > 0 &&
-      readiness.hardBlockers.some((m) =>
-        evidenceCheck.hardBlockers.some((eb) => eb.message === m)
-      );
-    throw new CloseSessionError(
-      `Cannot certify: ${readiness.hardBlockers.join('; ')}`,
-      isEvidenceBlock ? 'NOT_READY' : 'HARD_BLOCKERS'
-    );
-  }
+  assertNoAiMutationContext();
   if (!canPerform(actorRole, 'certify_close')) {
     throw new CloseSessionError('Insufficient role: certify_close requires approver', 'INSUFFICIENT_ROLE');
   }
-  const periodLabel = input.periodLabel ?? session.periodEnd.slice(0, 7);
 
-  // Create ledger snapshot at certification so binder/export have a certified source of truth.
-  let adjustedEntries: Awaited<ReturnType<typeof getAdjustedTrialBalance>>;
-  try {
-    adjustedEntries = await getAdjustedTrialBalance(
-      input.tenantId,
-      periodLabel,
-      pool,
-      input.closeSessionId
-    );
-  } catch (_e) {
-    throw new CloseSessionError(
-      'No trial balance anchored to session period; run ingest or resolve staging before certifying.',
-      'SESSION_DATA_MISSING'
-    );
-  }
-  const totalDebits = sumRound2(adjustedEntries.map((e) => e.debit ?? 0));
-  const totalCredits = sumRound2(adjustedEntries.map((e) => e.credit ?? 0));
-  const snapshotPayload: LedgerSnapshotPayload = {
-    trialBalance: {
-      entries: adjustedEntries.map((e) => ({
-        accountName: e.accountName,
-        debit: e.debit ?? 0,
-        credit: e.credit ?? 0,
-        ...(e.accountCode != null && { accountCode: e.accountCode }),
-        ...(e.lineId != null && e.lineId !== '' && { lineId: e.lineId }),
-      })),
-      totalDebits,
-      totalCredits,
-    },
-  };
-  try {
-    buildCertifiedStatementsFromSnapshot(snapshotPayload);
-  } catch (_e) {
-    throw new CloseSessionError(
-      'Trial balance does not pass integrity check (Truth Gate). Fix imbalance or balance sheet equation before certifying.',
-      'VALIDATION'
-    );
-  }
   return withTransaction(pool, async (client) => {
-    const lockedSession = await repo.getCloseSessionByIdForUpdate(client, input.tenantId, input.closeSessionId);
-    if (!lockedSession) {
+    // Acquire row-level lock FIRST to serialize concurrent certify attempts
+    const lockResult = await client.query<{ id: string; status: string }>(
+      'SELECT id, status FROM close_sessions WHERE id = $1 AND tenant_id = $2 FOR UPDATE',
+      [input.closeSessionId, input.tenantId]
+    );
+    if (lockResult.rows.length === 0) {
       throw new CloseSessionError('Close session not found', 'NOT_FOUND');
     }
-    if (lockedSession.status !== 'locked') {
+    const lockedStatus = lockResult.rows[0].status;
+    if (lockedStatus !== 'locked') {
       throw new CloseSessionError(
-        `Certification only allowed from locked; current status is ${lockedSession.status}`,
-        'NOT_LOCKED'
+        `Certification only allowed from locked; current status is ${lockedStatus}`,
+        'INVALID_TRANSITION'
       );
     }
+
+    const session = await repo.getCloseSessionById(client, input.tenantId, input.closeSessionId);
+    if (!session) throw new CloseSessionError('Close session not found', 'NOT_FOUND');
+
+    const readiness = await computeReadiness(pool, input.tenantId, session);
+    if (readiness.hardBlockers.length > 0) {
+      const evidenceCheck = await checkEvidencePolicyForCertification(
+        pool,
+        input.tenantId,
+        input.closeSessionId
+      );
+      const isEvidenceBlock =
+        evidenceCheck.hardBlockers.length > 0 &&
+        readiness.hardBlockers.some((m) =>
+          evidenceCheck.hardBlockers.some((eb) => eb.message === m)
+        );
+      throw new CloseSessionError(
+        `Cannot certify: ${readiness.hardBlockers.join('; ')}`,
+        isEvidenceBlock ? 'NOT_READY' : 'HARD_BLOCKERS'
+      );
+    }
+
+    const periodLabel = input.periodLabel ?? session.periodEnd.slice(0, 7);
+
+    let adjustedEntries: Awaited<ReturnType<typeof getAdjustedTrialBalance>>;
+    try {
+      adjustedEntries = await getAdjustedTrialBalance(
+        input.tenantId,
+        periodLabel,
+        pool,
+        input.closeSessionId
+      );
+    } catch (_e) {
+      throw new CloseSessionError(
+        'No trial balance anchored to session period; run ingest or resolve staging before certifying.',
+        'SESSION_DATA_MISSING'
+      );
+    }
+    const totalDebits = sumRound2(adjustedEntries.map((e) => e.debit ?? 0));
+    const totalCredits = sumRound2(adjustedEntries.map((e) => e.credit ?? 0));
+    const snapshotPayload: LedgerSnapshotPayload = {
+      trialBalance: {
+        entries: adjustedEntries.map((e) => ({
+          accountName: e.accountName,
+          debit: e.debit ?? 0,
+          credit: e.credit ?? 0,
+          ...(e.accountCode != null && { accountCode: e.accountCode }),
+          ...(e.lineId != null && e.lineId !== '' && { lineId: e.lineId }),
+        })),
+        totalDebits,
+        totalCredits,
+      },
+    };
+    try {
+      buildCertifiedStatementsFromSnapshot(snapshotPayload);
+    } catch (_e) {
+      throw new CloseSessionError(
+        'Trial balance does not pass integrity check (Truth Gate). Fix imbalance or balance sheet equation before certifying.',
+        'VALIDATION'
+      );
+    }
+
     const evidenceManifest = await buildEvidenceManifest(client, input.tenantId, input.closeSessionId);
     const snapshot = await createSnapshotFromTrialBalanceAndEntries(client, {
       tenantId: input.tenantId,
@@ -528,7 +554,7 @@ export async function advanceSession(
           blockers: mapHardBlockersToBlockers(readiness.hardBlockers),
         };
       }
-      if (e instanceof CloseSessionError && (e.code === 'INSUFFICIENT_ROLE' || e.code === 'NOT_LOCKED')) {
+      if (e instanceof CloseSessionError && (e.code === 'INSUFFICIENT_ROLE' || e.code === 'NOT_LOCKED' || e.code === 'INVALID_TRANSITION')) {
         return {
           success: false,
           session,
@@ -557,7 +583,7 @@ export async function advanceSession(
             throw new AdvanceBlockedError(mapHardBlockersToBlockers(readiness.hardBlockers), currentSession);
           }
         }
-        currentSession = await updateStatus(client, input.tenantId, input.closeSessionId, next);
+        currentSession = await updateStatus(client, input.tenantId, input.closeSessionId, next, 'advance-api');
       }
 
       if (currentSession.status === 'locked') {

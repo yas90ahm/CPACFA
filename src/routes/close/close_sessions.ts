@@ -19,6 +19,7 @@ import {
   CloseSessionError,
 } from '../../services/close_session_service.js';
 import { getCloseRoleFromReq } from '../../lib/closeRole.js';
+import { effectiveAllowLegacyCertifiedSource } from '../../lib/runtime_mode.js';
 import type { AuthRequest } from '../../auth/middleware.js';
 import { listIssues } from '../../services/issue_item_service.js';
 import {
@@ -332,8 +333,7 @@ router.get('/sessions/:id/certified-source', async (req: Request, res: Response)
       res.status(404).json({ error: 'Close session not found' });
       return;
     }
-    const allowLegacy =
-      req.query.allowLegacyCertifiedSource === '1' || process.env.ALLOW_LEGACY_CERTIFIED_SOURCE === 'true';
+    const allowLegacy = effectiveAllowLegacyCertifiedSource(req);
     let certifiedSnapshotId: string | undefined = session.certifiedSnapshotId ?? undefined;
     let snapshotHash: string | undefined;
     let snapshotHashVersion: number | undefined;
@@ -718,7 +718,8 @@ router.patch('/sessions/:id/status', async (req: Request, res: Response) => {
         }
       }
     }
-    const session = await updateStatus(pool, tenantId, id, newStatus);
+    const userId = (req as AuthRequest).userId;
+    const session = await updateStatus(pool, tenantId, id, newStatus, userId ?? 'api');
     res.json(session);
   } catch (e) {
     handleSessionError(res, e, 'Update close session status failed');

@@ -29,6 +29,7 @@ import {
   queryControl,
 } from '../../src/db/index.js';
 import * as periodTbRepo from '../../src/db/repositories/period_trial_balance_repository.js';
+import { upsertPeriodExportChecks } from '../../src/db/repositories/period_export_checks_repository.js';
 
 const TEST_TENANT_ID = process.env.TEST_TENANT_ID ?? `large-tb-tenant-${Date.now()}`;
 const ENTITY_ID = `entity-large-tb-${Date.now()}`;
@@ -196,6 +197,11 @@ describe('Large trial balance upload', () => {
         });
       expect(certifyRes.status).toBe(200);
       expect(certifyRes.body?.status).toBe('certified');
+
+      await upsertPeriodExportChecks(pool, TEST_TENANT_ID, periodLabel, {
+        roundingGapExceedsMateriality: false,
+        aggregateRoundingExceedsMateriality: false,
+      });
 
       const exportRes = await request(app)
         .post('/api/export/pdf')

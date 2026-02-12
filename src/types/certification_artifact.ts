@@ -33,5 +33,5 @@ export interface CertificationArtifactV1 {
   snapshot: CertificationArtifactSnapshot;
   auditChain?: CertificationArtifactAuditChain;
   evidenceManifest?: CertificationArtifactEvidenceManifest;
-  mode: 'dev' | 'demo' | 'prod';
+  mode: 'dev' | 'demo' | 'staging' | 'prod';
 }

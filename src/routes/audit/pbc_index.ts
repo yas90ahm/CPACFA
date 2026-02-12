@@ -13,6 +13,7 @@ import { verifyChain } from '../../services/audit_ledger_service.js';
 import { getCertifiedStatementsForBinder } from '../../services/audit_export_service.js';
 import { computeEvidenceSummary } from '../../services/evidence_policy_service.js';
 import { send500 } from '../../lib/errorHandler.js';
+import { effectiveAllowLegacyCertifiedSource } from '../../lib/runtime_mode.js';
 
 const router = Router();
 
@@ -273,8 +274,7 @@ router.get('/pbc-index', async (req: Request, res: Response) => {
       return;
     }
 
-    const allowLegacy =
-      req.query.allowLegacyCertifiedSource === '1' || process.env.ALLOW_LEGACY_CERTIFIED_SOURCE === 'true';
+    const allowLegacy = effectiveAllowLegacyCertifiedSource(req);
     const baseUrl = getBaseUrlForEndpoints(req);
     const payload = await buildPbcIndexPayload(pool, tenantId, closeSessionId, { allowLegacy, baseUrl });
     res.json(payload);

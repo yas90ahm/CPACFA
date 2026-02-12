@@ -168,10 +168,46 @@ describe('AI mutation boundaries', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 3. AI CANNOT WRITE TO DETERMINISTIC TABLES (code audit)
+  // 3. ADJUSTMENT WITHOUT PROVENANCE REJECTED (AI cannot inject mutation)
   // ---------------------------------------------------------------------------
 
-  it('3. AI cannot write to deterministic tables: zero direct imports from src/ai and src/agents', () => {
+  it('3. resolve-ingest rejects adjustment without amountProvenance: no DB write', async () => {
+    if (!isDbConfigured()) return;
+    const pool = await getTenantPool(testTenantId);
+    let targetStagedId = stagedId;
+    if (!targetStagedId) {
+      const r = await pool.query<{ id: string }>(
+        "SELECT id FROM tenant_hitl_staging WHERE tenant_id = $1 AND status = 'pending' AND payload->>'kind' = 'trial_balance_ingest' ORDER BY created_at DESC LIMIT 1",
+        [testTenantId]
+      );
+      targetStagedId = r.rows[0]?.id;
+    }
+    if (!targetStagedId) return;
+
+    const beforeCount = (await pool.query('SELECT COUNT(*) as c FROM period_trial_balance WHERE tenant_id = $1', [testTenantId])).rows[0]?.c ?? 0;
+
+    const adjustmentWithoutProvenance = [
+      { accountName: 'Retained Earnings', debit: 0, credit: 1000 },
+    ];
+
+    const res = await request(app)
+      .post('/api/hitl/resolve-ingest')
+      .set('Authorization', `Bearer ${authToken}`)
+      .set('Content-Type', 'application/json')
+      .send({ stagedId: targetStagedId, adjustment: adjustmentWithoutProvenance });
+
+    expect(res.status).toBe(400);
+    expect(res.body?.error).toMatch(/AMOUNT_PROVENANCE_REQUIRED|amountProvenance/i);
+
+    const afterCount = (await pool.query('SELECT COUNT(*) as c FROM period_trial_balance WHERE tenant_id = $1', [testTenantId])).rows[0]?.c ?? 0;
+    expect(Number(afterCount)).toBe(Number(beforeCount));
+  });
+
+  // ---------------------------------------------------------------------------
+  // 4. AI CANNOT WRITE TO DETERMINISTIC TABLES (code audit)
+  // ---------------------------------------------------------------------------
+
+  it('4. AI cannot write to deterministic tables: zero direct imports from src/ai and src/agents', () => {
     const projectRoot = path.resolve(__dirname, '..', '..');
     const aiDirs = [
       path.join(projectRoot, 'src', 'ai'),

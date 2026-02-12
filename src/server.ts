@@ -6,7 +6,7 @@
 
 import 'dotenv/config';
 import { assertNoDestructiveInStagingOrProduction } from './db/destructive_guards.js';
-import { applyModeDefaults, getMode } from './lib/runtime_mode.js';
+import { applyModeDefaults, getMode, requireAuth as requireAuthFromMode, enableDevApi } from './lib/runtime_mode.js';
 import { runStartupValidation, printStartupBanner } from './startup_validation.js';
 import { seedDemo } from './scripts/seed_demo.js';
 import { assertDeploymentConfigSafe, printDevModeEnforcementWarning } from './lib/deployment_config_guard.js';
@@ -36,6 +36,7 @@ import integrationsRouter from './routes/integrations.js';
 import pipelinesRouter from './routes/pipelines.js';
 import closeRouter from './routes/close/index.js';
 import precheckRouter from './routes/precheck.js';
+import configRouter from './routes/config.js';
 import verificationRouter from './routes/verification/index.js';
 import coaMappingRouter from './routes/coa_mapping.js';
 import dataQualityRouter from './routes/data_quality.js';
@@ -53,7 +54,7 @@ import { requestIdMiddleware } from './middleware/requestId.js';
 assertNoDestructiveInStagingOrProduction();
 
 const app = express();
-const PORT = process.env.PORT ?? 3001;
+const PORT = process.env.PORT ?? 3000;
 
 // Trust proxy when behind reverse proxy (for rate limit IP)
 if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
@@ -101,29 +102,17 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Require auth for all other /api routes. In demo/production ALWAYS require auth (override REQUIRE_AUTH).
-const useRequireAuth = (() => {
-  const mode = getMode();
-  if (mode === 'prod' || mode === 'demo') {
-    if (process.env.REQUIRE_AUTH === 'false') {
-      console.warn('[FATAL] REQUIRE_AUTH=false is ignored in demo/production. Auth is always enforced.');
-    }
-    return true;
-  }
-  return process.env.REQUIRE_AUTH !== 'false';
-})();
+// Require auth: from runtime_mode (MODE is single source of truth).
+const useRequireAuth = requireAuthFromMode();
 
-/** For tests: in demo/production, /api must always use requireAuth (bypass impossible). */
+/** For tests: /api must use requireAuth when in deployment mode. */
 export function useRequireAuthForApi(): boolean {
-  const mode = getMode();
-  if (mode === 'prod' || mode === 'demo') return true;
-  return process.env.REQUIRE_AUTH !== 'false';
+  return requireAuthFromMode();
 }
 
-/** For tests: /api-dev is mounted only when MODE=dev and ENABLE_DEV_API === 'true'. */
+/** For tests: /api-dev mounted only when MODE=dev and ENABLE_DEV_API=true. */
 export function isDevApiMounted(): boolean {
-  const { getMode: gm } = require('./lib/runtime_mode.js');
-  return gm() === 'dev' && process.env.ENABLE_DEV_API === 'true';
+  return getMode() === 'dev' && enableDevApi();
 }
 
 app.use('/api', apiLimiter, (req, res, next) => {
@@ -132,10 +121,8 @@ app.use('/api', apiLimiter, (req, res, next) => {
 app.use('/api', attachTenantPool);
 app.use('/api', requireTenantContext);
 
-// Dev-only diagnostics router: optionalAuth for trial-balance/ingest, supervisor 410.
-// Mounted ONLY when: MODE=dev AND ENABLE_DEV_API === 'true'.
-// Single canonical API: /api. Use /api in tests; set ENABLE_DEV_API=true only for explicit dev-only tests.
-const canMountDevApi = getMode() === 'dev' && process.env.ENABLE_DEV_API === 'true';
+// Dev-only diagnostics router. Mounted ONLY when MODE=dev AND ENABLE_DEV_API=true.
+const canMountDevApi = getMode() === 'dev' && enableDevApi();
 if (canMountDevApi) {
   app.use('/api-dev', devDiagnosticsRouter);
 }
@@ -175,6 +162,9 @@ app.use('/api/close', closeRouter);
 
 // API: Pre-certification structural check (board-ready) — stateless, no DB/AI
 app.use('/api/precheck', precheckRouter);
+
+// API: Config — tenant materiality and other overrides
+app.use('/api/config', configRouter);
 
 // API: Auditor verification — read-only snapshot hash verification
 app.use('/api/verification', verificationRouter);
@@ -237,6 +227,10 @@ async function start(): Promise<void> {
   }
   app.listen(PORT, () => {
     console.log(`FinOS Agent API listening on http://localhost:${PORT}`);
+    if (getMode() === 'demo') {
+      console.log(`Demo ready at http://localhost:${PORT}`);
+      console.log('  Login: demo@cloudmetrics.io / DemoPass2026!');
+    }
     console.log('  POST /api/trial-balance/ingest — upload CSV/XLSX Trial Balance');
     console.log('  POST /api/trial-balance/statements — JSON Trial Balance → BS + P&L');
     console.log('  GET  /api/trial-balance/supported — supported formats & codification');

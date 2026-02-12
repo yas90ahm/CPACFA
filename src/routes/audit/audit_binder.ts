@@ -27,6 +27,7 @@ import {
   BinderExportMessage,
   BinderExportRemediation,
 } from '../../constants/binder_export_codes.js';
+import { effectiveAllowLegacyCertifiedSource } from '../../lib/runtime_mode.js';
 
 const router = Router();
 
@@ -147,10 +148,6 @@ router.post('/register-statements', validateBody(registerStatementsBodySchema), 
   }
 });
 
-function allowLegacyCertifiedSource(req: Request): boolean {
-  return req.query.allowLegacyCertifiedSource === '1' || process.env.ALLOW_LEGACY_CERTIFIED_SOURCE === 'true';
-}
-
 const ROUTE_BINDER = 'GET /api/audit/binder';
 
 function binderGateLog(
@@ -181,11 +178,11 @@ router.get('/binder', async (req: Request, res: Response) => {
     if (!auth || !auth.pool || auth.tenantId == null) return;
     if (!(await runBinderExportGates(req, res, { pool: auth.pool, tenantId: auth.tenantId }))) return;
     const result = await getCertifiedStatementsForBinder(auth.pool, auth.tenantId, closeSessionId, {
-      allowLegacyCertifiedSource: allowLegacyCertifiedSource(req),
+      allowLegacyCertifiedSource: effectiveAllowLegacyCertifiedSource(req),
     });
     if (!result) {
       const code =
-        closeSessionId && !allowLegacyCertifiedSource(req)
+        closeSessionId && !effectiveAllowLegacyCertifiedSource(req)
           ? BinderExportCode.NO_CERTIFIED_SOURCE
           : BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED;
       binderGateLog(req, 'deny', { closeSessionId, code, startMs });
@@ -200,7 +197,7 @@ router.get('/binder', async (req: Request, res: Response) => {
         error: 'Unprocessable Entity',
         code,
         message: BinderExportMessage[code],
-        allowLegacyCertifiedSourceEffective: allowLegacyCertifiedSource(req),
+        allowLegacyCertifiedSourceEffective: effectiveAllowLegacyCertifiedSource(req),
         attemptedSource: 'certified_snapshot',
       };
       if (code === BinderExportCode.NO_CERTIFIED_SOURCE && BinderExportRemediation[code]) {
@@ -265,10 +262,10 @@ router.get('/binder/export/pdf', async (req: Request, res: Response) => {
     if (!(await runBinderExportGates(req, res, { pool: auth.pool, tenantId: auth.tenantId }))) return;
     const closeSessionId = (req.query.closeSessionId as string) ?? '';
     const result = await getCertifiedStatementsForBinder(auth.pool, auth.tenantId, closeSessionId, {
-      allowLegacyCertifiedSource: allowLegacyCertifiedSource(req),
+      allowLegacyCertifiedSource: effectiveAllowLegacyCertifiedSource(req),
     });
     if (!result) {
-      const code = closeSessionId && !allowLegacyCertifiedSource(req) ? BinderExportCode.NO_CERTIFIED_SOURCE : BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED;
+      const code = closeSessionId && !effectiveAllowLegacyCertifiedSource(req) ? BinderExportCode.NO_CERTIFIED_SOURCE : BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED;
       const payload: {
         error: string;
         code: string;
@@ -280,7 +277,7 @@ router.get('/binder/export/pdf', async (req: Request, res: Response) => {
         error: 'Unprocessable Entity',
         code,
         message: BinderExportMessage[code],
-        allowLegacyCertifiedSourceEffective: allowLegacyCertifiedSource(req),
+        allowLegacyCertifiedSourceEffective: effectiveAllowLegacyCertifiedSource(req),
         attemptedSource: 'certified_snapshot',
       };
       if (code === BinderExportCode.NO_CERTIFIED_SOURCE && BinderExportRemediation[code]) {
@@ -338,10 +335,10 @@ router.get('/binder/export/csv', async (req: Request, res: Response) => {
     if (!(await runBinderExportGates(req, res, { pool: auth.pool, tenantId: auth.tenantId }))) return;
     const closeSessionId = (req.query.closeSessionId as string) ?? '';
     const result = await getCertifiedStatementsForBinder(auth.pool, auth.tenantId, closeSessionId, {
-      allowLegacyCertifiedSource: allowLegacyCertifiedSource(req),
+      allowLegacyCertifiedSource: effectiveAllowLegacyCertifiedSource(req),
     });
     if (!result) {
-      const code = closeSessionId && !allowLegacyCertifiedSource(req) ? BinderExportCode.NO_CERTIFIED_SOURCE : BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED;
+      const code = closeSessionId && !effectiveAllowLegacyCertifiedSource(req) ? BinderExportCode.NO_CERTIFIED_SOURCE : BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED;
       const payload: {
         error: string;
         code: string;
@@ -353,7 +350,7 @@ router.get('/binder/export/csv', async (req: Request, res: Response) => {
         error: 'Unprocessable Entity',
         code,
         message: BinderExportMessage[code],
-        allowLegacyCertifiedSourceEffective: allowLegacyCertifiedSource(req),
+        allowLegacyCertifiedSourceEffective: effectiveAllowLegacyCertifiedSource(req),
         attemptedSource: 'certified_snapshot',
       };
       if (code === BinderExportCode.NO_CERTIFIED_SOURCE && BinderExportRemediation[code]) {

@@ -25,7 +25,11 @@ process.env.TEST_DB_PASSWORD = process.env.TEST_DB_PASSWORD || 'postgres';
 // Timeout for global hooks when DATABASE_URL is set (schema verification + pool init can exceed default 5s)
 const GLOBAL_SETUP_TIMEOUT_MS = 20000;
 
-// Global setup: when DATABASE_URL is set, verify schema before running tests (fail fast if tables missing)
+// Reset AI boundary state before test run (prevent leakage from prior runs)
+beforeAll(async () => {
+  const { resetAiBoundaryForTests } = await import('../src/lib/ai_boundary.js');
+  resetAiBoundaryForTests();
+});
 beforeAll(async () => {
   if (process.env.DATABASE_URL?.trim()) {
     const { getControlPool } = await import('../src/db/index.js');

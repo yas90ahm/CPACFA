@@ -58,6 +58,19 @@ export async function runMigrations(): Promise<void> {
 }
 
 /**
+ * Test that a database URL is reachable (runs SELECT 1).
+ * Throws on connection failure.
+ */
+export async function testConnectionForUrl(url: string): Promise<void> {
+  const pool = new pg.Pool({ connectionString: url, max: 1 });
+  try {
+    await pool.query('SELECT 1');
+  } finally {
+    await pool.end();
+  }
+}
+
+/**
  * Run tenant schema (003–063) on a given database URL.
  * URL is read from (in order): MIGRATE_TENANT_URL, DATABASE_URL (.env), or last CLI arg.
  * With Supabase URL in .env: set DATABASE_URL (or MIGRATE_TENANT_URL) then run: npx tsx src/db/migrate.ts --tenant

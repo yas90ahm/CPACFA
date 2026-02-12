@@ -21,6 +21,7 @@ import { finalIntegrityCheck } from '../services/integrity_check.js';
 import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
 import { ENABLE_INTEGRATED_SUPERVISOR } from '../lib/capability_flags.js';
 import { ALLOW_IMBALANCED_DRAFT_EXPORT, isProduction } from '../lib/env.js';
+import { effectiveAllowLegacyCertifiedSource } from '../lib/runtime_mode.js';
 import { log } from '../lib/logger.js';
 import { getStorage } from '../storage/index.js';
 import { send500 } from '../lib/errorHandler.js';
@@ -213,7 +214,7 @@ router.post('/pdf', async (req: Request, res: Response) => {
       if (closeSessionIdExport && tenantId && pool) {
         const { getCertifiedStatementsForBinder } = await import('../services/audit_export_service.js');
         const { statementsToExportPayload } = await import('../services/certified_statements_service.js');
-        const allowLegacy = (req.query.allowLegacyCertifiedSource as string) === '1' || process.env.ALLOW_LEGACY_CERTIFIED_SOURCE === 'true';
+        const allowLegacy = effectiveAllowLegacyCertifiedSource(req);
         const result = await getCertifiedStatementsForBinder(pool, tenantId, closeSessionIdExport, { allowLegacyCertifiedSource: allowLegacy });
         if (result) {
           certifiedExportResult = result;
@@ -586,7 +587,7 @@ router.post('/csv', async (req: Request, res: Response) => {
     if (exportModeCsv === 'certified' && closeSessionIdCsv && tenantId && pool) {
       const { getCertifiedStatementsForBinder } = await import('../services/audit_export_service.js');
       const { statementsToExportPayload } = await import('../services/certified_statements_service.js');
-      const allowLegacyCsv = (req.query.allowLegacyCertifiedSource as string) === '1' || process.env.ALLOW_LEGACY_CERTIFIED_SOURCE === 'true';
+      const allowLegacyCsv = effectiveAllowLegacyCertifiedSource(req);
       const resultCsv = await getCertifiedStatementsForBinder(pool, tenantId, closeSessionIdCsv, { allowLegacyCertifiedSource: allowLegacyCsv });
       if (resultCsv) {
         certifiedCsvResult = resultCsv;

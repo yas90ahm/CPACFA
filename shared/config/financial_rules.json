@@ -4,7 +4,10 @@
   "roundingTolerance": 0.01,
   "materiality": {
     "defaultThreshold": 0.01,
-    "description": "Default materiality for balance checks and variance (e.g. 0.01 = 1 unit or 1%)"
+    "absoluteThreshold": 1000,
+    "relativeThreshold": 0.005,
+    "roundingToleranceCents": 1,
+    "description": "Default materiality. absoluteThreshold in currency units; relativeThreshold as decimal (0.005 = 0.5%); roundingToleranceCents for rounding gap checks."
   },
   "equations": {
     "debits_equal_credits": {

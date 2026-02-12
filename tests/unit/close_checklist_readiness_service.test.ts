@@ -18,6 +18,7 @@ import * as issueService from '../../src/services/issue_item_service.js';
 import * as jeRepo from '../../src/db/repositories/journal_entry_repository.js';
 import * as auditLedger from '../../src/services/audit_ledger_service.js';
 import * as periodExportChecks from '../../src/db/repositories/period_export_checks_repository.js';
+import * as evidencePolicyService from '../../src/services/evidence_policy_service.js';
 
 const mockPool = {} as Pool;
 
@@ -53,7 +54,7 @@ describe('Close checklist readiness — initializeChecklistTemplate', () => {
   it('creates 4 default items when none exist', async () => {
     jest.spyOn(itemRepo, 'hasChecklistForSession').mockResolvedValue(false);
     jest.spyOn(itemRepo, 'insertChecklistItem').mockResolvedValue({ ...sampleItem });
-    const result = await initializeChecklistTemplate(mockPool, 'sess-1');
+    const result = await initializeChecklistTemplate(mockPool, 't1', 'sess-1');
     expect(result.created).toBe(true);
     expect(result.items).toHaveLength(4);
     expect(itemRepo.insertChecklistItem).toHaveBeenCalledTimes(4);
@@ -66,7 +67,7 @@ describe('Close checklist readiness — initializeChecklistTemplate', () => {
       { ...sampleItem, id: 'item-2', code: 'NO_CRITICAL_ISSUES' },
     ]);
     const insertSpy = jest.spyOn(itemRepo, 'insertChecklistItem');
-    const result = await initializeChecklistTemplate(mockPool, 'sess-1');
+    const result = await initializeChecklistTemplate(mockPool, 't1', 'sess-1');
     expect(result.created).toBe(false);
     expect(result.items).toHaveLength(2);
     expect(insertSpy).not.toHaveBeenCalled();
@@ -85,6 +86,7 @@ describe('Close checklist readiness — computeReadiness', () => {
     jest.spyOn(jeRepo, 'listJournalEntries').mockResolvedValue([]);
     jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true, entryCount: 1, verifiedAt: new Date().toISOString() });
     jest.spyOn(periodExportChecks, 'getPeriodExportChecks').mockResolvedValue(null);
+    jest.spyOn(evidencePolicyService, 'checkEvidencePolicyForCertification').mockResolvedValue({ hardBlockers: [], softWarnings: [] });
     const result = await computeReadiness(mockPool, 't1', sampleSession);
     expect(result.ready).toBe(false);
     expect(result.hardBlockers).toContainEqual(expect.stringContaining('Checklist not initialized'));
@@ -100,6 +102,7 @@ describe('Close checklist readiness — computeReadiness', () => {
     jest.spyOn(jeRepo, 'listJournalEntries').mockResolvedValue([]);
     jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true, entryCount: 1, verifiedAt: new Date().toISOString() });
     jest.spyOn(periodExportChecks, 'getPeriodExportChecks').mockResolvedValue(null);
+    jest.spyOn(evidencePolicyService, 'checkEvidencePolicyForCertification').mockResolvedValue({ hardBlockers: [], softWarnings: [] });
     const result = await computeReadiness(mockPool, 't1', sampleSession);
     expect(result.ready).toBe(false);
     expect(result.checklistComplete).toBe(false);
@@ -118,6 +121,7 @@ describe('Close checklist readiness — computeReadiness', () => {
     jest.spyOn(jeRepo, 'listJournalEntries').mockResolvedValue([]);
     jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true, entryCount: 1, verifiedAt: new Date().toISOString() });
     jest.spyOn(periodExportChecks, 'getPeriodExportChecks').mockResolvedValue(null);
+    jest.spyOn(evidencePolicyService, 'checkEvidencePolicyForCertification').mockResolvedValue({ hardBlockers: [], softWarnings: [] });
     const result = await computeReadiness(mockPool, 't1', sampleSession);
     expect(result.ready).toBe(true);
     expect(result.hardBlockers).toHaveLength(0);
@@ -148,6 +152,7 @@ describe('Close checklist readiness — computeReadiness', () => {
     jest.spyOn(jeRepo, 'listJournalEntries').mockResolvedValue([]);
     jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true, entryCount: 1, verifiedAt: new Date().toISOString() });
     jest.spyOn(periodExportChecks, 'getPeriodExportChecks').mockResolvedValue(null);
+    jest.spyOn(evidencePolicyService, 'checkEvidencePolicyForCertification').mockResolvedValue({ hardBlockers: [], softWarnings: [] });
     const result = await computeReadiness(mockPool, 't1', sampleSession);
     expect(result.ready).toBe(false);
     expect(result.noCriticalIssues).toBe(false);
@@ -168,6 +173,7 @@ describe('Close checklist readiness — computeReadiness', () => {
     ]);
     jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: true, entryCount: 1, verifiedAt: new Date().toISOString() });
     jest.spyOn(periodExportChecks, 'getPeriodExportChecks').mockResolvedValue(null);
+    jest.spyOn(evidencePolicyService, 'checkEvidencePolicyForCertification').mockResolvedValue({ hardBlockers: [], softWarnings: [] });
     const result = await computeReadiness(mockPool, 't1', sampleSession);
     expect(result.ready).toBe(false);
     expect(result.materialJesApproved).toBe(false);
@@ -186,6 +192,7 @@ describe('Close checklist readiness — computeReadiness', () => {
     jest.spyOn(jeRepo, 'listJournalEntries').mockResolvedValue([]);
     jest.spyOn(auditLedger, 'verifyChain').mockResolvedValue({ valid: false, message: 'Chain broken', entryCount: 1, verifiedAt: new Date().toISOString() });
     jest.spyOn(periodExportChecks, 'getPeriodExportChecks').mockResolvedValue(null);
+    jest.spyOn(evidencePolicyService, 'checkEvidencePolicyForCertification').mockResolvedValue({ hardBlockers: [], softWarnings: [] });
     const result = await computeReadiness(mockPool, 't1', sampleSession);
     expect(result.ready).toBe(false);
     expect(result.integrityChecksPass).toBe(false);
@@ -205,10 +212,11 @@ describe('Close checklist readiness — completeChecklistItem / getChecklistItem
       completedBy: 'user-1',
       completedAt: '2025-01-01T12:00:00Z',
     });
-    const result = await completeChecklistItem(mockPool, 'item-1', 'user-1', 'Done');
+    const result = await completeChecklistItem(mockPool, 't1', 'item-1', 'user-1', 'Done');
     expect(result?.status).toBe('completed');
     expect(itemRepo.updateChecklistItemStatus).toHaveBeenCalledWith(
       mockPool,
+      't1',
       'item-1',
       'completed',
       expect.objectContaining({ completedBy: 'user-1', notes: 'Done' })

@@ -168,9 +168,36 @@ Revenue,0,(1000.00)`;
       expect(parseAmount(1.23e5)).toBeCloseTo(123000, 0);
     });
 
+    it('parses scientific notation variants: 1.5e4, 3.2E-2, -2.5e3, 1e6', () => {
+      expect(parseAmount('1.5e4')).toBe(15000);
+      expect(parseAmount('3.2E-2')).toBe(0.032);
+      expect(parseAmount('-2.5e3')).toBe(-2500);
+      expect(parseAmount('1e6')).toBe(1000000);
+    });
+
     it('parses negative in parentheses', () => {
       expect(parseAmount('(1000.00)')).toBe(-1000);
       expect(parseAmount('(1,234.56)')).toBe(-1234.56);
+    });
+
+    it('Excel formula-as-string returns 0 (formula not resolved)', () => {
+      // Excel formulas are resolved to values by the XLSX parser. If a formula string
+      // appears in a CSV, it is treated as unparseable and parseAmount returns 0.
+      const result = parseAmount('=SUM(A1:A5)');
+      expect(result).toBe(0);
+    });
+
+    it('CSV with formula string in Debit column: row parsed with 0 or flagged', () => {
+      // When CSV contains "=SUM(A1:A5)" as literal string, parseAmount returns 0.
+      const csv = `AccountName,Debit,Credit
+Cash,=SUM(A1:A5),0
+Revenue,0,1000`;
+      const result = parseCsvToTrialBalance(Buffer.from(csv, 'utf8'));
+      expect(result).toBeDefined();
+      expect(result.rows.length).toBeGreaterThanOrEqual(1);
+      // First row: Debit parses as 0 (formula string unparseable)
+      expect(result.rows[0]?.debit).toBe(0);
+      expect(result.rows[0]?.credit).toBe(0);
     });
   });
 

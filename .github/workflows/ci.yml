@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+      - run: npm run lint
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cpacfa
+          POSTGRES_PASSWORD: cpacfa
+          POSTGRES_DB: cpacfa_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cpacfa -d cpacfa_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Run migrations
+        env:
+          DATABASE_URL: postgres://cpacfa:cpacfa@localhost:5432/cpacfa_test
+        run: npm run db:migrate
+
+      - name: Run tests
+        env:
+          CI: 'true'
+          DATABASE_URL: postgres://cpacfa:cpacfa@localhost:5432/cpacfa_test
+          JWT_SECRET: test_secret_key_for_testing_only
+          NODE_ENV: test
+        run: |
+          cd tests && npm ci && npm test
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t cpacfa:ci .

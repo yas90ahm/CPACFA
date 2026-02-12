@@ -84,9 +84,10 @@ export interface RecordMaterialEventInput {
     | 'je_posting'
     | 'statement_package_generation'
     | 'export_event'
-    | 'close_lock'
-    | 'certify_close'
-    | 'bridge_command'
+  | 'close_lock'
+  | 'certify_close'
+  | 'close_session_transition'
+  | 'bridge_command'
     | 'evidence_link'
     | 'legacy_certified_source_used'
   >;

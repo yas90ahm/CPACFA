@@ -31,6 +31,7 @@ import { getRoundingTolerance } from '../services/rules_registry.js';
 import { absGt } from '../utils/decimal.js';
 import * as persistence from '../services/persistence_service.js';
 import type { TrialBalanceEntry } from '../types/financial.js';
+import { assertNoAiMutationContext } from '../lib/ai_boundary.js';
 
 // ---------------------------------------------------------------------------
 // Bridge context
@@ -246,11 +247,13 @@ export class BridgeError extends Error {
 /**
  * Execute a single bridge command. Validates with Zod, enforces invariants,
  * calls services, records audit. Returns deterministic result or error.
+ * In prod/staging: asserts not invoked from AI context (AI is advisory-only).
  */
 export async function executeBridgeCommand(
   ctx: BridgeContext,
   command: unknown
 ): Promise<BridgeResult> {
+  assertNoAiMutationContext();
   const parsed = bridgeCommandSchema.safeParse(command);
   if (!parsed.success) {
     const msg = parsed.error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');

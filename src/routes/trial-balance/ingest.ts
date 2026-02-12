@@ -55,6 +55,7 @@ import { executeBridgeCommand } from '../../bridge/index.js';
 import { getAdjustedTrialBalance } from '../../services/adjusted_trial_balance_service.js';
 import { attachLineProvenance, attachCategories, parseTransactions, normalizeStandard } from './helpers.js';
 import { log } from '../../lib/logger.js';
+import { detectCoaSource, mapAccountTypeToCategory } from '../../services/coa_template_service.js';
 import { isBodyTenantInjectionAllowed } from '../../lib/env.js';
 import { send500 } from '../../lib/errorHandler.js';
 
@@ -173,6 +174,20 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       });
     } else if (false) {
       // Scope: agentic ledger-to-TB numeric extraction quarantined. Branch kept for brace structure; never runs.
+    }
+
+    const { source: detectedSource, template } = detectCoaSource(ingestResult.headers ?? []);
+    if (template && detectedSource !== 'generic') {
+      for (const row of rawRows) {
+        const r = row as { accountTypeRaw?: string; accountType?: import('../../types/financial.js').AccountType };
+        if (r.accountTypeRaw) {
+          const cat = mapAccountTypeToCategory(template, r.accountTypeRaw);
+          if (cat) r.accountType = cat;
+        }
+      }
+      log('info', 'coa_template_applied', { source: detectedSource, templateDetected: true });
+    } else {
+      log('info', 'coa_template_applied', { source: detectedSource, templateDetected: false });
     }
 
     const trialBalance = parseTrialBalance(rawRows);

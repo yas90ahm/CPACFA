@@ -1,6 +1,6 @@
 /**
  * Runtime mode: MODE parsing, applyModeDefaults, enforcement.
- * A) MODE=prod + REQUIRE_AUTH=false => throws at startup
+ * A) MODE=prod + REQUIRE_AUTH=false => warns and forces true (does not throw)
  * B) MODE=demo + ENABLE_DEV_API=true => forces false
  * C) MODE=dev default => permissive but warns (config state)
  * D) NODE_ENV=production and MODE unset => mode resolves to prod
@@ -73,11 +73,16 @@ describe('Runtime mode', () => {
   });
 
   describe('applyModeDefaults', () => {
-    it('A) MODE=prod + REQUIRE_AUTH=false => throws', () => {
+    it('A) MODE=prod + REQUIRE_AUTH=false => warns and forces true (does not throw)', () => {
       process.env.MODE = 'prod';
       process.env.NODE_ENV = 'production';
       process.env.REQUIRE_AUTH = 'false';
-      expect(() => applyModeDefaults()).toThrow(/MODE=prod.*REQUIRE_AUTH must not be false/);
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(() => applyModeDefaults()).not.toThrow();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/MODE=prod.*REQUIRE_AUTH=false is ignored/)
+      );
+      warnSpy.mockRestore();
     });
 
     it('A) MODE=prod + REQUIRE_TENANT_CONTEXT=false => throws', () => {
@@ -141,8 +146,8 @@ describe('Runtime mode', () => {
       applyModeDefaults();
       expect(warnSpy).toHaveBeenCalled();
       const output = warnSpy.mock.calls.flat().join('\n');
-      expect(output).toContain('DEMO MODE');
-      expect(output).toContain('STRICT');
+      expect(output).toContain('DEMO');
+      expect(output).toContain('auth enforced');
       warnSpy.mockRestore();
     });
   });

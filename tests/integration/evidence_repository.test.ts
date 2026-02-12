@@ -59,7 +59,7 @@ describe('Evidence repository', () => {
       pool,
       `sess-evidence-${Date.now()}`,
       TEST_TENANT_ID,
-      'e1',
+      `e-evidence-link-${Date.now()}`,
       '2025-01-01',
       '2025-01-31',
       'accrual',
@@ -88,6 +88,7 @@ describe('Evidence repository', () => {
       objectId: je.id,
       role: 'support',
       requiredness: 'optional',
+      assertionType: 'invoice_support',
       createdBy: 'user@test.com',
     });
     expect(link.id).toBeDefined();
@@ -109,7 +110,7 @@ describe('Evidence repository', () => {
       pool,
       `sess-evidence-2-${Date.now()}`,
       TEST_TENANT_ID,
-      'e1',
+      `e-evidence-session-${Date.now()}`,
       '2025-02-01',
       '2025-02-28',
       'accrual',
@@ -136,6 +137,7 @@ describe('Evidence repository', () => {
       evidenceId: record.id,
       objectId: je.id,
       role: 'support',
+      assertionType: 'invoice_support',
       createdBy: 'user@test.com',
     });
 

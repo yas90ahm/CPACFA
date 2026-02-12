@@ -86,7 +86,10 @@ describe('Startup validation', () => {
       process.env.MODE = 'prod';
       process.env.NODE_ENV = 'production';
       process.env.DATABASE_URL = 'postgres://localhost/test';
-      process.env.JWT_SECRET = 'secret';
+      process.env.JWT_SECRET = 'real-secret-for-prod-test-not-placeholder';
+      process.env.AI_MOCK = 'false';
+      process.env.AI_MOCK_CLASSIFIER = 'false';
+      process.env.AI_MOCK_ADVISOR = 'false';
       const keys = generateEd25519KeyPairBase64();
       process.env.CERT_SIGNING_PRIVATE_KEY = keys.privateKeyB64;
       process.env.CERT_SIGNING_PUBLIC_KEY = keys.publicKeyB64;
@@ -173,6 +176,9 @@ describe('Startup validation', () => {
       process.env.REQUIRE_AUTH = 'true';
       process.env.ALLOW_IMBALANCED_DRAFT_EXPORT = 'false';
       process.env.ALLOW_LEGACY_CERTIFIED_SOURCE = 'false';
+      process.env.AI_MOCK = 'false';
+      process.env.AI_MOCK_CLASSIFIER = 'false';
+      process.env.AI_MOCK_ADVISOR = 'false';
     });
 
     it('fails when CERT_SIGNING keys are missing in production', () => {
@@ -190,6 +196,16 @@ describe('Startup validation', () => {
       process.env.CERT_SIGNING_PUBLIC_KEY = keys.publicKeyB64;
       const result = validateEnv();
       expect(result.ok).toBe(true);
+    });
+
+    it('fails when JWT_SECRET is dev-secret-change-in-prod placeholder', () => {
+      process.env.JWT_SECRET = 'dev-secret-change-in-prod';
+      const keys = generateEd25519KeyPairBase64();
+      process.env.CERT_SIGNING_PRIVATE_KEY = keys.privateKeyB64;
+      process.env.CERT_SIGNING_PUBLIC_KEY = keys.publicKeyB64;
+      const result = validateEnv();
+      expect(result.ok).toBe(false);
+      expect(result.errors.some((e) => e.includes('JWT_SECRET') && e.includes('placeholder'))).toBe(true);
     });
   });
 

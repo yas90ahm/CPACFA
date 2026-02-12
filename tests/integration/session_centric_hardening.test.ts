@@ -21,6 +21,7 @@ import {
   queryControl,
 } from '../../src/db/index.js';
 import * as closeSessionRepo from '../../src/db/repositories/close_session_repository.js';
+import { upsertPeriodExportChecks } from '../../src/db/repositories/period_export_checks_repository.js';
 import { initializeChecklistTemplate } from '../../src/services/close_checklist_readiness_service.js';
 import * as itemRepo from '../../src/db/repositories/close_checklist_item_repository.js';
 
@@ -156,6 +157,12 @@ describe('Session-centric hardening', () => {
     expect(sess?.status).toBe('certified');
     expect(sess?.certifiedSnapshotId).toBeUndefined();
 
+    // Satisfy export gate: period_export_checks must exist (materiality from DB)
+    await upsertPeriodExportChecks(pool, TEST_TENANT_ID, '2030-02', {
+      roundingGapExceedsMateriality: false,
+      aggregateRoundingExceedsMateriality: false,
+    });
+
     // Attempt binder — no snapshot, no allowLegacy → expect 422 NO_CERTIFIED_SOURCE
     const res = await request(app)
       .get(
@@ -185,11 +192,17 @@ describe('Session-centric hardening', () => {
       'certified'
     );
     // Init checklist and complete items so export readiness passes
-    await initializeChecklistTemplate(pool, sessionId);
-    const items = await itemRepo.listChecklistItemsBySessionId(pool, sessionId);
+    await initializeChecklistTemplate(pool, TEST_TENANT_ID, sessionId);
+    const items = await itemRepo.listChecklistItemsBySessionId(pool, TEST_TENANT_ID, sessionId);
     for (const item of items) {
-      await itemRepo.updateChecklistItemStatus(pool, item.id, 'completed', { completedBy: 'test-user' });
+      await itemRepo.updateChecklistItemStatus(pool, TEST_TENANT_ID, item.id, 'completed', { completedBy: 'test-user' });
     }
+
+    // Satisfy export gate: period_export_checks must exist
+    await upsertPeriodExportChecks(pool, TEST_TENANT_ID, '2030-03', {
+      roundingGapExceedsMateriality: false,
+      aggregateRoundingExceedsMateriality: false,
+    });
 
     const res = await request(app)
       .post('/api/export/pdf')
@@ -267,8 +280,14 @@ describe('Session-centric hardening', () => {
             codificationRef: { framework: 'FASB', citation: 'ASC 220-10-45' },
           },
         },
-      });
+      }    );
     expect(regRes.status).toBe(200);
+
+    // Satisfy export gate: period_export_checks must exist
+    await upsertPeriodExportChecks(pool, TEST_TENANT_ID, '2030-04', {
+      roundingGapExceedsMateriality: false,
+      aggregateRoundingExceedsMateriality: false,
+    });
 
     const res = await request(app)
       .get(
@@ -337,6 +356,12 @@ describe('Session-centric hardening', () => {
         },
       });
 
+    // Satisfy export gate: period_export_checks must exist
+    await upsertPeriodExportChecks(pool, TEST_TENANT_ID, '2030-05', {
+      roundingGapExceedsMateriality: false,
+      aggregateRoundingExceedsMateriality: false,
+    });
+
     await request(app)
       .get(
         `/api/audit/binder?periodStart=2030-05-01&periodEnd=2030-05-31&closeSessionId=${sessionId}&allowLegacyCertifiedSource=1`
@@ -357,4 +382,80 @@ describe('Session-centric hardening', () => {
     expect(snap?.closeSessionId).toBe(sessionId);
     expect(snap?.resolvedSource).toBe('legacy');
   });
+
+  it('D) Advance through all states: audit ledger has entry for every transition', async () => {
+    if (!isDbConfigured()) return;
+
+    const pool = await getTenantPool(TEST_TENANT_ID);
+    const periodLabel = '2030-06';
+    const periodStart = '2030-06-01';
+    const periodEnd = '2030-06-30';
+
+    const createRes = await request(app)
+      .post('/api/close/sessions')
+      .set('Authorization', `Bearer ${authToken}`)
+      .set('Content-Type', 'application/json')
+      .send({
+        entityId: ENTITY_ID,
+        periodStart,
+        periodEnd,
+        basis: 'accrual',
+        standard: 'GAAP',
+      });
+    expect([200, 201]).toContain(createRes.status);
+    const closeSessionId = createRes.body?.id;
+    expect(closeSessionId).toBeDefined();
+
+    await request(app)
+      .post(`/api/close/sessions/${closeSessionId}/checklist/initialize`)
+      .set('Authorization', `Bearer ${authToken}`);
+
+    const listRes = await request(app)
+      .get(`/api/close/sessions/${closeSessionId}/checklist`)
+      .set('Authorization', `Bearer ${authToken}`);
+    const items = listRes.body?.items ?? listRes.body ?? [];
+    for (const item of Array.isArray(items) ? items : []) {
+      const id = item.id ?? item;
+      if (typeof id !== 'string') continue;
+      await request(app)
+        .post(`/api/close/checklist-items/${id}/complete`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('Content-Type', 'application/json')
+        .send({ completedBy: 'test-user' });
+      await request(app)
+        .post(`/api/close/checklist-items/${id}/skip`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('Content-Type', 'application/json')
+        .send({ completedBy: 'test-user' });
+    }
+
+    // Advance via PATCH: draft → in_progress → ready_for_review → finalized → locked
+    for (const status of ['in_progress', 'ready_for_review', 'finalized', 'locked']) {
+      const patchRes = await request(app)
+        .patch(`/api/close/sessions/${closeSessionId}/status`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('Content-Type', 'application/json')
+        .send({ status });
+      expect(patchRes.status).toBe(200);
+    }
+
+    // Query audit ledger: close_session_transition events for this session
+    const transitionRows = await pool.query<{ event_type: string; deterministic_flag_snapshot: unknown }>(
+      `SELECT event_type, deterministic_flag_snapshot FROM audit_ledger
+       WHERE tenant_id = $1 AND event_type = 'close_session_transition'
+       AND deterministic_flag_snapshot->>'sessionId' = $2
+       ORDER BY created_at`,
+      [TEST_TENANT_ID, closeSessionId]
+    );
+
+    // Expect 4 transitions: draft→in_progress, in_progress→ready_for_review, ready_for_review→finalized, finalized→locked
+    expect(transitionRows.rows.length).toBe(4);
+    const fromTo = transitionRows.rows.map(
+      (r) => (r.deterministic_flag_snapshot as Record<string, unknown>)?.from + '→' + (r.deterministic_flag_snapshot as Record<string, unknown>)?.to
+    );
+    expect(fromTo).toContain('draft→in_progress');
+    expect(fromTo).toContain('in_progress→ready_for_review');
+    expect(fromTo).toContain('ready_for_review→finalized');
+    expect(fromTo).toContain('finalized→locked');
+  }, 20000);
 });

@@ -1,0 +1,24 @@
+{
+  "source": "netsuite",
+  "description": "NetSuite standard account types",
+  "accountMappings": [
+    { "account_type": "Bank", "detail_type": null, "category": "ASSET" },
+    { "account_type": "Accounts Receivable", "detail_type": null, "category": "ASSET" },
+    { "account_type": "Other Current Asset", "detail_type": null, "category": "ASSET" },
+    { "account_type": "Fixed Asset", "detail_type": null, "category": "ASSET" },
+    { "account_type": "Other Asset", "detail_type": null, "category": "ASSET" },
+    { "account_type": "Deferred Expense", "detail_type": null, "category": "ASSET" },
+    { "account_type": "Accounts Payable", "detail_type": null, "category": "LIABILITY" },
+    { "account_type": "Credit Card", "detail_type": null, "category": "LIABILITY" },
+    { "account_type": "Other Current Liability", "detail_type": null, "category": "LIABILITY" },
+    { "account_type": "Long Term Liability", "detail_type": null, "category": "LIABILITY" },
+    { "account_type": "Deferred Revenue", "detail_type": null, "category": "LIABILITY" },
+    { "account_type": "Equity", "detail_type": null, "category": "EQUITY" },
+    { "account_type": "Income", "detail_type": null, "category": "REVENUE" },
+    { "account_type": "Cost of Goods Sold", "detail_type": null, "category": "EXPENSE" },
+    { "account_type": "Expense", "detail_type": null, "category": "EXPENSE" },
+    { "account_type": "Other Income", "detail_type": null, "category": "REVENUE" },
+    { "account_type": "Other Expense", "detail_type": null, "category": "EXPENSE" }
+  ],
+  "headerHints": ["Account", "Account Name", "Type", "AcctType"]
+}

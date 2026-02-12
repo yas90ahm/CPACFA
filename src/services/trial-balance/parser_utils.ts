@@ -11,6 +11,7 @@ export const CANONICAL_AMOUNT = 'Amount';
 export const CANONICAL_DESCRIPTION = 'Description';
 export const CANONICAL_ACCOUNT_NAME = 'AccountName';
 export const CANONICAL_ACCOUNT_CODE = 'AccountCode';
+export const CANONICAL_ACCOUNT_TYPE = 'AccountType';
 export const CANONICAL_DEBIT = 'Debit';
 export const CANONICAL_CREDIT = 'Credit';
 
@@ -41,6 +42,9 @@ const ACCOUNT_CODE_VARIANTS = [
   'accountcode', 'account_code', 'account code', 'code', 'gl_code',
   'ledger_code', 'account_number', 'acct_no',
 ];
+const ACCOUNT_TYPE_VARIANTS = [
+  'accounttype', 'account_type', 'account type', 'type', 'accttype', 'acct_type',
+];
 const DEBIT_VARIANTS = ['debit', 'debits', 'dr', 'debit_amount', 'debit_balance'];
 const CREDIT_VARIANTS = ['credit', 'credits', 'cr', 'credit_amount', 'credit_balance'];
 
@@ -49,6 +53,7 @@ const CANONICAL_MAP: Record<string, readonly string[]> = {
   [CANONICAL_DATE]: DATE_VARIANTS,
   [CANONICAL_ACCOUNT_NAME]: ACCOUNT_NAME_VARIANTS,
   [CANONICAL_ACCOUNT_CODE]: ACCOUNT_CODE_VARIANTS,
+  [CANONICAL_ACCOUNT_TYPE]: ACCOUNT_TYPE_VARIANTS,
   [CANONICAL_DEBIT]: DEBIT_VARIANTS,
   [CANONICAL_CREDIT]: CREDIT_VARIANTS,
   [CANONICAL_VENDOR]: VENDOR_VARIANTS,
@@ -176,24 +181,25 @@ export function hasCanonicalDebitCredit(standardizedRows: StandardizedRow[]): bo
  */
 export function standardizedRowsToTrialBalanceRows(
   rows: StandardizedRow[]
-): Array<{ accountName: string; accountCode?: string; debit: number; credit: number }> {
-  const out: Array<{ accountName: string; accountCode?: string; debit: number; credit: number }> = [];
+): Array<{ accountName: string; accountCode?: string; accountTypeRaw?: string; debit: number; credit: number }> {
+  const out: Array<{ accountName: string; accountCode?: string; accountTypeRaw?: string; debit: number; credit: number }> = [];
   const hasDebit = rows.length > 0 && (CANONICAL_DEBIT in (rows[0] ?? {}));
   const hasCredit = rows.length > 0 && (CANONICAL_CREDIT in (rows[0] ?? {}));
   const hasAmount = rows.length > 0 && (CANONICAL_AMOUNT in (rows[0] ?? {}) || CANONICAL_PRICE in (rows[0] ?? {}));
   const nameKey = rows.length > 0 && CANONICAL_ACCOUNT_NAME in (rows[0] ?? {}) ? CANONICAL_ACCOUNT_NAME : 'AccountName';
   const codeKey = rows.length > 0 && CANONICAL_ACCOUNT_CODE in (rows[0] ?? {}) ? CANONICAL_ACCOUNT_CODE : undefined;
+  const typeKey = rows.length > 0 && CANONICAL_ACCOUNT_TYPE in (rows[0] ?? {}) ? CANONICAL_ACCOUNT_TYPE : undefined;
 
   for (const row of rows) {
     const accountName = String(row[nameKey] ?? row['AccountName'] ?? row[CANONICAL_DESCRIPTION] ?? '').trim();
     if (!accountName) continue;
 
     const accountCode = codeKey ? String(row[codeKey] ?? '').trim() || undefined : undefined;
+    const accountTypeRaw = typeKey ? String(row[typeKey] ?? '').trim() || undefined : undefined;
     let debit = 0;
     let credit = 0;
 
     if (hasDebit && hasCredit) {
-      // Parentheses in separate columns: (1000) = 1000 in that column (accounting display convention)
       const rawDebit = parseAmount(row[CANONICAL_DEBIT]);
       const rawCredit = parseAmount(row[CANONICAL_CREDIT]);
       debit = rawDebit >= 0 ? rawDebit : Math.abs(rawDebit);
@@ -204,7 +210,7 @@ export function standardizedRowsToTrialBalanceRows(
       else credit = Math.abs(amt);
     }
 
-    out.push({ accountName, accountCode, debit, credit });
+    out.push({ accountName, accountCode, ...(accountTypeRaw ? { accountTypeRaw } : {}), debit, credit });
   }
   return out;
 }

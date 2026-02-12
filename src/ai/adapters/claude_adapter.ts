@@ -6,6 +6,7 @@
  */
 
 import { generateText } from '../../llm/provider.js';
+import { aiMock, aiMockClassifier, aiMockAdvisor } from '../../lib/runtime_mode.js';
 import { JUSTIFIER_PROMPT_VERSION } from '../prompts/justifier.prompt.js';
 import { SHADOW_AUDITOR_PROMPT_VERSION } from '../prompts/shadow_auditor.prompt.js';
 import { CLASSIFIER_PROMPT_VERSION } from '../prompts/classifier.prompt.js';
@@ -116,17 +117,13 @@ function getMockAdvisorJson(): string {
 }
 
 export async function callClaude(input: ClaudeAdapterInput): Promise<ClaudeAdapterOutput> {
-  const useMockClassifier =
-    process.env.AI_MOCK === 'true' || process.env.AI_MOCK_CLASSIFIER === 'true';
-  if (useMockClassifier && input.pillar === 'classifier') {
+  if (aiMockClassifier() && input.pillar === 'classifier') {
     return { ok: true, rawText: getMockClassifierJson() };
   }
-  const useMockAdvisor =
-    process.env.AI_MOCK === 'true' || process.env.AI_MOCK_ADVISOR === 'true';
-  if (useMockAdvisor && input.pillar === 'advisor') {
+  if (aiMockAdvisor() && input.pillar === 'advisor') {
     return { ok: true, rawText: getMockAdvisorJson() };
   }
-  if (process.env.AI_MOCK === 'true') {
+  if (aiMock()) {
     const rawText =
       input.pillar === 'shadow_auditor' ? getMockShadowAuditorJson() : MOCK_JUSTIFIER_JSON;
     return { ok: true, rawText };

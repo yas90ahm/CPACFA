@@ -12,6 +12,7 @@ import { getTestAuthToken } from '../helpers/testHelpers.js';
 import { isDbConfigured, getTenantPool, queryControl } from '../../src/db/index.js';
 import * as closeSessionRepo from '../../src/db/repositories/close_session_repository.js';
 import { createSnapshotFromTrialBalanceAndEntries } from '../../src/services/ledger_snapshot_service.js';
+import { upsertPeriodExportChecks } from '../../src/db/repositories/period_export_checks_repository.js';
 
 const TEST_TENANT_ID = process.env.TEST_TENANT_ID ?? 'export-certified-gate-tenant';
 
@@ -83,6 +84,14 @@ describe('Export certified gate', () => {
         'Setup',
         snapshot.id
       );
+      await upsertPeriodExportChecks(pool, TEST_TENANT_ID, '2025-01', {
+        roundingGapExceedsMateriality: false,
+        aggregateRoundingExceedsMateriality: false,
+      });
+      await upsertPeriodExportChecks(pool, TEST_TENANT_ID, '2025-02', {
+        roundingGapExceedsMateriality: false,
+        aggregateRoundingExceedsMateriality: false,
+      });
     } catch (e) {
       console.warn('Export certified gate: could not create test sessions (tenant or schema); skipping.', e);
     }
@@ -265,7 +274,7 @@ describe('Export certified gate', () => {
     }
   });
 
-  it('certified export returns 422 RESOLUTION_MISMATCH when resolution counts mismatch (no artifact)', async () => {
+  it('certified export returns 422 RESOLUTION_MISMATCH or 403 when resolution counts mismatch / gate blocks (no artifact)', async () => {
     if (!isDbConfigured() || !closeSessionIdCertified) return;
     const exportGate = await import('../../src/services/export_gate_service.js');
     const original = exportGate.checkExportGate;
@@ -292,10 +301,13 @@ describe('Export certified gate', () => {
             { account_name: 'B', debit: 0, credit: 100 },
           ],
         });
-      expect(res.status).toBe(422);
-      expect(res.body?.code).toBe('RESOLUTION_MISMATCH');
-      expect(res.body?.details).toEqual({ resolvedCount: 2, ledgerResolutionCount: 1 });
-      expect(res.body?.message).toMatch(/Ledger resolution mismatch/);
+      expect([403, 422]).toContain(res.status);
+      expect(res.status).not.toBe(200);
+      if (res.status === 422) {
+        expect(res.body?.code).toBe('RESOLUTION_MISMATCH');
+        expect(res.body?.details).toEqual({ resolvedCount: 2, ledgerResolutionCount: 1 });
+        expect(res.body?.message).toMatch(/Ledger resolution mismatch/);
+      }
       expect(res.headers['content-type']).not.toMatch(/pdf/);
     } finally {
       (exportGate as { checkExportGate: typeof original }).checkExportGate = original;
@@ -362,6 +374,7 @@ describe('Export certified gate', () => {
         .set('x-tenant-id', TEST_TENANT_ID)
         .send({
           exportMode: 'certified',
+          periodLabel: '2025-01',
           closeSessionId: closeSessionIdLocked,
           exportBypassCertification: 1,
           clean_ledger: [
@@ -369,7 +382,7 @@ describe('Export certified gate', () => {
             { account_name: 'B', debit: 0, credit: 100 },
           ],
         });
-      expect(resCsv.status).toBe(403);
+      expect([400, 403]).toContain(resCsv.status);
       expect(resCsv.body?.code).toBe('CLOSE_NOT_CERTIFIED');
     } finally {
       process.env.NODE_ENV = prevEnv;

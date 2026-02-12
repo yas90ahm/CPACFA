@@ -17,7 +17,7 @@ import { listEvidenceForJournalEntry } from '../../src/db/repositories/evidence_
 import * as closeSessionRepo from '../../src/db/repositories/close_session_repository.js';
 import * as periodLockRepo from '../../src/db/repositories/period_lock_repository.js';
 
-const TEST_TENANT_ID = process.env.TEST_TENANT_ID ?? 'evidence-api-tenant';
+const TEST_TENANT_ID = process.env.TEST_TENANT_ID ?? `evidence-api-tenant-${Date.now()}`;
 
 describe('Evidence attachment API', () => {
   let authToken: string;
@@ -39,7 +39,7 @@ describe('Evidence attachment API', () => {
       pool,
       `sess-evidence-api-${Date.now()}`,
       TEST_TENANT_ID,
-      'e1',
+      `e1-attach-${Date.now()}`,
       '2025-01-01',
       '2025-01-31',
       'accrual',
@@ -86,7 +86,7 @@ describe('Evidence attachment API', () => {
       pool,
       `sess-evidence-lock-${Date.now()}`,
       TEST_TENANT_ID,
-      'e1',
+      `e1-lock-${Date.now()}`,
       '2025-02-01',
       '2025-02-28',
       'accrual',
@@ -131,7 +131,7 @@ describe('Evidence attachment API', () => {
       pool,
       `sess-evidence-db-${Date.now()}`,
       TEST_TENANT_ID,
-      'e1',
+      `e1-db-${Date.now()}`,
       '2025-03-01',
       '2025-03-31',
       'accrual',

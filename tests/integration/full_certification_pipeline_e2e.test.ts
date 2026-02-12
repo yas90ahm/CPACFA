@@ -27,6 +27,7 @@ import { getSession } from '../../src/services/close_session_service.js';
 import { getLedgerSnapshotById } from '../../src/db/repositories/ledger_snapshot_repository.js';
 import * as auditLedgerRepo from '../../src/db/repositories/audit_ledger_repository.js';
 import * as periodTbRepo from '../../src/db/repositories/period_trial_balance_repository.js';
+import { upsertPeriodExportChecks } from '../../src/db/repositories/period_export_checks_repository.js';
 
 const PERIOD_LABEL_HAPPY = '2025-01';
 const PERIOD_START_HAPPY = '2025-01-01';
@@ -228,6 +229,11 @@ describe('Full certification pipeline E2E', () => {
 
   it('1g. Export certified PDF', async () => {
     if (!isDbConfigured() || !closeSessionIdHappy) return;
+    const pool = await getTenantPool(testTenantId);
+    await upsertPeriodExportChecks(pool, testTenantId, PERIOD_LABEL_HAPPY, {
+      roundingGapExceedsMateriality: false,
+      aggregateRoundingExceedsMateriality: false,
+    });
     const res = await request(app)
       .post('/api/export/pdf')
       .set('Authorization', `Bearer ${authToken}`)
@@ -258,6 +264,11 @@ describe('Full certification pipeline E2E', () => {
 
   it('1h. Verify: no watermark, PDF contains certification hash, export gate allowed', async () => {
     if (!isDbConfigured() || !closeSessionIdHappy) return;
+    const pool = await getTenantPool(testTenantId);
+    await upsertPeriodExportChecks(pool, testTenantId, PERIOD_LABEL_HAPPY, {
+      roundingGapExceedsMateriality: false,
+      aggregateRoundingExceedsMateriality: false,
+    });
     const res = await request(app)
       .post('/api/export/pdf')
       .set('Authorization', `Bearer ${authToken}`)

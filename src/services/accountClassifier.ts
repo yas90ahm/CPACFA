@@ -110,6 +110,14 @@ export function classifyAccount(accountName: string): {
  */
 export function classifyTrialBalanceDeterministic(entries: TrialBalanceEntry[]): TrialBalanceEntry[] {
   return entries.map((entry) => {
+    if (entry.accountType) {
+      return {
+        ...entry,
+        codificationRef: getCodificationRef(entry.accountType),
+        classificationSource: 'deterministic' as const,
+        classificationRationale: 'CoA template or prior classification applied.',
+      };
+    }
     const { accountType, matchedKeyword } = classifyAccountNameWithKeyword(entry.accountName);
     const codificationRef = getCodificationRef(accountType);
     const citation = codificationRef.citation;
@@ -181,10 +189,11 @@ export function applyUserClassificationOverrides(
  * For statement build, use classifyTrialBalanceDeterministic or applyUserClassificationOverrides instead.
  */
 export async function classifyTrialBalance(entries: TrialBalanceEntry[]): Promise<TrialBalanceEntry[]> {
+  if (entries.every((e) => e.accountType)) return entries.map((e) => ({ ...e, codificationRef: e.codificationRef ?? getCodificationRef(e.accountType!) }));
   const names = entries.map((e) => e.accountName);
   const agentic = await classifyAccountsAgentic(names);
   return entries.map((entry, idx) => {
-    const accountType = agentic?.[idx] ?? classifyAccountName(entry.accountName);
+    const accountType = entry.accountType ?? agentic?.[idx] ?? classifyAccountName(entry.accountName);
     const codificationRef = getCodificationRef(accountType);
     return {
       ...entry,

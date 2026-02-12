@@ -12,6 +12,10 @@ export interface RawTrialBalanceRow {
   accountName: string;
   debit: number;
   credit: number;
+  /** Raw account type from CSV (e.g. "Bank", "Expense"). Used for CoA template mapping. */
+  accountTypeRaw?: string;
+  /** Mapped category when CoA template applied (ASSET, LIABILITY, etc.). */
+  accountType?: import('../types/financial.js').AccountType;
 }
 
 /** Normalize number from string (handles commas, parentheses for negatives) */
@@ -48,14 +52,16 @@ export function parseTrialBalance(rows: RawTrialBalanceRow[]): TrialBalanceResul
     totalDebits += debit;
     totalCredits += credit;
 
-    entries.push({
+    const entry: import('../types/financial.js').TrialBalanceEntry = {
       lineId: computeLineId({ accountName, debit, credit, accountCode: row?.accountCode != null ? String(row.accountCode).trim() : undefined }),
       accountCode: row?.accountCode != null ? String(row.accountCode).trim() : undefined,
       accountName,
       debit,
       credit,
       sourceRowIndex: i,
-    });
+    };
+    if (row?.accountType) entry.accountType = row.accountType;
+    entries.push(entry);
   }
 
   const tolerance = 0.01;

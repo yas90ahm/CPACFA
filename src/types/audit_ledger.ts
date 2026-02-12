@@ -21,6 +21,7 @@ export type AuditLedgerEventType =
   | 'export_event'
   | 'close_lock'
   | 'certify_close'
+  | 'close_session_transition'
   | 'bridge_command'
   | 'evidence_link'
   | 'legacy_certified_source_used';

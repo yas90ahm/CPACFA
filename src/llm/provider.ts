@@ -3,6 +3,9 @@
  * Supports Anthropic by default; OpenAI/Mistral are optional and loaded dynamically.
  */
 
+import { aiMock } from '../lib/runtime_mode.js';
+import { enterAdvisoryContext, exitAdvisoryContext } from '../lib/ai_boundary.js';
+
 export type LLMProvider = 'anthropic' | 'openai' | 'mistral';
 
 export interface TextGenerationInput {
@@ -46,18 +49,20 @@ const AI_MOCK_RESPONSE =
 /**
  * Generate plain text from the selected provider.
  * Tool-calling is not handled here (use provider-specific flows for tool use).
- * When AI_MOCK=true, returns immediately with a deterministic string (no network call).
+ * When AI_MOCK=true (dev only; forced false in prod/staging/demo), returns mock string (no network call).
  */
 export async function generateText(input: TextGenerationInput): Promise<string> {
-  if (process.env.AI_MOCK === 'true') {
-    return AI_MOCK_RESPONSE;
-  }
-  const provider = getProviderFromEnv();
-  const maxTokens = input.maxTokens ?? 1024;
-  const prompt = input.prompt;
-  const system = input.system ?? '';
+  enterAdvisoryContext();
+  try {
+    if (aiMock()) {
+      return AI_MOCK_RESPONSE;
+    }
+    const provider = getProviderFromEnv();
+    const maxTokens = input.maxTokens ?? 1024;
+    const prompt = input.prompt;
+    const system = input.system ?? '';
 
-  if (provider === 'anthropic') {
+    if (provider === 'anthropic') {
     const apiKey = getApiKey('anthropic');
     const { default: Anthropic } = await import('@anthropic-ai/sdk');
     const client = new Anthropic({ apiKey });
@@ -72,9 +77,9 @@ export async function generateText(input: TextGenerationInput): Promise<string> 
       .map((b) => b.text)
       .join('\n')
       .trim();
-  }
+    }
 
-  if (provider === 'openai') {
+    if (provider === 'openai') {
     const apiKey = getApiKey('openai');
     const mod = await import('openai').catch(() => null);
     if (!mod?.default) {
@@ -91,26 +96,29 @@ export async function generateText(input: TextGenerationInput): Promise<string> 
     });
     const content = response.choices?.[0]?.message?.content;
     return typeof content === 'string' ? content.trim() : '';
-  }
+    }
 
-  // Mistral
-  const apiKey = getApiKey('mistral');
-  const mod = await import('@mistralai/mistralai').catch(() => null);
-  if (!mod) {
-    throw new Error('Mistral SDK not installed. Add "@mistralai/mistralai" to dependencies.');
+    // Mistral
+    const apiKey = getApiKey('mistral');
+    const mod = await import('@mistralai/mistralai').catch(() => null);
+    if (!mod) {
+      throw new Error('Mistral SDK not installed. Add "@mistralai/mistralai" to dependencies.');
+    }
+    const client = new mod.Mistral({ apiKey });
+    const response = await client.chat.complete({
+      model: input.model ?? 'mistral-large-latest',
+      maxTokens,
+      messages: [
+        ...(system ? [{ role: 'system' as const, content: system }] : []),
+        { role: 'user' as const, content: prompt },
+      ],
+    });
+    const content = response.choices?.[0]?.message?.content;
+    if (typeof content === 'string') return content.trim();
+    if (Array.isArray(content)) return content.map((c) => (typeof c === 'string' ? c : (c as { text?: string }).text ?? '')).join('').trim();
+    return '';
+  } finally {
+    exitAdvisoryContext();
   }
-  const client = new mod.Mistral({ apiKey });
-  const response = await client.chat.complete({
-    model: input.model ?? 'mistral-large-latest',
-    maxTokens,
-    messages: [
-      ...(system ? [{ role: 'system' as const, content: system }] : []),
-      { role: 'user' as const, content: prompt },
-    ],
-  });
-  const content = response.choices?.[0]?.message?.content;
-  if (typeof content === 'string') return content.trim();
-  if (Array.isArray(content)) return content.map((c) => (typeof c === 'string' ? c : (c as { text?: string }).text ?? '')).join('').trim();
-  return '';
 }
 

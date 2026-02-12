@@ -22,6 +22,8 @@ export const SUPPORTED_MIMES = [
 
 export interface IngestTrialBalanceResult {
   rows: RawTrialBalanceRow[];
+  /** Raw column headers (for CoA source detection). */
+  headers: string[];
   /** True when column cleaning could not find Debit/Credit or Amount; agentic mapping should be triggered. */
   needsAgenticMapping: boolean;
 }
@@ -40,11 +42,12 @@ export function parseCsvToTrialBalance(buffer: Buffer): IngestTrialBalanceResult
     relax_column_count: true,
     bom: true, // strip BOM so first column is not "\ufeffAccountName"
   }) as Record<string, unknown>[];
-  if (records.length === 0) return { rows: [], needsAgenticMapping: false };
+  if (records.length === 0) return { rows: [], headers: [], needsAgenticMapping: false };
+  const headers = Object.keys(records[0]!);
   const standardized = standardizeColumns(records);
   const needsAgenticMapping = !hasCanonicalDebitCredit(standardized);
   const rows = standardizedRowsToTrialBalanceRows(standardized) as RawTrialBalanceRow[];
-  return { rows, needsAgenticMapping };
+  return { rows, headers, needsAgenticMapping };
 }
 
 /**
@@ -55,7 +58,7 @@ export function parseCsvToTrialBalance(buffer: Buffer): IngestTrialBalanceResult
 export function parseXlsxToTrialBalance(buffer: Buffer): IngestTrialBalanceResult {
   const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false });
   const sheetName = workbook.SheetNames[0];
-  if (!sheetName) return { rows: [], needsAgenticMapping: false };
+  if (!sheetName) return { rows: [], headers: [], needsAgenticMapping: false };
 
   const sheet = workbook.Sheets[sheetName];
   const data = XLSX.utils.sheet_to_json(sheet, {
@@ -63,7 +66,7 @@ export function parseXlsxToTrialBalance(buffer: Buffer): IngestTrialBalanceResul
     defval: '',
   }) as unknown[][];
 
-  if (data.length < 2) return { rows: [], needsAgenticMapping: false };
+  if (data.length < 2) return { rows: [], headers: [], needsAgenticMapping: false };
 
   const headerRow = data[0].map((c) => String(c ?? '').trim());
   const records: Record<string, unknown>[] = [];
@@ -76,11 +79,11 @@ export function parseXlsxToTrialBalance(buffer: Buffer): IngestTrialBalanceResul
     }
     records.push(obj);
   }
-  if (records.length === 0) return { rows: [], needsAgenticMapping: false };
+  if (records.length === 0) return { rows: [], headers: [], needsAgenticMapping: false };
   const standardized = standardizeColumns(records);
   const needsAgenticMapping = !hasCanonicalDebitCredit(standardized);
   const rows = standardizedRowsToTrialBalanceRows(standardized) as RawTrialBalanceRow[];
-  return { rows, needsAgenticMapping };
+  return { rows, headers: headerRow.filter(Boolean), needsAgenticMapping };
 }
 
 /**

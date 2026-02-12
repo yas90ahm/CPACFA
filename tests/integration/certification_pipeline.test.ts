@@ -32,6 +32,7 @@ import * as shadowFindingsRepo from '../../src/db/repositories/tenant_shadow_aud
 import * as aiProposalsRepo from '../../src/db/repositories/tenant_ai_proposals_repository.js';
 import { getSession } from '../../src/services/close_session_service.js';
 import { getLedgerSnapshotById } from '../../src/db/repositories/ledger_snapshot_repository.js';
+import { upsertPeriodExportChecks } from '../../src/db/repositories/period_export_checks_repository.js';
 
 const PERIOD_LABEL = '2025-01';
 const PERIOD_START = '2025-01-01';
@@ -270,6 +271,12 @@ describe('Certification pipeline E2E', () => {
     expect(certifyRes.body?.certifiedSnapshotId).toBeDefined();
     expect(certifyRes.body?.snapshotHash).toBeDefined();
     expect(certifyRes.body?.snapshotHashVersion).toBeDefined();
+
+    // Satisfy export gate: period_export_checks must exist (materiality from DB)
+    await upsertPeriodExportChecks(pool, testTenantId, PERIOD_LABEL, {
+      roundingGapExceedsMateriality: false,
+      aggregateRoundingExceedsMateriality: false,
+    });
 
     // 8. Run export gates (checkExportGate + finalIntegrityCheck) via POST /api/export/pdf
     const balancedLedger = [

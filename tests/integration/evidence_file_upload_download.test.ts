@@ -19,7 +19,7 @@ import { createDraftJE } from '../../src/services/journal_entry_service.js';
 import { listEvidenceForJournalEntry } from '../../src/db/repositories/evidence_repository.js';
 import * as closeSessionRepo from '../../src/db/repositories/close_session_repository.js';
 
-const TEST_TENANT_ID = process.env.TEST_TENANT_ID ?? 'evidence-file-tenant';
+const TEST_TENANT_ID = process.env.TEST_TENANT_ID ?? `evidence-file-tenant-${Date.now()}`;
 
 function computeSha256(buffer: Buffer): string {
   return createHash('sha256').update(buffer).digest('hex');
@@ -47,7 +47,7 @@ describe('Evidence file upload and download', () => {
       pool,
       `sess-ev-file-${Date.now()}`,
       TEST_TENANT_ID,
-      'e1',
+      `e1-file-${Date.now()}`,
       '2025-01-01',
       '2025-01-31',
       'accrual',
@@ -103,7 +103,7 @@ describe('Evidence file upload and download', () => {
       pool,
       `sess-ev-meta-${Date.now()}`,
       TEST_TENANT_ID,
-      'e1',
+      `e1-meta-${Date.now()}`,
       '2025-03-01',
       '2025-03-31',
       'accrual',

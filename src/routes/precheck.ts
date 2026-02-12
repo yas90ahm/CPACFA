@@ -18,6 +18,7 @@ import {
 } from '../services/precheck_board_ready_service.js';
 import { getSession } from '../services/close_session_service.js';
 import { buildPbcIndexPayload, getBaseUrlForEndpoints } from './audit/pbc_index.js';
+import { effectiveAllowLegacyCertifiedSource } from '../lib/runtime_mode.js';
 
 const router = Router();
 
@@ -170,8 +171,7 @@ router.post('/board-ready-pack', async (req: Request, res: Response) => {
           message: 'No close session found for the given closeSessionId.',
         });
       }
-      const allowLegacy =
-        req.query.allowLegacyCertifiedSource === '1' || process.env.ALLOW_LEGACY_CERTIFIED_SOURCE === 'true';
+      const allowLegacy = effectiveAllowLegacyCertifiedSource(req);
       const baseUrl = getBaseUrlForEndpoints(req);
       pbcIndex = await buildPbcIndexPayload(pool, tenantId, closeSessionId, { allowLegacy, baseUrl });
       trustTokens = {

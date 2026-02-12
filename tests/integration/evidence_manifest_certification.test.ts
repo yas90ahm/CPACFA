@@ -119,6 +119,7 @@ describe('Certified Evidence Manifest', () => {
     await linkEvidenceToJournalEntry(pool, testTenantId, {
       evidenceId: record.id,
       objectId: jeId,
+      assertionType: 'invoice_support',
       role: 'support',
       requiredness: 'optional',
       createdBy: 'user@test.com',

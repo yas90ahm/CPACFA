@@ -1,0 +1,24 @@
+{
+  "source": "xero",
+  "description": "Xero standard chart of accounts",
+  "accountMappings": [
+    { "account_type": "BANK", "detail_type": null, "category": "ASSET" },
+    { "account_type": "CURRENT", "detail_type": null, "category": "ASSET" },
+    { "account_type": "CURRLIAB", "detail_type": null, "category": "LIABILITY" },
+    { "account_type": "DEPRECIATN", "detail_type": null, "category": "ASSET" },
+    { "account_type": "DIRECTCOSTS", "detail_type": null, "category": "EXPENSE" },
+    { "account_type": "EQUITY", "detail_type": null, "category": "EQUITY" },
+    { "account_type": "EXPENSE", "detail_type": null, "category": "EXPENSE" },
+    { "account_type": "FIXED", "detail_type": null, "category": "ASSET" },
+    { "account_type": "INVENTORY", "detail_type": null, "category": "ASSET" },
+    { "account_type": "LIABILITY", "detail_type": null, "category": "LIABILITY" },
+    { "account_type": "NONCURRENT", "detail_type": null, "category": "ASSET" },
+    { "account_type": "OTHERINCOME", "detail_type": null, "category": "REVENUE" },
+    { "account_type": "OVERHEADS", "detail_type": null, "category": "EXPENSE" },
+    { "account_type": "PREPAYMENT", "detail_type": null, "category": "ASSET" },
+    { "account_type": "REVENUE", "detail_type": null, "category": "REVENUE" },
+    { "account_type": "SALES", "detail_type": null, "category": "REVENUE" },
+    { "account_type": "TERMLIAB", "detail_type": null, "category": "LIABILITY" }
+  ],
+  "headerHints": ["Account Code", "Account Name", "Type", "Tax Type"]
+}

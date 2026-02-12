@@ -1,13 +1,13 @@
 /**
  * Integration tests: APP_MODE=demo auth enforcement.
- * - Unauthenticated request returns 401
+ * - Unauthenticated request returns 401 (even when REQUIRE_AUTH=false)
  * - Demo user can authenticate and access API
  *
- * IMPORTANT: APP_MODE must be set before server import so auth middleware uses demo mode.
+ * IMPORTANT: APP_MODE and env must be set before server import so auth middleware uses demo mode.
  */
 process.env.APP_MODE = 'demo';
 process.env.MODE = 'demo';
-process.env.REQUIRE_AUTH = 'true';
+process.env.REQUIRE_AUTH = 'false'; // Demo mode ignores this and always enforces auth
 
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
@@ -18,8 +18,8 @@ import { getUserByEmail } from '../../src/db/repositories/user_repository.js';
 import { seedDemo } from '../../src/scripts/seed_demo.js';
 
 const DEMO_TENANT_ID = 'demo-cloudmetrics';
-const DEMO_EMAIL = 'demo@cpacfa.com';
-const DEMO_PASSWORD = 'demo-password-change-me';
+const DEMO_EMAIL = 'demo@cloudmetrics.io';
+const DEMO_PASSWORD = 'DemoPass2026!';
 
 describe('APP_MODE=demo auth', () => {
   const origEnv: Record<string, string | undefined> = {};
@@ -30,7 +30,7 @@ describe('APP_MODE=demo auth', () => {
     });
     process.env.APP_MODE = 'demo';
     process.env.MODE = 'demo';
-    process.env.REQUIRE_AUTH = 'true';
+    process.env.REQUIRE_AUTH = 'false'; // demo always enforces auth regardless
     resetModeCache();
     if (isDbConfigured()) {
       await seedDemo();
@@ -51,6 +51,14 @@ describe('APP_MODE=demo auth', () => {
       .set('Content-Type', 'application/json');
     expect(res.status).toBe(401);
     expect(res.body?.error).toBe('Unauthorized');
+  });
+
+  it('demo mode rejects unauthenticated even when REQUIRE_AUTH=false', async () => {
+    // REQUIRE_AUTH=false was set before server import; applyModeDefaults forces auth in demo
+    const res = await request(app)
+      .get('/api/close/journal-entries')
+      .set('Content-Type', 'application/json');
+    expect(res.status).toBe(401);
   });
 
   it('demo user can authenticate and access API', async () => {

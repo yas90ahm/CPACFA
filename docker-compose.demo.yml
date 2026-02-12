@@ -1,0 +1,10 @@
+# Demo mode: APP_MODE=demo, demo user seeded on startup
+# Run: docker-compose -f docker-compose.yml -f docker-compose.demo.yml up
+# Login: demo@cloudmetrics.io / DemoPass2026!
+
+services:
+  app:
+    environment:
+      APP_MODE: demo
+      PORT: "3000"
+    # Migrations run in startup_validation; seed_demo runs automatically when APP_MODE=demo

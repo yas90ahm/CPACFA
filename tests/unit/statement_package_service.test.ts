@@ -92,9 +92,10 @@ describe('Statement package — generateStatements', () => {
     jest.spyOn(auditLedger, 'recordMaterialEvent').mockResolvedValue();
     const pkg = await generateStatements(mockPool, 't1', 'sess-1');
     expect(pkg.version).toBe(1);
-    expect(repo.getMaxVersionByCloseSessionId).toHaveBeenCalledWith(mockPool, 'sess-1');
+    expect(repo.getMaxVersionByCloseSessionId).toHaveBeenCalledWith(mockPool, 't1', 'sess-1');
     expect(repo.insertStatementPackage).toHaveBeenCalledWith(
       mockPool,
+      't1',
       expect.any(String),
       expect.objectContaining({ closeSessionId: 'sess-1', version: 1, engineVersion: 'financialStatements.v1' })
     );
@@ -130,7 +131,7 @@ describe('Statement package — generateStatements', () => {
     jest.spyOn(auditLedger, 'recordMaterialEvent').mockResolvedValue();
     const pkg = await generateStatements(mockPool, 't1', 'sess-1');
     expect(pkg.version).toBe(2);
-    expect(repo.getMaxVersionByCloseSessionId).toHaveBeenCalledWith(mockPool, 'sess-1');
+    expect(repo.getMaxVersionByCloseSessionId).toHaveBeenCalledWith(mockPool, 't1', 'sess-1');
   });
 });
 

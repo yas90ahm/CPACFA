@@ -188,7 +188,7 @@ describe('Certification Artifact v1', () => {
     delete process.env.CERT_SIGNING_PUBLIC_KEY;
     resetModeCache();
 
-    expect(() => assertSigningKeysInStrictMode()).toThrow(/Ed25519 signing keys required/);
+    expect(() => assertSigningKeysInStrictMode()).toThrow(/Ed25519 signing keys|signing keys.*required/);
 
     process.env.MODE = origMode;
     if (origNodeEnv !== undefined) process.env.NODE_ENV = origNodeEnv;
