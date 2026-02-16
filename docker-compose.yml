@@ -6,7 +6,7 @@ services:
     environment:
       DATABASE_URL: postgres://cpacfa:cpacfa@postgres:5432/cpacfa
       JWT_SECRET: dev-secret-change-in-prod
-      APP_MODE: development
+      MODE: demo
       NODE_ENV: development
       PORT: "3000"
     depends_on:
@@ -15,6 +15,8 @@ services:
 
   postgres:
     image: postgres:16-alpine
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_USER: cpacfa
       POSTGRES_PASSWORD: cpacfa

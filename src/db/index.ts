@@ -106,18 +106,9 @@ function getOrCreateTenantPool(url: string): pg.Pool {
   if (tenantPoolsByUrl.size >= MAX_TENANT_POOLS) evictOldestTenantPool();
   pool = new Pool({ connectionString: url, max: 10 });
   pool.on('connect', (client) => {
-    const setPath = () =>
-      client.query(`SET search_path = ${CORE_SEARCH_PATH}`).catch(() =>
-        client.query('SET search_path = public').catch(() => {})
-      );
-    if (isAiBoundaryDbRolesEnabled()) {
-      client
-        .query('SET ROLE core_writer')
-        .then(setPath)
-        .catch(() => setPath());
-    } else {
-      setPath();
-    }
+    client.query(`SET search_path = ${CORE_SEARCH_PATH}`).catch(() =>
+      client.query('SET search_path = public').catch(() => {})
+    );
   });
   tenantPoolsByUrl.set(url, pool);
   tenantPoolLru.push(url);
@@ -145,18 +136,9 @@ function getOrCreateTenantAiPool(url: string): pg.Pool {
   if (tenantAiPoolsByUrl.size >= MAX_TENANT_POOLS) evictOldestTenantAiPool();
   pool = new Pool({ connectionString: url, max: 5 });
   pool.on('connect', (client) => {
-    const setPath = () =>
-      client.query(`SET search_path = ${AI_SEARCH_PATH}`).catch(() =>
-        client.query('SET search_path = public').catch(() => {})
-      );
-    if (isAiBoundaryDbRolesEnabled()) {
-      client
-        .query('SET ROLE ai_writer')
-        .then(setPath)
-        .catch(() => setPath());
-    } else {
-      setPath();
-    }
+    client.query(`SET search_path = ${AI_SEARCH_PATH}`).catch(() =>
+      client.query('SET search_path = public').catch(() => {})
+    );
   });
   tenantAiPoolsByUrl.set(url, pool);
   tenantAiPoolLru.push(url);
@@ -165,7 +147,6 @@ function getOrCreateTenantAiPool(url: string): pg.Pool {
 
 /**
  * Get pool for tenant: control DB if tenant has no database_url (shared-DB), else tenant's DB.
- * When AI_BOUNDARY_DB_ROLES=true, always returns a tenant pool (SET ROLE core_writer), never control pool.
  */
 export async function getTenantPool(tenantId: string): Promise<pg.Pool> {
   const control = getControlPool();
@@ -174,9 +155,8 @@ export async function getTenantPool(tenantId: string): Promise<pg.Pool> {
     [tenantId]
   );
   const databaseUrl = r.rows[0]?.database_url ?? null;
-  const baseUrl = (databaseUrl?.trim() || process.env.DATABASE_URL) ?? '';
   if (!databaseUrl || databaseUrl.trim() === '') {
-    return getOrCreateTenantPool(baseUrl);
+    return control;
   }
   return getOrCreateTenantPool(databaseUrl);
 }
@@ -271,18 +251,16 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 91, file: '091_append_only_triggers.sql' },
   { version: 92, file: '092_tenant_financial_config.sql' },
   { version: 93, file: '093_ai_boundary_schemas.sql' },
-  { version: 94, file: '094_ai_boundary_grant_roles.sql' },
+  { version: 94, file: '094_tenant_chart_of_accounts.sql' },
+  { version: 95, file: '095_general_ledger.sql' },
+  { version: 96, file: '096_period_trial_balance_gl_derived_source.sql' },
+  { version: 97, file: '097_gl_performance_indexes.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 
-/** Advisory lock ID for tenant migrations (prevents concurrent duplicate inserts). Must fit in JS safe integer. */
-const TENANT_MIGRATIONS_LOCK_ID = 0x544e544d; // 1413827389 - "TNTM" mnemonic
-
-async function getTenantAppliedVersion(client: pg.PoolClient): Promise<number[]> {
+async function getTenantAppliedVersion(pool: pg.Pool): Promise<number[]> {
   try {
-    const r = await client.query<{ version: number }>(
-      'SELECT version FROM public.schema_migrations ORDER BY version'
-    );
+    const r = await pool.query<{ version: number }>('SELECT version FROM schema_migrations ORDER BY version');
     return r.rows.map((row) => row.version);
   } catch {
     return [];
@@ -291,27 +269,14 @@ async function getTenantAppliedVersion(client: pg.PoolClient): Promise<number[]>
 
 /**
  * Run tenant schema migrations (003, 004, ...) on the given pool if not already applied.
- * Uses advisory lock to prevent concurrent runners from duplicate inserts.
- * Idempotent: running twice is a no-op.
  */
 export async function runTenantMigrations(pool: pg.Pool): Promise<void> {
-  const client = await pool.connect();
-  try {
-    await client.query('SELECT pg_advisory_lock($1)', [TENANT_MIGRATIONS_LOCK_ID]);
-    const applied = await getTenantAppliedVersion(client);
-    for (const { version, file } of TENANT_MIGRATION_FILES) {
-      if (applied.includes(version)) continue;
-      const sql = readFileSync(join(MIGRATIONS_DIR, file), 'utf8');
-      await client.query(sql);
-      await client.query(
-        'INSERT INTO public.schema_migrations (version) VALUES ($1) ON CONFLICT (version) DO NOTHING',
-        [version]
-      );
-      applied.push(version);
-    }
-  } finally {
-    await client.query('SELECT pg_advisory_unlock($1)', [TENANT_MIGRATIONS_LOCK_ID]).catch(() => {});
-    client.release();
+  const applied = await getTenantAppliedVersion(pool);
+  for (const { version, file } of TENANT_MIGRATION_FILES) {
+    if (applied.includes(version)) continue;
+    const sql = readFileSync(join(MIGRATIONS_DIR, file), 'utf8');
+    await pool.query(sql);
+    await pool.query('INSERT INTO schema_migrations (version) VALUES ($1)', [version]);
   }
 }
 
