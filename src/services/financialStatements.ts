@@ -38,10 +38,11 @@ const CREDIT_POSITIVE_FS_LINES = new Set(['fs_liability', 'fs_equity', 'fs_reven
 /** Net amount for an account (debit − credit). Assets/Expenses: positive = debit. Liabilities/Equity/Revenue: positive = credit. Uses decimal round for display. */
 function netAmount(entry: TrialBalanceEntry): number {
   const net = entry.debit - entry.credit;
+  const u = entry.accountType != null ? String(entry.accountType).toUpperCase() : '';
   const creditPositive =
     entry.fsLineId != null
       ? CREDIT_POSITIVE_FS_LINES.has(entry.fsLineId)
-      : entry.accountType === 'LIABILITY' || entry.accountType === 'EQUITY' || entry.accountType === 'REVENUE';
+      : u === 'LIABILITY' || u === 'EQUITY' || u === 'REVENUE';
   const signed = creditPositive ? -net : net;
   return round2(signed);
 }
@@ -73,19 +74,32 @@ function sumLines(lines: FinancialStatementLine[]): number {
 const DEFAULT_MATERIALITY = 0.01;
 
 /** When fsLineId is set, bucket by taxonomy line id (BS defaults: fs_asset, fs_liability, fs_equity). */
-function bucketBsByFsLine(entries: TrialBalanceEntry[]): { assets: TrialBalanceEntry[]; liabilities: TrialBalanceEntry[]; equity: TrialBalanceEntry[] } {
+function bucketBsByFsLine(entries: TrialBalanceEntry[]): {
+  assets: TrialBalanceEntry[];
+  liabilities: TrialBalanceEntry[];
+  equity: TrialBalanceEntry[];
+  revenue: TrialBalanceEntry[];
+  expenses: TrialBalanceEntry[];
+} {
   const assets: TrialBalanceEntry[] = [];
   const liabilities: TrialBalanceEntry[] = [];
   const equity: TrialBalanceEntry[] = [];
+  const revenue: TrialBalanceEntry[] = [];
+  const expenses: TrialBalanceEntry[] = [];
+  const isType = (t?: string, expected?: string) => t != null && expected != null && String(t).toUpperCase() === expected;
   for (const e of entries) {
     if (e.fsLineId === 'fs_asset') assets.push(e);
     else if (e.fsLineId === 'fs_liability') liabilities.push(e);
     else if (e.fsLineId === 'fs_equity') equity.push(e);
-    else if (e.accountType === 'ASSET') assets.push(e);
-    else if (e.accountType === 'LIABILITY') liabilities.push(e);
-    else if (e.accountType === 'EQUITY') equity.push(e);
+    else if (e.fsLineId === 'fs_revenue') revenue.push(e);
+    else if (e.fsLineId === 'fs_expense') expenses.push(e);
+    else if (isType(e.accountType, 'ASSET')) assets.push(e);
+    else if (isType(e.accountType, 'LIABILITY')) liabilities.push(e);
+    else if (isType(e.accountType, 'EQUITY')) equity.push(e);
+    else if (isType(e.accountType, 'REVENUE')) revenue.push(e);
+    else if (isType(e.accountType, 'EXPENSE')) expenses.push(e);
   }
-  return { assets, liabilities, equity };
+  return { assets, liabilities, equity, revenue, expenses };
 }
 
 /**
@@ -98,15 +112,22 @@ export function buildBalanceSheet(
   options?: { materiality?: number }
 ): BalanceSheet {
   const materiality = options?.materiality ?? DEFAULT_MATERIALITY;
-  const { assets: assetEntries, liabilities: liabilityEntries, equity: equityEntries } = bucketBsByFsLine(entries);
+  const { assets: assetEntries, liabilities: liabilityEntries, equity: equityEntries, revenue: revenueEntries, expenses: expenseEntries } =
+    bucketBsByFsLine(entries);
 
   const assets = assetEntries.map(toLine);
   const liabilities = liabilityEntries.map(toLine);
   const equity = equityEntries.map(toLine);
+  const revenueLines = revenueEntries.map(toLine);
+  const expenseLines = expenseEntries.map(toLine);
 
   const totalAssets = sumLines(assets);
   const totalLiabilities = sumLines(liabilities);
-  const totalEquity = sumLines(equity);
+  // Equity for BS equation: Equity accounts + Net Income (Revenue - Expense) per ASC 210
+  const equityOnly = sumLines(equity);
+  const totalRevenue = sumLines(revenueLines);
+  const totalExpenses = sumLines(expenseLines);
+  const totalEquity = round2(equityOnly + totalRevenue - totalExpenses);
 
   const totalDebits = entries.reduce((s, e) => s + (e.debit ?? 0), 0);
   const totalCredits = entries.reduce((s, e) => s + (e.credit ?? 0), 0);
@@ -134,11 +155,13 @@ export function buildBalanceSheet(
 function bucketPlByFsLine(entries: TrialBalanceEntry[]): { revenue: TrialBalanceEntry[]; expenses: TrialBalanceEntry[] } {
   const revenue: TrialBalanceEntry[] = [];
   const expenses: TrialBalanceEntry[] = [];
+  const rev = (t?: string) => t != null && String(t).toUpperCase() === 'REVENUE';
+  const exp = (t?: string) => t != null && String(t).toUpperCase() === 'EXPENSE';
   for (const e of entries) {
     if (e.fsLineId === 'fs_revenue') revenue.push(e);
     else if (e.fsLineId === 'fs_expense') expenses.push(e);
-    else if (e.accountType === 'REVENUE') revenue.push(e);
-    else if (e.accountType === 'EXPENSE') expenses.push(e);
+    else if (rev(e.accountType)) revenue.push(e);
+    else if (exp(e.accountType)) expenses.push(e);
   }
   return { revenue: revenue, expenses: expenses };
 }
@@ -256,6 +279,7 @@ export function buildValidatedStatements(
 
   const result = buildFinancialStatements(trialBalanceResult, options);
 
+  // totalEquity from buildBalanceSheet already includes Net Income (Revenue - Expense)
   assertIntegrityGateOrThrow({
     trialBalance: { totalDebits, totalCredits },
     balanceSheet: {

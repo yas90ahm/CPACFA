@@ -16,6 +16,8 @@ import type { CloseAdjustment } from '../types/close_and_controls.js';
 import { getUnadjustedOrRollup } from './trial_balance_rollup_service.js';
 import { listAdjustments } from './close_adjustments_service.js';
 import { getPostableJEAdjustments } from './journal_entry_service.js';
+import { buildDerivedTrialBalance } from './gl_to_tb_aggregation_service.js';
+import * as glRepository from '../db/repositories/general_ledger_repository.js';
 
 /** Single debit or credit line for an adjustment (journal entry or reclassification). */
 export interface AdjustmentLine {
@@ -109,7 +111,8 @@ export function mergeAdjustmentsIntoEntries(
 
 /**
  * Get adjusted trial balance for a period: Unadjusted TB (roll-up from months) + posted close adjustments + approved/postable JEs (when closeSessionId provided).
- * Throws if no unadjusted TB for period (caller may 404).
+ * When no unadjusted TB exists but GL data exists for the period, derives TB from GL (GL-only flow).
+ * Throws if no unadjusted TB and no GL data for period (caller may 404).
  */
 export async function getAdjustedTrialBalance(
   tenantId: string,
@@ -117,9 +120,28 @@ export async function getAdjustedTrialBalance(
   pool: Pool | undefined,
   closeSessionId?: string
 ): Promise<TrialBalanceEntry[]> {
-  const result = await getUnadjustedOrRollup(tenantId, periodLabel, pool);
+  let result = await getUnadjustedOrRollup(tenantId, periodLabel, pool);
   if (!result || result.entries.length === 0) {
-    throw new Error(`No unadjusted trial balance for period ${periodLabel}`);
+    // Fallback: derive from GL when period_trial_balance is empty (GL-only flow)
+    if (pool) {
+      const glLines = await glRepository.getGLForPeriod(pool, tenantId, periodLabel);
+      if (glLines.length > 0) {
+        const derivedTB = await buildDerivedTrialBalance(pool, tenantId, periodLabel);
+        result = {
+          entries: derivedTB.entries.map((e) => ({
+            accountCode: e.account_code,
+            accountName: e.account_name,
+            debit: e.total_debits ?? e.debit ?? 0,
+            credit: e.total_credits ?? e.credit ?? 0,
+            accountType: mapAccountTypeToFinancial(e.account_type),
+          })),
+          source: 'uploaded',
+        };
+      }
+    }
+    if (!result || result.entries.length === 0) {
+      throw new Error(`No unadjusted trial balance for period ${periodLabel}`);
+    }
   }
 
   const adjustmentPayloads: TrialBalanceAdjustment[] = [];
@@ -148,4 +170,57 @@ export async function getAdjustedTrialBalance(
   }
 
   return mergeAdjustmentsIntoEntries(result.entries, adjustmentPayloads);
+}
+
+/** Map COA account_type (Asset/Liability) to financial.ts AccountType (ASSET/LIABILITY). */
+function mapAccountTypeToFinancial(
+  t?: string
+): TrialBalanceEntry['accountType'] | undefined {
+  if (!t) return undefined;
+  const u = t.toUpperCase();
+  if (u === 'ASSET' || u === 'LIABILITY' || u === 'EQUITY' || u === 'REVENUE' || u === 'EXPENSE') {
+    return u as TrialBalanceEntry['accountType'];
+  }
+  return undefined;
+}
+
+/**
+ * Get trial balance for certification.
+ * Priority: GL-derived TB > Uploaded TB.
+ * When GL exists for period, derive TB from GL. Otherwise use uploaded TB + adjustments.
+ */
+export async function getTrialBalanceForCertification(
+  pool: Pool,
+  tenantId: string,
+  periodLabel: string,
+  closeSessionId?: string
+): Promise<{
+  trialBalance: TrialBalanceEntry[];
+  source: 'gl_derived' | 'uploaded' | 'adjusted';
+  hasGL: boolean;
+}> {
+  const glLines = await glRepository.getGLForPeriod(pool, tenantId, periodLabel);
+
+  if (glLines.length > 0) {
+    const derivedTB = await buildDerivedTrialBalance(pool, tenantId, periodLabel);
+    const entries: TrialBalanceEntry[] = derivedTB.entries.map((e) => ({
+      accountCode: e.account_code,
+      accountName: e.account_name,
+      debit: e.debit ?? 0,
+      credit: e.credit ?? 0,
+      accountType: mapAccountTypeToFinancial(e.account_type),
+    }));
+    return {
+      trialBalance: entries,
+      source: 'gl_derived',
+      hasGL: true,
+    };
+  }
+
+  const existingTB = await getAdjustedTrialBalance(tenantId, periodLabel, pool, closeSessionId);
+  return {
+    trialBalance: existingTB,
+    source: 'adjusted',
+    hasGL: false,
+  };
 }

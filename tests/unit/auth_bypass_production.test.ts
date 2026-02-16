@@ -8,7 +8,7 @@
  *   TEST_AUTH_PRODUCTION=1 MODE=prod NODE_ENV=production npx jest tests/unit/auth_bypass_production.test.ts --runInBand
  */
 
-import { describe, it, expect, afterEach } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import request from 'supertest';
 import { app, useRequireAuthForApi } from '../../src/server.js';
 import { resetModeCache } from '../../src/lib/runtime_mode.js';
@@ -19,6 +19,10 @@ describe('Auth bypass impossible in production', () => {
   const originalNodeEnv = process.env.NODE_ENV;
   const originalMode = process.env.MODE;
   const originalRequireAuth = process.env.REQUIRE_AUTH;
+
+  beforeEach(() => {
+    resetModeCache();
+  });
 
   afterEach(() => {
     process.env.NODE_ENV = originalNodeEnv;

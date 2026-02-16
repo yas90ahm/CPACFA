@@ -189,8 +189,6 @@ export function applyModeDefaults(): ModeConfig {
     process.env.AI_MOCK_CLASSIFIER = 'false';
     process.env.AI_MOCK_ADVISOR = 'false';
 
-    setEnv('AI_BOUNDARY_DB_ROLES', true);
-
     if (mode === 'demo') {
       console.warn('\n╔══════════════════════════════════════════════════════════════╗');
       console.warn('║  Running in DEMO mode — auth enforced, demo user seeded      ║');

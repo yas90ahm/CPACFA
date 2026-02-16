@@ -1,0 +1,12 @@
+account_code,account_name,account_type,account_subtype
+1000,Cash,Asset,Current Asset
+1100,Accounts Receivable,Asset,Current Asset
+1500,Equipment,Asset,Fixed Asset
+2000,Accounts Payable,Liability,Current Liability
+2100,Notes Payable,Liability,Long-term Liability
+3000,Common Stock,Equity,Contributed Capital
+3100,Retained Earnings,Equity,Retained Earnings
+4000,Revenue,Revenue,Operating Revenue
+5000,Cost of Goods Sold,Expense,Operating Expense
+5100,Rent Expense,Expense,Operating Expense
+5200,Salary Expense,Expense,Operating Expense

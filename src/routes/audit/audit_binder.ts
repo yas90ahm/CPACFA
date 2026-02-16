@@ -237,7 +237,11 @@ router.get('/binder', async (req: Request, res: Response) => {
       tenantId: auth.tenantId,
       pool: auth.pool,
       ingestMetadata: ingestMetadata.length ? ingestMetadata : undefined,
+      generalLedger: result.generalLedger,
     });
+    if (result.generalLedger?.length) {
+      res.setHeader('X-Includes-GL', 'true');
+    }
     logCriticalRoute({
       ts: new Date().toISOString(),
       level: 'info',
@@ -317,7 +321,11 @@ router.get('/binder/export/pdf', async (req: Request, res: Response) => {
       tenantId: auth.tenantId,
       pool: auth.pool,
       ingestMetadata: ingestMetadata.length ? ingestMetadata : undefined,
+      generalLedger: result.generalLedger,
     });
+    if (result.generalLedger?.length) {
+      res.setHeader('X-Includes-GL', 'true');
+    }
     const buffer = await exportAuditBinderToPdf(binder);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="Audit_Binder-${periodStart}-${periodEnd}.pdf"`);
@@ -390,7 +398,11 @@ router.get('/binder/export/csv', async (req: Request, res: Response) => {
       tenantId: auth.tenantId,
       pool: auth.pool,
       ingestMetadata: ingestMetadata.length ? ingestMetadata : undefined,
+      generalLedger: result.generalLedger,
     });
+    if (result.generalLedger?.length) {
+      res.setHeader('X-Includes-GL', 'true');
+    }
     const buffer = exportAuditBinderToCsv(binder);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="Audit_Binder-${periodStart}-${periodEnd}.csv"`);

@@ -14,6 +14,8 @@ export interface LedgerSnapshotEntry {
   debit: number;
   credit: number;
   accountCode?: string;
+  /** Account type (ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE) for BS/P&L classification. */
+  accountType?: string;
   description?: string;
   /** Amount provenance for JE/adjustment lines; persisted for audit trail. */
   amountProvenance?: AmountProvenance;
@@ -48,6 +50,20 @@ export interface EvidenceManifest {
   journalEntries: EvidenceManifestJournalEntry[];
 }
 
+/** General ledger entry in snapshot (v4+). */
+export interface GeneralLedgerSnapshotEntry {
+  entry_id: string;
+  entry_date: string;
+  description?: string;
+  lines: Array<{
+    line_number: number;
+    account_code: string;
+    debit: number;
+    credit: number;
+    description?: string;
+  }>;
+}
+
 /** Canonical payload stored in snapshot_payload_json. */
 export interface LedgerSnapshotPayload {
   trialBalance: {
@@ -59,6 +75,8 @@ export interface LedgerSnapshotPayload {
   entries?: LedgerSnapshotEntry[];
   /** Certified evidence manifest (v3+). Sorted by journalEntryId, then evidenceId. Empty when no evidence. */
   evidenceManifest?: EvidenceManifest;
+  /** General ledger entries (v4+). Included when TB is derived from GL. */
+  generalLedger?: GeneralLedgerSnapshotEntry[];
 }
 
 export interface LedgerSnapshot {
@@ -74,13 +92,15 @@ export interface LedgerSnapshot {
   closeSessionId?: string;
 }
 
-/** Input entry for TB: may include lineId. Input entry for JE: may include amountProvenance. */
+/** Input entry for TB: may include lineId, accountType. Input entry for JE: may include amountProvenance. */
 export interface CreateLedgerSnapshotEntryInput {
   lineId?: string;
   accountName: string;
   debit: number;
   credit: number;
   accountCode?: string;
+  /** Account type (ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE) for BS/P&L classification. */
+  accountType?: string;
   description?: string;
   amountProvenance?: AmountProvenance;
 }
@@ -99,4 +119,6 @@ export interface CreateLedgerSnapshotInput {
   closeSessionId?: string;
   /** Evidence manifest for v3+ snapshots. Built at certification time. */
   evidenceManifest?: EvidenceManifest;
+  /** General ledger entries (v4+). Included when TB is derived from GL. */
+  generalLedger?: GeneralLedgerSnapshotEntry[];
 }

@@ -436,37 +436,34 @@ describe('Security adversarial — concurrent certify race', () => {
     }
   }, 25_000);
 
-  it.skip(
-    '10) Race: two concurrent advance (certify) calls yield at most one certified (flaky: ECONNRESET under concurrent load)',
-    async () => {
-      if (!isDbConfigured() || !closeSessionId) return;
+  it.skip('10) Race: two concurrent advance (certify) calls (ECONNRESET under load; see close_session_concurrency.test.ts)', async () => {
+    if (!isDbConfigured() || !closeSessionId) return;
 
-      try {
-        const [res1, res2] = await Promise.all([
-          request(app)
-            .post(`/api/close/sessions/${closeSessionId}/advance`)
-            .set('Authorization', `Bearer ${authToken}`)
-            .set('Content-Type', 'application/json')
-            .send({ certifiedBy: 'race-test-1' })
-            .timeout(15000),
-          request(app)
-            .post(`/api/close/sessions/${closeSessionId}/advance`)
-            .set('Authorization', `Bearer ${authToken}`)
-            .set('Content-Type', 'application/json')
-            .send({ certifiedBy: 'race-test-2' })
-            .timeout(15000),
-        ]);
-        const certified1 = res1.body?.actionTaken === 'certified';
-        const certified2 = res2.body?.actionTaken === 'certified';
-        expect(certified1 || certified2).toBe(true);
-        expect(certified1 && certified2).toBe(false);
-      } catch (err: unknown) {
-        if (isConnectionResetError(err)) return;
-        throw err;
-      }
-    },
-    20000
-  );
+    const [res1, res2] = await Promise.all([
+      request(app)
+        .post(`/api/close/sessions/${closeSessionId}/advance`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('x-tenant-id', TENANT_A)
+        .set('Content-Type', 'application/json')
+        .send({ certifiedBy: 'race-test-1' })
+        .timeout(20000),
+      request(app)
+        .post(`/api/close/sessions/${closeSessionId}/advance`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('x-tenant-id', TENANT_A)
+        .set('Content-Type', 'application/json')
+        .send({ certifiedBy: 'race-test-2' })
+        .timeout(20000),
+    ]);
+    const statuses = [res1.status, res2.status].sort((a, b) => a - b);
+    expect(statuses).toEqual([200, 409]);
+    const certified1 = res1.body?.actionTaken === 'certified';
+    const certified2 = res2.body?.actionTaken === 'certified';
+    expect(certified1 || certified2).toBe(true);
+    expect(certified1 && certified2).toBe(false);
+    const conflict = res1.status === 409 ? res1 : res2;
+    expect(conflict.body?.code).toBe('INVALID_TRANSITION');
+  }, 25000);
 });
 
 describe('Security adversarial — concurrent certify (row-level lock)', () => {
@@ -546,41 +543,39 @@ describe('Security adversarial — concurrent certify (row-level lock)', () => {
     }
   }, 25_000);
 
-  it.skip('Two concurrent certify calls yield exactly one 200 and one 409 (flaky: ECONNRESET under concurrent load)', async () => {
+  it.skip('Two concurrent certify calls (ECONNRESET under load; see close_session_concurrency.test.ts)', async () => {
     if (!isDbConfigured() || !closeSessionId) return;
     const periodLabel = '2025-06';
-    try {
-      const [res1, res2] = await Promise.all([
-        request(app)
-          .post(`/api/close/sessions/${closeSessionId}/certify`)
-          .set('Authorization', `Bearer ${authToken}`)
-          .set('Content-Type', 'application/json')
-          .send({ certifiedBy: 'certify-race-1', periodLabel })
-          .timeout(15000),
-        request(app)
-          .post(`/api/close/sessions/${closeSessionId}/certify`)
-          .set('Authorization', `Bearer ${authToken}`)
-          .set('Content-Type', 'application/json')
-          .send({ certifiedBy: 'certify-race-2', periodLabel })
-          .timeout(15000),
-      ]);
-      const statuses = [res1.status, res2.status].sort();
-      expect(statuses).toEqual([200, 409]);
 
-      const pool = await getTenantPool(TENANT_A);
-      const session = await getSession(pool, TENANT_A, closeSessionId);
-      expect(session?.status).toBe('certified');
+    const [res1, res2] = await Promise.all([
+      request(app)
+        .post(`/api/close/sessions/${closeSessionId}/certify`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('x-tenant-id', TENANT_A)
+        .set('Content-Type', 'application/json')
+        .send({ certifiedBy: 'certify-race-1', periodLabel })
+        .timeout(20000),
+      request(app)
+        .post(`/api/close/sessions/${closeSessionId}/certify`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('x-tenant-id', TENANT_A)
+        .set('Content-Type', 'application/json')
+        .send({ certifiedBy: 'certify-race-2', periodLabel })
+        .timeout(20000),
+    ]);
+    const statuses = [res1.status, res2.status].sort((a, b) => a - b);
+    expect(statuses).toEqual([200, 409]);
 
-      const r = await pool.query<{ event_type: string }>(
-        "SELECT event_type FROM audit_ledger WHERE tenant_id = $1 AND event_type = 'certify_close' AND deterministic_flag_snapshot->>'closeSessionId' = $2",
-        [TENANT_A, closeSessionId]
-      );
-      expect(r.rows.length).toBe(1);
-    } catch (err: unknown) {
-      if (isConnectionResetError(err)) return;
-      throw err;
-    }
-  }, 20000);
+    const pool = await getTenantPool(TENANT_A);
+    const session = await getSession(pool, TENANT_A, closeSessionId);
+    expect(session?.status).toBe('certified');
+
+    const r = await pool.query<{ event_type: string }>(
+      "SELECT event_type FROM audit_ledger WHERE tenant_id = $1 AND event_type = 'certify_close' AND deterministic_flag_snapshot->>'closeSessionId' = $2",
+      [TENANT_A, closeSessionId]
+    );
+    expect(r.rows.length).toBe(1);
+  }, 25000);
 });
 
 describe('Security adversarial — concurrent advance (finalized → locked)', () => {
@@ -667,33 +662,35 @@ describe('Security adversarial — concurrent advance (finalized → locked)', (
     }
   }, 25_000);
 
-  it.skip('Two concurrent advance (finalized → locked) calls yield exactly one success (flaky: ECONNRESET under concurrent load)', async () => {
+  it.skip('Two concurrent advance (finalized → locked) (ECONNRESET under load; see close_session_concurrency.test.ts)', async () => {
     if (!isDbConfigured() || !closeSessionId) return;
-    try {
-      const [res1, res2] = await Promise.all([
-        request(app)
-          .post(`/api/close/sessions/${closeSessionId}/advance`)
-          .set('Authorization', `Bearer ${authToken}`)
-          .set('Content-Type', 'application/json')
-          .send({ certifiedBy: 'advance-race-1' })
-          .timeout(15000),
-        request(app)
-          .post(`/api/close/sessions/${closeSessionId}/advance`)
-          .set('Authorization', `Bearer ${authToken}`)
-          .set('Content-Type', 'application/json')
-          .send({ certifiedBy: 'advance-race-2' })
-          .timeout(15000),
-      ]);
-      const locked1 = res1.body?.statusAfter === 'locked';
-      const locked2 = res2.body?.statusAfter === 'locked';
-      expect(locked1 || locked2).toBe(true);
-      expect(locked1 && locked2).toBe(false);
-      const pool = await getTenantPool(TENANT_A);
-      const session = await getSession(pool, TENANT_A, closeSessionId);
-      expect(session?.status).toBe('locked');
-    } catch (err: unknown) {
-      if (isConnectionResetError(err)) return;
-      throw err;
-    }
-  }, 20000);
+
+    const [res1, res2] = await Promise.all([
+      request(app)
+        .post(`/api/close/sessions/${closeSessionId}/advance`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('x-tenant-id', TENANT_A)
+        .set('Content-Type', 'application/json')
+        .send({ certifiedBy: 'advance-race-1' })
+        .timeout(20000),
+      request(app)
+        .post(`/api/close/sessions/${closeSessionId}/advance`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('x-tenant-id', TENANT_A)
+        .set('Content-Type', 'application/json')
+        .send({ certifiedBy: 'advance-race-2' })
+        .timeout(20000),
+    ]);
+    const statuses = [res1.status, res2.status].sort((a, b) => a - b);
+    expect(statuses).toEqual([200, 409]);
+    const locked1 = res1.body?.statusAfter === 'locked';
+    const locked2 = res2.body?.statusAfter === 'locked';
+    expect(locked1 || locked2).toBe(true);
+    expect(locked1 && locked2).toBe(false);
+    const conflict = res1.status === 409 ? res1 : res2;
+    expect(conflict.body?.code).toBe('INVALID_TRANSITION');
+    const pool = await getTenantPool(TENANT_A);
+    const session = await getSession(pool, TENANT_A, closeSessionId);
+    expect(session?.status).toBe('locked');
+  }, 25000);
 });

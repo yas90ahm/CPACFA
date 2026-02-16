@@ -8,6 +8,7 @@ import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { getLedgerSnapshotById } from '../../db/repositories/ledger_snapshot_repository.js';
 import { recomputeAndVerifySnapshotHash } from '../../services/ledger_snapshot_service.js';
+import { snapshotIncludesGL } from '../../services/snapshot_gl_helpers.js';
 import { send500 } from '../../lib/errorHandler.js';
 
 const router = Router();
@@ -51,6 +52,7 @@ router.get('/snapshots/:snapshotId', async (req: Request, res: Response) => {
     }
 
     const { recomputedHash, hashMatches } = recomputeAndVerifySnapshotHash(snapshot);
+    const includesGL = snapshotIncludesGL(snapshot);
 
     res.status(200).json({
       contractVersion: CONTRACT_VERSION,
@@ -64,6 +66,7 @@ router.get('/snapshots/:snapshotId', async (req: Request, res: Response) => {
         storedHash: snapshot.snapshotHash,
         recomputedHash,
         hashMatches,
+        includesGL,
       },
     });
   } catch (err) {

@@ -25,6 +25,9 @@ COPY --from=build /app/shared ./shared
 
 RUN npm ci --omit=dev
 
+# Create storage dir for local adapter (appuser needs write access)
+RUN mkdir -p /app/storage /app/data/evidence && chown -R appuser:appgroup /app/storage /app/data
+
 USER appuser
 
 EXPOSE 3000

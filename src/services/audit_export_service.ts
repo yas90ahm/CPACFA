@@ -26,6 +26,7 @@ import { verifyChain } from './audit_ledger_service.js';
 import { finalIntegrityCheck } from './integrity_check.js';
 import { buildCertifiedStatementsFromSnapshot } from './certified_statements_service.js';
 import { getLatestSnapshotByCloseSessionId, getLedgerSnapshotById } from '../db/repositories/ledger_snapshot_repository.js';
+import { extractGLFromSnapshot } from './snapshot_gl_helpers.js';
 import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
 import * as statementRegistry from '../db/repositories/statement_registry_repository.js';
 import * as closeAuditTrail from '../db/repositories/close_audit_trail_repository.js';
@@ -152,6 +153,8 @@ export interface GetCertifiedStatementsResult {
   certifiedSnapshotId?: string;
   snapshotHash?: string;
   snapshotHashVersion?: number;
+  /** General ledger entries (v4+ snapshots). Included when TB is derived from GL. */
+  generalLedger?: import('../types/ledger_snapshot.js').GeneralLedgerSnapshotEntry[];
 }
 
 /**
@@ -177,12 +180,14 @@ export async function getCertifiedStatementsForBinder(
     if (snapshot) {
       try {
         const statements = buildCertifiedStatementsFromSnapshot(snapshot.snapshotPayloadJson);
+        const glData = extractGLFromSnapshot(snapshot);
         return {
           statements,
           source: snapshotId ? 'certified_snapshot' : 'session_snapshot',
           certifiedSnapshotId: snapshot.id,
           snapshotHash: snapshot.snapshotHash,
           snapshotHashVersion: snapshot.hashVersion,
+          ...(glData && { generalLedger: glData.entries }),
         };
       } catch {
         return null;
@@ -285,6 +290,8 @@ export interface BuildAuditBinderOptions {
   pool?: Pool | null;
   /** Trust boundary: ingest metadata for staged items in period (included in binder for auditability) */
   ingestMetadata?: Array<{ source_type: string; source_hash: string; ingestion_timestamp: string }>;
+  /** General ledger entries (v4+ snapshots). Included when TB is derived from GL. */
+  generalLedger?: import('../types/ledger_snapshot.js').GeneralLedgerSnapshotEntry[];
 }
 
 /**
@@ -302,6 +309,7 @@ export async function buildAuditBinder(options: BuildAuditBinderOptions): Promis
     tenantId,
     pool,
     ingestMetadata,
+    generalLedger,
   } = options;
 
   const stored = await getLastStatementGeneration(tenantId, pool);
@@ -317,6 +325,7 @@ export async function buildAuditBinder(options: BuildAuditBinderOptions): Promis
     generatedAt,
     justifications,
     ...(ingestMetadata?.length && { ingestMetadata }),
+    ...(generalLedger != null && generalLedger.length > 0 && { generalLedger }),
   };
 
   if (tenantId && pool) {

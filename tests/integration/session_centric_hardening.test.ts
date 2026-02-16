@@ -12,27 +12,25 @@
  */
 
 import request from 'supertest';
-import { describe, it, expect, beforeAll } from '@jest/globals';
+import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { app } from '../../src/server.js';
-import { getTestAuthTokenWithRole } from '../helpers/testHelpers.js';
 import {
   isDbConfigured,
   getTenantPool,
-  queryControl,
 } from '../../src/db/index.js';
 import * as closeSessionRepo from '../../src/db/repositories/close_session_repository.js';
 import { upsertPeriodExportChecks } from '../../src/db/repositories/period_export_checks_repository.js';
 import { initializeChecklistTemplate } from '../../src/services/close_checklist_readiness_service.js';
 import * as itemRepo from '../../src/db/repositories/close_checklist_item_repository.js';
+import { createTenant, teardown } from '../helpers/integrationHarness.js';
 
-const TEST_TENANT_ID =
-  process.env.TEST_TENANT_ID ?? `session-centric-hardening-${Date.now()}`;
 const PERIOD_LABEL = '2030-01'; // Use future period to avoid collision with other tests
 const PERIOD_START = '2030-01-01';
 const PERIOD_END = '2030-01-31';
 const ENTITY_ID = 'entity-session-centric';
 
 describe('Session-centric hardening', () => {
+  let tenantId: string | undefined;
   let authToken: string;
 
   beforeAll(async () => {
@@ -40,21 +38,23 @@ describe('Session-centric hardening', () => {
       console.warn('Session-centric hardening: DATABASE_URL not set; skipping.');
       return;
     }
-    authToken = getTestAuthTokenWithRole(TEST_TENANT_ID, 'approver');
-    await queryControl(
-      'INSERT INTO tenants (id, name, database_url) VALUES ($1, $2, NULL) ON CONFLICT (id) DO NOTHING',
-      [TEST_TENANT_ID, `Test ${TEST_TENANT_ID}`]
-    );
+    const ctx = await createTenant('session-centric-hardening');
+    tenantId = ctx.tenantId;
+    authToken = ctx.authTokenWithRole('approver');
   });
 
-  it('A) Certify without anchored TB returns 422 SESSION_DATA_MISSING', async () => {
-    if (!isDbConfigured()) return;
+  afterAll(async () => {
+    if (tenantId) await teardown(tenantId);
+  }, 15000);
 
-    const pool = await getTenantPool(TEST_TENANT_ID);
+  it('A) Certify without anchored TB returns 422 SESSION_DATA_MISSING', async () => {
+    if (!isDbConfigured() || !tenantId) return;
+
+    const pool = await getTenantPool(tenantId);
     // Ensure no period_trial_balance for this period (delete if present from prior run)
     await pool.query(
       'DELETE FROM period_trial_balance WHERE tenant_id = $1 AND period_label = $2',
-      [TEST_TENANT_ID, PERIOD_LABEL]
+      [tenantId, PERIOD_LABEL]
     );
 
     // Create close session
@@ -136,15 +136,15 @@ describe('Session-centric hardening', () => {
   }, 15000);
 
   it('B) Binder without session snapshot returns 422 NO_CERTIFIED_SOURCE', async () => {
-    if (!isDbConfigured()) return;
+    if (!isDbConfigured() || !tenantId) return;
 
-    const pool = await getTenantPool(TEST_TENANT_ID);
+    const pool = await getTenantPool(tenantId);
     // Create certified session without snapshot (status=certified, certified_snapshot_id=null)
     const sessionId = `sess-no-snapshot-${Date.now()}`;
     await closeSessionRepo.insertCloseSession(
       pool,
       sessionId,
-      TEST_TENANT_ID,
+      tenantId,
       ENTITY_ID,
       '2030-02-01',
       '2030-02-28',
@@ -153,12 +153,12 @@ describe('Session-centric hardening', () => {
       'certified'
     );
     // Ensure certified_snapshot_id stays null (insert does not set it)
-    const sess = await closeSessionRepo.getCloseSessionById(pool, TEST_TENANT_ID, sessionId);
+    const sess = await closeSessionRepo.getCloseSessionById(pool, tenantId, sessionId);
     expect(sess?.status).toBe('certified');
     expect(sess?.certifiedSnapshotId).toBeUndefined();
 
     // Satisfy export gate: period_export_checks must exist (materiality from DB)
-    await upsertPeriodExportChecks(pool, TEST_TENANT_ID, '2030-02', {
+    await upsertPeriodExportChecks(pool, tenantId, '2030-02', {
       roundingGapExceedsMateriality: false,
       aggregateRoundingExceedsMateriality: false,
     });
@@ -169,21 +169,21 @@ describe('Session-centric hardening', () => {
         `/api/audit/binder?periodStart=2030-02-01&periodEnd=2030-02-28&closeSessionId=${sessionId}`
       )
       .set('Authorization', `Bearer ${authToken}`)
-      .set('x-tenant-id', TEST_TENANT_ID);
+      .set('x-tenant-id', tenantId);
 
     expect(res.status).toBe(422);
     expect(res.body?.code).toBe('NO_CERTIFIED_SOURCE');
   });
 
   it('B2) Export PDF without session snapshot returns 422 NO_CERTIFIED_SOURCE', async () => {
-    if (!isDbConfigured()) return;
+    if (!isDbConfigured() || !tenantId) return;
 
-    const pool = await getTenantPool(TEST_TENANT_ID);
+    const pool = await getTenantPool(tenantId);
     const sessionId = `sess-export-no-snap-${Date.now()}`;
     await closeSessionRepo.insertCloseSession(
       pool,
       sessionId,
-      TEST_TENANT_ID,
+      tenantId,
       ENTITY_ID,
       '2030-03-01',
       '2030-03-31',
@@ -192,14 +192,14 @@ describe('Session-centric hardening', () => {
       'certified'
     );
     // Init checklist and complete items so export readiness passes
-    await initializeChecklistTemplate(pool, TEST_TENANT_ID, sessionId);
-    const items = await itemRepo.listChecklistItemsBySessionId(pool, TEST_TENANT_ID, sessionId);
+    await initializeChecklistTemplate(pool, tenantId, sessionId);
+    const items = await itemRepo.listChecklistItemsBySessionId(pool, tenantId, sessionId);
     for (const item of items) {
-      await itemRepo.updateChecklistItemStatus(pool, TEST_TENANT_ID, item.id, 'completed', { completedBy: 'test-user' });
+      await itemRepo.updateChecklistItemStatus(pool, tenantId, item.id, 'completed', { completedBy: 'test-user' });
     }
 
     // Satisfy export gate: period_export_checks must exist
-    await upsertPeriodExportChecks(pool, TEST_TENANT_ID, '2030-03', {
+    await upsertPeriodExportChecks(pool, tenantId, '2030-03', {
       roundingGapExceedsMateriality: false,
       aggregateRoundingExceedsMateriality: false,
     });
@@ -208,7 +208,7 @@ describe('Session-centric hardening', () => {
       .post('/api/export/pdf')
       .set('Authorization', `Bearer ${authToken}`)
       .set('Content-Type', 'application/json')
-      .set('x-tenant-id', TEST_TENANT_ID)
+      .set('x-tenant-id', tenantId)
       .send({
         exportMode: 'certified',
         periodLabel: '2030-03',
@@ -227,14 +227,14 @@ describe('Session-centric hardening', () => {
   });
 
   it('B3) Binder with allowLegacyCertifiedSource=1 returns 200 and legacy headers when statements registered', async () => {
-    if (!isDbConfigured()) return;
+    if (!isDbConfigured() || !tenantId) return;
 
-    const pool = await getTenantPool(TEST_TENANT_ID);
+    const pool = await getTenantPool(tenantId);
     const sessionId = `sess-legacy-${Date.now()}`;
     await closeSessionRepo.insertCloseSession(
       pool,
       sessionId,
-      TEST_TENANT_ID,
+      tenantId,
       ENTITY_ID,
       '2030-04-01',
       '2030-04-30',
@@ -248,7 +248,7 @@ describe('Session-centric hardening', () => {
       .post('/api/audit/register-statements')
       .set('Authorization', `Bearer ${authToken}`)
       .set('Content-Type', 'application/json')
-      .set('x-tenant-id', TEST_TENANT_ID)
+      .set('x-tenant-id', tenantId)
       .send({
         statements: {
           trialBalance: {
@@ -284,7 +284,7 @@ describe('Session-centric hardening', () => {
     expect(regRes.status).toBe(200);
 
     // Satisfy export gate: period_export_checks must exist
-    await upsertPeriodExportChecks(pool, TEST_TENANT_ID, '2030-04', {
+    await upsertPeriodExportChecks(pool, tenantId, '2030-04', {
       roundingGapExceedsMateriality: false,
       aggregateRoundingExceedsMateriality: false,
     });
@@ -294,7 +294,7 @@ describe('Session-centric hardening', () => {
         `/api/audit/binder?periodStart=2030-04-01&periodEnd=2030-04-30&closeSessionId=${sessionId}&allowLegacyCertifiedSource=1`
       )
       .set('Authorization', `Bearer ${authToken}`)
-      .set('x-tenant-id', TEST_TENANT_ID);
+      .set('x-tenant-id', tenantId);
 
     expect(res.status).toBe(200);
     expect(res.headers['x-certified-source']).toBe('legacy');
@@ -302,14 +302,14 @@ describe('Session-centric hardening', () => {
   });
 
   it('B4) Legacy binder call records LEGACY_CERTIFIED_SOURCE_USED in audit ledger', async () => {
-    if (!isDbConfigured()) return;
+    if (!isDbConfigured() || !tenantId) return;
 
-    const pool = await getTenantPool(TEST_TENANT_ID);
+    const pool = await getTenantPool(tenantId);
     const sessionId = `sess-audit-legacy-${Date.now()}`;
     await closeSessionRepo.insertCloseSession(
       pool,
       sessionId,
-      TEST_TENANT_ID,
+      tenantId,
       ENTITY_ID,
       '2030-05-01',
       '2030-05-31',
@@ -322,7 +322,7 @@ describe('Session-centric hardening', () => {
       .post('/api/audit/register-statements')
       .set('Authorization', `Bearer ${authToken}`)
       .set('Content-Type', 'application/json')
-      .set('x-tenant-id', TEST_TENANT_ID)
+      .set('x-tenant-id', tenantId)
       .send({
         statements: {
           trialBalance: {
@@ -357,7 +357,7 @@ describe('Session-centric hardening', () => {
       });
 
     // Satisfy export gate: period_export_checks must exist
-    await upsertPeriodExportChecks(pool, TEST_TENANT_ID, '2030-05', {
+    await upsertPeriodExportChecks(pool, tenantId, '2030-05', {
       roundingGapExceedsMateriality: false,
       aggregateRoundingExceedsMateriality: false,
     });
@@ -367,14 +367,14 @@ describe('Session-centric hardening', () => {
         `/api/audit/binder?periodStart=2030-05-01&periodEnd=2030-05-31&closeSessionId=${sessionId}&allowLegacyCertifiedSource=1`
       )
       .set('Authorization', `Bearer ${authToken}`)
-      .set('x-tenant-id', TEST_TENANT_ID);
+      .set('x-tenant-id', tenantId);
 
     const r = await pool.query<{ event_type: string; deterministic_flag_snapshot: unknown }>(
       `SELECT event_type, deterministic_flag_snapshot FROM audit_ledger
        WHERE tenant_id = $1 AND event_type = 'legacy_certified_source_used'
        AND deterministic_flag_snapshot->>'closeSessionId' = $2
        ORDER BY created_at DESC LIMIT 1`,
-      [TEST_TENANT_ID, sessionId]
+      [tenantId, sessionId]
     );
     expect(r.rows.length).toBeGreaterThan(0);
     expect(r.rows[0].event_type).toBe('legacy_certified_source_used');
@@ -384,9 +384,9 @@ describe('Session-centric hardening', () => {
   });
 
   it('D) Advance through all states: audit ledger has entry for every transition', async () => {
-    if (!isDbConfigured()) return;
+    if (!isDbConfigured() || !tenantId) return;
 
-    const pool = await getTenantPool(TEST_TENANT_ID);
+    const pool = await getTenantPool(tenantId);
     const periodLabel = '2030-06';
     const periodStart = '2030-06-01';
     const periodEnd = '2030-06-30';
@@ -445,7 +445,7 @@ describe('Session-centric hardening', () => {
        WHERE tenant_id = $1 AND event_type = 'close_session_transition'
        AND deterministic_flag_snapshot->>'sessionId' = $2
        ORDER BY created_at`,
-      [TEST_TENANT_ID, closeSessionId]
+      [tenantId, closeSessionId]
     );
 
     // Expect 4 transitions: draft→in_progress, in_progress→ready_for_review, ready_for_review→finalized, finalized→locked

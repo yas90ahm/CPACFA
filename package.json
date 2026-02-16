@@ -17,7 +17,9 @@
     "example:happy-path": "tsx examples/happy_path_runner.ts",
     "demo:report": "tsx scripts/generate_demo_report.ts",
     "keygen": "tsx src/crypto/keygen.ts",
-    "seed:demo": "tsx src/scripts/seed_demo.ts"
+    "seed:demo": "tsx src/scripts/seed_demo.ts",
+    "test:integration": "tsx scripts/test_gl_certification.ts",
+    "test:integration:dev": "cross-env BASE_URL=http://localhost:3000 tsx scripts/test_gl_certification.ts"
   },
   "engines": {
     "node": ">=18"

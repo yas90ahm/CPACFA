@@ -10,7 +10,7 @@
  */
 
 /** Readonly advisory payload — structurally prevents mutation. No functions, no callbacks. */
-export type AdvisorySuggestion = readonly Record<string, unknown>;
+export type AdvisorySuggestion = Readonly<Record<string, unknown>>;
 
 /** Brand for classifier results — suggestions only, never written to ledger. */
 export type ClassifierAdvisory = Readonly<{

@@ -6,17 +6,16 @@
  */
 
 import request from 'supertest';
-import { describe, it, expect, beforeAll } from '@jest/globals';
+import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { app } from '../../src/server.js';
-import { getTestAuthToken } from '../helpers/testHelpers.js';
-import { isDbConfigured, getTenantPool, queryControl } from '../../src/db/index.js';
+import { isDbConfigured, getTenantPool } from '../../src/db/index.js';
 import * as closeSessionRepo from '../../src/db/repositories/close_session_repository.js';
 import { createSnapshotFromTrialBalanceAndEntries } from '../../src/services/ledger_snapshot_service.js';
 import { upsertPeriodExportChecks } from '../../src/db/repositories/period_export_checks_repository.js';
-
-const TEST_TENANT_ID = process.env.TEST_TENANT_ID ?? 'export-certified-gate-tenant';
+import { createTenant, teardown } from '../helpers/integrationHarness.js';
 
 describe('Export certified gate', () => {
+  let tenantId: string;
   let authToken: string;
   let closeSessionIdLocked: string | undefined;
   let closeSessionIdCertified: string | undefined;
@@ -27,18 +26,16 @@ describe('Export certified gate', () => {
       console.warn('Export certified gate: DATABASE_URL not set; skipping.');
       return;
     }
-    authToken = getTestAuthToken(TEST_TENANT_ID);
+    const ctx = await createTenant('export-certified-gate');
+    tenantId = ctx.tenantId;
+    authToken = ctx.authToken;
     entityId = `entity-export-gate-${Date.now()}`;
-    await queryControl(
-      'INSERT INTO tenants (id, name, database_url) VALUES ($1, $2, NULL) ON CONFLICT (id) DO NOTHING',
-      [TEST_TENANT_ID, `Test ${TEST_TENANT_ID}`]
-    );
     try {
-      const pool = await getTenantPool(TEST_TENANT_ID);
+      const pool = await ctx.getPool();
       const locked = await closeSessionRepo.insertCloseSession(
         pool,
         `sess-locked-${Date.now()}`,
-        TEST_TENANT_ID,
+        tenantId,
         entityId,
         '2025-01-01',
         '2025-01-31',
@@ -50,7 +47,7 @@ describe('Export certified gate', () => {
       const certified = await closeSessionRepo.insertCloseSession(
         pool,
         `sess-cert-${Date.now()}`,
-        TEST_TENANT_ID,
+        tenantId,
         entityId,
         '2025-02-01',
         '2025-02-28',
@@ -61,7 +58,7 @@ describe('Export certified gate', () => {
       closeSessionIdCertified = certified.id;
       // V2: certified binder/export requires a snapshot; create one and link to session.
       const snapshot = await createSnapshotFromTrialBalanceAndEntries(pool, {
-        tenantId: TEST_TENANT_ID,
+        tenantId,
         periodLabel: '2025-02',
         closeSessionId: certified.id,
         createdBy: 'test-setup',
@@ -77,18 +74,18 @@ describe('Export certified gate', () => {
       });
       await closeSessionRepo.updateCertification(
         pool,
-        TEST_TENANT_ID,
+        tenantId,
         certified.id,
         'test@test.com',
         new Date().toISOString(),
         'Setup',
         snapshot.id
       );
-      await upsertPeriodExportChecks(pool, TEST_TENANT_ID, '2025-01', {
+      await upsertPeriodExportChecks(pool, tenantId, '2025-01', {
         roundingGapExceedsMateriality: false,
         aggregateRoundingExceedsMateriality: false,
       });
-      await upsertPeriodExportChecks(pool, TEST_TENANT_ID, '2025-02', {
+      await upsertPeriodExportChecks(pool, tenantId, '2025-02', {
         roundingGapExceedsMateriality: false,
         aggregateRoundingExceedsMateriality: false,
       });
@@ -97,12 +94,16 @@ describe('Export certified gate', () => {
     }
   });
 
+  afterAll(async () => {
+    if (tenantId) await teardown(tenantId);
+  }, 15000);
+
   it('certified export returns 403 CLOSE_NOT_CERTIFIED when session is not certified', async () => {
     if (!isDbConfigured() || !closeSessionIdLocked) return;
     const res = await request(app)
       .post('/api/export/pdf')
       .set('Authorization', `Bearer ${authToken}`)
-      .set('x-tenant-id', TEST_TENANT_ID)
+      .set('x-tenant-id', tenantId)
       .send({
         exportMode: 'certified',
         periodLabel: '2025-01',
@@ -124,7 +125,7 @@ describe('Export certified gate', () => {
     const res = await request(app)
       .post('/api/export/pdf')
       .set('Authorization', `Bearer ${authToken}`)
-      .set('x-tenant-id', TEST_TENANT_ID)
+      .set('x-tenant-id', tenantId)
       .send({
         exportMode: 'certified',
         periodLabel: '2025-02',
@@ -154,7 +155,7 @@ describe('Export certified gate', () => {
     const res = await request(app)
       .post('/api/export/pdf')
       .set('Authorization', `Bearer ${authToken}`)
-      .set('x-tenant-id', TEST_TENANT_ID)
+      .set('x-tenant-id', tenantId)
       .send({
         exportMode: 'draft',
         periodLabel: '2025-01',
@@ -177,7 +178,7 @@ describe('Export certified gate', () => {
     const res = await request(app)
       .get('/api/audit/binder/export/pdf')
       .set('Authorization', `Bearer ${authToken}`)
-      .set('x-tenant-id', TEST_TENANT_ID)
+      .set('x-tenant-id', tenantId)
       .query({ periodStart: '2025-01-01', periodEnd: '2025-01-31' });
     expect(res.status).toBe(400);
     expect(res.body?.code).toBe('CLOSE_SESSION_REQUIRED');
@@ -188,7 +189,7 @@ describe('Export certified gate', () => {
     const res = await request(app)
       .get('/api/audit/binder/export/pdf')
       .set('Authorization', `Bearer ${authToken}`)
-      .set('x-tenant-id', TEST_TENANT_ID)
+      .set('x-tenant-id', tenantId)
       .query({
         closeSessionId: closeSessionIdLocked,
         periodStart: '2025-01-01',
@@ -203,7 +204,7 @@ describe('Export certified gate', () => {
     const certifiedRes = await request(app)
       .get(`/api/close/sessions/${closeSessionIdCertified}/certified-source`)
       .set('Authorization', `Bearer ${authToken}`)
-      .set('x-tenant-id', TEST_TENANT_ID);
+      .set('x-tenant-id', tenantId);
     expect(certifiedRes.status).toBe(200);
     expect(certifiedRes.body?.closeSessionId).toBe(closeSessionIdCertified);
     expect(certifiedRes.body?.isCertified).toBe(true);
@@ -216,7 +217,7 @@ describe('Export certified gate', () => {
     const lockedRes = await request(app)
       .get(`/api/close/sessions/${closeSessionIdLocked}/certified-source`)
       .set('Authorization', `Bearer ${authToken}`)
-      .set('x-tenant-id', TEST_TENANT_ID);
+      .set('x-tenant-id', tenantId);
     expect(lockedRes.status).toBe(200);
     expect(lockedRes.body?.closeSessionId).toBe(closeSessionIdLocked);
     expect(lockedRes.body?.isCertified).toBe(false);
@@ -229,7 +230,7 @@ describe('Export certified gate', () => {
     const res = await request(app)
       .get('/api/audit/binder/export/pdf')
       .set('Authorization', `Bearer ${authToken}`)
-      .set('x-tenant-id', TEST_TENANT_ID)
+      .set('x-tenant-id', tenantId)
       .query({
         closeSessionId: closeSessionIdCertified,
         periodStart: '2025-02-01',
@@ -261,7 +262,7 @@ describe('Export certified gate', () => {
       const res = await request(app)
         .get('/api/audit/binder/export/pdf')
         .set('Authorization', `Bearer ${authToken}`)
-        .set('x-tenant-id', TEST_TENANT_ID)
+        .set('x-tenant-id', tenantId)
         .query({
           closeSessionId: closeSessionIdCertified,
           periodStart: '2025-02-01',
@@ -288,7 +289,7 @@ describe('Export certified gate', () => {
       const res = await request(app)
         .post('/api/export/pdf')
         .set('Authorization', `Bearer ${authToken}`)
-        .set('x-tenant-id', TEST_TENANT_ID)
+        .set('x-tenant-id', tenantId)
         .send({
           exportMode: 'certified',
           periodLabel: '2025-02',
@@ -328,7 +329,7 @@ describe('Export certified gate', () => {
       const res = await request(app)
         .get('/api/audit/binder/export/pdf')
         .set('Authorization', `Bearer ${authToken}`)
-        .set('x-tenant-id', TEST_TENANT_ID)
+        .set('x-tenant-id', tenantId)
         .query({
           closeSessionId: closeSessionIdCertified,
           periodStart: '2025-02-01',
@@ -351,7 +352,7 @@ describe('Export certified gate', () => {
       const resPdf = await request(app)
         .post('/api/export/pdf')
         .set('Authorization', `Bearer ${authToken}`)
-        .set('x-tenant-id', TEST_TENANT_ID)
+        .set('x-tenant-id', tenantId)
         .send({
           exportMode: 'certified',
           periodLabel: '2025-01',
@@ -371,7 +372,7 @@ describe('Export certified gate', () => {
       const resCsv = await request(app)
         .post('/api/export/csv')
         .set('Authorization', `Bearer ${authToken}`)
-        .set('x-tenant-id', TEST_TENANT_ID)
+        .set('x-tenant-id', tenantId)
         .send({
           exportMode: 'certified',
           periodLabel: '2025-01',
@@ -391,20 +392,31 @@ describe('Export certified gate', () => {
 });
 
 describe('Export draft imbalanced (Policy B)', () => {
+  let policyBTenantId: string;
   let authToken: string;
 
-  beforeAll(() => {
-    authToken = getTestAuthToken(process.env.TEST_TENANT_ID ?? 'export-certified-gate-tenant');
+  beforeAll(async () => {
+    if (!isDbConfigured()) return;
+    const ctx = await createTenant('export-draft-imbalanced');
+    policyBTenantId = ctx.tenantId;
+    authToken = ctx.authToken;
   });
 
+  afterAll(async () => {
+    if (policyBTenantId) await teardown(policyBTenantId);
+  }, 15000);
+
   it('when ALLOW_IMBALANCED_DRAFT_EXPORT=true, draft export succeeds when imbalanced and returns draft PDF', async () => {
+    if (!isDbConfigured() || !policyBTenantId) return;
     const prev = process.env.ALLOW_IMBALANCED_DRAFT_EXPORT;
     process.env.ALLOW_IMBALANCED_DRAFT_EXPORT = 'true';
+    const { resetSecurityProfileCache } = await import('../../src/security/security_profile.js');
+    resetSecurityProfileCache();
     try {
       const res = await request(app)
         .post('/api/export/pdf')
         .set('Authorization', `Bearer ${authToken}`)
-        .set('x-tenant-id', process.env.TEST_TENANT_ID ?? 'export-certified-gate-tenant')
+        .set('x-tenant-id', policyBTenantId)
         .send({
           exportMode: 'draft',
           periodLabel: '2025-01',
@@ -422,6 +434,7 @@ describe('Export draft imbalanced (Policy B)', () => {
     } finally {
       if (prev !== undefined) process.env.ALLOW_IMBALANCED_DRAFT_EXPORT = prev;
       else delete process.env.ALLOW_IMBALANCED_DRAFT_EXPORT;
+      resetSecurityProfileCache();
     }
   });
 });

@@ -11,8 +11,9 @@ import * as repo from '../db/repositories/close_session_repository.js';
 import { computeReadiness } from './close_checklist_readiness_service.js';
 import { canPerform } from './segregation_service.js';
 import { recordMaterialEvent } from './audit_ledger_service.js';
-import { getAdjustedTrialBalance } from './adjusted_trial_balance_service.js';
+import { getTrialBalanceForCertification } from './adjusted_trial_balance_service.js';
 import { createSnapshotFromTrialBalanceAndEntries } from './ledger_snapshot_service.js';
+import * as glRepository from '../db/repositories/general_ledger_repository.js';
 import { buildEvidenceManifest } from './evidence_manifest_service.js';
 import { checkEvidencePolicyForCertification } from './evidence_policy_service.js';
 import { withTransaction } from '../db/transaction.js';
@@ -289,14 +290,20 @@ export async function certifyCloseSession(
 
     const periodLabel = input.periodLabel ?? session.periodEnd.slice(0, 7);
 
-    let adjustedEntries: Awaited<ReturnType<typeof getAdjustedTrialBalance>>;
+    let adjustedEntries: Awaited<ReturnType<typeof getTrialBalanceForCertification>>['trialBalance'];
+    let hasGL = false;
     try {
-      adjustedEntries = await getAdjustedTrialBalance(
+      const tbResult = await getTrialBalanceForCertification(
+        pool,
         input.tenantId,
         periodLabel,
-        pool,
         input.closeSessionId
       );
+      adjustedEntries = tbResult.trialBalance;
+      hasGL = tbResult.hasGL;
+      if (process.env.NODE_ENV !== 'test') {
+        console.log(`Certification using TB source: ${tbResult.source}, hasGL: ${hasGL}`);
+      }
     } catch (_e) {
       throw new CloseSessionError(
         'No trial balance anchored to session period; run ingest or resolve staging before certifying.',
@@ -312,6 +319,7 @@ export async function certifyCloseSession(
           debit: e.debit ?? 0,
           credit: e.credit ?? 0,
           ...(e.accountCode != null && { accountCode: e.accountCode }),
+          ...(e.accountType != null && { accountType: e.accountType }),
           ...(e.lineId != null && e.lineId !== '' && { lineId: e.lineId }),
         })),
         totalDebits,
@@ -327,6 +335,27 @@ export async function certifyCloseSession(
       );
     }
 
+    let generalLedger: LedgerSnapshotPayload['generalLedger'];
+    if (hasGL) {
+      const glLines = await glRepository.getGLForPeriod(pool, input.tenantId, periodLabel);
+      const entries = glRepository.groupLinesByEntry(glLines);
+      generalLedger = entries.map((entry) => ({
+        entry_id: entry.entry_id,
+        entry_date:
+          typeof entry.entry_date === 'string'
+            ? entry.entry_date
+            : (entry.entry_date as Date).toISOString().slice(0, 10),
+        description: entry.description,
+        lines: entry.lines.map((line) => ({
+          line_number: line.line_number,
+          account_code: line.account_code,
+          debit: line.debit ?? 0,
+          credit: line.credit ?? 0,
+          description: line.description,
+        })),
+      }));
+    }
+
     const evidenceManifest = await buildEvidenceManifest(client, input.tenantId, input.closeSessionId);
     const snapshot = await createSnapshotFromTrialBalanceAndEntries(client, {
       tenantId: input.tenantId,
@@ -340,11 +369,14 @@ export async function certifyCloseSession(
           debit: e.debit,
           credit: e.credit,
           ...(e.accountCode != null && { accountCode: e.accountCode }),
+          ...(e.accountType != null && { accountType: e.accountType }),
+          ...(e.lineId != null && e.lineId !== '' && { lineId: e.lineId }),
         })),
         totalDebits: snapshotPayload.trialBalance.totalDebits,
         totalCredits: snapshotPayload.trialBalance.totalCredits,
       },
       evidenceManifest,
+      ...(generalLedger != null && generalLedger.length > 0 && { generalLedger }),
     });
 
     const certifiedAt = new Date().toISOString();
@@ -554,7 +586,7 @@ export async function advanceSession(
           blockers: mapHardBlockersToBlockers(readiness.hardBlockers),
         };
       }
-      if (e instanceof CloseSessionError && (e.code === 'INSUFFICIENT_ROLE' || e.code === 'NOT_LOCKED' || e.code === 'INVALID_TRANSITION')) {
+      if (e instanceof CloseSessionError && (e.code === 'INSUFFICIENT_ROLE' || e.code === 'NOT_LOCKED')) {
         return {
           success: false,
           session,
@@ -565,15 +597,29 @@ export async function advanceSession(
           blockers: mapHardBlockersToBlockers([e.message]),
         };
       }
+      // INVALID_TRANSITION (e.g. concurrent certify - already certified) propagates → 409
       throw e;
     }
   }
 
   // draft | in_progress | ready_for_review | finalized → advance toward locked
   // Wrap status updates + close_lock audit in a single transaction for atomicity.
+  // Acquire row lock at start to serialize concurrent advance calls (no race).
   try {
-    const current = await withTransaction(pool, async (client) => {
-      let currentSession = session;
+    const { session: current, didLock } = await withTransaction(pool, async (client) => {
+      const locked = await repo.getCloseSessionByIdForUpdate(client, input.tenantId, input.closeSessionId);
+      if (!locked) {
+        throw new CloseSessionError('Close session not found', 'NOT_FOUND');
+      }
+      // Already locked by concurrent request → deterministic 409
+      if (locked.status === 'locked') {
+        throw new CloseSessionError(
+          'Session already locked by concurrent request',
+          'INVALID_TRANSITION'
+        );
+      }
+      let currentSession = locked;
+      let didLock = false;
       while (currentSession.status !== 'locked') {
         const next = nextStatusTowardLocked(currentSession.status);
         if (!next) break;
@@ -584,9 +630,10 @@ export async function advanceSession(
           }
         }
         currentSession = await updateStatus(client, input.tenantId, input.closeSessionId, next, 'advance-api');
+        if (next === 'locked') didLock = true;
       }
 
-      if (currentSession.status === 'locked') {
+      if (didLock && currentSession.status === 'locked') {
         await recordMaterialEvent(client, {
           tenantId: input.tenantId,
           periodLabel: currentSession.periodEnd?.slice(0, 7),
@@ -600,7 +647,7 @@ export async function advanceSession(
           createdBy: 'advance-api',
         });
       }
-      return currentSession;
+      return { session: currentSession, didLock };
     });
 
     return {
@@ -608,7 +655,7 @@ export async function advanceSession(
       session: current,
       statusBefore: session.status,
       statusAfter: current.status,
-      actionTaken: 'locked',
+      actionTaken: didLock ? 'locked' : 'none',
       result: emptyResult,
       blockers: [],
     };

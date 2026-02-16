@@ -39,6 +39,8 @@ import precheckRouter from './routes/precheck.js';
 import configRouter from './routes/config.js';
 import verificationRouter from './routes/verification/index.js';
 import coaMappingRouter from './routes/coa_mapping.js';
+import coaRouter from './routes/coa.js';
+import glRouter from './routes/gl/index.js';
 import dataQualityRouter from './routes/data_quality.js';
 import approvalsRouter from './routes/approvals.js';
 import accountingIntegrationRouter from './routes/accounting_integration.js';
@@ -172,6 +174,12 @@ app.use('/api/verification', verificationRouter);
 // API: COA Mapping — FS taxonomy lines, mapping rules, apply rules to accounts
 app.use('/api/coa-mapping', coaMappingRouter);
 
+// API: Chart of Accounts — upload CSV, list accounts, get by code
+app.use('/api/coa', coaRouter);
+
+// API: General Ledger — upload CSV, list entries, get by entry_id
+app.use('/api/gl', glRouter);
+
 // API: Data quality — Configurable rules, exceptions, agentic remediation
 app.use('/api/data-quality', dataQualityRouter);
 
@@ -248,7 +256,7 @@ async function start(): Promise<void> {
     console.log('  POST /api/ingestion/agent — Ingestion Agent: .xlsx/.csv/.pdf/.json → classify & route');
     console.log('  POST /api/pipelines/bank — Bank tx; ap-aging, ar-aging, payroll-accrual, bank-rec, cash-position');
     console.log('  POST /api/close/sessions, /close/sessions/:id/certify — Close sessions; POST /api/close/journal-entries — JE lifecycle');
-    console.log('  GET  /api/hitl/staging — Staging; POST /api/hitl/resolve-ingest — fix imbalanced ingest; POST /api/hitl/webhook — Approve/Reject');
+    console.log('  GET  /api/hitl/staging — Staging; POST /api/hitl/resolve-ingest — fix imbalanced TB ingest; POST /api/hitl/resolve-gl-ingest — fix imbalanced GL entry; POST /api/hitl/webhook — Approve/Reject');
     if (canMountDevApi) {
       console.log('  /api-dev (ENABLE_DEV_API=true): trial-balance, supervisor 410');
     }

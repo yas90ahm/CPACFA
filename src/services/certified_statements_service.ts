@@ -34,6 +34,7 @@ function snapshotEntryToTrialBalanceEntry(e: LedgerSnapshotEntry): TrialBalanceE
     debit: e.debit ?? 0,
     credit: e.credit ?? 0,
     accountCode: e.accountCode,
+    ...(e.accountType != null && { accountType: e.accountType as import('../types/financial.js').AccountType }),
   };
 }
 
@@ -70,6 +71,7 @@ export function buildCertifiedStatementsFromSnapshot(payload: LedgerSnapshotPayl
   const result = buildValidatedStatements(trialBalanceResult);
 
   const tolerance = getRoundingTolerance();
+  // totalEquity from buildBalanceSheet already includes Net Income (Revenue - Expense)
   const finalCheck = finalIntegrityCheck({
     trialBalance: {
       totalDebits: trialBalanceResult.totalDebits,

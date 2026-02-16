@@ -18,6 +18,7 @@ import {
   advanceSession,
   CloseSessionError,
 } from '../../services/close_session_service.js';
+import { withTransaction } from '../../db/transaction.js';
 import { getCloseRoleFromReq } from '../../lib/closeRole.js';
 import { effectiveAllowLegacyCertifiedSource } from '../../lib/runtime_mode.js';
 import type { AuthRequest } from '../../auth/middleware.js';
@@ -56,7 +57,7 @@ function handleSessionError(res: Response, err: unknown, fallbackLabel: string):
       return;
     }
     if (err.code === 'OVERLAP' || err.code === 'INVALID_TRANSITION' || err.code === 'NOT_LOCKED' || err.code === 'HARD_BLOCKERS') {
-      res.status(409).json({ error: err.message });
+      res.status(409).json({ error: err.message, code: err.code });
       return;
     }
     if (err.code === 'NOT_READY') {
@@ -719,7 +720,9 @@ router.patch('/sessions/:id/status', async (req: Request, res: Response) => {
       }
     }
     const userId = (req as AuthRequest).userId;
-    const session = await updateStatus(pool, tenantId, id, newStatus, userId ?? 'api');
+    const session = await withTransaction(pool, (client) =>
+      updateStatus(client, tenantId, id, newStatus, userId ?? 'api')
+    );
     res.json(session);
   } catch (e) {
     handleSessionError(res, e, 'Update close session status failed');

@@ -1,0 +1,3 @@
+entry_id,entry_date,account_code,debit,credit,description
+JE-004,2024-03-15,5000,1000,0,Expense
+JE-004,2024-03-15,1000,0,900,Expense payment

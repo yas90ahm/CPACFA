@@ -10,24 +10,23 @@
  */
 
 import request from 'supertest';
-import { describe, it, expect, beforeAll } from '@jest/globals';
+import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { app } from '../../src/server.js';
-import { getTestAuthTokenWithRole } from '../helpers/testHelpers.js';
 import {
   isDbConfigured,
   getTenantPool,
-  queryControl,
 } from '../../src/db/index.js';
 import { insertLedgerSnapshot } from '../../src/db/repositories/ledger_snapshot_repository.js';
 import { createDraftJE } from '../../src/services/journal_entry_service.js';
 import * as closeSessionRepo from '../../src/db/repositories/close_session_repository.js';
+import { createTenant, teardown } from '../helpers/integrationHarness.js';
 
-const TENANT_A = 'tenant-isolation-tenant-a';
-const TENANT_B = 'tenant-isolation-tenant-b';
 const PERIOD_LABEL = '2025-04';
 const ENTITY_ID = 'default';
 
 describe('Tenant isolation', () => {
+  let tenantIdA: string;
+  let tenantIdB: string;
   let tokenA: string;
   let tokenB: string;
   let closeSessionIdA: string;
@@ -36,13 +35,12 @@ describe('Tenant isolation', () => {
   beforeAll(async () => {
     if (!isDbConfigured()) return;
 
-    tokenA = getTestAuthTokenWithRole(TENANT_A, 'preparer');
-    tokenB = getTestAuthTokenWithRole(TENANT_B, 'preparer');
-
-    await queryControl(
-      'INSERT INTO tenants (id, name, database_url) VALUES ($1, $2, NULL), ($3, $4, NULL) ON CONFLICT (id) DO NOTHING',
-      [TENANT_A, `Test ${TENANT_A}`, TENANT_B, `Test ${TENANT_B}`]
-    );
+    const ctxA = await createTenant('tenant-isolation-a');
+    const ctxB = await createTenant('tenant-isolation-b');
+    tenantIdA = ctxA.tenantId;
+    tenantIdB = ctxB.tenantId;
+    tokenA = ctxA.authToken;
+    tokenB = ctxB.authToken;
 
     // Create close sessions for both tenants
     const resA = await request(app)
@@ -70,6 +68,11 @@ describe('Tenant isolation', () => {
     expect(closeSessionIdB).toBeDefined();
   });
 
+  afterAll(async () => {
+    if (tenantIdA) await teardown(tenantIdA);
+    if (tenantIdB) await teardown(tenantIdB);
+  }, 15000);
+
   describe('close_sessions', () => {
     it('Tenant B cannot access Tenant A close session', async () => {
       if (!isDbConfigured() || !closeSessionIdA) return;
@@ -96,9 +99,9 @@ describe('Tenant isolation', () => {
 
     beforeAll(async () => {
       if (!isDbConfigured() || !closeSessionIdA) return;
-      const pool = await getTenantPool(TENANT_A);
+      const pool = await getTenantPool(tenantIdA);
       const snapshot = await insertLedgerSnapshot(pool, {
-        tenantId: TENANT_A,
+        tenantId: tenantIdA,
         periodLabel: PERIOD_LABEL,
         source: 'close_session',
         snapshotPayloadJson: {
@@ -352,17 +355,17 @@ describe('Tenant isolation', () => {
 
     beforeAll(async () => {
       if (!isDbConfigured() || !closeSessionIdA) return;
-      const pool = await getTenantPool(TENANT_A);
+      const pool = await getTenantPool(tenantIdA);
       const session = await closeSessionRepo.getCloseSessionById(
         pool,
-        TENANT_A,
+        tenantIdA,
         closeSessionIdA
       );
       if (!session) return;
 
       const je = await createDraftJE(pool, {
         closeSessionId: closeSessionIdA,
-        tenantId: TENANT_A,
+        tenantId: tenantIdA,
         source: 'manual',
         createdBy: 'test@test.com',
         lines: [

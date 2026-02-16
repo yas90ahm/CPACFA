@@ -119,6 +119,8 @@ export interface AuditBinder {
   chainVerification?: ChainVerificationSummary;
   /** Trust boundary: ingest source metadata (source_type, source_hash, ingestion_timestamp) for staged data in period */
   ingestMetadata?: Array<{ source_type: string; source_hash: string; ingestion_timestamp: string }>;
+  /** General ledger entries (v4+ snapshots). Included when TB is derived from GL. */
+  generalLedger?: import('./ledger_snapshot.js').GeneralLedgerSnapshotEntry[];
 }
 
 /** Single accounting policy change during the fiscal year (GAAP consistency) */

@@ -29,18 +29,24 @@ import {
   HASH_VERSION_LEGACY,
   HASH_VERSION_CANONICAL_MONEY,
   HASH_VERSION_WITH_EVIDENCE_MANIFEST,
+  HASH_VERSION_WITH_GL,
 } from '../lib/snapshot_hash.js';
 import { canonicalStringifyKeysOnly } from '../lib/canonical_json.js';
 import { round2 } from '../utils/decimal.js';
 import { insertLedgerSnapshot } from '../db/repositories/ledger_snapshot_repository.js';
 
 /** Allowed top-level keys in LedgerSnapshotPayload. No other keys permitted (structural drift protection). */
-export const SNAPSHOT_PAYLOAD_ALLOWED_TOP_LEVEL_KEYS = new Set<string>(['trialBalance', 'entries', 'evidenceManifest']);
+export const SNAPSHOT_PAYLOAD_ALLOWED_TOP_LEVEL_KEYS = new Set<string>([
+  'trialBalance',
+  'entries',
+  'evidenceManifest',
+  'generalLedger',
+]);
 
 /** Required top-level key; every payload must have trialBalance. */
 export const SNAPSHOT_PAYLOAD_REQUIRED_TOP_LEVEL_KEYS = new Set<string>(['trialBalance']);
 
-/** Normalize to snapshot entry shape; preserve lineId and amountProvenance for audit trail. Uses round2 for deterministic debit/credit. */
+/** Normalize to snapshot entry shape; preserve lineId, accountType, amountProvenance for audit trail. Uses round2 for deterministic debit/credit. */
 function toSnapshotEntry(row: CreateLedgerSnapshotEntryInput): LedgerSnapshotEntry {
   return {
     ...(row.lineId != null && row.lineId !== '' && { lineId: row.lineId }),
@@ -48,6 +54,7 @@ function toSnapshotEntry(row: CreateLedgerSnapshotEntryInput): LedgerSnapshotEnt
     debit: round2(Number(row.debit) || 0),
     credit: round2(Number(row.credit) || 0),
     ...(row.accountCode != null && { accountCode: String(row.accountCode).trim() }),
+    ...(row.accountType != null && row.accountType !== '' && { accountType: String(row.accountType).trim() }),
     ...(row.description != null && row.description !== '' && { description: String(row.description).trim() }),
     ...(row.amountProvenance != null && { amountProvenance: row.amountProvenance }),
   };
@@ -71,6 +78,9 @@ export function buildSnapshotPayloadFromInput(input: CreateLedgerSnapshotInput):
   if (input.evidenceManifest != null) {
     payload.evidenceManifest = JSON.parse(canonicalStringifyKeysOnly(input.evidenceManifest)) as LedgerSnapshotPayload['evidenceManifest'];
   }
+  if (input.generalLedger != null && input.generalLedger.length > 0) {
+    payload.generalLedger = input.generalLedger;
+  }
   return payload;
 }
 
@@ -82,9 +92,9 @@ export async function createSnapshotFromTrialBalanceAndEntries(
   input: CreateLedgerSnapshotInput
 ): Promise<LedgerSnapshot> {
   const payload = buildSnapshotPayloadFromInput(input);
-
-  const snapshotHash = hashSnapshotPayload(payload, { hashVersion: getHashVersionForStorage() });
-  const hashVersion = getHashVersionForStorage();
+  const hasGL = payload.generalLedger != null && payload.generalLedger.length > 0;
+  const hashVersion = hasGL ? 4 : getHashVersionForStorage();
+  const snapshotHash = hashSnapshotPayload(payload, { hashVersion });
 
   return insertLedgerSnapshot(client, {
     tenantId: input.tenantId,
@@ -105,7 +115,12 @@ export async function createSnapshotFromTrialBalanceAndEntries(
  */
 export function verifySnapshotHash(snapshot: LedgerSnapshot): boolean {
   const v = snapshot.hashVersion;
-  if (v !== HASH_VERSION_LEGACY && v !== HASH_VERSION_CANONICAL_MONEY && v !== HASH_VERSION_WITH_EVIDENCE_MANIFEST) {
+  if (
+    v !== HASH_VERSION_LEGACY &&
+    v !== HASH_VERSION_CANONICAL_MONEY &&
+    v !== HASH_VERSION_WITH_EVIDENCE_MANIFEST &&
+    v !== HASH_VERSION_WITH_GL
+  ) {
     return false;
   }
   const computed = hashSnapshotPayload(snapshot.snapshotPayloadJson, { hashVersion: v });

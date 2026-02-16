@@ -12,6 +12,7 @@ import { buildReconciliationTieOut } from './reconciliation_tie_out_service.js';
 import { buildCloseReadiness } from './close_readiness_service.js';
 import { getMateriality, materialityThresholdFromSettings } from './materiality_service.js';
 import { getUnadjustedMeta } from './trial_balance_store_service.js';
+import type { PeriodTrialBalanceSource } from '../db/repositories/period_trial_balance_repository.js';
 import { listAdjustments } from './close_adjustments_service.js';
 
 export interface CloseStatusChecklist {
@@ -57,7 +58,7 @@ export interface CloseStatus {
   signOff: CloseStatusSignOff;
   materialityRef?: MaterialityRef;
   hasUnadjustedTB: boolean;
-  tbSource: 'uploaded' | 'synced' | null;
+  tbSource: PeriodTrialBalanceSource | null;
   tbAt?: string;
   adjustmentCount: number;
   postedCount: number;

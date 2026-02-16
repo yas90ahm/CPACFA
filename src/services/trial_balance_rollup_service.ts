@@ -24,7 +24,7 @@ export async function getUnadjustedOrRollup(
   tenantId: string,
   periodLabel: string,
   pool?: Pool
-): Promise<UnadjustedRollupResult | { entries: TrialBalanceEntry[]; source: 'uploaded' | 'synced'; at?: string; by?: string; connectionId?: string; fileName?: string; constituentPeriods?: never } | null> {
+): Promise<UnadjustedRollupResult | { entries: TrialBalanceEntry[]; source: 'uploaded' | 'synced' | 'gl_derived'; at?: string; by?: string; connectionId?: string; fileName?: string; constituentPeriods?: never } | null> {
   const direct = await getUnadjusted(tenantId, periodLabel, pool);
   if (direct) {
     return {

@@ -1,11 +1,9 @@
 /**
  * Environment config: NODE_ENV=production disallows in-memory stores to prevent silent data loss.
- * Use for HITL, trial balance, audit log, and any service that falls back to memory when DB/storage is missing.
- *
- * Trust-critical flags (auth, certification, legacy) come from runtime_mode — MODE is the single source of truth.
+ * Trust-critical flags (auth, tenant injection, bypass) come from getCurrentSecurityProfile().
  */
 
-import { getMode, getEffectiveConfig, allowLegacyCertifiedSource as allowLegacyFromMode, allowImbalancedDraftExport as allowImbalancedFromMode } from './runtime_mode.js';
+import { getCurrentSecurityProfile } from '../security/security_profile.js';
 
 /** True when NODE_ENV is production. */
 export const isProduction = (): boolean =>
@@ -13,21 +11,19 @@ export const isProduction = (): boolean =>
 
 /**
  * True only when body tenant injection is allowed (dev/diagnostic mode).
- * In prod/staging/demo: always false. In dev: when auth/tenant not strictly required.
+ * Delegates to SecurityProfile.tenantInjectionAllowed.
  */
 export function isBodyTenantInjectionAllowed(): boolean {
-  const mode = getMode();
-  if (mode === 'prod' || mode === 'staging' || mode === 'demo') return false;
-  const cfg = getEffectiveConfig();
-  if (cfg.REQUIRE_AUTH || cfg.REQUIRE_TENANT_CONTEXT) return false;
-  return true;
+  return getCurrentSecurityProfile().tenantInjectionAllowed;
 }
 
-/** Policy B: draft export allows imbalanced ledger. From runtime_mode — in prod/staging/demo always false. */
-export const ALLOW_IMBALANCED_DRAFT_EXPORT = (): boolean => allowImbalancedFromMode();
+/** Draft export allows imbalanced ledger. From profile. */
+export const ALLOW_IMBALANCED_DRAFT_EXPORT = (): boolean =>
+  getCurrentSecurityProfile().allowImbalancedDraftExport;
 
-/** Legacy certified source. From runtime_mode — in prod/staging/demo always false. */
-export const ALLOW_LEGACY_CERTIFIED_SOURCE = (): boolean => allowLegacyFromMode();
+/** Legacy certified source. From profile. */
+export const ALLOW_LEGACY_CERTIFIED_SOURCE = (): boolean =>
+  getCurrentSecurityProfile().allowLegacyCertifiedSource;
 
 /**
  * When in production, throw if the caller would use an in-memory path (e.g. missing pool/tenantId or storage).
