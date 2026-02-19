@@ -16,13 +16,15 @@ import {
   updateStatus,
   certifyCloseSession,
   advanceSession,
+  reopenCloseSession,
+  lockCloseSession,
   CloseSessionError,
 } from '../../services/close_session_service.js';
 import { withTransaction } from '../../db/transaction.js';
 import { getCloseRoleFromReq } from '../../lib/closeRole.js';
 import { effectiveAllowLegacyCertifiedSource } from '../../lib/runtime_mode.js';
 import type { AuthRequest } from '../../auth/middleware.js';
-import { listIssues } from '../../services/issue_item_service.js';
+import * as issueService from '../../services/issue_service.js';
 import {
   computeReadiness,
   initializeChecklistTemplate,
@@ -56,8 +58,12 @@ function handleSessionError(res: Response, err: unknown, fallbackLabel: string):
       res.status(403).json({ error: err.message });
       return;
     }
-    if (err.code === 'OVERLAP' || err.code === 'INVALID_TRANSITION' || err.code === 'NOT_LOCKED' || err.code === 'HARD_BLOCKERS') {
+    if (err.code === 'OVERLAP' || err.code === 'INVALID_TRANSITION' || err.code === 'NOT_LOCKED' || err.code === 'NOT_UNDER_REVIEW' || err.code === 'HARD_BLOCKERS' || err.code === 'REOPEN_FORBIDDEN_LOCKED' || err.code === 'REOPEN_UNAUTHORIZED') {
       res.status(409).json({ error: err.message, code: err.code });
+      return;
+    }
+    if (err.code === 'REOPEN_REASON_REQUIRED') {
+      res.status(400).json({ error: err.message, code: err.code });
       return;
     }
     if (err.code === 'NOT_READY') {
@@ -104,7 +110,7 @@ function criticalLog(
   });
 }
 
-/** POST /api/close/sessions/ensure — idempotent ensure session exists for entityId + periodLabel (draft). */
+/** POST /api/close/sessions/ensure — idempotent ensure session exists for entityId + periodLabel (open). */
 router.post('/sessions/ensure', async (req: Request, res: Response) => {
   const startMs = Date.now();
   try {
@@ -176,7 +182,7 @@ router.post('/sessions', async (req: Request, res: Response) => {
       periodEnd: body.periodEnd,
       basis: body.basis === 'cash' ? 'cash' : 'accrual',
       standard: body.standard ?? 'GAAP',
-      status: body.status as 'draft' | 'in_progress' | 'ready_for_review' | 'finalized' | 'locked' | undefined,
+      status: body.status as import('../../types/close_session.js').CloseSessionStatus | undefined,
     });
     res.status(created ? 201 : 200).json(session);
   } catch (e) {
@@ -205,7 +211,7 @@ router.get('/sessions/:id', async (req: Request, res: Response) => {
   }
 });
 
-/** POST /api/close/sessions/:id/advance — deterministic advance: draft→locked, locked→certified, certified→no-op */
+/** POST /api/close/sessions/:id/advance — advance: open→in_progress→under_review (certify and lock are separate) */
 router.post('/sessions/:id/advance', async (req: Request, res: Response) => {
   const startMs = Date.now();
   const id = req.params.id ?? '';
@@ -275,7 +281,7 @@ router.get('/sessions/:id/readiness', async (req: Request, res: Response) => {
   }
 });
 
-/** POST /api/close/sessions/:id/certify — certify close (gate before export); requires locked, no hard blockers, approver role */
+/** POST /api/close/sessions/:id/certify — certify close (gate before export); requires under_review, no hard blockers, approver role */
 router.post('/sessions/:id/certify', async (req: Request, res: Response) => {
   const startMs = Date.now();
   const id = req.params.id ?? '';
@@ -350,12 +356,12 @@ router.get('/sessions/:id/certified-source', async (req: Request, res: Response)
         certifiedSnapshotId = undefined;
       }
     }
-    if (certifiedSource === 'none' && session.status === 'certified' && allowLegacy) {
+    if (certifiedSource === 'none' && (session.status === 'certified' || session.status === 'locked') && allowLegacy) {
       certifiedSource = 'legacy';
     }
     res.json({
       closeSessionId: session.id,
-      isCertified: session.status === 'certified',
+      isCertified: session.status === 'certified' || session.status === 'locked',
       certifiedSnapshotId: certifiedSnapshotId ?? null,
       snapshotHash: snapshotHash ?? null,
       snapshotHashVersion: snapshotHashVersion ?? null,
@@ -542,10 +548,17 @@ router.get('/sessions/:id/triage', async (req: Request, res: Response) => {
         });
       }
     }
-    const issues = await listIssues(pool, { tenantId, closeSessionId: id });
+    const closeIssues = await issueService.listIssues(pool, { tenantId, periodId: id });
+    const issuesForTriage = closeIssues.map((i) => ({
+      status: (i.status === 'verified' || i.status === 'waived' || i.status === 'resolved' ? 'resolved' : 'open') as 'open' | 'resolved' | 'wont_fix',
+      severity: (i.severity === 'critical' ? 'critical' : i.severity === 'blocking' ? 'high' : i.severity === 'warning' ? 'med' : 'low') as 'low' | 'med' | 'high' | 'critical',
+      impactPl: 0,
+      impactBs: 0,
+      impactCash: 0,
+    })) as import('../../types/issue_item.js').IssueItem[];
     const result = await getOrComputeTriage(pool, tenantId, id, {
       tbSummary,
-      issues,
+      issues: issuesForTriage,
       materialityMethod: method,
       materialityOptions: { percentage: 0.05 },
       persist,
@@ -687,7 +700,7 @@ router.get('/statement-packages/:id/lines', async (req: Request, res: Response) 
   }
 });
 
-/** PATCH /api/close/sessions/:id/status — update close session status (finalized/locked require readiness) */
+/** PATCH /api/close/sessions/:id/status — update close session status (under_review requires readiness) */
 router.patch('/sessions/:id/status', async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
@@ -702,8 +715,8 @@ router.patch('/sessions/:id/status', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'status is required' });
       return;
     }
-    const newStatus = body.status as 'draft' | 'in_progress' | 'ready_for_review' | 'finalized' | 'locked';
-    if (newStatus === 'finalized' || newStatus === 'locked') {
+    const newStatus = body.status as import('../../types/close_session.js').CloseSessionStatus;
+    if (newStatus === 'under_review') {
       const session = await getSession(pool, tenantId, id);
       if (session) {
         const readiness = await computeReadiness(pool, tenantId, session);
@@ -711,7 +724,7 @@ router.patch('/sessions/:id/status', async (req: Request, res: Response) => {
           res.status(403).json({
             error: 'Close readiness blocked',
             code: 'CLOSE_READINESS_BLOCKED',
-            message: 'Cannot finalize or lock: resolve hard blockers first.',
+            message: 'Cannot advance to under_review: resolve hard blockers first.',
             hardBlockers: readiness.hardBlockers,
             softWarnings: readiness.softWarnings,
           });
@@ -726,6 +739,51 @@ router.patch('/sessions/:id/status', async (req: Request, res: Response) => {
     res.json(session);
   } catch (e) {
     handleSessionError(res, e, 'Update close session status failed');
+  }
+});
+
+/** POST /api/close/sessions/:id/reopen — reopen certified session (CERTIFIED → IN_PROGRESS); requires approver role and reason */
+router.post('/sessions/:id/reopen', async (req: Request, res: Response) => {
+  const id = req.params.id ?? '';
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const body = req.body as { reason?: string };
+    const reason = typeof body?.reason === 'string' ? body.reason.trim() : '';
+    if (!reason || reason.length < 10) {
+      res.status(400).json({ error: 'reason is required and must be at least 10 characters' });
+      return;
+    }
+    const authReq = req as AuthRequest;
+    const userId = authReq.userId ?? 'api';
+    const actorRole = getCloseRoleFromReq(authReq);
+    const session = await reopenCloseSession(pool, id, tenantId, userId, reason, actorRole);
+    res.status(200).json(session);
+  } catch (e) {
+    handleSessionError(res, e, 'Reopen close session failed');
+  }
+});
+
+/** POST /api/close/sessions/:id/lock — lock certified session (CERTIFIED → LOCKED); terminal state */
+router.post('/sessions/:id/lock', async (req: Request, res: Response) => {
+  const id = req.params.id ?? '';
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const authReq = req as AuthRequest;
+    const lockedBy = authReq.userId ?? 'system';
+    const session = await lockCloseSession(pool, id, tenantId, lockedBy);
+    res.status(200).json(session);
+  } catch (e) {
+    handleSessionError(res, e, 'Lock close session failed');
   }
 });
 

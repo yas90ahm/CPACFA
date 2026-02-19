@@ -16,11 +16,12 @@ import { validateJEProvenance } from '../types/amount_provenance.js';
 import * as repo from '../db/repositories/journal_entry_repository.js';
 import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
 import { getLatestTriage } from './triage_service.js';
-import { recordMaterialEvent } from './audit_ledger_service.js';
+import { recordMaterialEvent } from './audit_service.js';
 import { createJustificationFromAI } from './justification_service.js';
 import { runPrePostChecksAndStore } from './shadow_auditor_service.js';
 import { runJustifier, hashJustifierInputs } from '../ai/ai_orchestrator.js';
 import { JUSTIFIER_PROMPT_VERSION } from '../ai/prompts/justifier.prompt.js';
+import { executeCascade, CascadeTriggerType } from './cascade_engine.js';
 
 const ALLOW_SAME_USER_APPROVE =
   process.env.ALLOW_SAME_USER_APPROVE === '1' || process.env.ALLOW_SAME_USER_APPROVE === 'true';
@@ -37,6 +38,10 @@ export class JournalEntryError extends Error {
 
 /** Create a draft JE with lines. Enforces amount provenance at API and persists on each line. */
 export async function createDraftJE(pool: Pool, input: CreateDraftJEInput): Promise<JournalEntry> {
+  const memo = input.memo?.trim() ?? '';
+  if (!memo) {
+    throw new JournalEntryError('Journal entry memo/description is required', 'VALIDATION');
+  }
   const balanced = validateBalanced(input.lines);
   if (!balanced.valid) {
     throw new JournalEntryError(
@@ -141,6 +146,11 @@ export interface PostJEResult {
 }
 
 /** Post an approved JE (approved → posted). Shadow Auditor runs first; blocks on severity=block. */
+/** Sum of debits (or credits) for materiality comparison. Uses Decimal.js. */
+function computeJETotalAmount(lines: { debit: number; credit: number }[]): number {
+  return lines.reduce((s, l) => s + (l.debit ?? 0), 0);
+}
+
 export async function postJE(pool: Pool, tenantId: string, id: string, aiPool?: Pool): Promise<PostJEResult> {
   const je = await repo.getJournalEntryById(pool, id, tenantId);
   if (!je) throw new JournalEntryError('Journal entry not found', 'NOT_FOUND');
@@ -148,6 +158,28 @@ export async function postJE(pool: Pool, tenantId: string, id: string, aiPool?: 
     throw new JournalEntryError(`Only approved JEs can be posted; current status: ${je.status}`, 'INVALID_STATUS');
   }
   const lines = await repo.listJournalEntryLines(pool, id);
+
+  const { getEvidencePolicy } = await import('../db/repositories/evidence_policy_repository.js');
+  const { listEvidenceForObject } = await import('../db/repositories/evidence_repository.js');
+  const { from } = await import('../utils/decimal.js');
+  const policy = await getEvidencePolicy(pool, tenantId);
+  const thresholdNum = policy?.materialityThreshold != null && policy.materialityThreshold !== ''
+    ? Number(policy.materialityThreshold)
+    : 0;
+  if (thresholdNum > 0) {
+    const totalAmount = computeJETotalAmount(lines);
+    const totalDecimal = from(totalAmount);
+    const thresholdDecimal = from(thresholdNum);
+    if (totalDecimal.gte(thresholdDecimal)) {
+      const attachments = await listEvidenceForObject(pool, tenantId, 'journal_entry', id);
+      if (attachments.length === 0) {
+        throw new JournalEntryError(
+          `Cannot post: journal entry total of $${totalAmount.toFixed(2)} meets or exceeds the evidence threshold of $${thresholdNum.toFixed(2)}. Supporting documentation is required. Upload invoices, contracts, calculations, or other supporting documents before posting.`,
+          'VALIDATION'
+        );
+      }
+    }
+  }
   const periodLabel =
     (je.closeSessionId
       ? (await getCloseSessionById(pool, tenantId, je.closeSessionId))?.periodEnd?.slice(0, 7)
@@ -217,6 +249,20 @@ export async function postJE(pool: Pool, tenantId: string, id: string, aiPool?: 
     !justifierResult.ok
       ? [{ ai_status: 'unavailable' as const, reason: justifierResult.error ?? 'Justifier failed', pillar: 'justifier' as const }]
       : undefined;
+
+  if (je.closeSessionId) {
+    const session = await getCloseSessionById(pool, tenantId, je.closeSessionId);
+    if (session) {
+      await executeCascade(pool, tenantId, {
+        type: CascadeTriggerType.AJE_POSTED,
+        period_id: je.closeSessionId,
+        entity_id: session.entityId,
+        triggered_by: je.approvedBy ?? 'system',
+        affected_accounts: lines.map((l) => l.accountRef),
+        details: { aje_id: id },
+      });
+    }
+  }
   return { journalEntry: updated!, aiWarnings };
 }
 

@@ -23,7 +23,6 @@ import { recordOverride } from '../services/audit_ledger_service.js';
 import { parseTrialBalance } from '../services/trialBalanceParser.js';
 import { getRoundingTolerance } from '../services/rules_registry.js';
 import { absGt } from '../utils/decimal.js';
-import { appendAuditLog } from '../services/audit_log_service.js';
 import * as persistence from '../services/persistence_service.js';
 import { executeBridgeCommand } from '../bridge/index.js';
 import type { JournalEntryProposal } from '../types/hitl.js';

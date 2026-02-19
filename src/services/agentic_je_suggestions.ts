@@ -4,6 +4,7 @@
  */
 
 import { callLLMWithFallback } from '../llm/callWithFallback.js';
+import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import type { JournalEntrySuggestion } from '../types/close_and_controls.js';
 
 const SYSTEM = [
@@ -70,35 +71,41 @@ export async function suggestJEsFromTextAgentic(options: {
 
   const prompt = `User request: "${text.trim()}"\n\nOutput a JSON array of journal entries. Each object: description, debits: [{ account, amount }], credits: [{ account, amount }].`;
 
-  return callLLMWithFallback({
-    system: SYSTEM_FROM_TEXT,
-    prompt,
-    maxTokens: 1024,
-    parse: (raw) => {
-      const trimmed = raw?.trim() ?? '';
-      const jsonMatch = trimmed.match(/\[[\s\S]*\]/);
-      const jsonStr = jsonMatch ? jsonMatch[0] : trimmed;
-      let arr: LLMJEItem[];
-      try {
-        arr = JSON.parse(jsonStr) as LLMJEItem[];
-      } catch {
-        return [];
-      }
-      if (!Array.isArray(arr) || arr.length === 0) return [];
-      return arr.map((item, i) => {
-        const debits = (item.debits ?? []).filter((d) => d?.account != null && typeof d.amount === 'number');
-        const credits = (item.credits ?? []).filter((c) => c?.account != null && typeof c.amount === 'number');
-        return {
-          id: `je-text-${i + 1}`,
-          date,
-          description: typeof item.description === 'string' ? item.description : 'Adjustment from natural language',
-          debits: debits.map((d) => ({ account: String(d.account), amount: Number(d.amount) })),
-          credits: credits.map((c) => ({ account: String(c.account), amount: Number(c.amount) })),
-          source: 'manual' as const,
-          sourceDetail: 'From natural language',
-        } satisfies JournalEntrySuggestion;
-      });
-    },
-    fallback: [],
-  });
+  try {
+    const result = await callLLMWithFallback({
+      system: SYSTEM_FROM_TEXT,
+      prompt,
+      maxTokens: 1024,
+      parse: (raw) => {
+        const trimmed = raw?.trim() ?? '';
+        const jsonMatch = trimmed.match(/\[[\s\S]*\]/);
+        const jsonStr = jsonMatch ? jsonMatch[0] : trimmed;
+        let arr: LLMJEItem[];
+        try {
+          arr = JSON.parse(jsonStr) as LLMJEItem[];
+        } catch {
+          return [];
+        }
+        if (!Array.isArray(arr) || arr.length === 0) return [];
+        return arr.map((item, i) => {
+          const debits = (item.debits ?? []).filter((d) => d?.account != null && typeof d.amount === 'number');
+          const credits = (item.credits ?? []).filter((c) => c?.account != null && typeof c.amount === 'number');
+          return {
+            id: `je-text-${i + 1}`,
+            date,
+            description: typeof item.description === 'string' ? item.description : 'Adjustment from natural language',
+            debits: debits.map((d) => ({ account: String(d.account), amount: Number(d.amount) })),
+            credits: credits.map((c) => ({ account: String(c.account), amount: Number(c.amount) })),
+            source: 'manual' as const,
+            sourceDetail: 'From natural language',
+          } satisfies JournalEntrySuggestion;
+        });
+      },
+      fallback: [],
+    });
+    assertNoNumericAmountsInAgentOutput(result, 'agentic_je_suggestions.suggestJEsFromTextAgentic');
+    return result;
+  } catch {
+    return [];
+  }
 }

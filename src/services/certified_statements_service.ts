@@ -15,6 +15,7 @@ import type { LedgerSnapshotPayload, LedgerSnapshotEntry } from '../types/ledger
 import { buildValidatedStatements } from './financialStatements.js';
 import { finalIntegrityCheck } from './integrity_check.js';
 import { getRoundingTolerance } from './rules_registry.js';
+import { sumRound2, plus, from, absLt } from '../utils/decimal.js';
 
 /** Thrown when snapshot payload fails final integrity check (Truth Gate). */
 export class CertifiedIntegrityError extends Error {
@@ -48,11 +49,11 @@ export function snapshotPayloadToTrialBalanceResult(payload: LedgerSnapshotPaylo
   let totalDebits = payload.trialBalance.totalDebits ?? 0;
   let totalCredits = payload.trialBalance.totalCredits ?? 0;
   if (extraEntries.length > 0) {
-    totalDebits += extraEntries.reduce((s, e) => s + (e.debit ?? 0), 0);
-    totalCredits += extraEntries.reduce((s, e) => s + (e.credit ?? 0), 0);
+    totalDebits = plus(totalDebits, sumRound2(extraEntries.map((e) => e.debit ?? 0)));
+    totalCredits = plus(totalCredits, sumRound2(extraEntries.map((e) => e.credit ?? 0)));
   }
   const tolerance = getRoundingTolerance();
-  const balances = Math.abs(totalDebits - totalCredits) < tolerance;
+  const balances = absLt(totalDebits, totalCredits, tolerance);
   return {
     entries,
     totalDebits,

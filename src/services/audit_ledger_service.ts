@@ -1,5 +1,10 @@
 /**
  * Audit ledger service — record human overrides with deterministic flag + agent dissent + user rationale.
+ *
+ * @internal recordMaterialEvent and recordLegacyCertifiedSourceUsed are now in audit_service.ts.
+ * External callers should use audit_service.recordMaterialEvent() and audit_service.recordLegacyCertifiedSourceUsed().
+ * This module's recordOverride and recordObservation remain for override-specific flows.
+ * Do not call recordMaterialEvent from outside audit_service.
  */
 
 import type { Pool, PoolClient } from 'pg';
@@ -87,6 +92,8 @@ export interface RecordMaterialEventInput {
   | 'close_lock'
   | 'certify_close'
   | 'close_session_transition'
+  | 'close_session_reopened'
+  | 'close_session_locked'
   | 'bridge_command'
     | 'evidence_link'
     | 'legacy_certified_source_used'
@@ -100,6 +107,7 @@ export interface RecordMaterialEventInput {
 /**
  * Append a material event to the audit ledger (hash-chained).
  * Uses system rationale; no user prompt required.
+ * @deprecated Use audit_service.recordMaterialEvent() instead. External callers should use audit_service.
  */
 export async function recordMaterialEvent(client: Queryable, input: RecordMaterialEventInput): Promise<void> {
   const rationale = `Material event: ${input.eventType}`;
@@ -117,6 +125,7 @@ export async function recordMaterialEvent(client: Queryable, input: RecordMateri
 /**
  * Record that a certified binder/export used legacy source (last registered statements) instead of session snapshot.
  * Call when result.source === 'legacy' from getCertifiedStatementsForBinder.
+ * @deprecated Use audit_service.recordLegacyCertifiedSourceUsed() instead. External callers should use audit_service.
  */
 export async function recordLegacyCertifiedSourceUsed(
   client: Queryable,

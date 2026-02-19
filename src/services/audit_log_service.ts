@@ -1,5 +1,11 @@
 /**
  * Immutable audit log (append-only) for core app — who did what when.
+ *
+ * @deprecated Use audit_service.recordAuditEvent() instead.
+ * This service will be removed in a future release.
+ * All new audit logging should use the unified audit_service.
+ * Existing callers continue to work; migration happens gradually.
+ *
  * When REQUIRE_AUDIT_DB_CONTEXT is set or NODE_ENV=production: context (pool, tenantId) is required;
  * in-memory-only paths are disabled for accounting-grade immutability.
  */
@@ -30,6 +36,7 @@ function nextId(): string {
 }
 
 /**
+ * @deprecated Use audit_service.recordAuditEvent() instead.
  * Append an audit log entry (immutable). When context is provided, writes to tenant DB.
  * In production (or when REQUIRE_AUDIT_DB_CONTEXT), context is required; in-memory-only is disabled.
  */

@@ -1,6 +1,17 @@
 /**
- * GL → Trial Balance aggregation service.
- * Aggregates journal entry lines into account-level TB format for certification.
+ * GL→TB Aggregation Service
+ *
+ * PRIMARY PIPELINE: GL journal entries → Trial Balance
+ *
+ * This service aggregates raw general ledger entries into a trial balance
+ * by summing all debits and credits per account code for a given period.
+ *
+ * All monetary arithmetic uses Decimal.js via utils/decimal.ts.
+ * Native JavaScript floating-point is NEVER used for dollar amounts.
+ *
+ * The output trial balance is stored as an immutable snapshot (hashed)
+ * and serves as the foundation for all downstream processes:
+ * reconciliation, adjusting entries, statement generation, and certification.
  */
 
 import type { Pool } from 'pg';
@@ -9,6 +20,7 @@ import type { TrialBalanceEntry, DerivedTrialBalance } from '../types/trial_bala
 import type { CoaAccount } from '../types/coa.js';
 import * as glRepository from '../db/repositories/general_ledger_repository.js';
 import * as coaRepository from '../db/repositories/coa_repository.js';
+import { from, plus, minus, sumRound2, round2, absGt } from '../utils/decimal.js';
 
 /**
  * Aggregate GL lines into trial balance entries.
@@ -33,15 +45,18 @@ export function aggregateGLToTB(
       total_debits: 0,
       total_credits: 0,
     };
-    existing.total_debits += line.debit ?? 0;
-    existing.total_credits += line.credit ?? 0;
+    existing.total_debits = plus(existing.total_debits, line.debit ?? 0);
+    existing.total_credits = plus(existing.total_credits, line.credit ?? 0);
     accountMap.set(line.account_code, existing);
   }
 
   const tbEntries: TrialBalanceEntry[] = [];
   accountMap.forEach((totals, accountCode) => {
     const coaAccount = coaMap.get(accountCode);
-    const netBalance = totals.total_debits - totals.total_credits;
+    const netBalance = minus(totals.total_debits, totals.total_credits);
+    const netD = from(netBalance);
+    const debitVal = netD.greaterThan(0) ? netBalance : 0;
+    const creditVal = netD.lessThan(0) ? round2(from(netBalance).abs().toNumber()) : 0;
 
     tbEntries.push({
       account_code: accountCode,
@@ -50,8 +65,8 @@ export function aggregateGLToTB(
       total_debits: totals.total_debits,
       total_credits: totals.total_credits,
       net_balance: netBalance,
-      debit: netBalance > 0 ? netBalance : 0,
-      credit: netBalance < 0 ? Math.abs(netBalance) : 0,
+      debit: debitVal,
+      credit: creditVal,
     });
   });
 
@@ -74,24 +89,24 @@ export function computeBalanceSheetTotals(entries: TrialBalanceEntry[]): {
 
   for (const entry of entries) {
     if (!entry.account_type) continue;
+    const nb = entry.net_balance;
+    const nbAbs = round2(from(nb).abs().toNumber());
 
     switch (entry.account_type) {
       case 'Asset':
-        assets += entry.net_balance;
+        assets = plus(assets, nb);
         break;
       case 'Liability':
-        liabilities += Math.abs(entry.net_balance);
+        liabilities = plus(liabilities, nbAbs);
         break;
       case 'Equity':
-        equity += Math.abs(entry.net_balance);
+        equity = plus(equity, nbAbs);
         break;
       case 'Revenue':
-        // Revenue has credit balance (negative net_balance); increases equity
-        equity -= entry.net_balance;
+        equity = minus(equity, nb);
         break;
       case 'Expense':
-        // Expense has debit balance (positive net_balance); decreases equity
-        equity -= entry.net_balance;
+        equity = minus(equity, nb);
         break;
       default:
         break;
@@ -124,8 +139,8 @@ export async function buildDerivedTrialBalance(
   }
 
   const entries = aggregateGLToTB(glLines, coaAccounts);
-  const totalDebits = entries.reduce((sum, e) => sum + e.total_debits, 0);
-  const totalCredits = entries.reduce((sum, e) => sum + e.total_credits, 0);
+  const totalDebits = sumRound2(entries.map((e) => e.total_debits));
+  const totalCredits = sumRound2(entries.map((e) => e.total_credits));
   const balanceSheetTotals = computeBalanceSheetTotals(entries);
 
   return {
@@ -151,18 +166,17 @@ export function validateDerivedTB(
 ): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
 
-  const debitCreditGap = Math.abs(
-    derivedTB.total_debits - derivedTB.total_credits
-  );
-  if (debitCreditGap > tolerance) {
+  const debitCreditGap = from(derivedTB.total_debits).minus(derivedTB.total_credits).abs().toNumber();
+  if (absGt(derivedTB.total_debits, derivedTB.total_credits, tolerance)) {
     errors.push(
       `Trial balance does not balance: debits ${derivedTB.total_debits.toFixed(2)} ≠ credits ${derivedTB.total_credits.toFixed(2)} (gap: ${debitCreditGap.toFixed(2)})`
     );
   }
 
   const { assets, liabilities, equity } = derivedTB.balance_sheet_totals;
-  const balanceSheetGap = Math.abs(assets - (liabilities + equity));
-  if (balanceSheetGap > tolerance) {
+  const lhsEq = plus(liabilities, equity);
+  const balanceSheetGap = from(assets).minus(lhsEq).abs().toNumber();
+  if (absGt(assets, lhsEq, tolerance)) {
     errors.push(
       `Balance sheet equation does not hold: Assets ${assets.toFixed(2)} ≠ Liabilities ${liabilities.toFixed(2)} + Equity ${equity.toFixed(2)} (gap: ${balanceSheetGap.toFixed(2)})`
     );

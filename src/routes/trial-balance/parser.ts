@@ -30,7 +30,7 @@ import { listContracts } from '../../db/repositories/revenue_recognition_reposit
 import type { Pool } from 'pg';
 import type { StatementGeneratorOptions } from '../../services/statementGenerator.js';
 import { assertPeriodNotLocked, PeriodLockedError } from '../../services/period_lock_service.js';
-import { appendAuditLog } from '../../services/audit_log_service.js';
+import { recordAuditLogAction } from '../../services/audit_service.js';
 import { validateBody, validateParams, validateQuery } from '../../middleware/validationMiddleware.js';
 import {
   statementsBodySchema,
@@ -353,11 +353,14 @@ router.post('/statements', validateBody(statementsBodySchema), async (req: Reque
     if (err instanceof PeriodLockedError) {
       const pool = getTenantPool(req);
       const tenantId = getTenantId(req);
-      const auditContext = pool && tenantId ? { pool, tenantId } : undefined;
-      appendAuditLog(
-        { action: 'period_edit_blocked', resource: `period:${err.periodLabel}`, detail: 'Period is locked', actor: (req as AuthRequest).userId ?? 'anonymous' },
-        auditContext
-      );
+      if (pool && tenantId) {
+        await recordAuditLogAction(pool, tenantId, {
+          action: 'period_edit_blocked',
+          resource: `period:${err.periodLabel}`,
+          detail: 'Period is locked',
+          actor: (req as AuthRequest).userId ?? 'anonymous',
+        });
+      }
       return res.status(403).json({ error: 'Period locked', periodLabel: err.periodLabel });
     }
     if (err instanceof MathematicalIntegrityError) {

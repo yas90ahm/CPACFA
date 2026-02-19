@@ -17,7 +17,7 @@ import {
   exportDraftPackageToPdf,
 } from '../../services/audit_binder_export_service.js';
 import { checkExportGate, RESOLUTION_MISMATCH } from '../../services/export_gate_service.js';
-import { recordLegacyCertifiedSourceUsed } from '../../services/audit_ledger_service.js';
+import { recordLegacyCertifiedSourceUsed } from '../../services/audit_service.js';
 import { listStagingItems } from '../../services/persistence_service.js';
 import { validateBody } from '../../middleware/validationMiddleware.js';
 import { registerStatementsBodySchema } from '../../schemas/auditSchemas.js';
@@ -82,11 +82,11 @@ async function requireCertifiedSession(
     });
     return null;
   }
-  if (session.status !== 'certified') {
+  if (session.status !== 'certified' && session.status !== 'locked') {
     res.status(403).json({
       error: 'Close not certified',
       code: 'CLOSE_NOT_CERTIFIED',
-      message: 'Binder is certified-only. Session must have status certified. Use /api/audit/draft-package for draft.',
+      message: 'Binder is certified-only. Session must have status certified or locked. Use /api/audit/draft-package for draft.',
     });
     return null;
   }

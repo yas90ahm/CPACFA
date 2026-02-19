@@ -18,6 +18,7 @@ import {
   PrecheckRemediation,
   PRECHECK_CONTRACT_VERSION,
 } from '../constants/precheck_codes.js';
+import { round2, from, plus, sumRound2 } from '../utils/decimal.js';
 
 /** Same shape as TB ingest/parser input (JSON payload). */
 export interface PrecheckTrialBalanceRow {
@@ -102,15 +103,15 @@ function toRawRow(r: PrecheckTrialBalanceRow): RawTrialBalanceRow {
   return {
     accountName: String(r?.accountName ?? '').trim(),
     accountCode: r?.accountCode,
-    debit: typeof r?.debit === 'number' ? r.debit : Number(r?.debit) || 0,
-    credit: typeof r?.credit === 'number' ? r.credit : Number(r?.credit) || 0,
+    debit: typeof r?.debit === 'number' ? round2(r.debit) : round2(from(r?.debit ?? 0).toNumber()),
+    credit: typeof r?.credit === 'number' ? round2(r.credit) : round2(from(r?.credit ?? 0).toNumber()),
   };
 }
 
 function toTrialBalanceEntry(r: PrecheckJournalEntryLine): TrialBalanceEntry {
   const accountName = String(r?.accountRef ?? '').trim();
-  const debit = typeof r?.debit === 'number' ? r.debit : Number(r?.debit) || 0;
-  const credit = typeof r?.credit === 'number' ? r.credit : Number(r?.credit) || 0;
+  const debit = typeof r?.debit === 'number' ? round2(r.debit) : round2(from(r?.debit ?? 0).toNumber());
+  const credit = typeof r?.credit === 'number' ? round2(r.credit) : round2(from(r?.credit ?? 0).toNumber());
   return {
     accountName,
     debit,
@@ -174,8 +175,8 @@ export function runPrecheckBoardReady(input: PrecheckBoardReadyInput): PrecheckB
       const e = toTrialBalanceEntry(line);
       if (!e.accountName) continue;
       entries.push(e);
-      totalDebits += e.debit ?? 0;
-      totalCredits += e.credit ?? 0;
+      totalDebits = plus(totalDebits, e.debit ?? 0);
+      totalCredits = plus(totalCredits, e.credit ?? 0);
     }
   }
 

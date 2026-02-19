@@ -196,8 +196,8 @@ export function buildCleanLedgerWithConfidence(
     return {
       account_code: r.account_code ?? '',
       account_name: r.account_name ?? '',
-      debit: Number(r.debit) || 0,
-      credit: Number(r.credit) || 0,
+      debit: round2(r.debit ?? 0),
+      credit: round2(r.credit ?? 0),
       account_type: r.account_type ?? '',
       Agent_Confidence_Score: round2(clamped),
     };

@@ -86,7 +86,7 @@ export async function seedDemo(): Promise<void> {
     fileName: 'demo-tb.csv',
   });
 
-  // 4. Close session (draft) — idempotent
+  // 4. Close session (open) — idempotent
   const sessionId = `demo-session-${DEMO_PERIOD}`;
   let session = await closeSessionRepo.getCloseSessionById(pool, DEMO_TENANT_ID, sessionId);
   const createdSession = !session;
@@ -100,7 +100,7 @@ export async function seedDemo(): Promise<void> {
       '2025-01-31',
       'accrual',
       'GAAP',
-      'draft'
+      'open'
     );
   }
 
@@ -162,7 +162,7 @@ export async function seedDemo(): Promise<void> {
     });
   }
 
-  console.log('[seed_demo] Demo data seeded: tenant, user, TB, 3 JEs, 3 evidence, close session (draft).');
+  console.log('[seed_demo] Demo data seeded: tenant, user, TB, 3 JEs, 3 evidence, close session (open).');
 }
 
 const isMain = process.argv[1]?.includes('seed_demo');

@@ -6,7 +6,7 @@
  * Accounting Laws are defined in shared/config/financial_rules.json (equations + materiality).
  */
 
-import { absGt } from '../utils/decimal.js';
+import { absGt, sumRound2, plus, minus, round2, from } from '../utils/decimal.js';
 import { getFinancialRules } from './rules_registry.js';
 import { MathematicalIntegrityError } from '../errors.js';
 
@@ -56,16 +56,16 @@ export function detectSuspiciousPlugs(
   const plugAccountNames: string[] = [];
 
   for (const e of entries) {
-    const net = Math.abs((e.debit ?? 0) - (e.credit ?? 0));
-    totalNetActivity += net;
+    const net = round2(from(e.debit ?? 0).minus(e.credit ?? 0).abs().toNumber());
+    totalNetActivity = plus(totalNetActivity, net);
     const name = (e.accountName ?? '').trim();
     if (PLUG_ACCOUNT_PATTERN.test(name)) {
-      plugAmount += net;
+      plugAmount = plus(plugAmount, net);
       if (!plugAccountNames.includes(name)) plugAccountNames.push(name);
     }
   }
 
-  const plugShare = totalNetActivity > 0 ? plugAmount / totalNetActivity : 0;
+  const plugShare = totalNetActivity > 0 ? from(plugAmount).dividedBy(totalNetActivity).toNumber() : 0;
   const isSuspicious = plugAccountNames.length > 0 && plugShare >= threshold;
 
   return {
@@ -124,12 +124,8 @@ function getTrialBalanceTotals(
     };
   }
   const entries = 'entries' in trialBalance ? trialBalance.entries : [];
-  let totalDebits = 0;
-  let totalCredits = 0;
-  for (const e of entries) {
-    totalDebits += e.debit ?? 0;
-    totalCredits += e.credit ?? 0;
-  }
+  const totalDebits = sumRound2(entries.map((e) => e.debit ?? 0));
+  const totalCredits = sumRound2(entries.map((e) => e.credit ?? 0));
   return { totalDebits, totalCredits };
 }
 

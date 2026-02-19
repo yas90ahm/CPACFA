@@ -9,8 +9,8 @@ import {
   getStandardName,
   type BridgeStandardKey,
 } from './cpa_bridge_manifest.js';
-import { appendAuditLog } from './audit_log_service.js';
-import type { AuditLogContext } from './audit_log_service.js';
+import { recordAuditLogAction } from './audit_service.js';
+import type { AuditLogContext } from './segregation_service.js';
 import { computeLeaseLiability } from './leaseLiabilityCalc.js';
 import { classifyLease } from './lease_service.js';
 import { buildLinearRecognitionSchedule } from './revenue_recognition_service.js';
@@ -75,15 +75,14 @@ export async function executeAgentRecommendation(
         ? JSON.stringify(result).slice(0, 500)
         : String(result);
     createBridgeAdjustmentJustification(standard, standardName, params, resultSummary);
-    appendAuditLog(
-      {
+    if (auditContext) {
+      await recordAuditLogAction(auditContext.pool, auditContext.tenantId, {
         action: 'AGENTIC_ADJUSTMENT_EXECUTED',
         resource: `bridge:${standard}`,
         detail: `${standardName} via Deterministic Engine`,
         actor: 'system',
-      },
-      auditContext
-    );
+      });
+    }
     return { ok: true, result };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

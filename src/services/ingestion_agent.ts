@@ -13,6 +13,7 @@ import * as XLSX from 'xlsx';
 import type { SourceProvenance } from '../types/canonical_ap_ar_payroll.js';
 import { classifyIngestionAgentic, normalizeByMapping } from './agentic_ingestion_classifier.js';
 import { runOcr, ocrResultToRawText, ocrResultToRows } from './ocr_service.js';
+import { round2, from } from '../utils/decimal.js';
 
 // --- Types ---
 
@@ -485,8 +486,12 @@ function normalizeNegativeNumber(value: unknown): unknown {
   const s = String(value).trim().replace(/,/g, '');
   if (s === '') return value;
   if (s.startsWith('(') && s.endsWith(')')) {
-    const num = parseFloat(s.slice(1, -1));
-    return Number.isNaN(num) ? value : -num;
+    try {
+      const d = from(s.slice(1, -1)).negated();
+      return d.isFinite() ? round2(d.toNumber()) : value;
+    } catch {
+      return value;
+    }
   }
   return value;
 }
@@ -679,8 +684,15 @@ function pickNumber(
 ): number | undefined {
   const v = getRowValue(row, headers, keys);
   if (v == null) return undefined;
-  const num = typeof v === 'number' ? v : Number(String(v).replace(/[^0-9.\-]/g, ''));
-  return Number.isFinite(num) ? num : undefined;
+  try {
+    if (typeof v === 'number' && Number.isFinite(v)) return round2(v);
+    const s = String(v).replace(/[^0-9.\-]/g, '').trim();
+    if (s === '' || s === '-') return 0;
+    const d = from(s);
+    return d.isFinite() ? round2(d.toNumber()) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function getRowValue(

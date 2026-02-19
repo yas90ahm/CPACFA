@@ -18,7 +18,7 @@ import {
   JournalEntryError,
 } from '../services/journal_entry_service.js';
 import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
-import { recordMaterialEvent } from '../services/audit_ledger_service.js';
+import { recordMaterialEvent } from '../services/audit_service.js';
 import { addJEAsAdjustments, addAccrualsAsAdjustments, getAdjustment } from '../services/close_adjustments_service.js';
 import { updateCloseAdjustmentStatus } from '../services/close_adjustment_update_service.js';
 import type { JournalEntrySuggestion } from '../types/close_and_controls.js';

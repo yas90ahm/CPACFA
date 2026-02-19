@@ -71,11 +71,24 @@ describe('Journal Entry — createDraftJE', () => {
     jest.restoreAllMocks();
   });
 
+  it('throws VALIDATION when memo is empty', async () => {
+    await expect(
+      createDraftJE(mockPool, {
+        closeSessionId: 'sess-1',
+        tenantId: 't1',
+        memo: '',
+        source: 'manual',
+        lines: [{ accountRef: 'Cash', debit: 100 }, { accountRef: 'Revenue', credit: 100 }],
+      })
+    ).rejects.toMatchObject({ code: 'VALIDATION', message: /memo.*required/ });
+  });
+
   it('throws VALIDATION when lines do not balance', async () => {
     await expect(
       createDraftJE(mockPool, {
         closeSessionId: 'sess-1',
         tenantId: 't1',
+        memo: 'Test accrual',
         source: 'manual',
         lines: [
           { accountRef: 'Cash', debit: 100 },
@@ -223,8 +236,20 @@ describe('Journal Entry — postJE', () => {
       status: 'posted',
       postedAt: '2025-01-01T12:00:00Z',
     });
-    jest.spyOn(closeSessionRepo, 'getCloseSessionById').mockResolvedValue({ periodEnd: '2025-01-31' } as never);
+    jest.spyOn(closeSessionRepo, 'getCloseSessionById').mockResolvedValue({ id: 'sess-1', entityId: 'e1', periodEnd: '2025-01-31' } as never);
     jest.spyOn(auditLedger, 'recordMaterialEvent').mockResolvedValue();
+    const cascadeEngine = await import('../../src/services/cascade_engine.js');
+    jest.spyOn(cascadeEngine, 'executeCascade').mockResolvedValue({
+      adjusted_tb_recalculated: true,
+      recon_balances_refreshed: 0,
+      recon_status_changes: [],
+      statements_invalidated: false,
+      validation_results: { hard_checks: [], soft_checks: [], all_hard_passing: true, blocking_count: 0, warning_count: 0 },
+      issues_auto_verified: [],
+      issues_created: [],
+      issues_reopened: [],
+      duration_ms: 0,
+    });
     jest.spyOn(aiOrchestrator, 'runJustifier').mockResolvedValue({
       ok: true,
       memo_markdown: '',

@@ -15,7 +15,7 @@ import {
 import { createChecklistSchema } from '../../schemas/closeSchemas.js';
 import { validateBody } from '../../middleware/validateRequest.js';
 import { send500 } from '../../lib/errorHandler.js';
-import { appendAuditLog } from '../../services/audit_log_service.js';
+import { recordAuditLogAction } from '../../services/audit_service.js';
 
 const router = Router();
 
@@ -181,11 +181,14 @@ router.post('/checklist-sign-off', async (req: Request, res: Response) => {
     const pool = getTenantPool(req);
     const tenantId = getTenantId(req);
     await setChecklist(body.periodLabel, steps, tenantId ?? undefined, pool);
-    const auditContext = pool && tenantId ? { pool, tenantId } : undefined;
-    appendAuditLog(
-      { action: 'close_checklist_complete', resource: `checklist:${body.periodLabel}:${body.stepId}`, actor: body.signedOffBy, detail: 'signed off' },
-      auditContext
-    );
+    if (pool && tenantId) {
+      await recordAuditLogAction(pool, tenantId, {
+        action: 'close_checklist_complete',
+        resource: `checklist:${body.periodLabel}:${body.stepId}`,
+        actor: body.signedOffBy,
+        detail: 'signed off',
+      });
+    }
     res.json({ periodLabel: body.periodLabel, stepId: body.stepId, steps, signedOffAt: now });
   } catch (e) {
     send500(res, e, 'Checklist sign-off failed');

@@ -28,6 +28,7 @@ describe('JE provenance persistence', () => {
     const je = await createDraftJE(pool, {
       closeSessionId,
       tenantId: TEST_TENANT_ID,
+      memo: 'Test accrual',
       source: 'manual',
       createdBy: 'test-user',
       lines: [

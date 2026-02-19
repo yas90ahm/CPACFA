@@ -14,9 +14,8 @@ import {
 import { createPdfFromStructuredPayload } from '../services/pdf_export.js';
 import { checkExportGate, TAMPERING_ATTEMPT_DETECTED, RESOLUTION_MISMATCH } from '../services/export_gate_service.js';
 import { detectIntegrityConflicts } from '../services/integrity_conflict_service.js';
-import { appendAuditLog } from '../services/audit_log_service.js';
-import { recordMaterialEvent, recordLegacyCertifiedSourceUsed } from '../services/audit_ledger_service.js';
-import { createIssueFromIntegrityFailure } from '../services/issue_item_service.js';
+import { recordMaterialEvent, recordLegacyCertifiedSourceUsed, recordAuditLogAction } from '../services/audit_service.js';
+import { createIssueFromIntegrityFailure } from '../services/issue_service.js';
 import { finalIntegrityCheck } from '../services/integrity_check.js';
 import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
 import { ENABLE_INTEGRATED_SUPERVISOR } from '../lib/capability_flags.js';
@@ -76,20 +75,23 @@ function hasAgentContext(body: Record<string, unknown>): body is Record<string, 
 }
 
 /** In production, certification bypass flag is IGNORED and never honored. If present, log tampering_attempt. */
-function auditBypassFlagIfPresent(req: Request, resource: string, tenantId: string | undefined, pool: ReturnType<typeof getTenantPool>): void {
+async function auditBypassFlagIfPresent(
+  req: Request,
+  resource: string,
+  tenantId: string | undefined,
+  pool: ReturnType<typeof getTenantPool>
+): Promise<void> {
   if (!isProduction()) return;
   const body = (req.body as Record<string, unknown>) ?? {};
   const present = 'exportBypassCertification' in body || 'exportBypassCertification' in (req.query ?? {});
-  if (present) {
-    appendAuditLog(
-      {
-        action: 'tampering_attempt',
-        resource,
-        detail: 'exportBypassCertification sent; ignored in production. Certified export requires session.status === certified.',
-        actor: (req as AuthRequest).userId ?? 'anonymous',
-      },
-      tenantId && pool ? { pool, tenantId } : undefined
-    );
+  if (present && pool && tenantId) {
+    await recordAuditLogAction(pool, tenantId, {
+      action: 'tampering_attempt',
+      resource,
+      detail:
+        'exportBypassCertification sent; ignored in production. Certified export requires session.status === certified.',
+      actor: (req as AuthRequest).userId ?? 'anonymous',
+    });
   }
 }
 
@@ -104,7 +106,7 @@ router.post('/pdf', async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    auditBypassFlagIfPresent(req, 'export:pdf', tenantId, pool);
+    await auditBypassFlagIfPresent(req, 'export:pdf', tenantId, pool);
 
     let qualitativeEvidenceMissing = false;
     const bodyForMode = req.body as Record<string, unknown> & { exportMode?: string; closeSessionId?: string; periodLabel?: string };
@@ -152,11 +154,11 @@ router.post('/pdf', async (req: Request, res: Response) => {
           });
           return;
         }
-        if (session.status !== 'certified') {
+        if ((session.status !== 'certified' && session.status !== 'locked')) {
           res.status(403).json({
             error: 'Close not certified',
             code: 'CLOSE_NOT_CERTIFIED',
-            message: 'Certified export requires session.status === \'certified\'. Use exportMode=draft for pre-certification export.',
+            message: 'Certified export requires session status certified or locked. Use exportMode=draft for pre-certification export.',
           });
           return;
         }
@@ -249,15 +251,14 @@ router.post('/pdf', async (req: Request, res: Response) => {
       const { conflicts, hasFatal } = detectIntegrityConflicts(conflictInput);
       if (hasFatal) {
         const authReq = req as AuthRequest;
-        appendAuditLog(
-          {
+        if (tenantId && pool) {
+          await recordAuditLogAction(pool, tenantId, {
             action: 'BLOCKED_EXPORT',
             resource: 'export:pdf',
             detail: JSON.stringify({ reason: 'CPA vs CFA conflict', conflicts }),
             actor: authReq.userId ?? 'anonymous',
-          },
-          tenantId && pool ? { pool, tenantId } : undefined
-        );
+          });
+        }
         const closeSessionId = (req.body as Record<string, unknown>).closeSessionId ?? (req.query as Record<string, unknown>).closeSessionId;
         if (tenantId && pool && typeof closeSessionId === 'string' && closeSessionId) {
           try {
@@ -387,9 +388,9 @@ router.post('/pdf', async (req: Request, res: Response) => {
         if (closeSessionIdForDraft) {
           const { getSession } = await import('../services/close_session_service.js');
           const session = await getSession(pool, tenantId, closeSessionIdForDraft);
-          (pdfPayload as { draftWorkflowState?: string }).draftWorkflowState = session?.status ?? 'draft';
+          (pdfPayload as { draftWorkflowState?: string }).draftWorkflowState = session?.status ?? 'open';
         } else {
-          (pdfPayload as { draftWorkflowState?: string }).draftWorkflowState = 'draft';
+          (pdfPayload as { draftWorkflowState?: string }).draftWorkflowState = 'open';
         }
       }
       const buf = await createPdfFromStructuredPayload(pdfPayload);
@@ -496,7 +497,7 @@ router.post('/csv', async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    auditBypassFlagIfPresent(req, 'export:csv', tenantId, pool);
+    await auditBypassFlagIfPresent(req, 'export:csv', tenantId, pool);
 
     const bodyCsv = req.body as Record<string, unknown> & { exportMode?: string; closeSessionId?: string; periodLabel?: string };
     const exportModeCsv: ExportMode = (bodyCsv.exportMode ?? (req.query.exportMode as string) ?? 'draft') === 'certified' ? 'certified' : 'draft';
@@ -541,11 +542,11 @@ router.post('/csv', async (req: Request, res: Response) => {
           });
           return;
         }
-        if (session.status !== 'certified') {
+        if ((session.status !== 'certified' && session.status !== 'locked')) {
           res.status(403).json({
             error: 'Close not certified',
             code: 'CLOSE_NOT_CERTIFIED',
-            message: 'Certified CSV export requires session.status === \'certified\'. Use exportMode=draft for pre-certification export.',
+            message: 'Certified CSV export requires session status certified or locked. Use exportMode=draft for pre-certification export.',
           });
           return;
         }

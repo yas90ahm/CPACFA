@@ -26,6 +26,10 @@ interface CloseSessionRow {
   certification_memo: string | null;
   certified_snapshot_id: string | null;
   certification_artifact_id: string | null;
+  reopened_at: string | Date | null;
+  reopened_by: string | null;
+  reopen_reason: string | null;
+  statements_stale_since: string | Date | null;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -45,7 +49,7 @@ function toISOTimestampString(v: string | Date | null | undefined): string {
 }
 
 const SESSION_COLUMNS =
-  'id, tenant_id, entity_id, period_start, period_end, basis, standard, status, certified_by, certified_at, certification_memo, certified_snapshot_id, certification_artifact_id, created_at, updated_at';
+  'id, tenant_id, entity_id, period_start, period_end, basis, standard, status, certified_by, certified_at, certification_memo, certified_snapshot_id, certification_artifact_id, reopened_at, reopened_by, reopen_reason, statements_stale_since, created_at, updated_at';
 
 function rowToSession(row: CloseSessionRow): CloseSession {
   return {
@@ -65,6 +69,18 @@ function rowToSession(row: CloseSessionRow): CloseSession {
     certificationMemo: row.certification_memo ?? undefined,
     certifiedSnapshotId: row.certified_snapshot_id ?? undefined,
     certificationArtifactId: row.certification_artifact_id ?? undefined,
+    reopenedAt:
+      row.reopened_at != null
+        ? (typeof row.reopened_at === 'string' ? row.reopened_at : (row.reopened_at as Date).toISOString())
+        : undefined,
+    reopenedBy: row.reopened_by ?? undefined,
+    reopenReason: row.reopen_reason ?? undefined,
+    statementsStaleSince:
+      row.statements_stale_since != null && String(row.statements_stale_since).length > 0
+        ? (typeof row.statements_stale_since === 'string'
+            ? row.statements_stale_since
+            : (row.statements_stale_since as Date).toISOString())
+        : undefined,
     createdAt: toISOTimestampString(row.created_at),
     updatedAt: toISOTimestampString(row.updated_at),
   };
@@ -219,6 +235,53 @@ export async function updateCertification(
          updated_at = $6
      WHERE tenant_id = $7 AND id = $8`,
     [certifiedBy, certifiedAt, certificationMemo ?? null, certifiedSnapshotId ?? null, certificationArtifactId ?? null, now, tenantId, id]
+  );
+  if (r.rowCount === 0) return null;
+  return getCloseSessionById(client, tenantId, id);
+}
+
+/** Set statements_stale_since when TB changes (cascade invalidation). Clear when statements regenerated. */
+export async function setStatementsStaleSince(
+  pool: Queryable,
+  tenantId: string,
+  closeSessionId: string
+): Promise<void> {
+  const now = new Date().toISOString();
+  await pool.query(
+    `UPDATE close_sessions SET statements_stale_since = $1, updated_at = $1
+     WHERE tenant_id = $2 AND id = $3`,
+    [now, tenantId, closeSessionId]
+  );
+}
+
+/** Clear statements_stale_since when statements are regenerated. */
+export async function clearStatementsStaleSince(
+  pool: Queryable,
+  tenantId: string,
+  closeSessionId: string
+): Promise<void> {
+  const now = new Date().toISOString();
+  await pool.query(
+    `UPDATE close_sessions SET statements_stale_since = NULL, updated_at = $1
+     WHERE tenant_id = $2 AND id = $3`,
+    [now, tenantId, closeSessionId]
+  );
+}
+
+/** Reopen: set status to in_progress, record reopened_at/by/reason. Certification fields preserved for audit. */
+export async function updateReopen(
+  client: Queryable,
+  tenantId: string,
+  id: string,
+  reopenedBy: string,
+  reopenReason: string
+): Promise<CloseSession | null> {
+  const now = new Date().toISOString();
+  const r = await client.query(
+    `UPDATE close_sessions
+     SET status = 'in_progress', reopened_at = $1, reopened_by = $2, reopen_reason = $3, updated_at = $4
+     WHERE tenant_id = $5 AND id = $6`,
+    [now, reopenedBy, reopenReason, now, tenantId, id]
   );
   if (r.rowCount === 0) return null;
   return getCloseSessionById(client, tenantId, id);

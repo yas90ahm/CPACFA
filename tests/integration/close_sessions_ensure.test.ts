@@ -43,7 +43,7 @@ describe('POST /api/close/sessions/ensure', () => {
     expect(res.body?.closeSessionId).toBeDefined();
     expect(res.body?.entityId).toBe(ENTITY_ID_A);
     expect(res.body?.periodLabel).toBe(PERIOD_LABEL);
-    expect(res.body?.status).toBe('draft');
+    expect(res.body?.status).toBe('open');
     expect(res.body?.created).toBe(true);
   });
 

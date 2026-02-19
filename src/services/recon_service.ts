@@ -19,9 +19,9 @@ import type {
 } from '../types/recon.js';
 import * as repo from '../db/repositories/recon_repository.js';
 import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
-import { createIssue } from './issue_item_service.js';
+import { createIssueForSession } from './issue_service.js';
 import { getLatestTriage } from './triage_service.js';
-import { recordMaterialEvent } from './audit_ledger_service.js';
+import { recordMaterialEvent } from './audit_service.js';
 
 export class ReconError extends Error {
   constructor(
@@ -234,21 +234,17 @@ export async function emitIssuesForUnmatchedAboveMateriality(
   for (const item of unmatched) {
     const absAmount = Math.abs(item.amount);
     if (absAmount <= threshold) continue;
-    const issue = await createIssue(pool, {
+    const issue = await createIssueForSession(pool, {
       closeSessionId: opts.closeSessionId,
       tenantId: opts.tenantId,
       category: 'reconciliation',
       severity: 'critical',
       title: `Unmatched reconciliation item above materiality: ${item.description ?? item.id}`,
       description: `Recon run ${opts.reconRunId}; item ${item.id}; amount ${item.amount}; source ${item.source}.`,
-      impactCash: item.amount,
-      currency: opts.currency ?? undefined,
-      materialityEstimate: absAmount,
-      materialityThresholdUsed: threshold,
-      sourceRef: { reconRunId: opts.reconRunId, reconItemId: item.id, source: item.source },
+      sourceRef: { reconRunId: opts.reconRunId, reconItemId: item.id, source: item.source, amount: item.amount, threshold },
       createdBy: opts.createdBy ?? undefined,
     });
-    emitted.push({ issueId: issue.id, reconItemId: item.id, amount: item.amount });
+    emitted.push({ issueId: issue.issueId, reconItemId: item.id, amount: item.amount });
   }
   return emitted;
 }

@@ -134,15 +134,25 @@ export async function linkEvidenceToJournalEntry(
   tenantId: string,
   input: Omit<LinkEvidenceInput, 'objectType'> & { objectType?: 'journal_entry' }
 ): Promise<EvidenceLink> {
-  if (!input.assertionType) {
-    throw new Error('assertionType is required');
+  return linkEvidenceToObject(pool, tenantId, { ...input, objectType: input.objectType ?? 'journal_entry' });
+}
+
+/** Link evidence to any supported object (journal_entry, reconciliation). For reconciliation, assertionType defaults to reconciliation. */
+export async function linkEvidenceToObject(
+  pool: Pool,
+  tenantId: string,
+  input: LinkEvidenceInput
+): Promise<EvidenceLink> {
+  const assertionType = input.assertionType ?? (input.objectType === 'reconciliation' ? 'reconciliation' : undefined);
+  if (!assertionType) {
+    throw new Error('assertionType is required for journal_entry; defaults to reconciliation for reconciliation targets');
   }
   validateClaimedAmount(input.claimedAmount);
   const claimedAmountCanonical =
     input.claimedAmount != null && input.claimedAmount !== '' ? normalizeMoney(input.claimedAmount) : null;
 
   const id = randomUUID();
-  const objectType = input.objectType ?? 'journal_entry';
+  const objectType = input.objectType;
   const requiredness = input.requiredness ?? 'optional';
   await pool.query(
     `INSERT INTO evidence_links (
@@ -158,7 +168,7 @@ export async function linkEvidenceToJournalEntry(
       input.role ?? null,
       requiredness,
       input.createdBy,
-      input.assertionType,
+      assertionType,
       claimedAmountCanonical,
       input.claimedCurrency ?? null,
       input.claimedPeriod ?? null,
@@ -241,10 +251,12 @@ export async function isEvidenceLinkedToJournalEntry(
   return parseInt(r.rows[0]?.count ?? '0', 10) > 0;
 }
 
-export async function listEvidenceForJournalEntry(
+/** List evidence for any object type (journal_entry, reconciliation). */
+export async function listEvidenceForObject(
   pool: Pool,
   tenantId: string,
-  journalEntryId: string
+  objectType: import('../../types/evidence.js').EvidenceObjectType,
+  objectId: string
 ): Promise<Array<EvidenceRecord & { link: EvidenceLink }>> {
   const r = await pool.query<
     EvidenceRecordRow & {
@@ -274,14 +286,22 @@ export async function listEvidenceForJournalEntry(
             el.note AS link_note
      FROM evidence_links el
      JOIN evidence_records er ON er.id = el.evidence_id AND er.tenant_id = el.tenant_id
-     WHERE el.tenant_id = $1 AND el.object_type = 'journal_entry' AND el.object_id = $2
+     WHERE el.tenant_id = $1 AND el.object_type = $2 AND el.object_id = $3
      ORDER BY el.created_at`,
-    [tenantId, journalEntryId]
+    [tenantId, objectType, objectId]
   );
   return r.rows.map((row) => ({
     ...rowToRecord(row),
     link: mapRowToLink(row, tenantId),
   }));
+}
+
+export async function listEvidenceForJournalEntry(
+  pool: Pool,
+  tenantId: string,
+  journalEntryId: string
+): Promise<Array<EvidenceRecord & { link: EvidenceLink }>> {
+  return listEvidenceForObject(pool, tenantId, 'journal_entry', journalEntryId);
 }
 
 export async function listEvidenceForCloseSession(

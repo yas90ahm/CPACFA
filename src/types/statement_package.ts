@@ -15,13 +15,23 @@ export interface StatementPackage {
   status: StatementPackageStatus;
   engineVersion?: string;
   ruleVersionsSnapshot?: Record<string, unknown>;
+  /** Cross-statement validation (net income tie, cash tie, RE tie). */
+  validationResults?: ValidationResult[];
 }
+
+export interface ValidationResult {
+  check: string;
+  passed: boolean;
+  message?: string;
+}
+
+export type StatementType = 'balance_sheet' | 'profit_and_loss' | 'cash_flow' | 'equity';
 
 export interface StatementLine {
   packageId: string;
   fsLineId: string;
   amount: number;
-  statement: 'balance_sheet' | 'profit_and_loss';
+  statement: StatementType;
   metadata?: Record<string, unknown>;
 }
 

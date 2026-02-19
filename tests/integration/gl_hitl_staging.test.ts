@@ -109,7 +109,7 @@ describe('GL HITL staging', () => {
     }
   });
 
-  it('2. Staging item exists with payload.kind = gl_ingest', async () => {
+  it('2. Staging item exists with payload.kind = gl_ingest and pattern_detection', async () => {
     if (!isDbConfigured() || !ctx) return;
     const pool = await getTenantPool(tenantId);
     const item = await persistence.getStagingItem(pool, tenantId, stagedId1);
@@ -121,6 +121,11 @@ describe('GL HITL staging', () => {
     expect(payload?.entry_id).toBe('JE-003');
     expect(payload?.periodLabel).toBe(PERIOD_LABEL);
     expect(payload?.imbalance).toBe(500);
+    expect(payload?.pattern_detection).toBeDefined();
+    const pd = payload?.pattern_detection as Record<string, unknown>;
+    expect(pd?.primary_pattern).toBeDefined();
+    expect(pd?.requires_ai).toBeDefined();
+    expect(item?.justification).toContain('Pattern:');
   });
 
   it('3. Resolve with apply_correction → entry saved to general_ledger', async () => {

@@ -49,6 +49,7 @@ describe('Evidence attachment API', () => {
     const je = await createDraftJE(pool, {
       closeSessionId: session.id,
       tenantId: TEST_TENANT_ID,
+      memo: 'Test accrual',
       source: 'manual',
       createdBy: 'user@test.com',
       lines: [
@@ -96,6 +97,7 @@ describe('Evidence attachment API', () => {
     const je = await createDraftJE(pool, {
       closeSessionId: session.id,
       tenantId: TEST_TENANT_ID,
+      memo: 'Test accrual',
       source: 'manual',
       createdBy: 'user@test.com',
       lines: [
@@ -141,6 +143,7 @@ describe('Evidence attachment API', () => {
     const je = await createDraftJE(pool, {
       closeSessionId: session.id,
       tenantId: TEST_TENANT_ID,
+      memo: 'Test accrual',
       source: 'manual',
       createdBy: 'user@test.com',
       lines: [

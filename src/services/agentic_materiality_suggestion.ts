@@ -5,6 +5,7 @@
  */
 
 import { callLLMWithFallback } from '../llm/callWithFallback.js';
+import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import type { MaterialitySettings } from '../types/close_and_controls.js';
 
 export interface FinancialSummary {
@@ -47,6 +48,7 @@ export async function suggestMaterialityAgentic(summary: FinancialSummary): Prom
   if (!raw) return undefined;
   try {
     const parsed = JSON.parse(raw.replace(/```json?\s*|\s*```/g, '').trim()) as Record<string, unknown>;
+    assertNoNumericAmountsInAgentOutput(parsed, 'agentic_materiality_suggestion.suggestMaterialityAgentic');
     const result: MaterialitySettings = {};
     if (typeof parsed.overallMaterialityPercent === 'number') result.overallMaterialityPercent = parsed.overallMaterialityPercent;
     if (typeof parsed.overallMaterialityAmount === 'number') result.overallMaterialityAmount = parsed.overallMaterialityAmount;

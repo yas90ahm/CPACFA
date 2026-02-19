@@ -60,11 +60,14 @@ export interface CreateEvidenceRecordInput {
   originalFilename?: string;
 }
 
+export type EvidenceObjectType = 'journal_entry' | 'reconciliation';
+
 export interface LinkEvidenceInput {
   evidenceId: string;
-  objectType: 'journal_entry';
+  objectType: EvidenceObjectType;
   objectId: string;
-  assertionType: AssertionType;
+  /** Required for journal_entry; defaults to 'reconciliation' for reconciliation target. */
+  assertionType?: AssertionType;
   role?: string;
   requiredness?: 'optional' | 'required';
   createdBy: string;

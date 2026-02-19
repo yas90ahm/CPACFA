@@ -91,7 +91,11 @@ export async function getLatestHash(client: Queryable, tenantId: string): Promis
 
 export async function appendEntry(
   client: Queryable,
-  input: Omit<AuditLedgerEntryInput, 'previousEntryHash' | 'entryHash'> & { createdBy?: string }
+  input: Omit<AuditLedgerEntryInput, 'previousEntryHash' | 'entryHash'> & {
+    createdBy?: string;
+    beforeState?: Record<string, unknown> | null;
+    afterState?: Record<string, unknown> | null;
+  }
 ): Promise<AuditLedgerEntry> {
   const id = nextId();
   const createdAt = new Date().toISOString();
@@ -108,12 +112,15 @@ export async function appendEntry(
   };
   const entryHash = computeEntryHashV2(payload);
 
+  const beforeState = input.beforeState != null ? JSON.stringify(input.beforeState) : null;
+  const afterState = input.afterState != null ? JSON.stringify(input.afterState) : null;
+
   await client.query(
     `INSERT INTO audit_ledger (
       id, tenant_id, period_label, event_type, deterministic_flag_snapshot,
       agent_dissent_snapshot, user_prompt_rationale, previous_entry_hash, entry_hash,
-      created_at, created_by, hash_version
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      created_at, created_by, hash_version, before_state, after_state
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
     [
       id,
       input.tenantId,
@@ -127,6 +134,8 @@ export async function appendEntry(
       createdAt,
       input.createdBy ?? null,
       HASH_VERSION_V2,
+      beforeState,
+      afterState,
     ]
   );
 

@@ -3,6 +3,7 @@
  */
 
 import { callLLMWithFallback } from '../llm/callWithFallback.js';
+import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import type {
   BankRecResult,
   BankStatementLine,
@@ -60,27 +61,33 @@ export async function suggestReconciliationAdjustmentAgentic(params: {
   const systemPrompt = `You are a CPA. Given unmatched bank statement lines and unmatched GL cash entries, suggest likely one-line adjustments (e.g. bank fees, timing differences, errors). Return JSON: { "suggestions": [ { "type": "fee"|"timing"|"error"|"other", "description": "...", "amount": X, "rationale": "...", "confidence": 0.X } ] }`;
   const userContent = `Unmatched statement: ${JSON.stringify(params.unmatchedStatement.slice(0, 20))}\nUnmatched GL: ${JSON.stringify(params.unmatchedGL.slice(0, 20))}`;
   const fallback = { suggestions: [] as SuggestedAdjustment[] };
-  return callLLMWithFallback({
-    system: systemPrompt,
-    prompt: userContent,
-    maxTokens: 600,
-    parse: (raw: string) => {
-      try {
-        const parsed = JSON.parse(raw);
-        const arr = Array.isArray(parsed.suggestions) ? parsed.suggestions : [];
-        return {
-          suggestions: arr.map((s: Record<string, unknown>) => ({
-            type: s.type === 'fee' || s.type === 'timing' || s.type === 'error' ? s.type : 'other',
-            description: String(s.description ?? ''),
-            amount: typeof s.amount === 'number' ? s.amount : undefined,
-            rationale: String(s.rationale ?? ''),
-            confidence: typeof s.confidence === 'number' ? s.confidence : 0.5,
-          })),
-        };
-      } catch {
-        return fallback;
-      }
-    },
-    fallback,
-  });
+  try {
+    const result = await callLLMWithFallback({
+      system: systemPrompt,
+      prompt: userContent,
+      maxTokens: 600,
+      parse: (raw: string) => {
+        try {
+          const parsed = JSON.parse(raw);
+          const arr = Array.isArray(parsed.suggestions) ? parsed.suggestions : [];
+          return {
+            suggestions: arr.map((s: Record<string, unknown>) => ({
+              type: s.type === 'fee' || s.type === 'timing' || s.type === 'error' ? s.type : 'other',
+              description: String(s.description ?? ''),
+              amount: typeof s.amount === 'number' ? s.amount : undefined,
+              rationale: String(s.rationale ?? ''),
+              confidence: typeof s.confidence === 'number' ? s.confidence : 0.5,
+            })),
+          };
+        } catch {
+          return fallback;
+        }
+      },
+      fallback,
+    });
+    assertNoNumericAmountsInAgentOutput(result, 'agentic_bank_rec_service.suggestReconciliationAdjustmentAgentic');
+    return result;
+  } catch {
+    return fallback;
+  }
 }

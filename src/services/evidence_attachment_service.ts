@@ -15,9 +15,11 @@ import * as closeSessionRepo from '../db/repositories/close_session_repository.j
 import {
   createEvidenceRecord,
   linkEvidenceToJournalEntry,
+  linkEvidenceToObject,
+  listEvidenceForObject,
 } from '../db/repositories/evidence_repository.js';
 import { isPeriodLocked } from './period_lock_service.js';
-import { recordMaterialEvent } from './audit_ledger_service.js';
+import { recordMaterialEvent } from './audit_service.js';
 import type { CloseSessionStatus } from '../types/close_session.js';
 import type { AssertionType } from '../types/evidence.js';
 
@@ -249,4 +251,129 @@ export async function attachEvidenceWithFile(
     evidenceId: record.id,
     linkId: link.id,
   };
+}
+
+export interface AttachEvidenceToReconciliationInput {
+  buffer: Buffer;
+  mimeType?: string;
+  originalFilename?: string;
+  description?: string;
+  attachedBy: string;
+}
+
+/**
+ * Attach evidence to a reconciliation (supporting document).
+ * Blocks when recon is approved or period is locked.
+ */
+export async function attachEvidenceToReconciliation(
+  pool: Pool,
+  tenantId: string,
+  reconId: string,
+  input: AttachEvidenceToReconciliationInput
+): Promise<AttachEvidenceResult> {
+  const { getPeriodReconciliationById } = await import('../db/repositories/period_reconciliation_repository.js');
+  const recon = await getPeriodReconciliationById(pool, tenantId, reconId);
+  if (!recon) {
+    throw new EvidenceAttachmentError('Reconciliation not found', 'NOT_FOUND');
+  }
+  if (recon.status === 'approved') {
+    throw new EvidenceAttachmentError(
+      'Cannot modify evidence on an approved reconciliation',
+      'PERIOD_LOCKED'
+    );
+  }
+
+  const session = await closeSessionRepo.getCloseSessionById(pool, tenantId, recon.periodId);
+  if (!session) {
+    throw new EvidenceAttachmentError('Close session not found for reconciliation', 'NOT_FOUND');
+  }
+  if (BLOCKED_SESSION_STATUSES.includes(session.status as CloseSessionStatus)) {
+    throw new EvidenceAttachmentError(
+      `Cannot attach evidence: close session is ${session.status}`,
+      'PERIOD_LOCKED'
+    );
+  }
+
+  const periodLabel = session.periodEnd?.slice(0, 7);
+  if (periodLabel) {
+    const locked = await isPeriodLocked(periodLabel, tenantId, pool);
+    if (locked) {
+      throw new EvidenceAttachmentError(
+        `Cannot attach evidence: period ${periodLabel} is locked`,
+        'PERIOD_LOCKED'
+      );
+    }
+  }
+
+  const hashSha256 = computeSha256(input.buffer);
+  const sizeBytes = input.buffer.length;
+  const evidenceId = randomUUID();
+  const adapter = await getEvidenceStorageAdapterAsync();
+  const { storagePath } = await adapter.store(
+    tenantId,
+    evidenceId,
+    input.buffer,
+    {
+      mimeType: input.mimeType,
+      originalFilename: input.originalFilename,
+    }
+  );
+  const record = await createEvidenceRecord(
+    pool,
+    tenantId,
+    {
+      hashSha256,
+      sizeBytes,
+      mimeType: input.mimeType,
+      attachedBy: input.attachedBy,
+      storagePath,
+      originalFilename: input.originalFilename,
+    },
+    { id: evidenceId }
+  );
+  const link = await linkEvidenceToObject(pool, tenantId, {
+    evidenceId: record.id,
+    objectType: 'reconciliation',
+    objectId: reconId,
+    assertionType: 'reconciliation',
+    role: 'support',
+    requiredness: 'required',
+    createdBy: input.attachedBy,
+    note: input.description,
+  });
+  await recordMaterialEvent(pool, {
+    tenantId,
+    periodLabel: periodLabel ?? undefined,
+    eventType: 'evidence_link',
+    deterministicFlagSnapshot: {
+      reconId,
+      evidenceId: record.id,
+      linkId: link.id,
+      hashSha256,
+    },
+    createdBy: input.attachedBy,
+  });
+
+  return {
+    evidenceId: record.id,
+    linkId: link.id,
+  };
+}
+
+/** List evidence attachments for a reconciliation. */
+export async function listEvidenceForReconciliation(
+  pool: Pool,
+  tenantId: string,
+  reconId: string
+): Promise<Array<{ evidenceId: string; linkId: string; hashSha256: string; sizeBytes: number; originalFilename?: string; attachedBy: string; attachedAt: string }>> {
+  const items = await listEvidenceForObject(pool, tenantId, 'reconciliation', reconId);
+  return items.map((e) => ({
+    evidenceId: e.id,
+    linkId: e.link.id,
+    hashSha256: e.hashSha256,
+    sizeBytes: e.sizeBytes,
+    originalFilename: e.originalFilename,
+    attachedBy: e.attachedBy,
+    attachedAt: e.attachedAt,
+  }));
 }

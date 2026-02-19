@@ -24,7 +24,7 @@ import {
 import * as repo from '../../src/db/repositories/recon_repository.js';
 import * as closeSessionRepo from '../../src/db/repositories/close_session_repository.js';
 import * as auditLedger from '../../src/services/audit_ledger_service.js';
-import * as issueService from '../../src/services/issue_item_service.js';
+import * as issueService from '../../src/services/issue_service.js';
 import * as triageService from '../../src/services/triage_service.js';
 
 const mockPool = {} as Pool;
@@ -292,17 +292,16 @@ describe('Recon service — emitIssuesForUnmatchedAboveMateriality', () => {
     jest.spyOn(repo, 'listReconMatchGroupItemIds').mockResolvedValue([]);
     jest.spyOn(triageService, 'getLatestTriage').mockResolvedValue(null);
     const createdIssue = {
-      id: 'issue-1',
-      closeSessionId: 'sess-1',
+      issueId: 'issue-1',
+      periodId: 'sess-1',
       tenantId: 't1',
+      entityId: 'e1',
       category: 'reconciliation',
       severity: 'critical',
-      status: 'open',
+      status: 'detected',
       title: 'Unmatched reconciliation item above materiality',
-      createdAt: '2025-01-01T00:00:00Z',
-      updatedAt: '2025-01-01T00:00:00Z',
     };
-    jest.spyOn(issueService, 'createIssue').mockResolvedValue(createdIssue as any);
+    jest.spyOn(issueService, 'createIssueForSession').mockResolvedValue(createdIssue as any);
     const result = await emitIssuesForUnmatchedAboveMateriality(mockPool, {
       reconRunId: 'run-1',
       closeSessionId: 'sess-1',
@@ -312,14 +311,13 @@ describe('Recon service — emitIssuesForUnmatchedAboveMateriality', () => {
     expect(result).toHaveLength(1);
     expect(result[0].reconItemId).toBe('item-1');
     expect(result[0].amount).toBe(100);
-    expect(issueService.createIssue).toHaveBeenCalledTimes(1);
-    expect(issueService.createIssue).toHaveBeenCalledWith(
+    expect(issueService.createIssueForSession).toHaveBeenCalledTimes(1);
+    expect(issueService.createIssueForSession).toHaveBeenCalledWith(
       mockPool,
       expect.objectContaining({
         category: 'reconciliation',
         severity: 'critical',
-        impactCash: 100,
-        materialityThresholdUsed: 50,
+        sourceRef: expect.objectContaining({ amount: 100, threshold: 50 }),
       })
     );
   });

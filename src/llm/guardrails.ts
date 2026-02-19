@@ -1,6 +1,28 @@
 /**
  * Guardrails — confidence scoring and escalation triggers for agentic workflows.
  * Minimal Stage-1 implementation; integrate into flows as tools mature.
+ *
+ * AI OUTPUT GUARDRAIL REGISTRY
+ *
+ * Every agentic service that returns structured data MUST call
+ * assertNoNumericAmountsInAgentOutput on its response before
+ * returning to the caller.
+ *
+ * Services covered:
+ * ✅ agentic_account_classifier — 2025-02-10
+ * ✅ agentic_ingestion_classifier — 2025-02-10
+ * ✅ agentic_je_suggestions — 2025-02-10
+ * ✅ agentic_ar_ap_workflows — 2025-02-10
+ * ✅ accrual_deferral_service — 2025-02-10
+ * ✅ agentic_materiality_suggestion — 2025-02-10
+ * ✅ agentic_bank_feed_matching — 2025-02-10
+ * ✅ agentic_bank_rec_service — 2025-02-10
+ * ✅ agentic_ledger_to_tb — 2025-02-10
+ * ✅ invoice_to_books_service — 2025-02-10
+ * ✅ (narrative/text-only services: guardrail applied on raw string; no amount keys)
+ *
+ * If you add a new agentic service, ADD IT TO THIS LIST
+ * and apply the guardrail.
  */
 
 /**
@@ -33,8 +55,18 @@ export function shouldEscalateToHuman(confidence: number): boolean {
 }
 
 /** Keys that indicate monetary/ledger amounts (AI must not produce these). */
-const AMOUNT_KEYS = new Set(['debit', 'credit', 'amount', 'debits', 'credits', 'amounts', 'balance', 'total']);/** Metadata keys we allow (e.g. confidence, count). */
-const ALLOWED_KEYS = new Set(['confidence', 'count', 'urgency', 'type', 'title', 'description', 'suggestion', 'rationale', 'id']);function hasNumericAmount(obj: unknown, path: string): boolean {
+const AMOUNT_KEYS = new Set([
+  'debit', 'credit', 'amount', 'debits', 'credits', 'amounts', 'balance', 'total',
+  'applyamount', 'paymentamount', 'bankamount', 'aramount', 'overallmaterialityamount',
+  'trivialthreshold', 'daysoverdue', 'openaramount', 'openapamount', 'payrollaccrualamount',
+]);
+/** Metadata/non-financial keys we allow (e.g. confidence, count, account codes as identifiers). */
+const ALLOWED_KEYS = new Set([
+  'confidence', 'count', 'urgency', 'type', 'title', 'description', 'suggestion', 'rationale', 'id',
+  'accountcode', 'account', 'accountname', 'basis', 'priority', 'include', 'reason', 'reasoning',
+  'schemamapping', 'classification', 'normalized', 'lineid', 'glentryid', 'arinvoicenumber',
+  'overallmaterialitypercent', 'performancematerialitypercent',
+]);function hasNumericAmount(obj: unknown, path: string): boolean {
   if (obj === null || obj === undefined) return false;
   if (typeof obj === 'number') return true;
   if (Array.isArray(obj)) {

@@ -22,6 +22,13 @@ export interface CertificationArtifactEvidenceManifest {
   hashVersion: string;
 }
 
+export interface ValidationStateCheck {
+  check_name: string;
+  check_type: 'hard' | 'soft';
+  passes: boolean;
+  message: string | null;
+}
+
 export interface CertificationArtifactV1 {
   contractVersion: 'v1';
   artifactId: string;
@@ -33,5 +40,7 @@ export interface CertificationArtifactV1 {
   snapshot: CertificationArtifactSnapshot;
   auditChain?: CertificationArtifactAuditChain;
   evidenceManifest?: CertificationArtifactEvidenceManifest;
+  /** Cross-statement tie checks at moment of certification. */
+  validationStateAtCertification?: ValidationStateCheck[];
   mode: 'dev' | 'demo' | 'staging' | 'prod';
 }

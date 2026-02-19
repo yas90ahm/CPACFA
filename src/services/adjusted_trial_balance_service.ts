@@ -18,6 +18,7 @@ import { listAdjustments } from './close_adjustments_service.js';
 import { getPostableJEAdjustments } from './journal_entry_service.js';
 import { buildDerivedTrialBalance } from './gl_to_tb_aggregation_service.js';
 import * as glRepository from '../db/repositories/general_ledger_repository.js';
+import { plus } from '../utils/decimal.js';
 
 /** Single debit or credit line for an adjustment (journal entry or reclassification). */
 export interface AdjustmentLine {
@@ -54,8 +55,8 @@ export function mergeAdjustmentsIntoEntries(
     const debit = e.debit ?? 0;
     const credit = e.credit ?? 0;
     if (existing) {
-      existing.debit += debit;
-      existing.credit += credit;
+      existing.debit = plus(existing.debit, debit);
+      existing.credit = plus(existing.credit, credit);
     } else {
       byAccount.set(key, {
         accountCode: e.accountCode,
@@ -75,7 +76,7 @@ export function mergeAdjustmentsIntoEntries(
       const key = name;
       const existing = byAccount.get(key);
       if (existing) {
-        existing.debit += d.amount ?? 0;
+        existing.debit = plus(existing.debit, d.amount ?? 0);
       } else {
         byAccount.set(key, {
           accountName: name,
@@ -89,7 +90,7 @@ export function mergeAdjustmentsIntoEntries(
       const key = name;
       const existing = byAccount.get(key);
       if (existing) {
-        existing.credit += c.amount ?? 0;
+        existing.credit = plus(existing.credit, c.amount ?? 0);
       } else {
         byAccount.set(key, {
           accountName: name,

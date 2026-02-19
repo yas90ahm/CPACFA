@@ -6,9 +6,11 @@ import type { Pool } from 'pg';
 import type {
   StatementPackage,
   StatementLine,
+  StatementType,
   StatementDiffRecord,
   StatementPackageStatus,
   StatementDiffJson,
+  ValidationResult,
 } from '../../types/statement_package.js';
 
 interface PackageRow {
@@ -21,6 +23,7 @@ interface PackageRow {
   status: string;
   engine_version: string | null;
   rule_versions_snapshot: unknown;
+  validation_results?: unknown;
 }
 
 interface LineRow {
@@ -31,7 +34,7 @@ interface LineRow {
   metadata: unknown;
 }
 
-const PKG_COLS = `id, close_session_id, version, input_hash, generated_at, generated_by, status, engine_version, rule_versions_snapshot`;
+const PKG_COLS = `id, close_session_id, version, input_hash, generated_at, generated_by, status, engine_version, rule_versions_snapshot, validation_results`;
 const LINE_COLS = `package_id, fs_line_id, amount, statement, metadata`;
 
 function rowToPackage(row: PackageRow): StatementPackage {
@@ -47,6 +50,10 @@ function rowToPackage(row: PackageRow): StatementPackage {
     ruleVersionsSnapshot: row.rule_versions_snapshot != null && typeof row.rule_versions_snapshot === 'object'
       ? (row.rule_versions_snapshot as Record<string, unknown>)
       : undefined,
+    validationResults:
+      row.validation_results != null && Array.isArray(row.validation_results)
+        ? (row.validation_results as ValidationResult[])
+        : undefined,
   };
 }
 
@@ -55,7 +62,7 @@ function rowToLine(row: LineRow): StatementLine {
     packageId: row.package_id,
     fsLineId: row.fs_line_id,
     amount: Number(row.amount),
-    statement: row.statement as 'balance_sheet' | 'profit_and_loss',
+    statement: row.statement as StatementType,
     metadata: row.metadata != null && typeof row.metadata === 'object' ? (row.metadata as Record<string, unknown>) : undefined,
   };
 }
@@ -72,11 +79,12 @@ export async function insertStatementPackage(
     status?: StatementPackageStatus;
     engineVersion?: string;
     ruleVersionsSnapshot?: Record<string, unknown>;
+    validationResults?: ValidationResult[];
   }
 ): Promise<StatementPackage> {
   await pool.query(
-    `INSERT INTO statement_packages (id, close_session_id, version, input_hash, generated_by, status, engine_version, rule_versions_snapshot)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    `INSERT INTO statement_packages (id, close_session_id, version, input_hash, generated_by, status, engine_version, rule_versions_snapshot, validation_results)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
     [
       id,
       input.closeSessionId,
@@ -86,6 +94,7 @@ export async function insertStatementPackage(
       input.status ?? 'draft',
       input.engineVersion ?? null,
       input.ruleVersionsSnapshot != null ? JSON.stringify(input.ruleVersionsSnapshot) : null,
+      input.validationResults != null && input.validationResults.length > 0 ? JSON.stringify(input.validationResults) : null,
     ]
   );
   const row = await getStatementPackageById(pool, tenantId, id);
@@ -95,7 +104,7 @@ export async function insertStatementPackage(
 
 export async function getStatementPackageById(pool: Pool, tenantId: string, id: string): Promise<StatementPackage | null> {
   const r = await pool.query<PackageRow>(
-    `SELECT sp.id, sp.close_session_id, sp.version, sp.input_hash, sp.generated_at, sp.generated_by, sp.status, sp.engine_version, sp.rule_versions_snapshot
+    `SELECT sp.id, sp.close_session_id, sp.version, sp.input_hash, sp.generated_at, sp.generated_by, sp.status, sp.engine_version, sp.rule_versions_snapshot, sp.validation_results
      FROM statement_packages sp
      JOIN close_sessions cs ON sp.close_session_id = cs.id
      WHERE cs.tenant_id = $1 AND sp.id = $2`,
@@ -126,7 +135,7 @@ export async function listStatementPackagesByCloseSessionId(
   closeSessionId: string,
   limit?: number
 ): Promise<StatementPackage[]> {
-  let sql = `SELECT sp.id, sp.close_session_id, sp.version, sp.input_hash, sp.generated_at, sp.generated_by, sp.status, sp.engine_version, sp.rule_versions_snapshot
+  let sql = `SELECT sp.id, sp.close_session_id, sp.version, sp.input_hash, sp.generated_at, sp.generated_by, sp.status, sp.engine_version, sp.rule_versions_snapshot, sp.validation_results
      FROM statement_packages sp
      JOIN close_sessions cs ON sp.close_session_id = cs.id
      WHERE cs.tenant_id = $1 AND sp.close_session_id = $2
@@ -146,7 +155,7 @@ export async function insertStatementLine(
     packageId: string;
     fsLineId: string;
     amount: number;
-    statement: 'balance_sheet' | 'profit_and_loss';
+    statement: StatementType;
     metadata?: Record<string, unknown>;
   }
 ): Promise<void> {

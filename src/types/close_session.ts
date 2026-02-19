@@ -8,12 +8,11 @@ export type CloseSessionBasis = 'cash' | 'accrual';
 export type CloseSessionStandard = 'GAAP' | 'IFRS' | string;
 
 export type CloseSessionStatus =
-  | 'draft'
+  | 'open'
   | 'in_progress'
-  | 'ready_for_review'
-  | 'finalized'
-  | 'locked'
-  | 'certified';
+  | 'under_review'
+  | 'certified'
+  | 'locked';
 
 export interface CloseSession {
   id: string;
@@ -31,6 +30,12 @@ export interface CloseSession {
   certifiedSnapshotId?: string;
   /** Certification artifact id (signed attestation). */
   certificationArtifactId?: string;
+  /** Set when session is reopened from certified (CERTIFIED → IN_PROGRESS). */
+  reopenedAt?: string;
+  reopenedBy?: string;
+  reopenReason?: string;
+  /** Set when TB changes (cascade); cleared when statements regenerated. */
+  statementsStaleSince?: string;
   createdAt: string;  // ISO
   updatedAt: string;  // ISO
 }

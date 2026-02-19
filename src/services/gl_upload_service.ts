@@ -16,7 +16,9 @@ import * as coaRepository from '../db/repositories/coa_repository.js';
 import { buildDerivedTrialBalance } from './gl_to_tb_aggregation_service.js';
 import { saveUnadjustedFromGLDerived } from './trial_balance_store_service.js';
 import * as persistence from './persistence_service.js';
+import { detectPatterns, getSummary } from './deterministic_pattern_detector.js';
 import type { TrialBalanceEntry } from '../types/financial.js';
+import { round2, from, sumRound2, minus, absGt } from '../utils/decimal.js';
 
 /** GL column mappings: raw header variants → canonical key */
 const GL_COLUMN_MAP: Record<string, readonly string[]> = {
@@ -67,17 +69,30 @@ function mapHeaderToCanonical(rawHeader: string): string | null {
   return null;
 }
 
-/** Parse amount from string (handles $1,234.56, (123), etc.). */
+/**
+ * Parse amount from string (handles $1,234.56, (123), etc.).
+ * Uses Decimal.js for precision. Throws if value cannot be parsed as a valid decimal.
+ */
 function parseGlAmount(value: unknown): number {
-  if (typeof value === 'number' && !Number.isNaN(value)) return value;
-  if (value == null) return 0;
+  if (value == null || value === '') return 0;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || Number.isNaN(value)) {
+      throw new Error(`Invalid amount: cannot parse "${value}" as a decimal number`);
+    }
+    return round2(value);
+  }
   const s = String(value)
     .replace(/[$,\s]/g, '')
     .replace(/[()]/g, '-')
     .trim();
   if (s === '' || s === '-') return 0;
-  const parsed = parseFloat(s);
-  return Number.isNaN(parsed) ? 0 : parsed;
+  try {
+    const d = from(s);
+    if (!d.isFinite()) throw new Error(`Invalid amount`);
+    return round2(d.toNumber());
+  } catch {
+    throw new Error(`Invalid amount: cannot parse "${value}" as a decimal number`);
+  }
 }
 
 /**
@@ -212,11 +227,11 @@ export async function validateGLEntries(
   const entries = glRepository.groupLinesByEntry(lines);
 
   for (const entry of entries) {
-    const totalDebits = entry.lines.reduce((sum, line) => sum + (line.debit ?? 0), 0);
-    const totalCredits = entry.lines.reduce((sum, line) => sum + (line.credit ?? 0), 0);
-    const imbalance = Math.abs(totalDebits - totalCredits);
+    const totalDebits = sumRound2(entry.lines.map((line) => line.debit ?? 0));
+    const totalCredits = sumRound2(entry.lines.map((line) => line.credit ?? 0));
+    const imbalance = Math.abs(minus(totalDebits, totalCredits));
 
-    if (imbalance > tolerance) {
+    if (absGt(totalDebits, totalCredits, tolerance)) {
       imbalancedEntries.push({
         entry,
         totalDebits,
@@ -414,9 +429,25 @@ export async function uploadGLForPeriod(
       const stageStart = Date.now();
       for (const ie of validation.imbalancedEntries) {
         try {
+          const patternResult = detectPatterns({
+            entry_id: ie.entry.entry_id,
+            entry_date: ie.entry.entry_date,
+            lines: ie.entry.lines.map((l) => ({
+              line_number: l.line_number,
+              account_code: l.account_code,
+              debit: l.debit ?? 0,
+              credit: l.credit ?? 0,
+              description: l.description,
+            })),
+            totalDebits: ie.totalDebits,
+            totalCredits: ie.totalCredits,
+            imbalance: ie.imbalance,
+          });
+          const summary = getSummary(patternResult);
+
           const item = await persistence.createStagingItem(pool, tenantId, {
-            proposedAction: `GL entry ${ie.entry.entry_id} is imbalanced by ${ie.imbalance.toFixed(2)}. Resolve to continue.`,
-            justification: `Debits: ${ie.totalDebits.toFixed(2)}, Credits: ${ie.totalCredits.toFixed(2)}. Imbalance: ${ie.imbalance.toFixed(2)}`,
+            proposedAction: `GL entry ${ie.entry.entry_id} is imbalanced by ${Math.abs(ie.imbalance).toFixed(2)}. ${summary}`,
+            justification: `Pattern: ${patternResult.primary_pattern.pattern_id} (${patternResult.primary_pattern.confidence} confidence). ${patternResult.primary_pattern.likely_cause}`,
             type: 'journal_entry',
             amount: ie.imbalance,
             payload: {
@@ -434,6 +465,11 @@ export async function uploadGLForPeriod(
                 credit: line.credit ?? 0,
                 description: line.description,
               })),
+              pattern_detection: {
+                primary_pattern: patternResult.primary_pattern,
+                all_patterns: patternResult.patterns,
+                requires_ai: patternResult.requires_ai,
+              },
             },
           });
           stagedIds.push(item.id);

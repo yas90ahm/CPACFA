@@ -11,10 +11,12 @@ type Queryable = Pool | PoolClient;
 import type {
   EvidenceManifest,
   EvidenceManifestJournalEntry,
+  EvidenceManifestReconciliation,
   EvidenceLinkInManifest,
 } from '../types/ledger_snapshot.js';
 import { listJournalEntries } from '../db/repositories/journal_entry_repository.js';
-import { listEvidenceForCloseSession } from '../db/repositories/evidence_repository.js';
+import { listEvidenceForCloseSession, listEvidenceForObject } from '../db/repositories/evidence_repository.js';
+import { listPeriodReconciliationsByPeriod } from '../db/repositories/period_reconciliation_repository.js';
 import { getEvidenceStorageAdapterAsync, verifyEvidenceIntegrity } from './evidence_storage_service.js';
 
 /**
@@ -73,5 +75,39 @@ export async function buildEvidenceManifest(
   }
   journalEntries.sort((a, b) => a.journalEntryId.localeCompare(b.journalEntryId));
 
-  return { journalEntries };
+  const recons = await listPeriodReconciliationsByPeriod(client as Pool, tenantId, closeSessionId);
+  const reconciliationEvidence: EvidenceManifestReconciliation[] = [];
+  for (const recon of recons) {
+    const reconEvidence = await listEvidenceForObject(client as Pool, tenantId, 'reconciliation', recon.reconId);
+    const links: EvidenceLinkInManifest[] = [];
+    for (const e of reconEvidence) {
+      let verified = false;
+      if (e.storagePath) {
+        const verify = await verifyEvidenceIntegrity(adapter, tenantId, e.id, e.hashSha256);
+        verified = verify.valid;
+      }
+      links.push({
+        evidenceId: e.id,
+        hashSha256: e.hashSha256,
+        sizeBytes: e.sizeBytes,
+        attachedBy: e.attachedBy,
+        attachedAt: e.attachedAt,
+        verified,
+        ...(e.mimeType != null && { mimeType: e.mimeType }),
+        ...(e.storagePath != null && { storagePath: e.storagePath }),
+      });
+    }
+    if (links.length > 0) {
+      links.sort((a, b) => a.evidenceId.localeCompare(b.evidenceId));
+      reconciliationEvidence.push({
+        reconId: recon.reconId,
+        accountCode: recon.accountCode,
+        accountName: null,
+        evidenceLinks: links,
+      });
+    }
+  }
+  reconciliationEvidence.sort((a, b) => a.reconId.localeCompare(b.reconId));
+
+  return { journalEntries, reconciliationEvidence };
 }

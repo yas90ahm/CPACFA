@@ -366,6 +366,7 @@ describe('Tenant isolation', () => {
       const je = await createDraftJE(pool, {
         closeSessionId: closeSessionIdA,
         tenantId: tenantIdA,
+        memo: 'Test accrual',
         source: 'manual',
         createdBy: 'test@test.com',
         lines: [

@@ -54,6 +54,7 @@ describe('Evidence upload limits', () => {
     const je = await createDraftJE(pool, {
       closeSessionId: session.id,
       tenantId: TEST_TENANT_ID,
+      memo: 'Test accrual',
       source: 'manual',
       createdBy: 'user@test.com',
       lines: [

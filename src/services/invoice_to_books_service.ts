@@ -3,6 +3,7 @@
  */
 
 import { callLLMWithFallback } from '../llm/callWithFallback.js';
+import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import { createInMemoryStore } from '../lib/inMemoryStore.js';
 import type {
   InvoiceCapture,
@@ -76,13 +77,19 @@ Return JSON: { headerAccountCode?: string, headerAccountName?: string, lines: [ 
   const fallback: InvoiceCoding = {
     lines: inv.lines.map((l) => ({ lineId: l.lineId, accountCode: '6000', accountName: 'Expenses' })),
   };
-  const result = await callLLMWithFallback({
-    system: 'You are a staff accountant. Suggest GL account coding for invoice lines. Output only valid JSON.',
-    prompt,
-    maxTokens: 600,
-    parse: (raw) => parseCoding(raw, inv.lines),
-    fallback,
-  });
+  let result: InvoiceCoding | null;
+  try {
+    result = await callLLMWithFallback({
+      system: 'You are a staff accountant. Suggest GL account coding for invoice lines. Output only valid JSON.',
+      prompt,
+      maxTokens: 600,
+      parse: (raw) => parseCoding(raw, inv.lines),
+      fallback,
+    });
+    if (result) assertNoNumericAmountsInAgentOutput(result, 'invoice_to_books_service.suggestCodingAgentic');
+  } catch {
+    result = fallback;
+  }
   if (result) {
     const updated = store.update(invoiceId, { suggestedCoding: result, status: 'pending_approval' });
     if (updated) {

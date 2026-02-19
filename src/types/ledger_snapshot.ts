@@ -45,9 +45,18 @@ export interface EvidenceManifestJournalEntry {
   evidenceLinks: EvidenceLinkInManifest[];
 }
 
-/** Certified evidence manifest: deterministic, sorted by journalEntryId then evidenceId. */
+/** One reconciliation with its evidence links in the manifest. */
+export interface EvidenceManifestReconciliation {
+  reconId: string;
+  accountCode: string;
+  accountName: string | null;
+  evidenceLinks: EvidenceLinkInManifest[];
+}
+
+/** Certified evidence manifest: deterministic, sorted by journalEntryId/reconId then evidenceId. */
 export interface EvidenceManifest {
   journalEntries: EvidenceManifestJournalEntry[];
+  reconciliationEvidence?: EvidenceManifestReconciliation[];
 }
 
 /** General ledger entry in snapshot (v4+). */

@@ -3,6 +3,7 @@
  */
 
 import { callLLMWithFallback } from '../llm/callWithFallback.js';
+import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import type { CanonicalArItem, CanonicalApItem } from '../types/canonical_ap_ar_payroll.js';
 import type { ApAgingReport, ArAgingReport } from './ap_ar_aging_service.js';
 
@@ -64,13 +65,19 @@ Return a JSON array of up to ${limit} collection recommendations. Each object: c
       suggestedAction: due > 60 ? 'Call and send reminder' : 'Send statement',
     };
   });
-  return callLLMWithFallback({
-    system: 'You are a treasury/collections analyst. Output only valid JSON array of collection recommendations.',
-    prompt,
-    maxTokens: 800,
-    parse: (raw) => parseCollections(raw, limit),
-    fallback,
-  });
+  try {
+    const result = await callLLMWithFallback({
+      system: 'You are a treasury/collections analyst. Output only valid JSON array of collection recommendations.',
+      prompt,
+      maxTokens: 800,
+      parse: (raw) => parseCollections(raw, limit),
+      fallback,
+    });
+    assertNoNumericAmountsInAgentOutput(result, 'agentic_ar_ap_workflows.recommendCollectionsAgentic');
+    return result;
+  } catch {
+    return fallback;
+  }
 }
 
 function parseCollections(raw: string, limit: number): CollectionsRecommendation[] {
@@ -123,13 +130,19 @@ Budget for this run: ${maxTotal}. Return JSON array of payment recommendations. 
     include: true,
     reason: 'Included in default run',
   }));
-  return callLLMWithFallback({
-    system: 'You are an AP analyst. Output only valid JSON array of payment run recommendations.',
-    prompt,
-    maxTokens: 1000,
-    parse: (raw) => parsePaymentRun(raw, limit),
-    fallback,
-  });
+  try {
+    const result = await callLLMWithFallback({
+      system: 'You are an AP analyst. Output only valid JSON array of payment run recommendations.',
+      prompt,
+      maxTokens: 1000,
+      parse: (raw) => parsePaymentRun(raw, limit),
+      fallback,
+    });
+    assertNoNumericAmountsInAgentOutput(result, 'agentic_ar_ap_workflows.recommendPaymentRunAgentic');
+    return result;
+  } catch {
+    return fallback;
+  }
 }
 
 function parsePaymentRun(raw: string, limit: number): PaymentRunRecommendation[] {
@@ -182,13 +195,19 @@ Suggest which invoice(s) to apply this payment to. Return JSON: { suggestedInvoi
     confidence: 'low',
     reasoning: 'Fallback: first open AR items',
   };
-  return callLLMWithFallback({
-    system: 'You are a cash application specialist. Output only valid JSON object with suggestedInvoices, confidence, and optional reasoning.',
-    prompt,
-    maxTokens: 500,
-    parse: (raw) => parseCashApp(raw, payment),
-    fallback,
-  });
+  try {
+    const result = await callLLMWithFallback({
+      system: 'You are a cash application specialist. Output only valid JSON object with suggestedInvoices, confidence, and optional reasoning.',
+      prompt,
+      maxTokens: 500,
+      parse: (raw) => parseCashApp(raw, payment),
+      fallback,
+    });
+    assertNoNumericAmountsInAgentOutput(result, 'agentic_ar_ap_workflows.suggestCashApplicationAgentic');
+    return result;
+  } catch {
+    return fallback;
+  }
 }
 
 function parseCashApp(

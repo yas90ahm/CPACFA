@@ -29,7 +29,7 @@ import * as evidencePolicy from '../../src/services/evidence_policy_service.js';
 const mockPool = {} as Pool;
 
 /** Mock client for transaction callbacks: supports query for row lock. */
-function createMockClient(lockRows: { id: string; status: string }[] = [{ id: 'sess-1', status: 'locked' }]) {
+function createMockClient(lockRows: { id: string; status: string }[] = [{ id: 'sess-1', status: 'under_review' }]) {
   return {
     query: jest.fn().mockImplementation(() => Promise.resolve({ rows: lockRows })),
   };
@@ -43,29 +43,26 @@ const sampleSession = {
   periodEnd: '2025-01-31',
   basis: 'accrual' as const,
   standard: 'GAAP',
-  status: 'draft' as const,
+  status: 'open' as const,
   createdAt: '2025-01-01T00:00:00Z',
   updatedAt: '2025-01-01T00:00:00Z',
 };
 
 describe('Close session — getAllowedTransitions', () => {
-  it('draft can only go to in_progress', () => {
-    expect(getAllowedTransitions('draft')).toEqual(['in_progress']);
+  it('open can only go to in_progress', () => {
+    expect(getAllowedTransitions('open')).toEqual(['in_progress']);
   });
-  it('in_progress can go to draft or ready_for_review', () => {
-    expect(getAllowedTransitions('in_progress')).toEqual(['draft', 'ready_for_review']);
+  it('in_progress can only go to under_review', () => {
+    expect(getAllowedTransitions('in_progress')).toEqual(['under_review']);
   });
-  it('ready_for_review can go to in_progress or finalized', () => {
-    expect(getAllowedTransitions('ready_for_review')).toEqual(['in_progress', 'finalized']);
+  it('under_review can only go to in_progress (certified via certifyCloseSession)', () => {
+    expect(getAllowedTransitions('under_review')).toEqual(['in_progress']);
   });
-  it('finalized can go to ready_for_review or locked', () => {
-    expect(getAllowedTransitions('finalized')).toEqual(['ready_for_review', 'locked']);
+  it('certified can go to in_progress or locked', () => {
+    expect(getAllowedTransitions('certified')).toEqual(['in_progress', 'locked']);
   });
-  it('locked can only go to certified', () => {
-    expect(getAllowedTransitions('locked')).toEqual(['certified']);
-  });
-  it('certified has no allowed transitions', () => {
-    expect(getAllowedTransitions('certified')).toEqual([]);
+  it('locked has no allowed transitions (terminal)', () => {
+    expect(getAllowedTransitions('locked')).toEqual([]);
   });
 });
 
@@ -74,7 +71,7 @@ describe('Close session — createSession', () => {
     jest.restoreAllMocks();
   });
 
-  it('creates session with defaults (accrual, GAAP, draft)', async () => {
+  it('creates session with defaults (accrual, GAAP, open)', async () => {
     jest.spyOn(repo, 'hasOverlappingSession').mockResolvedValue(false);
     jest.spyOn(repo, 'insertCloseSession').mockResolvedValue({ ...sampleSession });
     const result = await createSession(mockPool, {
@@ -143,8 +140,8 @@ describe('Close session — updateStatus', () => {
     jest.spyOn(auditLedger, 'recordMaterialEvent').mockResolvedValue();
   });
 
-  it('allows draft -> in_progress', async () => {
-    jest.spyOn(repo, 'getCloseSessionByIdForUpdate').mockResolvedValue({ ...sampleSession, status: 'draft' });
+  it('allows open -> in_progress', async () => {
+    jest.spyOn(repo, 'getCloseSessionByIdForUpdate').mockResolvedValue({ ...sampleSession, status: 'open' });
     jest.spyOn(repo, 'updateCloseSessionStatus').mockResolvedValue({
       ...sampleSession,
       status: 'in_progress',
@@ -157,24 +154,24 @@ describe('Close session — updateStatus', () => {
       expect.anything(),
       expect.objectContaining({
         eventType: 'close_session_transition',
-        deterministicFlagSnapshot: expect.objectContaining({ from: 'draft', to: 'in_progress', sessionId: 'sess-1' }),
+        deterministicFlagSnapshot: expect.objectContaining({ from: 'open', to: 'in_progress', sessionId: 'sess-1' }),
       })
     );
   });
 
-  it('rejects draft -> finalized (invalid transition)', async () => {
-    jest.spyOn(repo, 'getCloseSessionByIdForUpdate').mockResolvedValue({ ...sampleSession, status: 'draft' });
+  it('rejects open -> certified (invalid transition)', async () => {
+    jest.spyOn(repo, 'getCloseSessionByIdForUpdate').mockResolvedValue({ ...sampleSession, status: 'open' });
     const updateSpy = jest.spyOn(repo, 'updateCloseSessionStatus');
-    await expect(updateStatus(mockPool, 't1', 'sess-1', 'finalized')).rejects.toMatchObject({
+    await expect(updateStatus(mockPool, 't1', 'sess-1', 'certified')).rejects.toMatchObject({
       code: 'INVALID_TRANSITION',
-      message: expect.stringMatching(/draft.*finalized|Transition.*not allowed/),
+      message: expect.stringMatching(/open.*certified|Transition.*not allowed/),
     });
     expect(updateSpy).not.toHaveBeenCalled();
   });
 
-  it('allows locked -> certified via certifyCloseSession (not updateStatus)', async () => {
-    jest.spyOn(repo, 'getCloseSessionByIdForUpdate').mockResolvedValue({ ...sampleSession, status: 'locked' });
-    await expect(updateStatus(mockPool, 't1', 'sess-1', 'finalized')).rejects.toMatchObject({
+  it('under_review -> certified only via certifyCloseSession (not updateStatus)', async () => {
+    jest.spyOn(repo, 'getCloseSessionByIdForUpdate').mockResolvedValue({ ...sampleSession, status: 'under_review' });
+    await expect(updateStatus(mockPool, 't1', 'sess-1', 'certified')).rejects.toMatchObject({
       code: 'INVALID_TRANSITION',
     });
   });
@@ -212,9 +209,9 @@ describe('Close session — certifyCloseSession', () => {
     jest.spyOn(transaction, 'withTransaction').mockImplementation(async (_pool, fn) => fn(createMockClient() as never));
   });
 
-  it('cannot certify unless session is locked', async () => {
+  it('cannot certify unless session is under_review', async () => {
     jest.spyOn(transaction, 'withTransaction').mockImplementation(async (_pool, fn) =>
-      fn(createMockClient([{ id: 'sess-1', status: 'ready_for_review' }]) as never)
+      fn(createMockClient([{ id: 'sess-1', status: 'in_progress' }]) as never)
     );
     const updateCertSpy = jest.spyOn(repo, 'updateCertification');
     await expect(
@@ -227,17 +224,49 @@ describe('Close session — certifyCloseSession', () => {
         },
         'approver'
       )
-    ).rejects.toMatchObject({ code: 'INVALID_TRANSITION' });
+    ).rejects.toMatchObject({ code: 'NOT_UNDER_REVIEW' });
     expect(updateCertSpy).not.toHaveBeenCalled();
+  });
+
+  it('cannot certify when statementsStaleSince is set', async () => {
+    jest.spyOn(transaction, 'withTransaction').mockImplementation(async (_pool, fn) =>
+      fn(createMockClient([{ id: 'sess-1', status: 'under_review' }]) as never)
+    );
+    jest.spyOn(repo, 'getCloseSessionById').mockResolvedValue({
+      ...sampleSession,
+      status: 'under_review',
+      statementsStaleSince: '2025-01-15T10:00:00Z',
+    });
+    jest.spyOn(readiness, 'computeReadiness').mockResolvedValue({
+      ready: true,
+      hardBlockers: [],
+      softWarnings: [],
+      checklistComplete: true,
+      cashRecComplete: true,
+      noCriticalIssues: true,
+      materialJesApproved: true,
+      integrityChecksPass: true,
+    });
+    await expect(
+      certifyCloseSession(
+        mockPool,
+        {
+          tenantId: 't1',
+          closeSessionId: 'sess-1',
+          certifiedBy: 'approver@test.com',
+        },
+        'approver'
+      )
+    ).rejects.toMatchObject({ code: 'VALIDATION', message: /regenerate statements/ });
   });
 
   it('cannot certify when hardBlockers present', async () => {
     jest.spyOn(transaction, 'withTransaction').mockImplementation(async (_pool, fn) =>
-      fn(createMockClient([{ id: 'sess-1', status: 'locked' }]) as never)
+      fn(createMockClient([{ id: 'sess-1', status: 'under_review' }]) as never)
     );
     jest.spyOn(repo, 'getCloseSessionById').mockResolvedValue({
       ...sampleSession,
-      status: 'locked',
+      status: 'under_review',
     });
     jest.spyOn(evidencePolicy, 'checkEvidencePolicyForCertification').mockResolvedValue({
       hardBlockers: [],
@@ -269,7 +298,7 @@ describe('Close session — certifyCloseSession', () => {
   it('cannot certify with preparer role (requires approver)', async () => {
     jest.spyOn(repo, 'getCloseSessionById').mockResolvedValue({
       ...sampleSession,
-      status: 'locked',
+      status: 'under_review',
     });
     jest.spyOn(readiness, 'computeReadiness').mockResolvedValue({
       ready: true,
@@ -294,10 +323,10 @@ describe('Close session — certifyCloseSession', () => {
     ).rejects.toMatchObject({ code: 'INSUFFICIENT_ROLE' });
   });
 
-  it('certifies when locked, no hard blockers, approver role', async () => {
-    const lockedSession = { ...sampleSession, status: 'locked' as const };
+  it('certifies when under_review, no hard blockers, approver role', async () => {
+    const underReviewSession = { ...sampleSession, status: 'under_review' as const };
     const certifiedSession = {
-      ...lockedSession,
+      ...underReviewSession,
       status: 'certified' as const,
       certifiedBy: 'approver@test.com',
       certifiedAt: '2025-01-02T12:00:00Z',
@@ -306,10 +335,10 @@ describe('Close session — certifyCloseSession', () => {
       updatedAt: '2025-01-02T12:00:00Z',
     };
     jest.spyOn(transaction, 'withTransaction').mockImplementation(async (_pool, fn) => {
-      const mockClient = createMockClient([{ id: 'sess-1', status: 'locked' }]);
+      const mockClient = createMockClient([{ id: 'sess-1', status: 'under_review' }]);
       return fn(mockClient as never);
     });
-    jest.spyOn(repo, 'getCloseSessionById').mockResolvedValue(lockedSession);
+    jest.spyOn(repo, 'getCloseSessionById').mockResolvedValue(underReviewSession);
     jest.spyOn(readiness, 'computeReadiness').mockResolvedValue({
       ready: true,
       hardBlockers: [],
@@ -320,11 +349,27 @@ describe('Close session — certifyCloseSession', () => {
       materialJesApproved: true,
       integrityChecksPass: true,
     });
-    jest.spyOn(adjustedTb, 'getAdjustedTrialBalance').mockResolvedValue([
-      { accountName: 'Cash', debit: 1000, credit: 0 },
-      { accountName: 'Retained Earnings', debit: 0, credit: 1000 },
-    ]);
-    jest.spyOn(certifiedStatements, 'buildCertifiedStatementsFromSnapshot').mockReturnValue({} as never);
+    jest.spyOn(adjustedTb, 'getTrialBalanceForCertification').mockResolvedValue({
+      trialBalance: [
+        { accountName: 'Cash', debit: 1000, credit: 0 },
+        { accountName: 'Retained Earnings', debit: 0, credit: 1000 },
+      ],
+      source: 'adjusted',
+      hasGL: false,
+    });
+    jest.spyOn(certifiedStatements, 'buildCertifiedStatementsFromSnapshot').mockReturnValue({
+      balanceSheet: {
+        totalAssets: 1000,
+        totalLiabilities: 0,
+        totalEquity: 1000,
+        assets: [{ label: 'Cash', amount: 1000 }],
+        liabilities: [],
+        equity: [],
+      },
+      profitAndLoss: { netIncome: 0, totalRevenue: 0, totalExpenses: 0, revenue: [], expenses: [] },
+      cashFlow: { endingCash: 1000, operating: [], investing: [], financing: [] },
+      equityChanges: { closingEquity: 1000, changes: [{ label: 'Net Income', amount: 0 }] },
+    } as never);
     jest.spyOn(ledgerSnapshot, 'createSnapshotFromTrialBalanceAndEntries').mockResolvedValue({
       id: 'snap-1',
       tenantId: 't1',
@@ -398,13 +443,13 @@ describe('Close session — ensureSessionForPeriod (getOrCreate)', () => {
     expect(repo.getOverlappingSession).toHaveBeenCalledWith(mockPool, 't1', 'e1', '2025-01-01', '2025-01-31');
   });
 
-  it('creates draft session when none exists (created=true)', async () => {
+  it('creates open session when none exists (created=true)', async () => {
     jest.spyOn(repo, 'getOverlappingSession').mockResolvedValue(null);
     jest.spyOn(repo, 'hasOverlappingSession').mockResolvedValue(false);
     jest.spyOn(repo, 'insertCloseSession').mockResolvedValue({ ...sampleSession, id: 'new-id' });
     const result = await ensureSessionForPeriod(mockPool, 't1', 'e1', '2025-03');
     expect(result.created).toBe(true);
-    expect(result.session.status).toBe('draft');
+    expect(result.session.status).toBe('open');
     expect(repo.insertCloseSession).toHaveBeenCalledWith(
       mockPool,
       expect.any(String),
@@ -414,7 +459,7 @@ describe('Close session — ensureSessionForPeriod (getOrCreate)', () => {
       '2025-03-31',
       'accrual',
       'GAAP',
-      'draft'
+      'open'
     );
   });
 
@@ -430,34 +475,13 @@ describe('Close session — advanceSession governance (close_lock)', () => {
     jest.spyOn(transaction, 'withTransaction').mockImplementation(async (_pool, fn) => fn(createMockClient() as never));
   });
 
-  it('appends close_lock audit ledger event when transitioning to locked', async () => {
-    const draftSession = { ...sampleSession, status: 'draft' as const };
+  it('advances open -> in_progress (one step per call)', async () => {
+    const openSession = { ...sampleSession, status: 'open' as const };
     const inProgressSession = { ...sampleSession, status: 'in_progress' as const };
-    const readySession = { ...sampleSession, status: 'ready_for_review' as const };
-    const finalizedSession = { ...sampleSession, status: 'finalized' as const };
-    const lockedSession = { ...sampleSession, status: 'locked' as const };
 
-    jest.spyOn(repo, 'getCloseSessionByIdForUpdate')
-      .mockResolvedValueOnce(draftSession)
-      .mockResolvedValueOnce(inProgressSession)
-      .mockResolvedValueOnce(readySession)
-      .mockResolvedValueOnce(finalizedSession);
-    jest.spyOn(repo, 'getCloseSessionById').mockResolvedValue(draftSession);
-    jest.spyOn(readiness, 'computeReadiness').mockResolvedValue({
-      ready: true,
-      hardBlockers: [],
-      softWarnings: [],
-      checklistComplete: true,
-      cashRecComplete: true,
-      noCriticalIssues: true,
-      materialJesApproved: true,
-      integrityChecksPass: true,
-    });
-    jest.spyOn(repo, 'updateCloseSessionStatus')
-      .mockResolvedValueOnce(inProgressSession)
-      .mockResolvedValueOnce(readySession)
-      .mockResolvedValueOnce(finalizedSession)
-      .mockResolvedValueOnce(lockedSession);
+    jest.spyOn(repo, 'getCloseSessionByIdForUpdate').mockResolvedValue(openSession);
+    jest.spyOn(repo, 'getCloseSessionById').mockResolvedValue(openSession);
+    jest.spyOn(repo, 'updateCloseSessionStatus').mockResolvedValue(inProgressSession);
     jest.spyOn(auditLedger, 'recordMaterialEvent').mockResolvedValue();
 
     const result = await advanceSession(mockPool, {
@@ -467,17 +491,17 @@ describe('Close session — advanceSession governance (close_lock)', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.actionTaken).toBe('locked');
-    expect(result.statusAfter).toBe('locked');
+    expect(result.actionTaken).toBe('advanced');
+    expect(result.statusAfter).toBe('in_progress');
     expect(auditLedger.recordMaterialEvent).toHaveBeenCalledWith(
-      expect.anything(), // transaction client
+      expect.anything(),
       expect.objectContaining({
-        eventType: 'close_lock',
+        eventType: 'close_session_transition',
         tenantId: 't1',
         deterministicFlagSnapshot: expect.objectContaining({
-          closeSessionId: 'sess-1',
-          statusAfter: 'locked',
-          actor: 'advance-api',
+          sessionId: 'sess-1',
+          from: 'open',
+          to: 'in_progress',
         }),
       })
     );

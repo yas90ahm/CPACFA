@@ -3,7 +3,14 @@
  */
 
 import type { CloseRole } from '../types/close_and_controls.js';
-import { appendAuditLog, type AuditLogContext } from './audit_log_service.js';
+import type { AuditLogEntry } from '../types/close_and_controls.js';
+import { recordAuditLogAction } from './audit_service.js';
+
+/** Context for audit writes (pool, tenantId). */
+export interface AuditLogContext {
+  pool: import('pg').Pool;
+  tenantId: string;
+}
 
 /** Actions that require a role */
 export type ControlledAction =
@@ -42,10 +49,10 @@ export function canPerform(actorRole: CloseRole, action: ControlledAction): bool
 }
 
 /**
- * Perform a controlled action: check role, then append to audit log. Returns { allowed, auditEntry }.
- * When context (pool, tenantId) is provided, audit entry is persisted to tenant DB.
+ * Perform a controlled action: check role, then record to audit ledger. Returns { allowed, auditEntry }.
+ * When context (pool, tenantId) is provided, audit entry is persisted to hash-chained audit_ledger.
  */
-export function performControlledAction(
+export async function performControlledAction(
   actor: string,
   actorRole: CloseRole,
   action: ControlledAction,
@@ -53,17 +60,26 @@ export function performControlledAction(
   detail?: string,
   payload?: Record<string, unknown>,
   context?: AuditLogContext
-): { allowed: boolean; auditEntry?: import('../types/close_and_controls.js').AuditLogEntry } {
+): Promise<{ allowed: boolean; auditEntry?: AuditLogEntry }> {
   const allowed = canPerform(actorRole, action);
-  const auditEntry = appendAuditLog(
-    {
+  const entryPayload = { ...payload, actorRole, requiredRole: ACTION_ROLE[action], allowed };
+  const auditEntry: AuditLogEntry = {
+    id: 'audit-ledger',
+    timestamp: new Date().toISOString(),
+    actor,
+    action,
+    resource,
+    detail: detail ?? (allowed ? undefined : 'Denied: insufficient role'),
+    payload: entryPayload,
+  };
+  if (context) {
+    await recordAuditLogAction(context.pool, context.tenantId, {
       actor,
       action,
       resource,
-      detail: detail ?? (allowed ? undefined : 'Denied: insufficient role'),
-      payload: { ...payload, actorRole, requiredRole: ACTION_ROLE[action], allowed },
-    },
-    context
-  );
+      detail: auditEntry.detail,
+      payload: entryPayload,
+    });
+  }
   return { allowed, auditEntry };
 }

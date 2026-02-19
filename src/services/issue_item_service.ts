@@ -1,4 +1,9 @@
 /**
+ * @deprecated FULLY DEPRECATED — Do not use.
+ * All issue operations now use issue_service.ts + tenant_close_issues table.
+ * This file is retained temporarily for reference only.
+ * TODO: Remove this file and drop tenant_issue_items table.
+ *
  * Issue (Exception) service: create, resolve, assign, list.
  * Helpers to emit issues from import validations, low-confidence classifications, integrity failures.
  */
@@ -15,7 +20,7 @@ import type {
 } from '../types/issue_item.js';
 import * as repo from '../db/repositories/issue_item_repository.js';
 import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
-import { recordMaterialEvent } from './audit_ledger_service.js';
+import { recordMaterialEvent } from './audit_service.js';
 
 export class IssueItemError extends Error {
   constructor(

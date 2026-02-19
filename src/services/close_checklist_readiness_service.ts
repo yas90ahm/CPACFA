@@ -10,11 +10,10 @@ import type { CloseSession } from '../types/close_session.js';
 import type { CloseChecklistItem, CloseReadinessResult, CloseChecklistItemCode } from '../types/close_checklist_item.js';
 import * as itemRepo from '../db/repositories/close_checklist_item_repository.js';
 import * as reconRepo from '../db/repositories/recon_repository.js';
-import { listIssues } from './issue_item_service.js';
+import { getBlockingIssuesForPeriod, createIssueForSession } from './issue_service.js';
 import * as jeRepo from '../db/repositories/journal_entry_repository.js';
 import { verifyChain } from './audit_ledger_service.js';
 import { getPeriodExportChecks } from '../db/repositories/period_export_checks_repository.js';
-import { createIssue } from './issue_item_service.js';
 import { checkEvidencePolicyForCertification } from './evidence_policy_service.js';
 
 const DEFAULT_ITEMS: { code: CloseChecklistItemCode; name: string; required: boolean }[] = [
@@ -108,15 +107,12 @@ export async function computeReadiness(
   }
 
   let noCriticalIssues = true;
-  const issues = await listIssues(pool, {
-    tenantId,
-    closeSessionId,
-    severity: 'critical',
-  });
-  const openCritical = issues.filter((i) => i.status !== 'resolved' && i.status !== 'wont_fix');
-  if (openCritical.length > 0) {
+  const blockingIssues = await getBlockingIssuesForPeriod(pool, closeSessionId, tenantId);
+  if (blockingIssues.length > 0) {
     noCriticalIssues = false;
-    hardBlockers.push(`${openCritical.length} critical issue(s) open; resolve or waive before close.`);
+    hardBlockers.push(
+      `${blockingIssues.length} critical/blocking issue(s) open; resolve or waive before close.`
+    );
   }
 
   let materialJesApproved = true;
@@ -154,6 +150,89 @@ export async function computeReadiness(
     softWarnings.push(w.message);
   }
 
+  // Reconciliation completeness gate (Step 5): all required account recons complete and within tolerance
+  const { checkReconCompleteness } = await import('./recon_completeness_gate.js');
+  const reconResult = await checkReconCompleteness(pool, tenantId, closeSessionId);
+  if (!reconResult.passes && reconResult.total_required > 0) {
+    hardBlockers.push(
+      `${reconResult.blockers.length} reconciliation(s) incomplete: ${reconResult.blockers.slice(0, 3).map((b) => `${b.account_code} (${b.reason})`).join('; ')}${reconResult.blockers.length > 3 ? '…' : ''}`
+    );
+  }
+
+  // Variance completeness gate: material variances must have human explanation before UNDER_REVIEW
+  const { checkVarianceCompleteness } = await import('./variance_analysis_service.js');
+  const varianceResult = await checkVarianceCompleteness(pool, tenantId, closeSessionId);
+  if (!varianceResult.passes && varianceResult.unexplained.length > 0) {
+    hardBlockers.push(
+      `${varianceResult.unexplained.length} material variance(s) without explanation; explain or approve before close.`
+    );
+  }
+
+  // Template completeness gate: proposed AJE templates must be applied or skipped before UNDER_REVIEW
+  const { checkTemplateCompleteness } = await import('./template_completeness_gate.js');
+  const templateResult = await checkTemplateCompleteness(pool, tenantId, closeSessionId);
+  if (!templateResult.passes && templateResult.pending > 0) {
+    hardBlockers.push(
+      `${templateResult.pending} AJE template(s) proposed but not yet applied or skipped; review and apply or skip before close.`
+    );
+  }
+
+  // Recon evidence completeness (safety net): completed recons must have attachments
+  const { listPeriodReconciliationsByPeriod } = await import('../db/repositories/period_reconciliation_repository.js');
+  const { listEvidenceForObject } = await import('../db/repositories/evidence_repository.js');
+  const reconsForPeriod = await listPeriodReconciliationsByPeriod(pool, tenantId, closeSessionId);
+  const completedRecons = reconsForPeriod.filter((r) => r.status === 'completed' || r.status === 'approved');
+  for (const recon of completedRecons) {
+    const attachments = await listEvidenceForObject(pool, tenantId, 'reconciliation', recon.reconId);
+    if (attachments.length === 0) {
+      hardBlockers.push(
+        `Reconciliation for ${recon.accountCode} is completed but missing supporting documentation. Upload the source document before close.`
+      );
+    }
+  }
+
+  // JE evidence completeness (soft warning): posted JEs above threshold without evidence
+  const { getEvidencePolicy } = await import('../db/repositories/evidence_policy_repository.js');
+  const { listJournalEntryLines } = await import('../db/repositories/journal_entry_repository.js');
+  const jePolicy = await getEvidencePolicy(pool, tenantId);
+  const jeThreshold = jePolicy?.materialityThreshold != null && jePolicy.materialityThreshold !== ''
+    ? Number(jePolicy.materialityThreshold)
+    : 0;
+  if (jeThreshold > 0) {
+    const postedJes = jes.filter((j) => j.status === 'posted' || j.status === 'exported');
+    for (const je of postedJes) {
+      const jeLines = await listJournalEntryLines(pool, je.id);
+      const totalAmount = jeLines.reduce((s, l) => s + (l.debit ?? 0), 0);
+      if (totalAmount >= jeThreshold) {
+        const jeAttachments = await listEvidenceForObject(pool, tenantId, 'journal_entry', je.id);
+        if (jeAttachments.length === 0) {
+          softWarnings.push(
+            `Posted journal entry ${je.memo ?? je.id} ($${totalAmount.toFixed(2)}) above threshold lacks supporting documentation.`
+          );
+        }
+      }
+    }
+  }
+
+  // Mapping completeness gate: all TB accounts must have COA mapping before UNDER_REVIEW
+  const { checkMappingCompleteness } = await import('./mapping_completeness_gate.js');
+  const mappingResult = await checkMappingCompleteness(
+    pool,
+    tenantId,
+    closeSessionId,
+    session.entityId ?? ''
+  );
+  if (!mappingResult.passes && mappingResult.unmapped_accounts.length > 0) {
+    hardBlockers.push(
+      `${mappingResult.unmapped_accounts.length} account(s) not mapped to reporting line items: ` +
+        mappingResult.unmapped_accounts
+          .slice(0, 5)
+          .map((u) => `${u.account_code || u.account_name} ($${u.balance})`)
+          .join(', ') +
+        (mappingResult.unmapped_accounts.length > 5 ? '…' : '')
+    );
+  }
+
   const ready = hardBlockers.length === 0;
   return {
     ready,
@@ -178,7 +257,7 @@ export async function emitIssuesForStuckChecklist(
   const items = await itemRepo.listChecklistItemsBySessionId(pool, opts.tenantId, opts.closeSessionId);
   const stuck = items.filter((i) => i.required && i.status !== 'completed' && i.status !== 'skipped');
   if (stuck.length === 0) return null;
-  const issue = await createIssue(pool, {
+  const issue = await createIssueForSession(pool, {
     closeSessionId: opts.closeSessionId,
     tenantId: opts.tenantId,
     category: 'reconciliation',
@@ -188,7 +267,7 @@ export async function emitIssuesForStuckChecklist(
     sourceRef: { closeSessionId: opts.closeSessionId, itemCodes: stuck.map((i) => i.code) },
     createdBy: opts.createdBy,
   });
-  return { issueId: issue.id };
+  return { issueId: issue.issueId };
 }
 
 export async function getChecklistItems(

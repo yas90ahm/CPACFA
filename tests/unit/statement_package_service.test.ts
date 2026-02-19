@@ -72,6 +72,7 @@ describe('Statement package — generateStatements', () => {
 
   it('creates package with version 1 when no previous packages', async () => {
     jest.spyOn(closeSessionService, 'getSession').mockResolvedValue(sampleSession as any);
+    jest.spyOn(closeSessionService, 'listSessions').mockResolvedValue([]);
     jest.spyOn(adjustedTB, 'getAdjustedTrialBalance').mockResolvedValue([
       { accountName: 'Cash', debit: 1000, credit: 0 },
       { accountName: 'AP', debit: 0, credit: 200 },
@@ -97,12 +98,18 @@ describe('Statement package — generateStatements', () => {
       mockPool,
       't1',
       expect.any(String),
-      expect.objectContaining({ closeSessionId: 'sess-1', version: 1, engineVersion: 'financialStatements.v1' })
+      expect.objectContaining({
+        closeSessionId: 'sess-1',
+        version: 1,
+        engineVersion: 'financialStatements.v1',
+        validationResults: expect.any(Array),
+      })
     );
   });
 
   it('creates package with version 2 when previous package exists', async () => {
     jest.spyOn(closeSessionService, 'getSession').mockResolvedValue(sampleSession as any);
+    jest.spyOn(closeSessionService, 'listSessions').mockResolvedValue([]);
     jest.spyOn(adjustedTB, 'getAdjustedTrialBalance').mockResolvedValue([
       { accountName: 'Cash', debit: 1000, credit: 0 },
       { accountName: 'AP', debit: 0, credit: 200 },

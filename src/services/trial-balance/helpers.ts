@@ -1,9 +1,11 @@
 /**
  * Trial balance helpers for formatting ledger data for agent context (e.g. self-correction loop).
  * No hardcoded account names or amounts — works on any CSV/session data.
+ * Money values use Decimal.js for precision.
  */
 
 import type { SessionSnapshot } from '../persistence_service.js';
+import { round2, from } from '../../utils/decimal.js';
 
 /** Minimal trial balance row for context formatting. */
 export interface TrialBalanceEntryForContext {
@@ -27,13 +29,18 @@ export function formatLedgerForContext(entries: TrialBalanceEntryForContext[]): 
   }
 
   const header = 'Account Name | Debit | Credit | Description';
-  const rows = entries.map((e) => ({
-    accountName: String(e.accountName ?? '').trim() || '—',
-    debit: Number(e.debit) || 0,
-    credit: Number(e.credit) || 0,
-    description: String(e.accountCode ?? '').trim() || '—',
-    absValue: Math.max(Number(e.debit) || 0, Number(e.credit) || 0),
-  }));
+  const rows = entries.map((e) => {
+    const debit = round2(e.debit ?? 0);
+    const credit = round2(e.credit ?? 0);
+    const absValue = from(debit).greaterThan(credit) ? debit : credit;
+    return {
+      accountName: String(e.accountName ?? '').trim() || '—',
+      debit,
+      credit,
+      description: String(e.accountCode ?? '').trim() || '—',
+      absValue,
+    };
+  });
 
   let toShow = rows;
   let omitted = 0;

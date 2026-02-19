@@ -3,6 +3,7 @@
  */
 
 import { callLLMWithFallback } from '../llm/callWithFallback.js';
+import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import type { CanonicalBankTransaction } from '../types/canonical_ap_ar_payroll.js';
 import type { GLCashEntry } from './bank_reconciliation_service.js';
 import type { CanonicalArItem } from '../types/canonical_ap_ar_payroll.js';
@@ -56,13 +57,19 @@ For each bank transaction, suggest best match: either a GL entry (by amount and 
       reasoning: gl ? 'Amount and month match' : 'No automatic match',
     };
   });
-  return callLLMWithFallback({
-    system: 'You are a cash reconciliation specialist. Output only valid JSON array of match suggestions.',
-    prompt,
-    maxTokens: 1200,
-    parse: (raw) => parseMatchSuggestions(raw, bankTransactions),
-    fallback,
-  });
+  try {
+    const result = await callLLMWithFallback({
+      system: 'You are a cash reconciliation specialist. Output only valid JSON array of match suggestions.',
+      prompt,
+      maxTokens: 1200,
+      parse: (raw) => parseMatchSuggestions(raw, bankTransactions),
+      fallback,
+    });
+    assertNoNumericAmountsInAgentOutput(result, 'agentic_bank_feed_matching.suggestBankFeedMatchesAgentic');
+    return result;
+  } catch {
+    return fallback;
+  }
 }
 
 function parseMatchSuggestions(

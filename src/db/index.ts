@@ -255,6 +255,15 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 95, file: '095_general_ledger.sql' },
   { version: 96, file: '096_period_trial_balance_gl_derived_source.sql' },
   { version: 97, file: '097_gl_performance_indexes.sql' },
+  { version: 98, file: '098_close_session_state_machine.sql' },
+  { version: 99, file: '099_tenant_close_issues.sql' },
+  { version: 100, file: '100_migrate_issues_to_close_issues.sql' },
+  { version: 101, file: '101_tenant_recon_requirements.sql' },
+  { version: 102, file: '102_tenant_period_reconciliations.sql' },
+  { version: 103, file: '103_close_session_statements_stale.sql' },
+  { version: 110, file: '110_statement_package_cash_flow_equity.sql' },
+  { version: 111, file: '111_tenant_aje_templates.sql' },
+  { version: 112, file: '112_tenant_variance_analysis.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 

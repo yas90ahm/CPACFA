@@ -138,7 +138,7 @@ export async function buildPbcIndexPayload(
     throw new Error('NOT_FOUND');
   }
   const isLocked = session.status === 'locked';
-  const isCertified = session.status === 'certified';
+  const isCertified = session.status === 'certified' || session.status === 'locked';
   const periodLabel = session.periodEnd?.slice(0, 7) ?? null;
 
   let snapshotId: string | null = null;

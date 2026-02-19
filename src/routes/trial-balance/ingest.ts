@@ -41,8 +41,8 @@ import { listContracts } from '../../db/repositories/revenue_recognition_reposit
 import type { Pool } from 'pg';
 import type { StatementGeneratorOptions } from '../../services/statementGenerator.js';
 import { assertPeriodNotLocked, PeriodLockedError } from '../../services/period_lock_service.js';
-import { appendAuditLog } from '../../services/audit_log_service.js';
-import { createIssueFromIntegrityFailure } from '../../services/issue_item_service.js';
+import { recordAuditLogAction } from '../../services/audit_service.js';
+import { createIssueFromIntegrityFailure } from '../../services/issue_service.js';
 import { createDecisionRecord } from '../../services/decision_record_service.js';
 import { validateBody, requireValidTenantId } from '../../middleware/validationMiddleware.js';
 import { ingestBodySchema, type IngestBody } from '../../schemas/request/trialBalance.js';
@@ -713,11 +713,14 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
     if (err instanceof PeriodLockedError) {
       const pool = getTenantPool(req);
       const tenantId = getTenantId(req);
-      const auditContext = pool && tenantId ? { pool, tenantId } : undefined;
-      appendAuditLog(
-        { action: 'period_edit_blocked', resource: `period:${err.periodLabel}`, detail: 'Period is locked', actor: (req as AuthRequest).userId ?? 'anonymous' },
-        auditContext
-      );
+      if (pool && tenantId) {
+        await recordAuditLogAction(pool, tenantId, {
+          action: 'period_edit_blocked',
+          resource: `period:${err.periodLabel}`,
+          detail: 'Period is locked',
+          actor: (req as AuthRequest).userId ?? 'anonymous',
+        });
+      }
       return res.status(403).json({ error: 'Period locked', periodLabel: err.periodLabel });
     }
     // Recognize MathematicalIntegrityError even when instanceof fails (e.g. Jest/ESM class identity)
@@ -749,17 +752,21 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
         if (typeof closeSessionId === 'string' && closeSessionId) {
           try {
             await createIssueFromIntegrityFailure(
-            { pool, tenantId, closeSessionId, createdBy: (req as AuthRequest).userId },
-            {
-              title: 'Trial balance imbalance (debits ≠ credits or A ≠ L+E)',
-              description: integrityErr.message,
-              category: 'posting',
-              severity: 'high',
-              impactPl: integrityErr.imbalanceAmount,
-              impactBs: integrityErr.check === 'B' ? integrityErr.imbalanceAmount : undefined,
-              sourceRef: { check: integrityErr.check, imbalanceAmount: integrityErr.imbalanceAmount, details: integrityErr.details },
-            }
-          );
+              { pool, tenantId, closeSessionId, createdBy: (req as AuthRequest).userId },
+              {
+                title: 'Trial balance imbalance (debits ≠ credits or A ≠ L+E)',
+                description: integrityErr.message,
+                category: 'posting',
+                severity: 'high',
+                sourceRef: {
+                  check: integrityErr.check,
+                  imbalanceAmount: integrityErr.imbalanceAmount,
+                  details: integrityErr.details,
+                  impactPl: integrityErr.imbalanceAmount,
+                  impactBs: integrityErr.check === 'B' ? integrityErr.imbalanceAmount : undefined,
+                },
+              }
+            );
         } catch (_) {
           /* non-fatal */
         }

@@ -3,6 +3,7 @@
  */
 
 import { callLLMWithFallback } from '../llm/callWithFallback.js';
+import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import type { AccrualSuggestion, AccrualSuggestionInput } from '../types/accrual_deferral.js';
 
 function uuid(): string {
@@ -85,27 +86,33 @@ export async function suggestAccrualsAgentic(input: AccrualSuggestionInput): Pro
     .filter(Boolean)
     .join('\n');
 
-  return callLLMWithFallback({
-    system: SYSTEM,
-    prompt,
-    maxTokens: 512,
-    parse: (raw) => {
-      const match = raw.match(/\[[\s\S]*?\]/);
-      const arr = match ? JSON.parse(match[0]) : [];
-      const agentic: AccrualSuggestion[] = (Array.isArray(arr) ? arr : []).slice(0, 4).map((o: Record<string, unknown>) => ({
-        id: uuid(),
-        type: (o.type === 'deferral' ? 'deferral' : 'accrual') as AccrualSuggestion['type'],
-        description: String(o.description ?? 'Adjustment'),
-        debitAccount: String(o.debitAccount ?? 'TBD'),
-        creditAccount: String(o.creditAccount ?? 'TBD'),
-        amount: Number(o.amount) || 0,
-        periodEnd: input.periodEnd,
-        source: 'agentic' as const,
-        sourceDetail: 'LLM-suggested',
-        confidence: 0.6,
-      }));
-      return [...ruleBased, ...agentic.filter((a) => a.amount > 0)];
-    },
-    fallback: ruleBased,
-  });
+  try {
+    const result = await callLLMWithFallback({
+      system: SYSTEM,
+      prompt,
+      maxTokens: 512,
+      parse: (raw) => {
+        const match = raw.match(/\[[\s\S]*?\]/);
+        const arr = match ? JSON.parse(match[0]) : [];
+        const agentic: AccrualSuggestion[] = (Array.isArray(arr) ? arr : []).slice(0, 4).map((o: Record<string, unknown>) => ({
+          id: uuid(),
+          type: (o.type === 'deferral' ? 'deferral' : 'accrual') as AccrualSuggestion['type'],
+          description: String(o.description ?? 'Adjustment'),
+          debitAccount: String(o.debitAccount ?? 'TBD'),
+          creditAccount: String(o.creditAccount ?? 'TBD'),
+          amount: Number(o.amount) || 0,
+          periodEnd: input.periodEnd,
+          source: 'agentic' as const,
+          sourceDetail: 'LLM-suggested',
+          confidence: 0.6,
+        }));
+        return [...ruleBased, ...agentic.filter((a) => a.amount > 0)];
+      },
+      fallback: ruleBased,
+    });
+    assertNoNumericAmountsInAgentOutput(result, 'accrual_deferral_service.suggestAccrualsAgentic');
+    return result;
+  } catch {
+    return ruleBased;
+  }
 }

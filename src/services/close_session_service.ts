@@ -1,6 +1,20 @@
 /**
- * Close session service: create, get, list, update status, certify.
- * Enforces allowed status transitions; certification is the gate before export.
+ * Close Session Service — State Machine
+ *
+ * States: OPEN → IN_PROGRESS → UNDER_REVIEW → CERTIFIED → LOCKED
+ *
+ * OPEN: Period exists, close not started
+ * IN_PROGRESS: Active close work (recons, AJEs, statement generation)
+ * UNDER_REVIEW: All work complete, senior reviewer examining package
+ * CERTIFIED: Human has attested to correctness, snapshot created
+ * LOCKED: Permanent immutability, terminal state
+ *
+ * Key transitions:
+ * - IN_PROGRESS → UNDER_REVIEW: gated by completeness checks (canAdvanceToUnderReview)
+ * - UNDER_REVIEW → CERTIFIED: gated by re-validation + authority (canCertify)
+ * - UNDER_REVIEW → IN_PROGRESS: rejection (preserves all work)
+ * - CERTIFIED → IN_PROGRESS: reopen (requires CFO auth + reason)
+ * - CERTIFIED → LOCKED: permanent (no undo)
  */
 
 import { randomUUID } from 'crypto';
@@ -10,7 +24,7 @@ import type { CloseRole } from '../types/close_and_controls.js';
 import * as repo from '../db/repositories/close_session_repository.js';
 import { computeReadiness } from './close_checklist_readiness_service.js';
 import { canPerform } from './segregation_service.js';
-import { recordMaterialEvent } from './audit_ledger_service.js';
+import { recordMaterialEvent } from './audit_service.js';
 import { getTrialBalanceForCertification } from './adjusted_trial_balance_service.js';
 import { createSnapshotFromTrialBalanceAndEntries } from './ledger_snapshot_service.js';
 import * as glRepository from '../db/repositories/general_ledger_repository.js';
@@ -18,6 +32,7 @@ import { buildEvidenceManifest } from './evidence_manifest_service.js';
 import { checkEvidencePolicyForCertification } from './evidence_policy_service.js';
 import { withTransaction } from '../db/transaction.js';
 import { buildCertifiedStatementsFromSnapshot } from './certified_statements_service.js';
+import { runCrossStatementValidationForCertification } from './cross_statement_validation.js';
 import { buildCertificationArtifact } from './certification_artifact_service.js';
 import * as certArtifactRepo from '../db/repositories/certification_artifact_repository.js';
 import { verifyChain } from '../db/repositories/audit_ledger_repository.js';
@@ -25,20 +40,20 @@ import { sumRound2 } from '../utils/decimal.js';
 import type { LedgerSnapshotPayload } from '../types/ledger_snapshot.js';
 import { getLedgerSnapshotById } from '../db/repositories/ledger_snapshot_repository.js';
 import { assertNoAiMutationContext } from '../lib/ai_boundary.js';
+import { createIssue } from './issue_service.js';
 
 const ALLOWED_TRANSITIONS: Record<CloseSessionStatus, CloseSessionStatus[]> = {
-  draft: ['in_progress'],
-  in_progress: ['draft', 'ready_for_review'],
-  ready_for_review: ['in_progress', 'finalized'],
-  finalized: ['ready_for_review', 'locked'],
-  locked: ['certified'],
-  certified: [],
+  open: ['in_progress'],
+  in_progress: ['under_review'],
+  under_review: ['in_progress'], // certified only via certifyCloseSession (updateCertification)
+  certified: ['in_progress', 'locked'],
+  locked: [],
 };
 
 export class CloseSessionError extends Error {
   constructor(
     message: string,
-    public readonly code: 'OVERLAP' | 'INVALID_TRANSITION' | 'NOT_FOUND' | 'VALIDATION' | 'INSUFFICIENT_ROLE' | 'NOT_LOCKED' | 'HARD_BLOCKERS' | 'NOT_READY' | 'SESSION_DATA_MISSING'
+    public readonly code: 'OVERLAP' | 'INVALID_TRANSITION' | 'NOT_FOUND' | 'VALIDATION' | 'INSUFFICIENT_ROLE' | 'NOT_LOCKED' | 'NOT_UNDER_REVIEW' | 'HARD_BLOCKERS' | 'NOT_READY' | 'SESSION_DATA_MISSING' | 'REOPEN_REASON_REQUIRED' | 'REOPEN_FORBIDDEN_LOCKED' | 'REOPEN_UNAUTHORIZED'
   ) {
     super(message);
     this.name = 'CloseSessionError';
@@ -62,11 +77,12 @@ export async function createSession(
 ): Promise<CloseSession> {
   const basis = input.basis ?? 'accrual';
   const standard = input.standard ?? 'GAAP';
-  const status = input.status ?? 'draft';
+  const status = input.status ?? 'open';
   if (basis !== 'cash' && basis !== 'accrual') {
     throw new CloseSessionError('basis must be cash or accrual', 'VALIDATION');
   }
-  if (status !== 'draft' && status !== 'in_progress' && status !== 'ready_for_review' && status !== 'finalized' && status !== 'locked' && status !== 'certified') {
+  const validStatuses: CloseSessionStatus[] = ['open', 'in_progress', 'under_review', 'certified', 'locked'];
+  if (!validStatuses.includes(status)) {
     throw new CloseSessionError('invalid status', 'VALIDATION');
   }
   const overlapping = await repo.hasOverlappingSession(
@@ -141,7 +157,7 @@ export interface EnsureSessionForPeriodResult {
   created: boolean;
 }
 
-/** Idempotent ensure: find or create a draft close session for (tenantId, entityId, periodLabel). No lock/certify. */
+/** Idempotent ensure: find or create an open close session for (tenantId, entityId, periodLabel). No lock/certify. */
 export async function ensureSessionForPeriod(
   pool: Pool,
   tenantId: string,
@@ -157,7 +173,7 @@ export async function ensureSessionForPeriod(
     entityId,
     periodStart: bounds.periodStart,
     periodEnd: bounds.periodEnd,
-    status: 'draft',
+    status: 'open',
   });
   return result;
 }
@@ -179,8 +195,7 @@ export async function listSessions(
 
 /**
  * Update session status. Call only from within a transaction; acquires row lock (FOR UPDATE) to prevent concurrent advance races.
- * Logs close_session_transition for draft→in_progress, in_progress→ready_for_review, ready_for_review→finalized.
- * For finalized→locked and locked→certified, the caller logs close_lock and certify_close respectively (no double-log).
+ * Logs close_session_transition for every state change.
  */
 export async function updateStatus(
   client: Pool | PoolClient,
@@ -236,8 +251,8 @@ export interface CertifyCloseInput {
 }
 
 /**
- * Certify a close session: only from locked, no hard blockers, approver role.
- * Sets status to certified and records certify_close in audit ledger.
+ * Certify a close session: only from under_review, no hard blockers, approver role.
+ * Re-runs all hard validation checks, creates snapshot, signs artifact, sets status to certified.
  * Uses row-level lock (SELECT FOR UPDATE) inside transaction to prevent concurrent certify races.
  */
 export async function certifyCloseSession(
@@ -259,16 +274,23 @@ export async function certifyCloseSession(
     if (lockResult.rows.length === 0) {
       throw new CloseSessionError('Close session not found', 'NOT_FOUND');
     }
-    const lockedStatus = lockResult.rows[0].status;
-    if (lockedStatus !== 'locked') {
+    const currentStatus = lockResult.rows[0].status;
+    if (currentStatus !== 'under_review') {
       throw new CloseSessionError(
-        `Certification only allowed from locked; current status is ${lockedStatus}`,
-        'INVALID_TRANSITION'
+        `Certification only allowed from under_review; current status is ${currentStatus}`,
+        'NOT_UNDER_REVIEW'
       );
     }
 
     const session = await repo.getCloseSessionById(client, input.tenantId, input.closeSessionId);
     if (!session) throw new CloseSessionError('Close session not found', 'NOT_FOUND');
+
+    if (session.statementsStaleSince) {
+      throw new CloseSessionError(
+        'Financial statements have changed since last generation; regenerate statements before certifying.',
+        'VALIDATION'
+      );
+    }
 
     const readiness = await computeReadiness(pool, input.tenantId, session);
     if (readiness.hardBlockers.length > 0) {
@@ -326,13 +348,26 @@ export async function certifyCloseSession(
         totalCredits,
       },
     };
+    let statements;
     try {
-      buildCertifiedStatementsFromSnapshot(snapshotPayload);
+      statements = buildCertifiedStatementsFromSnapshot(snapshotPayload);
     } catch (_e) {
       throw new CloseSessionError(
         'Trial balance does not pass integrity check (Truth Gate). Fix imbalance or balance sheet equation before certifying.',
         'VALIDATION'
       );
+    }
+
+    const validationChecks = runCrossStatementValidationForCertification(
+      statements.balanceSheet,
+      statements.profitAndLoss,
+      statements.cashFlow ?? null,
+      statements.equityChanges ?? null
+    );
+    const hardFailures = validationChecks.filter((c) => c.check_type === 'hard' && !c.passes);
+    if (hardFailures.length > 0) {
+      const messages = hardFailures.map((c) => c.message ?? c.check_name).join('; ');
+      throw new CloseSessionError(`Cross-statement validation failed: ${messages}`, 'VALIDATION');
     }
 
     let generalLedger: LedgerSnapshotPayload['generalLedger'];
@@ -396,6 +431,12 @@ export async function certifyCloseSession(
         hashVersion: snapshot.hashVersion,
         snapshotPayload: snapshot.snapshotPayloadJson,
         auditChainResult,
+        validationStateAtCertification: validationChecks.map((c) => ({
+          check_name: c.check_name,
+          check_type: c.check_type,
+          passes: c.passes,
+          message: c.message,
+        })),
       });
       const inserted = await certArtifactRepo.insertCertificationArtifact(client, {
         tenantId: input.tenantId,
@@ -440,19 +481,16 @@ export async function certifyCloseSession(
   });
 }
 
-/** Next status toward locked (draft → … → locked). Returns null when already locked or certified. */
-function nextStatusTowardLocked(status: CloseSessionStatus): CloseSessionStatus | null {
+/** Next status toward under_review (open → in_progress → under_review). Returns null when already under_review or beyond. */
+function nextStatusTowardUnderReview(status: CloseSessionStatus): CloseSessionStatus | null {
   switch (status) {
-    case 'draft':
+    case 'open':
       return 'in_progress';
     case 'in_progress':
-      return 'ready_for_review';
-    case 'ready_for_review':
-      return 'finalized';
-    case 'finalized':
-      return 'locked';
-    case 'locked':
+      return 'under_review';
+    case 'under_review':
     case 'certified':
+    case 'locked':
       return null;
     default:
       return null;
@@ -471,7 +509,7 @@ export interface AdvanceResultSuccess {
   session: CloseSession;
   statusBefore: CloseSessionStatus;
   statusAfter: CloseSessionStatus;
-  actionTaken: 'none' | 'locked' | 'certified';
+  actionTaken: 'none' | 'advanced';
   result: {
     certifiedSnapshotId: string | null;
     snapshotHash: string | null;
@@ -492,6 +530,159 @@ export interface AdvanceResultFailure {
     hashVersion: null;
   };
   blockers: AdvanceBlocker[];
+}
+
+/** Gate: can transition IN_PROGRESS → UNDER_REVIEW. Returns ready and list of missing items. */
+export async function canAdvanceToUnderReview(
+  pool: Pool,
+  tenantId: string,
+  session: CloseSession
+): Promise<{ allowed: boolean; missing: string[] }> {
+  const readiness = await computeReadiness(pool, tenantId, session);
+  if (readiness.ready && readiness.hardBlockers.length === 0) {
+    return { allowed: true, missing: [] };
+  }
+  return { allowed: false, missing: readiness.hardBlockers };
+}
+
+/** Gate: can transition UNDER_REVIEW → CERTIFIED. Re-validates (no cache). */
+export async function canCertify(
+  pool: Pool,
+  tenantId: string,
+  session: CloseSession
+): Promise<{ allowed: boolean; missing: string[] }> {
+  if (session.status !== 'under_review') {
+    return { allowed: false, missing: [`Session must be under_review; current status is ${session.status}`] };
+  }
+  const readiness = await computeReadiness(pool, tenantId, session);
+  if (!readiness.ready || readiness.hardBlockers.length > 0) {
+    return { allowed: false, missing: readiness.hardBlockers };
+  }
+  const evidenceCheck = await checkEvidencePolicyForCertification(pool, tenantId, session.id);
+  for (const b of evidenceCheck.hardBlockers) {
+    readiness.hardBlockers.push(b.message);
+  }
+  if (readiness.hardBlockers.length > 0) {
+    return { allowed: false, missing: readiness.hardBlockers };
+  }
+  return { allowed: true, missing: [] };
+}
+
+/** Gate: can transition CERTIFIED → LOCKED. */
+export function canLock(session: CloseSession): boolean {
+  return session.status === 'certified';
+}
+
+/** Gate: can reopen (CERTIFIED → IN_PROGRESS). Requires reason and reopen authority. */
+export function canReopen(
+  session: CloseSession,
+  reason: string | undefined,
+  hasReopenAuthority: boolean
+): { allowed: boolean; missing: string[] } {
+  const missing: string[] = [];
+  if (session.status === 'locked') {
+    missing.push('Cannot reopen: session is locked (terminal state).');
+    return { allowed: false, missing };
+  }
+  if (session.status !== 'certified') {
+    missing.push(`Reopen only allowed from certified; current status is ${session.status}`);
+    return { allowed: false, missing };
+  }
+  if (!hasReopenAuthority) {
+    missing.push('Reopen requires CFO-level or configured reopen authority.');
+    return { allowed: false, missing };
+  }
+  const trimmed = (reason ?? '').trim();
+  if (trimmed.length === 0) {
+    missing.push('Reopen reason is required and cannot be empty.');
+    return { allowed: false, missing };
+  }
+  if (trimmed.length < 10) {
+    missing.push('Reopen reason must be at least 10 characters.');
+    return { allowed: false, missing };
+  }
+  return { allowed: true, missing: [] };
+}
+
+/** Reopen: CERTIFIED → IN_PROGRESS. Requires same authority as certify (approver) and non-empty reason. */
+export async function reopenCloseSession(
+  pool: Pool,
+  sessionId: string,
+  tenantId: string,
+  userId: string,
+  reason: string,
+  actorRole: CloseRole
+): Promise<CloseSession> {
+  assertNoAiMutationContext();
+  if (!canPerform(actorRole, 'certify_close')) {
+    throw new CloseSessionError('Insufficient role: reopen requires approver', 'REOPEN_UNAUTHORIZED');
+  }
+  const session = await repo.getCloseSessionById(pool, tenantId, sessionId);
+  if (!session) throw new CloseSessionError('Close session not found', 'NOT_FOUND');
+  const check = canReopen(session, reason, true);
+  if (!check.allowed) {
+    if (session.status === 'locked') throw new CloseSessionError(check.missing[0] ?? 'Cannot reopen locked session', 'REOPEN_FORBIDDEN_LOCKED');
+    if ((reason ?? '').trim().length < 10) throw new CloseSessionError(check.missing[0] ?? 'Reopen reason required (min 10 characters)', 'REOPEN_REASON_REQUIRED');
+    throw new CloseSessionError(check.missing[0] ?? 'Cannot reopen', 'INVALID_TRANSITION');
+  }
+  return withTransaction(pool, async (client) => {
+    const updated = await repo.updateReopen(client, tenantId, sessionId, userId, reason.trim());
+    if (!updated) throw new CloseSessionError('Close session not found', 'NOT_FOUND');
+    await recordMaterialEvent(client, {
+      tenantId,
+      periodLabel: updated.periodEnd?.slice(0, 7),
+      eventType: 'close_session_reopened',
+      deterministicFlagSnapshot: {
+        closeSessionId: sessionId,
+        reopenedBy: userId,
+        reason: reason.trim(),
+        priorCertifiedAt: session.certifiedAt,
+        priorCertifiedSnapshotId: session.certifiedSnapshotId ?? null,
+      },
+      createdBy: userId,
+    });
+    await createIssue(pool, {
+      tenantId,
+      periodId: sessionId,
+      entityId: session.entityId,
+      issueType: 'period_reopened',
+      category: 'review',
+      severity: 'info',
+      title: 'Period reopened',
+      description: `Period reopened by ${userId}. Reason: ${reason.trim()}`,
+      sourceDetails: { type: 'period_reopened', reopenedBy: userId },
+    });
+    return updated;
+  });
+}
+
+/** Lock: CERTIFIED → LOCKED. Terminal state; no further transitions. */
+export async function lockCloseSession(pool: Pool, sessionId: string, tenantId: string, lockedBy?: string): Promise<CloseSession> {
+  assertNoAiMutationContext();
+  const session = await repo.getCloseSessionById(pool, tenantId, sessionId);
+  if (!session) throw new CloseSessionError('Close session not found', 'NOT_FOUND');
+  if (!canLock(session)) {
+    throw new CloseSessionError(`Lock only allowed from certified; current status is ${session.status}`, 'INVALID_TRANSITION');
+  }
+  return withTransaction(pool, async (client) => {
+    const updated = await repo.updateCloseSessionStatus(client, tenantId, sessionId, 'locked');
+    if (!updated) throw new CloseSessionError('Close session not found', 'NOT_FOUND');
+    const daysSinceCert = session.certifiedAt
+      ? Math.floor((Date.now() - new Date(session.certifiedAt).getTime()) / (24 * 60 * 60 * 1000))
+      : null;
+    await recordMaterialEvent(client, {
+      tenantId,
+      periodLabel: updated.periodEnd?.slice(0, 7),
+      eventType: 'close_session_locked',
+      deterministicFlagSnapshot: {
+        closeSessionId: sessionId,
+        lockedBy: lockedBy ?? 'system',
+        daysSinceCertification: daysSinceCert,
+      },
+      createdBy: lockedBy ?? 'system',
+    });
+    return updated;
+  });
 }
 
 export type AdvanceResult = AdvanceResultSuccess | AdvanceResultFailure;
@@ -515,8 +706,10 @@ export interface AdvanceSessionInput {
 }
 
 /**
- * Deterministic advance: draft → … → locked (one call), locked → certified, certified → no-op.
- * Reuses updateStatus and certifyCloseSession. Returns 422-style result (success: false + blockers) when not ready.
+ * Advance: open → in_progress → under_review (one step per call, or multiple steps until gate).
+ * Gate at IN_PROGRESS → UNDER_REVIEW: requires all readiness checks (computeReadiness).
+ * Certification is a separate API (certify); lock is separate (lockCloseSession).
+ * Returns 422-style result (success: false + blockers) when not ready to advance to under_review.
  */
 export async function advanceSession(
   pool: Pool,
@@ -533,121 +726,42 @@ export async function advanceSession(
     hashVersion: null,
   };
 
-  if (session.status === 'certified') {
+  if (session.status === 'under_review' || session.status === 'certified' || session.status === 'locked') {
     return {
       success: true,
       session,
-      statusBefore: 'certified',
-      statusAfter: 'certified',
+      statusBefore: session.status,
+      statusAfter: session.status,
       actionTaken: 'none',
       result: emptyResult,
       blockers: [],
     };
   }
 
-  if (session.status === 'locked') {
-    const readiness = await computeReadiness(pool, input.tenantId, session);
-    try {
-      const certified = await certifyCloseSession(
-        pool,
-        {
-          tenantId: input.tenantId,
-          closeSessionId: input.closeSessionId,
-          certifiedBy: (input.certifiedBy ?? 'advance-api').trim() || 'advance-api',
-          periodLabel: session.periodEnd?.slice(0, 7),
-        },
-        input.actorRole
-      );
-      const snapshot = certified.certifiedSnapshotId
-        ? await getLedgerSnapshotById(pool, input.tenantId, certified.certifiedSnapshotId)
-        : null;
-      return {
-        success: true,
-        session: certified,
-        statusBefore: 'locked',
-        statusAfter: 'certified',
-        actionTaken: 'certified',
-        result: {
-          certifiedSnapshotId: certified.certifiedSnapshotId ?? null,
-          snapshotHash: snapshot?.snapshotHash ?? null,
-          hashVersion: snapshot?.hashVersion != null ? String(snapshot.hashVersion) : null,
-        },
-        blockers: [],
-      };
-    } catch (e) {
-      if (e instanceof CloseSessionError && e.code === 'HARD_BLOCKERS') {
-        return {
-          success: false,
-          session,
-          statusBefore: 'locked',
-          statusAfter: 'locked',
-          actionTaken: 'none',
-          result: emptyResult,
-          blockers: mapHardBlockersToBlockers(readiness.hardBlockers),
-        };
-      }
-      if (e instanceof CloseSessionError && (e.code === 'INSUFFICIENT_ROLE' || e.code === 'NOT_LOCKED')) {
-        return {
-          success: false,
-          session,
-          statusBefore: 'locked',
-          statusAfter: 'locked',
-          actionTaken: 'none',
-          result: emptyResult,
-          blockers: mapHardBlockersToBlockers([e.message]),
-        };
-      }
-      // INVALID_TRANSITION (e.g. concurrent certify - already certified) propagates → 409
-      throw e;
-    }
-  }
-
-  // draft | in_progress | ready_for_review | finalized → advance toward locked
-  // Wrap status updates + close_lock audit in a single transaction for atomicity.
-  // Acquire row lock at start to serialize concurrent advance calls (no race).
   try {
-    const { session: current, didLock } = await withTransaction(pool, async (client) => {
+    const current = await withTransaction(pool, async (client) => {
       const locked = await repo.getCloseSessionByIdForUpdate(client, input.tenantId, input.closeSessionId);
-      if (!locked) {
-        throw new CloseSessionError('Close session not found', 'NOT_FOUND');
+      if (!locked) throw new CloseSessionError('Close session not found', 'NOT_FOUND');
+      let currentSession = locked;
+      const next = nextStatusTowardUnderReview(currentSession.status);
+      if (!next) return currentSession;
+      if (next === 'under_review') {
+        const readiness = await computeReadiness(pool, input.tenantId, currentSession);
+        if (!readiness.ready && readiness.hardBlockers.length > 0) {
+          throw new AdvanceBlockedError(mapHardBlockersToBlockers(readiness.hardBlockers), currentSession);
+        }
       }
-      // Already locked by concurrent request → deterministic 409
-      if (locked.status === 'locked') {
-        throw new CloseSessionError(
-          'Session already locked by concurrent request',
-          'INVALID_TRANSITION'
+      currentSession = await updateStatus(client, input.tenantId, input.closeSessionId, next, input.certifiedBy ?? 'advance-api');
+      if (next === 'in_progress') {
+        const { initializeReconciliations } = await import('./period_reconciliation_service.js');
+        await initializeReconciliations(
+          client as unknown as Pool,
+          input.tenantId,
+          input.closeSessionId,
+          currentSession.entityId
         );
       }
-      let currentSession = locked;
-      let didLock = false;
-      while (currentSession.status !== 'locked') {
-        const next = nextStatusTowardLocked(currentSession.status);
-        if (!next) break;
-        if (next === 'finalized' || next === 'locked') {
-          const readiness = await computeReadiness(pool, input.tenantId, currentSession);
-          if (!readiness.ready && readiness.hardBlockers.length > 0) {
-            throw new AdvanceBlockedError(mapHardBlockersToBlockers(readiness.hardBlockers), currentSession);
-          }
-        }
-        currentSession = await updateStatus(client, input.tenantId, input.closeSessionId, next, 'advance-api');
-        if (next === 'locked') didLock = true;
-      }
-
-      if (didLock && currentSession.status === 'locked') {
-        await recordMaterialEvent(client, {
-          tenantId: input.tenantId,
-          periodLabel: currentSession.periodEnd?.slice(0, 7),
-          eventType: 'close_lock',
-          deterministicFlagSnapshot: {
-            closeSessionId: input.closeSessionId,
-            statusBefore: session.status,
-            statusAfter: 'locked',
-            actor: 'advance-api',
-          },
-          createdBy: 'advance-api',
-        });
-      }
-      return { session: currentSession, didLock };
+      return currentSession;
     });
 
     return {
@@ -655,7 +769,7 @@ export async function advanceSession(
       session: current,
       statusBefore: session.status,
       statusAfter: current.status,
-      actionTaken: didLock ? 'locked' : 'none',
+      actionTaken: current.status !== session.status ? 'advanced' : 'none',
       result: emptyResult,
       blockers: [],
     };

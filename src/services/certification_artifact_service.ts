@@ -33,6 +33,8 @@ export interface BuildArtifactInput {
   hashVersion: number;
   snapshotPayload: LedgerSnapshotPayload;
   auditChainResult?: AuditLedgerVerifyResult;
+  /** Cross-statement validation at certification. */
+  validationStateAtCertification?: Array<{ check_name: string; check_type: 'hard' | 'soft'; passes: boolean; message: string | null }>;
 }
 
 export function buildCertificationArtifact(input: BuildArtifactInput): {
@@ -82,6 +84,9 @@ export function buildCertificationArtifact(input: BuildArtifactInput): {
     snapshot,
     ...(auditChain && { auditChain }),
     ...(evidenceManifest && { evidenceManifest }),
+    ...(input.validationStateAtCertification && input.validationStateAtCertification.length > 0 && {
+      validationStateAtCertification: input.validationStateAtCertification,
+    }),
     mode,
   };
 

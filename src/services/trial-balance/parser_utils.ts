@@ -1,9 +1,14 @@
 /**
  * Parser utilities — standardize column names for messy CSV/XLSX (ported from backend/parser/column_cleaner.py).
+ * All amount parsing uses Decimal.js via utils/decimal.ts.
+ */
+
+import { round2, from } from '../../utils/decimal.js';
+
+/**
  * Maps variants like "Balance", "Amt", "Dr", "Cr" to canonical: Date, Vendor, Amount, Description, AccountName, AccountCode, Debit, Credit.
  * Handles "pathetic" bank/export formats for trial balance and transaction lists.
  */
-
 export const CANONICAL_DATE = 'Date';
 export const CANONICAL_VENDOR = 'Vendor';
 export const CANONICAL_PRICE = 'Price';
@@ -153,13 +158,21 @@ export function inferFormat(cleanedRows: StandardizedRow[]): 'trial_balance' | '
   return 'mixed';
 }
 
-/** Parse numeric value from cell (commas, parentheses for negative). */
+/** Parse numeric value from cell (commas, parentheses for negative). Uses Decimal.js. */
 export function parseAmount(value: unknown): number {
-  if (typeof value === 'number' && !Number.isNaN(value)) return value;
+  if (typeof value === 'number' && Number.isFinite(value) && !Number.isNaN(value)) return round2(value);
   const s = String(value ?? '').trim().replace(/,/g, '');
   if (s === '' || s === '-') return 0;
-  if (s.startsWith('(') && s.endsWith(')')) return -parseFloat(s.slice(1, -1)) || 0;
-  return parseFloat(s) || 0;
+  try {
+    if (s.startsWith('(') && s.endsWith(')')) {
+      const inner = from(s.slice(1, -1)).negated();
+      return round2(inner.isFinite() ? inner.toNumber() : 0);
+    }
+    const d = from(s);
+    return round2(d.isFinite() ? d.toNumber() : 0);
+  } catch {
+    return 0;
+  }
 }
 
 /**

@@ -7,8 +7,10 @@
 
 import type { RawTrialBalanceRow } from './trialBalanceParser.js';
 import { classifyIngestionAgentic } from './agentic_ingestion_classifier.js';
+import { round2, from } from '../utils/decimal.js';
 import { detectFileType, parseFile } from './ingestion_agent.js';
 import { callLLMWithFallback } from '../llm/callWithFallback.js';
+import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 
 const MAX_LINES_PER_PARSE = 100;
 
@@ -20,12 +22,21 @@ export function isMessyTrialBalance(rawRows: RawTrialBalanceRow[]): boolean {
   return allZero && hasNonEmptyAccount;
 }
 
+/** Parse number using Decimal.js. AI-adjacent code must maintain precision. */
 function parseNum(value: unknown): number {
-  if (typeof value === 'number' && !Number.isNaN(value)) return value;
+  if (typeof value === 'number' && Number.isFinite(value) && !Number.isNaN(value)) return round2(value);
   const s = String(value ?? '').trim().replace(/,/g, '');
-  if (s === '') return 0;
-  if (s.startsWith('(') && s.endsWith(')')) return -parseFloat(s.slice(1, -1)) || 0;
-  return parseFloat(s) || 0;
+  if (s === '' || s === '-') return 0;
+  try {
+    if (s.startsWith('(') && s.endsWith(')')) {
+      const inner = from(s.slice(1, -1)).negated();
+      return round2(inner.isFinite() ? inner.toNumber() : 0);
+    }
+    const d = from(s);
+    return round2(d.isFinite() ? d.toNumber() : 0);
+  } catch {
+    return 0;
+  }
 }
 
 function getMappedValue(
@@ -65,27 +76,33 @@ ${batch.map((s, i) => `${i + 1}: ${s}`).join('\n')}
 
 Return only the JSON array, no other text.`;
 
-  const parsed = await callLLMWithFallback({
-    system:
-      'You are a CPA-grade data extractor. Extract account name and debit/credit amounts from messy ledger lines. Return only a JSON array.',
-    prompt,
-    maxTokens: 4000,
-    parse: (raw) => {
-      const start = raw.indexOf('[');
-      const end = raw.lastIndexOf(']');
-      const slice = start >= 0 && end >= 0 ? raw.slice(start, end + 1) : raw;
-      const arr = JSON.parse(slice) as unknown[];
-      if (!Array.isArray(arr)) return [];
-      return arr.map((item) => {
-        const o = item && typeof item === 'object' ? (item as Record<string, unknown>) : {};
-        const accountName = String(o.accountName ?? o.account ?? '').trim() || 'Unknown';
-        const debit = parseNum(o.debit);
-        const credit = parseNum(o.credit);
-        return { accountName, debit, credit };
-      });
-    },
-    fallback: [],
-  });
+  let parsed: { accountName: string; debit: number; credit: number }[];
+  try {
+    parsed = await callLLMWithFallback({
+      system:
+        'You are a CPA-grade data extractor. Extract account name and debit/credit amounts from messy ledger lines. Return only a JSON array.',
+      prompt,
+      maxTokens: 4000,
+      parse: (raw) => {
+        const start = raw.indexOf('[');
+        const end = raw.lastIndexOf(']');
+        const slice = start >= 0 && end >= 0 ? raw.slice(start, end + 1) : raw;
+        const arr = JSON.parse(slice) as unknown[];
+        if (!Array.isArray(arr)) return [];
+        return arr.map((item) => {
+          const o = item && typeof item === 'object' ? (item as Record<string, unknown>) : {};
+          const accountName = String(o.accountName ?? o.account ?? '').trim() || 'Unknown';
+          const debit = parseNum(o.debit);
+          const credit = parseNum(o.credit);
+          return { accountName, debit, credit };
+        });
+      },
+      fallback: [],
+    });
+    assertNoNumericAmountsInAgentOutput(parsed, 'agentic_ledger_to_tb.parseLedgerLinesAgentic');
+  } catch {
+    return [];
+  }
 
   if (lineStrings.length > MAX_LINES_PER_PARSE) {
     const rest = await parseLedgerLinesAgentic(lineStrings.slice(MAX_LINES_PER_PARSE));
@@ -148,8 +165,8 @@ export async function agenticLedgerToTrialBalance(
     let finalDebit = debit;
     let finalCredit = credit;
     if (debit === 0 && credit === 0 && amount !== 0) {
-      if (amount >= 0) finalDebit = amount;
-      else finalCredit = -amount;
+      if (amount >= 0) finalDebit = round2(amount);
+      else finalCredit = round2(from(amount).negated().toNumber());
     }
     const accountCode = getMappedValue(row, mapping, 'accountcode') ?? undefined;
     tbRows.push({
