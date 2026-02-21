@@ -5,14 +5,16 @@
 
 import type { JobHandlerContext } from '../types/job.js';
 import { getTenantPool } from '../db/index.js';
-import { runAllFetchersAndIngest } from './ingestion_fetchers.js';
+// QUARANTINED — Automated ingestion infrastructure not in MVP architecture
+// import { runAllFetchersAndIngest } from './ingestion_fetchers.js';
 import { generateStatements as generateStatementPackage } from './statement_package_service.js';
 
-/** Run ingestion pipeline for a tenant (fetch email/drive, run ingestion agent, dedup). */
-export async function handleIngestionPipeline(ctx: JobHandlerContext): Promise<void> {
-  const tenantId = typeof ctx.job.payload?.tenantId === 'string' ? ctx.job.payload.tenantId : undefined;
-  await runAllFetchersAndIngest(tenantId);
-}
+// QUARANTINED — Automated ingestion pipeline not in MVP architecture
+// /** Run ingestion pipeline for a tenant (fetch email/drive, run ingestion agent, dedup). */
+// export async function handleIngestionPipeline(ctx: JobHandlerContext): Promise<void> {
+//   const tenantId = typeof ctx.job.payload?.tenantId === 'string' ? ctx.job.payload.tenantId : undefined;
+//   await runAllFetchersAndIngest(tenantId);
+// }
 
 /**
  * Agentic cleanup/classification for a context (tenant/session/document).
@@ -40,7 +42,8 @@ export const JOB_HANDLERS: Record<
   string,
   (ctx: JobHandlerContext) => Promise<void>
 > = {
-  ingestion_pipeline: handleIngestionPipeline,
+  // QUARANTINED — Automated ingestion pipeline not in MVP architecture
+  // ingestion_pipeline: handleIngestionPipeline,
   agentic_cleanup: handleAgenticCleanup,
   statement_generation: handleStatementGeneration,
 };

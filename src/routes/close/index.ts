@@ -11,8 +11,9 @@ import closeReconciliationRouter from './close_reconciliation.js';
 import closeControlsRouter from './close_controls.js';
 import closeMaterialityDisclosureRouter from './close_materiality_disclosure.js';
 import closeSignoffReadinessRouter from './close_signoff_readiness.js';
-import closeOnePagerExceptionsRouter from './close_one_pager_exceptions.js';
-import closePackageRouter from './close_package.js';
+// QUARANTINED — Summary/reporting routes not in MVP architecture
+// import closeOnePagerExceptionsRouter from './close_one_pager_exceptions.js';
+// import closePackageRouter from './close_package.js';
 import closeAdjustmentsRouter from './close_adjustments.js';
 import closeClosingEntriesRouter from './close_closing_entries.js';
 import closeAuditLogRouter from './close_audit_log.js';
@@ -47,8 +48,9 @@ router.use(closeReconciliationRouter);
 router.use(closeControlsRouter);
 router.use(closeMaterialityDisclosureRouter);
 router.use(closeSignoffReadinessRouter);
-router.use(closeOnePagerExceptionsRouter);
-router.use(closePackageRouter);
+// QUARANTINED — Summary/reporting routes not in MVP architecture
+// router.use(closeOnePagerExceptionsRouter);
+// router.use(closePackageRouter);
 router.use(closeAdjustmentsRouter);
 router.use(closeClosingEntriesRouter);
 router.use(closeAuditLogRouter);

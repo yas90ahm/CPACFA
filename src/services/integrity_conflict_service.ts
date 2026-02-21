@@ -3,7 +3,8 @@
  * Used by the export route to block export when covenant breaches would be fatal.
  */
 
-import { monitorCovenants } from './enterprise_m_and_a_financing_service.js';
+// QUARANTINED — enterprise_m_and_a_financing_service not in MVP architecture
+// import { monitorCovenants } from './enterprise_m_and_a_financing_service.js';
 
 /** Covenant thresholds for export gate (debt/equity, debt/EBITDA, interest coverage, current ratio). */
 const COVENANT_THRESHOLDS = {
@@ -99,13 +100,22 @@ export function detectIntegrityConflicts(input: IntegrityConflictInput): DetectI
   }
 
   if (ebitda != null && ebitda > 0 && debtForCovenant > 0) {
-    const covenantResult = monitorCovenants(
-      { debt: debtForCovenant, ebitda, interestExpense: interestExpense ?? 0 },
-      {
-        maxDebtToEbitda: thresholds.maxDebtToEbitda,
-        minInterestCoverage: thresholds.minInterestCoverage,
-      }
-    );
+    // QUARANTINED — enterprise_m_and_a_financing_service not in MVP architecture
+    // const covenantResult = monitorCovenants(
+    //   { debt: debtForCovenant, ebitda, interestExpense: interestExpense ?? 0 },
+    //   {
+    //     maxDebtToEbitda: thresholds.maxDebtToEbitda,
+    //     minInterestCoverage: thresholds.minInterestCoverage,
+    //   }
+    // );
+    const debtToEbitda = ebitda > 0 ? debtForCovenant / ebitda : 0;
+    const interestCoverage = (interestExpense ?? 0) > 0 ? ebitda / (interestExpense ?? 0) : 0;
+    const covenantResult = {
+      debtToEbitdaBreach: debtToEbitda > thresholds.maxDebtToEbitda,
+      interestCoverageBreach: interestCoverage < thresholds.minInterestCoverage,
+      debtToEbitda,
+      interestCoverage,
+    };
     if (covenantResult.debtToEbitdaBreach) {
       conflicts.push({
         severity: 'Fatal',

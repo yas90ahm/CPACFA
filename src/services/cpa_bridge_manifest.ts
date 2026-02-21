@@ -39,7 +39,7 @@ export const CPA_BRIDGE_MANIFEST: Record<BridgeStandardKey, BridgeEntry> = {
 
 /** Service module paths (for documentation / handler imports). */
 export const BRIDGE_SERVICE_PATHS: Record<BridgeStandardKey, string> = {
-  Lease: 'src/services/lease_service.ts',
+  Lease: 'src/_quarantine/services/lease_service.ts',
   Revenue: 'src/services/revenue_recognition_service.ts',
   FixedAsset: 'src/services/fixed_asset_service.ts',
   Tax: 'src/services/deferred_tax_service.ts',

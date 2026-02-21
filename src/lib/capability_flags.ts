@@ -12,8 +12,8 @@ function envBool(name: string, defaultValue: boolean): boolean {
 /** CPA module (professional review, consolidation, disclosure, audit binder). */
 export const ENABLE_CPA_MODULE = envBool('ENABLE_CPA_MODULE', true);
 
-/** CFA module (DCF, LBO, portfolio, ratios, liquidity). */
-export const ENABLE_CFA_MODULE = envBool('ENABLE_CFA_MODULE', true);
+/** CFA module (DCF, LBO, portfolio, ratios, liquidity). Disabled by default — product is CPA close engine. */
+export const ENABLE_CFA_MODULE = envBool('ENABLE_CFA_MODULE', false);
 
 /** Integrated Supervisor: conflict detection, veto, export gate on unresolved conflicts. Only meaningful when both CPA and CFA are enabled. */
 export const ENABLE_INTEGRATED_SUPERVISOR =

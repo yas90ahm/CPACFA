@@ -28,7 +28,8 @@ export type IssueType =
   | 'duplicate_entry'
   | 'round_number_suspicious'
   | 'period_reopened'
-  | 'manual_flag';
+  | 'manual_flag'
+  | 'review_rejection';
 
 export type CloseIssueSeverity = 'critical' | 'blocking' | 'warning' | 'info';
 

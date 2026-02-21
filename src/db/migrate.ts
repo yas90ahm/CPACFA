@@ -11,12 +11,13 @@ import { getControlPool, queryControl, isDbConfigured, runTenantMigrations } fro
 
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 
-/** Control DB migrations only (001, 002, 010, 075). Do not run 003 on control. */
+/** Control DB migrations only (001, 002, 010, 075, 119). Do not run 003 on control. */
 const CONTROL_MIGRATION_FILES = [
   '001_initial.sql',
   '002_control_add_database_url.sql',
   '010_scheduler_lock.sql',
   '075_jobs.sql',
+  '119_user_management_and_portfolio.sql',
 ];
 
 async function getAppliedVersionsControl(): Promise<number[]> {

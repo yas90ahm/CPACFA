@@ -32,6 +32,13 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
   req.userId = payload.userId;
   req.tenantId = payload.tenantId;
   req.role = payload.role;
+  if (isDbConfigured() && payload.userId) {
+    import('../services/team_service.js').then(({ updateLastActive }) =>
+      import('../db/index.js').then(({ getControlPool }) => {
+        updateLastActive(getControlPool(), payload.userId!).catch(() => {});
+      })
+    );
+  }
   next();
 }
 
@@ -45,6 +52,13 @@ export function optionalAuth(req: AuthRequest, _res: Response, next: NextFunctio
       req.userId = payload.userId;
       req.tenantId = payload.tenantId;
       req.role = payload.role;
+      if (isDbConfigured() && payload.userId) {
+        import('../services/team_service.js').then(({ updateLastActive }) =>
+          import('../db/index.js').then(({ getControlPool }) => {
+            updateLastActive(getControlPool(), payload.userId!).catch(() => {});
+          })
+        );
+      }
     }
   }
   next();

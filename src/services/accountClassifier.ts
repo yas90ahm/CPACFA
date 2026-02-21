@@ -4,7 +4,8 @@
  */
 
 import type { AccountType, CodificationRef, TrialBalanceEntry } from '../types/financial.js';
-import { classifyAccountsAgentic } from './agentic_account_classifier.js';
+// QUARANTINED — Agentic account classifier not in MVP architecture
+// import { classifyAccountsAgentic } from './agentic_account_classifier.js';
 import {
   ASSET_REF,
   LIABILITY_REF,
@@ -142,18 +143,19 @@ export async function getClassificationSuggestions(entries: TrialBalanceEntry[])
   diffCount: number;
 }> {
   const deterministic = classifyTrialBalanceDeterministic(entries);
-  const names = entries.map((e) => e.accountName);
-  const agentic = await classifyAccountsAgentic(names);
+  // QUARANTINED — Agentic account classifier not in MVP architecture
+  // const names = entries.map((e) => e.accountName);
+  // const agentic = await classifyAccountsAgentic(names);
   const suggestedOverrides: { index: number; accountType: AccountType }[] = [];
-  if (agentic) {
-    for (let idx = 0; idx < deterministic.length; idx++) {
-      const det = deterministic[idx];
-      const ag = agentic[idx];
-      if (ag && det && ag !== det.accountType) {
-        suggestedOverrides.push({ index: idx, accountType: ag });
-      }
-    }
-  }
+  // if (agentic) {
+  //   for (let idx = 0; idx < deterministic.length; idx++) {
+  //     const det = deterministic[idx];
+  //     const ag = agentic[idx];
+  //     if (ag && det && ag !== det.accountType) {
+  //       suggestedOverrides.push({ index: idx, accountType: ag });
+  //     }
+  //   }
+  // }
   return {
     deterministic,
     suggestedOverrides,
@@ -190,10 +192,11 @@ export function applyUserClassificationOverrides(
  */
 export async function classifyTrialBalance(entries: TrialBalanceEntry[]): Promise<TrialBalanceEntry[]> {
   if (entries.every((e) => e.accountType)) return entries.map((e) => ({ ...e, codificationRef: e.codificationRef ?? getCodificationRef(e.accountType!) }));
-  const names = entries.map((e) => e.accountName);
-  const agentic = await classifyAccountsAgentic(names);
+  // QUARANTINED — Agentic account classifier not in MVP architecture
+  // const names = entries.map((e) => e.accountName);
+  // const agentic = await classifyAccountsAgentic(names);
   return entries.map((entry, idx) => {
-    const accountType = entry.accountType ?? agentic?.[idx] ?? classifyAccountName(entry.accountName);
+    const accountType = entry.accountType ?? /* agentic?.[idx] ?? */ classifyAccountName(entry.accountName);
     const codificationRef = getCodificationRef(accountType);
     return {
       ...entry,

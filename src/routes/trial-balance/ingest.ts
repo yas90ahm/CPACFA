@@ -18,8 +18,10 @@ import { buildEquityChangesStatement } from '../../services/equityChanges.js';
 import { buildNotesAndPolicies } from '../../services/notesPolicies.js';
 import { inferAccountingStandard } from '../../services/standard_selector.js';
 import { updatePolicyMemory } from '../../memory/index.js';
-import { classifyTransactionsAgentic } from '../../services/transaction_classifier.js';
-import { runPlanExecuteVerifyAgentic } from '../../services/agentic_plan_execute_verify.js';
+// QUARANTINED — transaction_classifier not in MVP architecture
+// import { classifyTransactionsAgentic } from '../../services/transaction_classifier.js';
+// QUARANTINED — Agentic plan-execute-verify not in MVP architecture
+// import { runPlanExecuteVerifyAgentic } from '../../services/agentic_plan_execute_verify.js';
 import { registerStatementGeneration, recordPolicyChange } from '../../services/audit_export_service.js';
 import { createIngestionIntegrityMemo } from '../../services/justification_service.js';
 import { markUploadCompleted, runResultPipeline } from '../../services/result_generator.js';
@@ -27,10 +29,12 @@ import * as persistence from '../../services/persistence_service.js';
 import { createStagingItem, updateStagingPayload } from '../../services/persistence_service.js';
 import { runClassifier, runAdvisor } from '../../ai/ai_orchestrator.js';
 import * as aiProposalsRepo from '../../db/repositories/tenant_ai_proposals_repository.js';
-import { assessAgenticQuality } from '../../services/agentic_quality_assessor.js';
+// QUARANTINED — Agentic quality assessor not in MVP architecture
+// import { assessAgenticQuality } from '../../services/agentic_quality_assessor.js';
 import { shouldEscalateToHuman, submitToStaging } from '../../services/hitl_orchestrator.js';
 import { addTodosFromGaps } from '../../services/reconciliation_todos.js';
-import { inferStandardAgentic } from '../../services/standard_inference_agentic.js';
+// QUARANTINED — standard_inference_agentic not in MVP architecture
+// import { inferStandardAgentic } from '../../services/standard_inference_agentic.js';
 import { runRulesAndPersistExceptions } from '../../services/data_quality_exception_service.js';
 import type { RuleEvaluationContext } from '../../services/data_quality_rule_service.js';
 import type { FinancialStatementsOutput } from '../../types/financial.js';
@@ -48,7 +52,8 @@ import { validateBody, requireValidTenantId } from '../../middleware/validationM
 import { ingestBodySchema, type IngestBody } from '../../schemas/request/trialBalance.js';
 import { getPrecedentForCloseStep, toSimilarPrecedentSummary } from '../../services/precedent_for_close_step.js';
 import { runProfessionalReview } from '../../services/professional_review_service.js';
-import { deriveCovenantAndLiquidityFromIngest } from '../../services/ingest_covenant_liquidity.js';
+// QUARANTINED — ingest_covenant_liquidity not on close pipeline
+// import { deriveCovenantAndLiquidityFromIngest } from '../../services/ingest_covenant_liquidity.js';
 import * as periodFinancialDataState from '../../db/repositories/period_financial_data_state_repository.js';
 import { classifyTrialBalance } from '../../services/accountClassifier.js';
 import { executeBridgeCommand } from '../../bridge/index.js';
@@ -342,7 +347,9 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       transactions && transactions.length > 0
         ? attachCategories(
             transactions,
-            await classifyTransactionsAgentic(transactions, { entityId: body.entityId })
+            // QUARANTINED — transaction_classifier not in MVP architecture
+            // await classifyTransactionsAgentic(transactions, { entityId: body.entityId })
+            [] // No transaction classification in MVP
           )
         : undefined;
     const explicitStandard = normalizeStandard(body.standard);
@@ -361,17 +368,20 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
         pool: poolIngest ?? undefined,
         tenantId: tenantIdIngest ?? undefined,
       }));
-    const standardInference = !standard
-      ? await inferStandardAgentic({
-          country: body.country,
-          jurisdiction: body.jurisdiction,
-          currency: body.currency,
-          taxId: body.taxId,
-          businessNumber: body.businessNumber,
-        })
-      : null;
+    // QUARANTINED — standard_inference_agentic not in MVP architecture
+    // const standardInference = !standard
+    //   ? await inferStandardAgentic({
+    //       country: body.country,
+    //       jurisdiction: body.jurisdiction,
+    //       currency: body.currency,
+    //       taxId: body.taxId,
+    //       businessNumber: body.businessNumber,
+    //     })
+    //   : null;
+    const standardInference = null;
     if (!standard) {
-      standard = standardInference?.standard ?? 'US_GAAP';
+      // QUARANTINED — standard_inference_agentic not in MVP architecture
+      standard = 'US_GAAP'; // Default to US_GAAP when not provided
     }
     if (body.entityId && poolIngest && tenantIdIngest) {
       await updatePolicyMemory(
@@ -516,11 +526,23 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
     const equityChanges = fullSet ? buildEquityChangesStatement(balanceSheet, priorBalanceSheetIngest, profitAndLoss) : undefined;
     const notesAndPolicies = fullSet && standard ? buildNotesAndPolicies(standard) : undefined;
 
-    const reasoningChain = await runPlanExecuteVerifyAgentic({
-      trialBalance: trialBalanceForBuild,
-      balanceSheet,
-      profitAndLoss,
-    });
+    // QUARANTINED — Agentic plan-execute-verify not in MVP architecture
+    // const reasoningChain = await runPlanExecuteVerifyAgentic({
+    //   trialBalance: trialBalanceForBuild,
+    //   balanceSheet,
+    //   profitAndLoss,
+    // });
+    const reasoningChain = {
+      plan: 'Deterministic validation',
+      executedAt: new Date().toISOString(),
+      verification: {
+        passed: balanceSheet.balances && trialBalanceForBuild.balances,
+        checks: [
+          balanceSheet.balances ? 'Balance sheet balances' : 'Balance sheet does not balance',
+          trialBalanceForBuild.balances ? 'Trial balance balances' : 'Trial balance does not balance',
+        ],
+      },
+    };
 
     const output: FinancialStatementsOutput = {
       reasoningChain,
@@ -595,13 +617,20 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
         pipelineInputSnapshot: { type: 'statements', output, meta },
       });
     }
-    const agenticAssessment = await assessAgenticQuality({
-      qualityChecks: pipelineResult.qualityChecks ?? [],
-      dataGaps: pipelineResult.dataGaps ?? [],
-      standard: standard,
-    });
+    // QUARANTINED — Agentic quality assessor not in MVP architecture
+    // const agenticAssessment = await assessAgenticQuality({
+    //   qualityChecks: pipelineResult.qualityChecks ?? [],
+    //   dataGaps: pipelineResult.dataGaps ?? [],
+    //   standard: standard,
+    // });
+    const agenticAssessment = {
+      overallSeverity: 'low' as const,
+      summary: 'Deterministic validation only',
+    };
     let hitl = pipelineResult.hitl ?? { escalated: false };
-    if (!hitl.escalated && agenticAssessment?.overallSeverity === 'critical') {
+    // QUARANTINED — Agentic quality assessor not in MVP architecture, so skip escalation check
+    // if (!hitl.escalated && agenticAssessment?.overallSeverity === 'critical') {
+    if (false) {
       const escalate = shouldEscalateToHuman({ isCriticalAccountingPolicyChange: true });
       if (escalate) {
         const item = await Promise.resolve(
@@ -612,7 +641,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
               type: 'other',
             },
             authReq.tenantId && authReq.tenantPool
-              ? { pool: getTenantAiPool(req) ?? authReq.tenantPool, tenantId: authReq.tenantId }
+              ? { pool: (getTenantAiPool(req) ?? authReq.tenantPool)!, tenantId: authReq.tenantId! }
               : undefined
           )
         );
@@ -634,11 +663,8 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
     let professionalReviewIngest: import('../../types/professional_review.js').ProfessionalReviewResponse | undefined;
     if (authReq.tenantId && authReq.tenantPool) {
       try {
-        const { covenantResult, liquidityMetrics } = deriveCovenantAndLiquidityFromIngest({
-          balanceSheet: output.balanceSheet,
-          profitAndLoss: output.profitAndLoss,
-          cashFlow: output.cashFlow,
-        });
+        const covenantResult = undefined;
+        const liquidityMetrics = undefined;
         let contractsForReview: import('../../types/professional_review.js').ProfessionalReviewInput['contracts'];
         try {
           const { listContracts: listContractsService } = await import('../../services/revenue_recognition_service.js');

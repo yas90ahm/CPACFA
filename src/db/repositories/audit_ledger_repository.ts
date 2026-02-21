@@ -154,6 +154,112 @@ export async function appendEntry(
   };
 }
 
+/** List ledger entries for tenant and period (session-scoped). */
+export async function listByTenantAndPeriod(
+  pool: Queryable,
+  tenantId: string,
+  periodLabel: string,
+  opts?: { eventType?: string; createdBy?: string; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }
+): Promise<
+  Array<{
+    id: string;
+    eventType: string;
+    description: string;
+    userId: string | null;
+    timestamp: string;
+    beforeState: unknown;
+    afterState: unknown;
+    hash: string;
+    previousHash: string | null;
+  }>
+> {
+  let sql = `SELECT id, event_type, user_prompt_rationale, created_by, created_at,
+       deterministic_flag_snapshot, before_state, after_state, entry_hash, previous_entry_hash
+     FROM audit_ledger
+     WHERE tenant_id = $1 AND period_label = $2`;
+  const params: unknown[] = [tenantId, periodLabel];
+  let i = 3;
+  if (opts?.eventType) {
+    sql += ` AND event_type = $${i++}`;
+    params.push(opts.eventType);
+  }
+  if (opts?.createdBy) {
+    sql += ` AND created_by = $${i++}`;
+    params.push(opts.createdBy);
+  }
+  if (opts?.dateFrom) {
+    sql += ` AND created_at >= $${i++}`;
+    params.push(opts.dateFrom);
+  }
+  if (opts?.dateTo) {
+    sql += ` AND created_at <= $${i++}`;
+    params.push(opts.dateTo);
+  }
+  sql += ` ORDER BY created_at DESC`;
+  if (opts?.limit != null) {
+    sql += ` LIMIT $${i}`;
+    params.push(opts.limit);
+    i++;
+  }
+  if (opts?.offset != null) {
+    sql += ` OFFSET $${i}`;
+    params.push(opts.offset);
+  }
+  const r = await pool.query<{
+    id: string;
+    event_type: string;
+    user_prompt_rationale: string;
+    created_by: string | null;
+    created_at: string | Date;
+    before_state: unknown;
+    after_state: unknown;
+    entry_hash: string;
+    previous_entry_hash: string | null;
+  }>(sql, params);
+  return r.rows.map((row) => ({
+    id: row.id,
+    eventType: row.event_type,
+    description: row.user_prompt_rationale ?? row.event_type,
+    userId: row.created_by,
+    timestamp: typeof row.created_at === 'string' ? row.created_at : (row.created_at as Date).toISOString(),
+    beforeState: row.before_state,
+    afterState: row.after_state,
+    hash: row.entry_hash,
+    previousHash: row.previous_entry_hash,
+  }));
+}
+
+/** Count ledger entries for tenant/period (for pagination total). */
+export async function countByTenantAndPeriod(
+  pool: Queryable,
+  tenantId: string,
+  periodLabel: string,
+  opts?: { eventType?: string; createdBy?: string; dateFrom?: string; dateTo?: string }
+): Promise<number> {
+  let sql = `SELECT COUNT(*)::text AS c FROM audit_ledger
+     WHERE tenant_id = $1 AND period_label = $2`;
+  const params: unknown[] = [tenantId, periodLabel];
+  let i = 3;
+  if (opts?.eventType) {
+    sql += ` AND event_type = $${i++}`;
+    params.push(opts.eventType);
+  }
+  if (opts?.createdBy) {
+    sql += ` AND created_by = $${i++}`;
+    params.push(opts.createdBy);
+  }
+  if (opts?.dateFrom) {
+    sql += ` AND created_at >= $${i++}`;
+    params.push(opts.dateFrom);
+  }
+  if (opts?.dateTo) {
+    sql += ` AND created_at <= $${i++}`;
+    params.push(opts.dateTo);
+  }
+  const r = await pool.query<{ c: string }>(sql, params);
+  return parseInt(r.rows[0]?.c ?? '0', 10);
+}
+
 /** Count ledger entries for tenant/period and event type (for integrity check). */
 export async function countByTenantPeriodAndEventType(
   pool: Pool,

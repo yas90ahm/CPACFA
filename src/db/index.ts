@@ -264,6 +264,12 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 110, file: '110_statement_package_cash_flow_equity.sql' },
   { version: 111, file: '111_tenant_aje_templates.sql' },
   { version: 112, file: '112_tenant_variance_analysis.sql' },
+  { version: 113, file: '113_document_deprecated_tables.sql' },
+  { version: 114, file: '114_statement_lines_hierarchy.sql' },
+  { version: 115, file: '115_je_rejection_metadata.sql' },
+  { version: 116, file: '116_aje_template_skip_reason.sql' },
+  { version: 117, file: '117_variance_ai_draft_explanation.sql' },
+  { version: 118, file: '118_tenant_entity_settings.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 

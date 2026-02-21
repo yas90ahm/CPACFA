@@ -27,6 +27,10 @@ export interface JournalEntry {
   approvedBy?: string;
   postedAt?: string;
   reversalDate?: string;
+  /** Set when status is 'rejected'. */
+  rejectionReason?: string;
+  rejectedBy?: string;
+  rejectedAt?: string;
   createdAt: string;
   updatedAt: string;
 }

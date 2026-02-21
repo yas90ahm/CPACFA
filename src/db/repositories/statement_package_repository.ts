@@ -32,10 +32,15 @@ interface LineRow {
   amount: string;
   statement: string;
   metadata: unknown;
+  display_order?: number;
+  indent_level?: number;
+  is_subtotal?: boolean;
+  is_grand_total?: boolean;
+  section_name?: string | null;
 }
 
 const PKG_COLS = `id, close_session_id, version, input_hash, generated_at, generated_by, status, engine_version, rule_versions_snapshot, validation_results`;
-const LINE_COLS = `package_id, fs_line_id, amount, statement, metadata`;
+const LINE_COLS = `package_id, fs_line_id, amount, statement, metadata, display_order, indent_level, is_subtotal, is_grand_total, section_name`;
 
 function rowToPackage(row: PackageRow): StatementPackage {
   return {
@@ -64,6 +69,11 @@ function rowToLine(row: LineRow): StatementLine {
     amount: Number(row.amount),
     statement: row.statement as StatementType,
     metadata: row.metadata != null && typeof row.metadata === 'object' ? (row.metadata as Record<string, unknown>) : undefined,
+    displayOrder: row.display_order ?? 0,
+    indentLevel: row.indent_level ?? 0,
+    isSubtotal: row.is_subtotal ?? false,
+    isGrandTotal: row.is_grand_total ?? false,
+    sectionName: row.section_name ?? undefined,
   };
 }
 
@@ -157,28 +167,52 @@ export async function insertStatementLine(
     amount: number;
     statement: StatementType;
     metadata?: Record<string, unknown>;
+    displayOrder?: number;
+    indentLevel?: number;
+    isSubtotal?: boolean;
+    isGrandTotal?: boolean;
+    sectionName?: string | null;
   }
 ): Promise<void> {
   await pool.query(
-    `INSERT INTO statement_lines (package_id, fs_line_id, amount, statement, metadata)
-     VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (package_id, fs_line_id) DO UPDATE SET amount = $3, statement = $4, metadata = $5`,
+    `INSERT INTO statement_lines (package_id, fs_line_id, amount, statement, metadata, display_order, indent_level, is_subtotal, is_grand_total, section_name)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     ON CONFLICT (package_id, fs_line_id) DO UPDATE SET amount = $3, statement = $4, metadata = $5, display_order = $6, indent_level = $7, is_subtotal = $8, is_grand_total = $9, section_name = $10`,
     [
       input.packageId,
       input.fsLineId,
       input.amount,
       input.statement,
       input.metadata != null ? JSON.stringify(input.metadata) : null,
+      input.displayOrder ?? 0,
+      input.indentLevel ?? 0,
+      input.isSubtotal ?? false,
+      input.isGrandTotal ?? false,
+      input.sectionName ?? null,
     ]
   );
 }
 
 export async function listStatementLinesByPackageId(pool: Pool, packageId: string): Promise<StatementLine[]> {
   const r = await pool.query<LineRow>(
-    `SELECT ${LINE_COLS} FROM statement_lines WHERE package_id = $1 ORDER BY statement, fs_line_id`,
+    `SELECT ${LINE_COLS} FROM statement_lines WHERE package_id = $1 ORDER BY COALESCE(display_order, 0), statement, fs_line_id`,
     [packageId]
   );
   return r.rows.map(rowToLine);
+}
+
+export async function getStatementLineByFsLineId(
+  pool: Pool,
+  packageId: string,
+  fsLineId: string
+): Promise<StatementLine | null> {
+  const r = await pool.query<LineRow>(
+    `SELECT ${LINE_COLS} FROM statement_lines WHERE package_id = $1 AND fs_line_id = $2`,
+    [packageId, fsLineId]
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  return rowToLine(row);
 }
 
 export async function upsertStatementDiff(

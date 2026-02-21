@@ -115,7 +115,7 @@ export async function applyTemplate(
     createdBy: input.createdBy,
     lines,
   });
-  await repo.updateApplicationStatus(pool, input.tenantId, input.applicationId, 'applied', je.id);
+  await repo.updateApplicationStatus(pool, input.tenantId, input.applicationId, 'applied', { appliedJeId: je.id });
   const updated = await repo.getApplicationsForSession(pool, input.tenantId, input.closeSessionId);
   const updatedApp = updated.find((a) => a.id === input.applicationId)!;
   return { jeId: je.id, application: updatedApp };
@@ -125,13 +125,19 @@ export interface SkipTemplateInput {
   tenantId: string;
   applicationId: string;
   closeSessionId: string;
+  /** Reason for skipping (required, min 5 chars). */
+  reason: string;
 }
 
-/** Skip a proposed template. */
+/** Skip a proposed template. Reason is required (min 5 chars). */
 export async function skipTemplate(
   pool: Pool,
   input: SkipTemplateInput
 ): Promise<AjeTemplateApplication> {
+  const reasonTrimmed = input.reason?.trim() ?? '';
+  if (reasonTrimmed.length < 5) {
+    throw new Error('Skip reason is required (minimum 5 characters)');
+  }
   const apps = await repo.getApplicationsForSession(pool, input.tenantId, input.closeSessionId);
   const app = apps.find((a) => a.id === input.applicationId);
   if (!app) throw new Error('Template application not found');
@@ -140,7 +146,8 @@ export async function skipTemplate(
     pool,
     input.tenantId,
     input.applicationId,
-    'skipped'
+    'skipped',
+    { skipReason: reasonTrimmed }
   );
   if (!updated) throw new Error('Failed to update application');
   return updated;

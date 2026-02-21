@@ -18,6 +18,7 @@ import { saveUnadjustedFromGLDerived } from './trial_balance_store_service.js';
 import * as persistence from './persistence_service.js';
 import { detectPatterns, getSummary } from './deterministic_pattern_detector.js';
 import type { TrialBalanceEntry } from '../types/financial.js';
+import Decimal from 'decimal.js';
 import { round2, from, sumRound2, minus, absGt } from '../utils/decimal.js';
 
 /** GL column mappings: raw header variants → canonical key */
@@ -58,6 +59,43 @@ function normalizeHeader(h: string): string {
   return String(h ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '_');
 }
 
+/** Column mapping: frontend field names → CSV header strings. */
+export type GLColumnMapping = {
+  accountCode?: string | null;
+  accountName?: string | null;
+  debit?: string | null;
+  credit?: string | null;
+  date?: string | null;
+  description?: string | null;
+  reference?: string | null;
+  entryId?: string | null;
+};
+
+/** Auto-detect column mapping from CSV headers. */
+export function autoDetectColumnMapping(headers: string[]): GLColumnMapping {
+  const lower = headers.map((h) => (h ?? '').toLowerCase().trim());
+  const find = (pred: (h: string) => boolean): string | null => {
+    const i = lower.findIndex(pred);
+    return i >= 0 ? headers[i]! : null;
+  };
+  return {
+    accountCode:
+      find((h) => (h.includes('account') && (h.includes('code') || h.includes('number') || h.includes('#') || h.includes('id'))) || h === 'gl account' || h === 'glaccount') ??
+      find((h) => h === 'account' || h === 'account code'),
+    accountName:
+      find((h) => h.includes('account') && h.includes('name')) ??
+      find((h) => h === 'name' || h === 'account name' || h === 'description'),
+    debit: find((h) => h.includes('debit') || h === 'dr'),
+    credit: find((h) => h.includes('credit') || h === 'cr'),
+    date: find((h) => h.includes('date') || h.includes('period') || h === 'posted'),
+    description: find((h) => h.includes('memo') || h.includes('desc') || h.includes('narration') || h === 'notes'),
+    reference: find((h) => h.includes('ref') || h.includes('doc') || h.includes('voucher')),
+    entryId:
+      find((h) => h.includes('entry') && (h.includes('id') || h.includes('#') || h.includes('number'))) ??
+      find((h) => h === 'je #' || h === 'je#' || h === 'journal entry'),
+  };
+}
+
 function mapHeaderToCanonical(rawHeader: string): string | null {
   const n = normalizeHeader(rawHeader);
   for (const [canonical, variants] of Object.entries(GL_COLUMN_MAP)) {
@@ -93,6 +131,279 @@ function parseGlAmount(value: unknown): number {
   } catch {
     throw new Error(`Invalid amount: cannot parse "${value}" as a decimal number`);
   }
+}
+
+/**
+ * Parse GL CSV for preview (no persist). Returns headers, suggested mapping, errors, TB preview.
+ */
+export function parseGLPreview(
+  fileBuffer: Buffer,
+  columnMapping?: GLColumnMapping | null
+): {
+  success: boolean;
+  headers: string[];
+  appliedMapping: GLColumnMapping;
+  suggestedMapping: GLColumnMapping;
+  errors: string[];
+  warnings: string[];
+  preview: {
+    totalRows: number;
+    validRows: number;
+    uniqueAccounts: number;
+    totalDebits: string;
+    totalCredits: string;
+    balanced: boolean;
+    accounts: Array<{
+      accountCode: string;
+      accountName: string;
+      totalDebit: string;
+      totalCredit: string;
+      netBalance: string;
+      entryCount: number;
+    }>;
+  } | null;
+} {
+  const records = parse(fileBuffer.toString('utf8'), {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true,
+    relax_column_count: true,
+    bom: true,
+  }) as Record<string, unknown>[];
+
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  if (records.length === 0) {
+    return {
+      success: false,
+      headers: [],
+      appliedMapping: {},
+      suggestedMapping: {},
+      errors: ['CSV file is empty'],
+      warnings: [],
+      preview: null,
+    };
+  }
+
+  const headers = Object.keys(records[0]!);
+  const suggested = autoDetectColumnMapping(headers);
+  const mapping = columnMapping && (columnMapping.accountCode || columnMapping.debit || columnMapping.credit)
+    ? columnMapping
+    : suggested;
+
+  const required: (keyof GLColumnMapping)[] = ['accountCode'];
+  if (!mapping.debit && !mapping.credit) {
+    required.push('debit', 'credit');
+  }
+  const missing = required.filter((f) => !mapping[f]);
+  if (missing.length > 0) {
+    return {
+      success: false,
+      headers,
+      appliedMapping: mapping,
+      suggestedMapping: suggested,
+      errors: [`Missing column mappings: ${missing.join(', ')}`],
+      warnings: [],
+      preview: null,
+    };
+  }
+
+  const getVal = (row: Record<string, unknown>, key: keyof GLColumnMapping): unknown =>
+    mapping[key] ? row[mapping[key] as string] : null;
+
+  const transformedRows: Array<{
+    rowNumber: number;
+    accountCode: string;
+    accountName: string;
+    debit: number;
+    credit: number;
+  }> = [];
+
+  for (let i = 0; i < records.length; i++) {
+    const row = records[i]!;
+    const ac = String(getVal(row, 'accountCode') ?? '').trim();
+    const an = String(getVal(row, 'accountName') ?? '').trim();
+    const d = parseDecimalSafe(getVal(row, 'debit'));
+    const c = parseDecimalSafe(getVal(row, 'credit'));
+    transformedRows.push({
+      rowNumber: i + 2,
+      accountCode: ac,
+      accountName: an,
+      debit: d,
+      credit: c,
+    });
+  }
+
+  const emptyAccount = transformedRows.filter((r) => !r.accountCode);
+  if (emptyAccount.length > 0) {
+    errors.push(
+      `${emptyAccount.length} row(s) have empty account codes (rows: ${emptyAccount.slice(0, 5).map((r) => r.rowNumber).join(', ')}${emptyAccount.length > 5 ? '...' : ''})`
+    );
+  }
+
+  const accountMap = new Map<
+    string,
+    { accountCode: string; accountName: string; totalDebit: Decimal; totalCredit: Decimal; entryCount: number }
+  >();
+
+  for (const row of transformedRows) {
+    if (!row.accountCode) continue;
+    const key = row.accountCode;
+    if (!accountMap.has(key)) {
+      accountMap.set(key, {
+        accountCode: row.accountCode,
+        accountName: row.accountName,
+        totalDebit: new Decimal(0),
+        totalCredit: new Decimal(0),
+        entryCount: 0,
+      });
+    }
+    const acc = accountMap.get(key)!;
+    acc.totalDebit = acc.totalDebit.plus(row.debit);
+    acc.totalCredit = acc.totalCredit.plus(row.credit);
+    acc.entryCount++;
+  }
+
+  const accounts = Array.from(accountMap.values()).map((a) => ({
+    accountCode: a.accountCode,
+    accountName: a.accountName,
+    totalDebit: a.totalDebit.toString(),
+    totalCredit: a.totalCredit.toString(),
+    netBalance: a.totalDebit.minus(a.totalCredit).toString(),
+    entryCount: a.entryCount,
+  }));
+
+  const totalDebits = accounts.reduce((s, a) => s.plus(a.totalDebit), new Decimal(0));
+  const totalCredits = accounts.reduce((s, a) => s.plus(a.totalCredit), new Decimal(0));
+  const balanced = totalDebits.equals(totalCredits);
+
+  if (!balanced) {
+    warnings.push(
+      `Trial balance is not balanced: Debits $${totalDebits.toFixed(2)} ≠ Credits $${totalCredits.toFixed(2)} (difference: $${totalDebits.minus(totalCredits).abs().toFixed(2)})`
+    );
+  }
+
+  accounts.sort((a, b) => a.accountCode.localeCompare(b.accountCode));
+
+  return {
+    success: errors.length === 0,
+    headers,
+    appliedMapping: mapping,
+    suggestedMapping: suggested,
+    errors,
+    warnings,
+    preview: {
+      totalRows: transformedRows.length,
+      validRows: transformedRows.filter((r) => r.accountCode).length,
+      uniqueAccounts: accounts.length,
+      totalDebits: totalDebits.toString(),
+      totalCredits: totalCredits.toString(),
+      balanced,
+      accounts,
+    },
+  };
+}
+
+/** Parse amount from string (handles $1,234.56, (123), etc.). Returns 0 for empty. */
+function parseDecimalSafe(value: unknown): number {
+  if (value == null || value === '') return 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? round2(value) : 0;
+  const s = String(value).replace(/[$,\s]/g, '').replace(/[()]/g, '-').trim();
+  if (s === '' || s === '-') return 0;
+  try {
+    const d = from(s);
+    return d.isFinite() ? round2(d.toNumber()) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Parse GL CSV with optional column mapping. If mapping is provided, use it; otherwise auto-detect.
+ * Returns GLUploadRow[] for ingest, or can be used for preview.
+ */
+export function parseGLCsvWithMapping(
+  fileBuffer: Buffer,
+  columnMapping?: GLColumnMapping | null
+): GLUploadRow[] {
+  const input = fileBuffer.toString('utf8');
+  const records = parse(input, {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true,
+    relax_column_count: true,
+    bom: true,
+  }) as Record<string, unknown>[];
+
+  if (records.length === 0) return [];
+
+  const rawHeaders = Object.keys(records[0]!);
+  let headerToCanonical: Record<string, string>;
+
+  if (columnMapping && (columnMapping.accountCode || columnMapping.debit || columnMapping.credit)) {
+    headerToCanonical = {};
+    const map: Record<string, string> = {
+      account_code: columnMapping.accountCode ?? '',
+      debit: columnMapping.debit ?? '',
+      credit: columnMapping.credit ?? '',
+      entry_date: columnMapping.date ?? columnMapping.entryId ?? '',
+      entry_id: columnMapping.entryId ?? '',
+      description: columnMapping.description ?? '',
+    };
+    for (const [canon, header] of Object.entries(map)) {
+      if (header && rawHeaders.includes(header)) headerToCanonical[header] = canon;
+    }
+  } else {
+    headerToCanonical = {};
+    for (const raw of rawHeaders) {
+      const canonical = mapHeaderToCanonical(raw);
+      if (canonical && !Object.values(headerToCanonical).includes(canonical)) {
+        headerToCanonical[raw] = canonical;
+      }
+    }
+  }
+
+  const hasAccount = Object.values(headerToCanonical).includes('account_code');
+  const hasDebit = Object.values(headerToCanonical).includes('debit');
+  const hasCredit = Object.values(headerToCanonical).includes('credit');
+
+  if (!hasAccount || (!hasDebit && !hasCredit)) {
+    throw new Error('CSV must have account_code (or Account, GL Account) and debit/credit columns.');
+  }
+
+  const rows: GLUploadRow[] = [];
+  for (let i = 0; i < records.length; i++) {
+    const row = records[i]!;
+    const mapped: Record<string, string | number> = {};
+    for (const [k, v] of Object.entries(row)) {
+      const canon = headerToCanonical[k];
+      if (canon && v != null && String(v).trim() !== '') {
+        mapped[canon] = String(v).trim();
+      }
+    }
+
+    const accountCode = mapped.account_code;
+    if (!accountCode) continue;
+
+    const entryId = mapped.entry_id ? String(mapped.entry_id).trim() : `ENTRY-${i + 1}`;
+    const entryDate =
+      mapped.entry_date ??
+      new Date().toISOString().slice(0, 10);
+    const debit = hasDebit ? parseGlAmount(mapped.debit) : 0;
+    const credit = hasCredit ? parseGlAmount(mapped.credit) : 0;
+    const description = mapped.description ? String(mapped.description).trim() : undefined;
+
+    rows.push({
+      entry_id: entryId || `ENTRY-${i + 1}`,
+      entry_date: typeof entryDate === 'string' ? entryDate : String(entryDate),
+      account_code: String(accountCode),
+      debit,
+      credit,
+      description,
+    });
+  }
+  return rows;
 }
 
 /**
@@ -325,7 +636,8 @@ export async function uploadGLForPeriod(
   tenantId: string,
   periodLabel: string,
   fileBuffer: Buffer,
-  uploadedBy?: string
+  uploadedBy?: string,
+  columnMapping?: GLColumnMapping | null
 ): Promise<{
   success: boolean;
   balancedCount: number;
@@ -351,7 +663,9 @@ export async function uploadGLForPeriod(
 
   try {
     const parseStart = Date.now();
-    const rows = parseGLCsv(fileBuffer);
+    const rows = columnMapping
+      ? parseGLCsvWithMapping(fileBuffer, columnMapping)
+      : parseGLCsv(fileBuffer);
     perfMetrics.parse_ms = Date.now() - parseStart;
 
     if (rows.length === 0) {

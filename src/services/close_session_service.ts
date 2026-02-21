@@ -481,6 +481,68 @@ export async function certifyCloseSession(
   });
 }
 
+/** Reject from UNDER_REVIEW back to IN_PROGRESS. Creates blocking issue. */
+export async function rejectSession(
+  pool: Pool,
+  tenantId: string,
+  sessionId: string,
+  reason: string,
+  rejectedBy: string
+): Promise<CloseSession> {
+  const session = await repo.getCloseSessionById(pool, tenantId, sessionId);
+  if (!session) throw new CloseSessionError('Close session not found', 'NOT_FOUND');
+  if (session.status !== 'under_review') {
+    throw new CloseSessionError(
+      `Cannot reject session in '${session.status}' state. Can only reject from UNDER_REVIEW.`,
+      'NOT_UNDER_REVIEW'
+    );
+  }
+
+  const reasonTrimmed = reason?.trim() ?? '';
+  if (reasonTrimmed.length < 10) {
+    throw new CloseSessionError('Rejection reason is required (minimum 10 characters)', 'VALIDATION');
+  }
+
+  await withTransaction(pool, async (client) => {
+    await updateStatus(client, tenantId, sessionId, 'in_progress', rejectedBy);
+    const issue = await createIssue(client as unknown as Pool, {
+      tenantId,
+      periodId: sessionId,
+      entityId: session.entityId,
+      issueType: 'review_rejection',
+      severity: 'blocking',
+      category: 'review',
+      title: `Review rejected: ${reasonTrimmed.substring(0, 100)}`,
+      description: `Close session was rejected by reviewer and sent back to IN_PROGRESS.\n\nReason: ${reasonTrimmed}`,
+      sourceCheck: 'review_rejection',
+      sourceDetails: { rejectedBy, reason: reasonTrimmed },
+    });
+    const preparerId = (session as { createdBy?: string }).createdBy ?? null;
+    if (preparerId) {
+      const { assignIssue } = await import('./issue_service.js');
+      await assignIssue(client as unknown as Pool, tenantId, issue.issueId, preparerId, rejectedBy);
+    }
+  });
+
+  await recordMaterialEvent(pool, {
+    tenantId,
+    periodLabel: session.periodEnd?.slice(0, 7),
+    eventType: 'close_session_transition',
+    deterministicFlagSnapshot: {
+      event: 'close_session_rejected',
+      sessionId,
+      rejectedBy,
+      reason: reasonTrimmed,
+      fromState: 'under_review',
+      toState: 'in_progress',
+    },
+  });
+
+  const updated = await repo.getCloseSessionById(pool, tenantId, sessionId);
+  if (!updated) throw new CloseSessionError('Close session not found after update', 'NOT_FOUND');
+  return updated;
+}
+
 /** Next status toward under_review (open → in_progress → under_review). Returns null when already under_review or beyond. */
 function nextStatusTowardUnderReview(status: CloseSessionStatus): CloseSessionStatus | null {
   switch (status) {

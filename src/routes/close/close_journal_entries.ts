@@ -14,6 +14,7 @@ import {
   rejectJE,
   exportJE,
   getJournalEntry,
+  deleteDraftJE,
   getJournalEntryWithLines,
   listJournalEntries,
   listPostableJournalEntries,
@@ -290,7 +291,7 @@ router.post('/journal-entries/:id/approve', async (req: Request, res: Response) 
   }
 });
 
-/** POST /api/close/journal-entries/:id/reject */
+/** POST /api/close/journal-entries/:id/reject — body: { reason } (min 10 chars) */
 router.post('/journal-entries/:id/reject', async (req: Request, res: Response) => {
   try {
     const pool = getTenantPool(req);
@@ -300,11 +301,18 @@ router.post('/journal-entries/:id/reject', async (req: Request, res: Response) =
       return;
     }
     const id = req.params.id ?? '';
-    const je = await rejectJE(pool, tenantId, id);
+    const body = req.body as { reason?: string };
+    const reason = body?.reason?.trim() ?? '';
+    if (reason.length < 10) {
+      res.status(400).json({ error: 'Rejection reason is required (minimum 10 characters)' });
+      return;
+    }
+    const userId = (req as AuthRequest).userId ?? 'anonymous';
+    const je = await rejectJE(pool, tenantId, id, reason, userId);
     res.json(je);
   } catch (e) {
     if (e instanceof JournalEntryError) {
-      res.status(e.code === 'NOT_FOUND' ? 404 : 400).json({ error: e.message });
+      res.status(e.code === 'NOT_FOUND' ? 404 : e.code === 'VALIDATION' ? 400 : 400).json({ error: e.message });
       return;
     }
     send500(res, e, 'Reject JE failed');
@@ -351,6 +359,28 @@ router.post('/journal-entries/:id/post', async (req: Request, res: Response) => 
     const stack = e instanceof Error ? e.stack : undefined;
     log('error', 'Post JE failed', { message, stack });
     send500(res, new Error('Post JE failed'), 'Post JE failed');
+  }
+});
+
+/** DELETE /api/close/journal-entries/:id — only draft or rejected */
+router.delete('/journal-entries/:id', async (req: Request, res: Response) => {
+  try {
+    const pool = getTenantPool(req);
+    const tenantId = getTenantId(req);
+    if (!pool || !tenantId) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const id = req.params.id ?? '';
+    const userId = (req as AuthRequest).userId ?? 'anonymous';
+    const result = await deleteDraftJE(pool, tenantId, id, userId);
+    res.json(result);
+  } catch (e) {
+    if (e instanceof JournalEntryError) {
+      res.status(e.code === 'NOT_FOUND' ? 404 : e.code === 'INVALID_STATUS' ? 403 : 400).json({ error: e.message });
+      return;
+    }
+    send500(res, e, 'Delete journal entry failed');
   }
 });
 

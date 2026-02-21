@@ -4,7 +4,7 @@
 
 import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
-import { uploadGLForPeriod } from '../../services/gl_upload_service.js';
+import { uploadGLForPeriod, parseGLPreview } from '../../services/gl_upload_service.js';
 import {
   buildDerivedTrialBalance,
   validateDerivedTB,
@@ -38,9 +38,42 @@ const upload = multer({
 });
 
 /**
+ * POST /api/gl/parse
+ * Parse CSV for preview (no persist). Body: file, optional columnMapping (JSON string).
+ */
+router.post(
+  '/parse',
+  upload.single('file'),
+  requireValidTenantId,
+  async (req: Request, res: Response) => {
+    try {
+      const file = req.file;
+      if (!file) {
+        res.status(400).json({ error: 'File is required' });
+        return;
+      }
+      let columnMapping: import('../../services/gl_upload_service.js').GLColumnMapping | null = null;
+      if (req.body?.columnMapping && typeof req.body.columnMapping === 'string') {
+        try {
+          columnMapping = JSON.parse(req.body.columnMapping) as import('../../services/gl_upload_service.js').GLColumnMapping;
+        } catch {
+          res.status(400).json({ error: 'Invalid columnMapping JSON' });
+          return;
+        }
+      }
+      const result = parseGLPreview(file.buffer, columnMapping);
+      res.json(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Parse failed';
+      res.status(400).json({ success: false, error: `Failed to parse CSV: ${msg}` });
+    }
+  }
+);
+
+/**
  * POST /api/gl/ingest
  * Upload General Ledger (CSV).
- * Body: multipart/form-data with 'file' field.
+ * Body: multipart/form-data with 'file' field, optional columnMapping (JSON string).
  * Query: ?period=2024-Q1 (optional, default to current quarter)
  */
 router.post(
@@ -72,12 +105,23 @@ router.post(
         (req.query.period as string)?.trim() || getDefaultPeriod();
       const uploadedBy = (req as { userId?: string; tenantId?: string }).userId ?? (req as { userId?: string; tenantId?: string }).tenantId;
 
+      let columnMapping: import('../../services/gl_upload_service.js').GLColumnMapping | null = null;
+      if (req.body?.columnMapping && typeof req.body.columnMapping === 'string') {
+        try {
+          columnMapping = JSON.parse(req.body.columnMapping) as import('../../services/gl_upload_service.js').GLColumnMapping;
+        } catch {
+          res.status(400).json({ error: 'Invalid columnMapping JSON' });
+          return;
+        }
+      }
+
       const result = await uploadGLForPeriod(
         pool,
         tenantId,
         periodLabel,
         file.buffer,
-        uploadedBy
+        uploadedBy,
+        columnMapping
       );
 
       if (!result.success) {

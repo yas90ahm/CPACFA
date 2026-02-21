@@ -27,16 +27,20 @@ import trialBalanceRouter from './routes/trial-balance/index.js';
 import justificationRouter from './routes/justification.js';
 import auditRouter from './routes/audit/index.js';
 import exportRouter from './routes/export.js';
-import financialMemoryRouter from './routes/financial_memory.js';
-import vectorStoreRouter from './routes/vector_store.js';
-import ingestionRouter from './routes/ingestion.js';
+// QUARANTINED — Knowledge base routes not in MVP architecture
+// import financialMemoryRouter from './routes/financial_memory.js';
+// import vectorStoreRouter from './routes/vector_store.js';
+// QUARANTINED — Automated ingestion infrastructure not in MVP architecture
+// import ingestionRouter from './routes/ingestion.js';
 import hitlRouter from './routes/hitl.js';
 import memoryRouter from './routes/memory.js';
 import integrationsRouter from './routes/integrations.js';
-import pipelinesRouter from './routes/pipelines.js';
+// QUARANTINED — Bank pipeline, AP/AR aging, payroll accrual not in MVP architecture
+// import pipelinesRouter from './routes/pipelines.js';
 import closeRouter from './routes/close/index.js';
 import precheckRouter from './routes/precheck.js';
 import configRouter from './routes/config.js';
+import settingsRouter from './routes/settings.js';
 import verificationRouter from './routes/verification/index.js';
 import coaMappingRouter from './routes/coa_mapping.js';
 import coaRouter from './routes/coa.js';
@@ -46,9 +50,11 @@ import approvalsRouter from './routes/approvals.js';
 import accountingIntegrationRouter from './routes/accounting_integration.js';
 import onboardingRouter from './routes/onboarding.js';
 import tenantsRouter from './routes/tenants.js';
+import portfolioRouter from './routes/portfolio.js';
 import cpaRouter from './routes/cpa_index.js';
 import devDiagnosticsRouter from './routes/dev_diagnostics.js';
-import { startIngestionScheduler } from './services/ingestion_scheduler.js';
+// QUARANTINED — Automated ingestion infrastructure not in MVP architecture
+// import { startIngestionScheduler } from './services/ingestion_scheduler.js';
 import { runWorkerLoop } from './services/job_worker.js';
 import { send500 } from './lib/errorHandler.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
@@ -142,13 +148,15 @@ app.use('/api/audit', auditRouter);
 app.use('/api/export', exportRouter);
 
 // API: Financial Memory (three-tier: Global/Firm/Session, hybrid search, CPA invoice consistency)
-app.use('/api/knowledge-base', financialMemoryRouter);
+// QUARANTINED — Knowledge base routes not in MVP architecture
+// app.use('/api/knowledge-base', financialMemoryRouter);
 
 // API: RAG Vector Store (Intelligent Context — ingestion, precedent, citation with document title + page number)
-app.use('/api/vector-store', vectorStoreRouter);
+// QUARANTINED — Knowledge base routes not in MVP architecture
+// app.use('/api/vector-store', vectorStoreRouter);
 
-// API: Ingestion Agent (auto-detect type, classify bank/tax, route to specialist, data cleaning)
-app.use('/api/ingestion', ingestionRouter);
+// QUARANTINED — Automated ingestion infrastructure not in MVP architecture
+// app.use('/api/ingestion', ingestionRouter);
 
 // API: Semantic Memory (decisions, user corrections, justifications — vectorized; vendor lookup and consistency check)
 app.use('/api/memory', memoryRouter);
@@ -156,8 +164,8 @@ app.use('/api/memory', memoryRouter);
 // API: OAuth integrations (Gmail/Drive)
 app.use('/api/integrations', integrationsRouter);
 
-// API: Pipelines — Bank transaction-level, AP/AR aging, Payroll accrual
-app.use('/api/pipelines', pipelinesRouter);
+// QUARANTINED — Bank pipeline, AP/AR aging, payroll accrual not in MVP architecture
+// app.use('/api/pipelines', pipelinesRouter);
 
 // API: Month-end close — JE suggestions, checklist, period lock, audit log, segregation
 app.use('/api/close', closeRouter);
@@ -167,6 +175,9 @@ app.use('/api/precheck', precheckRouter);
 
 // API: Config — tenant materiality and other overrides
 app.use('/api/config', configRouter);
+
+// API: Settings — entity general settings, entity list
+app.use('/api/settings', settingsRouter);
 
 // API: Auditor verification — read-only snapshot hash verification
 app.use('/api/verification', verificationRouter);
@@ -194,6 +205,9 @@ app.use('/api/onboarding', onboardingRouter);
 
 // API: Tenants — BYOD database_url (PATCH/GET; require auth, same-tenant only)
 app.use('/api/tenants', tenantsRouter);
+
+// API: Portfolio — cross-tenant dashboard (operating_partner / admin)
+app.use('/api/portfolio', portfolioRouter);
 
 // API: HITL staging and webhook
 app.use('/api/hitl', hitlRouter);
@@ -270,7 +284,8 @@ if (shouldStart) {
     console.error(e);
     process.exit(1);
   });
-  startIngestionScheduler();
+  // QUARANTINED — Automated ingestion infrastructure not in MVP architecture
+  // startIngestionScheduler();
   const workerEnabled = (process.env.JOB_WORKER_ENABLED ?? 'true') === 'true';
   if (workerEnabled && isDbConfigured()) {
     runWorkerLoop({

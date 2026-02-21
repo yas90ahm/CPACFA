@@ -40,5 +40,7 @@ export interface AjeTemplateApplication {
   status: 'proposed' | 'applied' | 'skipped';
   appliedJeId?: string;
   skippedAt?: string;
+  /** Reason given when template was skipped. */
+  skipReason?: string;
   createdAt: string;
 }

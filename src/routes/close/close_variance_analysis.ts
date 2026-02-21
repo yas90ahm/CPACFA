@@ -28,6 +28,28 @@ router.get('/sessions/:closeSessionId/variances', async (req: Request, res: Resp
   }
 });
 
+/** GET /api/close/variances/:id/ai-draft — get AI draft explanation (cached or generate fallback) */
+router.get('/variances/:id/ai-draft', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const id = req.params.id;
+    const result = await varianceService.getVarianceAiDraft(pool, tenantId, id);
+    res.json(result);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes('not found')) {
+      res.status(404).json({ error: 'Variance not found' });
+      return;
+    }
+    send500(res, e, 'Get variance AI draft failed');
+  }
+});
+
 /** POST /api/close/variances/:id/explain — add human explanation */
 router.post('/variances/:id/explain', async (req: Request, res: Response) => {
   try {

@@ -11,11 +11,12 @@ import { send500 } from '../lib/errorHandler.js';
 import { logCriticalRoute } from '../lib/logger.js';
 import type { RequestWithId } from '../middleware/requestId.js';
 import { precheckVerdictToText } from '../lib/precheck_report_text.js';
-import {
-  runPrecheckBoardReady,
-  type PrecheckTrialBalanceRow,
-  type PrecheckJournalEntryLine,
-} from '../services/precheck_board_ready_service.js';
+// QUARANTINED — Board-ready precheck is summary/reporting, not close execution
+// import {
+//   runPrecheckBoardReady,
+//   type PrecheckTrialBalanceRow,
+//   type PrecheckJournalEntryLine,
+// } from '../services/precheck_board_ready_service.js';
 import { getSession } from '../services/close_session_service.js';
 import { buildPbcIndexPayload, getBaseUrlForEndpoints } from './audit/pbc_index.js';
 import { effectiveAllowLegacyCertifiedSource } from '../lib/runtime_mode.js';
@@ -44,10 +45,17 @@ function criticalLog(
 
 const PACK_CONTRACT_VERSION = 'v1';
 
+// QUARANTINED — Board-ready precheck types
+// interface BoardReadyBody {
+//   periodLabel?: string;
+//   trialBalance?: PrecheckTrialBalanceRow[];
+//   journalEntries?: PrecheckJournalEntryLine[];
+//   closeSessionId?: string;
+// }
 interface BoardReadyBody {
   periodLabel?: string;
-  trialBalance?: PrecheckTrialBalanceRow[];
-  journalEntries?: PrecheckJournalEntryLine[];
+  trialBalance?: unknown[];
+  journalEntries?: unknown[];
   closeSessionId?: string;
 }
 
@@ -83,24 +91,29 @@ router.post('/board-ready', (req: Request, res: Response) => {
     });
   }
 
-  try {
-    const verdict = runPrecheckBoardReady({
-      periodLabel,
-      trialBalance: body.trialBalance,
-      journalEntries: body.journalEntries,
-    });
+  // QUARANTINED — Board-ready precheck is summary/reporting, not close execution
+  res.status(410).json({
+    error: 'Out of scope',
+    message: 'Board-ready precheck is quarantined. Use close_checklist_readiness_service for close readiness checks.',
+  });
+  // try {
+  //   const verdict = runPrecheckBoardReady({
+  //     periodLabel,
+  //     trialBalance: body.trialBalance,
+  //     journalEntries: body.journalEntries,
+  //   });
 
-    if (format === 'text') {
-      res.type('text/plain').send(precheckVerdictToText(verdict, periodLabel));
-      criticalLog(req, ROUTE_BOARD_READY, 'ok', { startMs });
-      return;
-    }
-    res.json({ ...verdict, periodLabel });
-    criticalLog(req, ROUTE_BOARD_READY, 'ok', { startMs });
-  } catch (err) {
-    criticalLog(req, ROUTE_BOARD_READY, 'error', { startMs });
-    send500(res, err as Error, 'precheck.board-ready');
-  }
+  //   if (format === 'text') {
+  //     res.type('text/plain').send(precheckVerdictToText(verdict, periodLabel));
+  //     criticalLog(req, ROUTE_BOARD_READY, 'ok', { startMs });
+  //     return;
+  //   }
+  //   res.json({ ...verdict, periodLabel });
+  //   criticalLog(req, ROUTE_BOARD_READY, 'ok', { startMs });
+  // } catch (err) {
+  //   criticalLog(req, ROUTE_BOARD_READY, 'error', { startMs });
+  //   send500(res, err as Error, 'precheck.board-ready');
+  // }
 });
 
 /** POST /api/precheck/board-ready-pack — precheck + optional PBC index and trust tokens (when closeSessionId in body). */
@@ -130,13 +143,19 @@ router.post('/board-ready-pack', async (req: Request, res: Response) => {
     });
   }
 
-  try {
-    const verdict = runPrecheckBoardReady({
-      periodLabel,
-      trialBalance: body.trialBalance,
-      journalEntries: body.journalEntries,
-    });
-    const precheck = { ...verdict, periodLabel };
+  // QUARANTINED — Board-ready precheck is summary/reporting, not close execution
+  res.status(410).json({
+    error: 'Out of scope',
+    message: 'Board-ready precheck is quarantined. Use close_checklist_readiness_service for close readiness checks.',
+  });
+  return;
+  // try {
+  //   const verdict = runPrecheckBoardReady({
+  //     periodLabel,
+  //     trialBalance: body.trialBalance,
+  //     journalEntries: body.journalEntries,
+  //   });
+  //   const precheck = { ...verdict, periodLabel };
 
     let pbcIndex: Awaited<ReturnType<typeof buildPbcIndexPayload>> | null = null;
     let trustTokens: {
@@ -162,7 +181,8 @@ router.post('/board-ready-pack', async (req: Request, res: Response) => {
           message: 'Tenant context is required when closeSessionId is provided.',
         });
       }
-      const session = await getSession(pool, tenantId, closeSessionId);
+      // pool is guaranteed to be defined here due to check above
+      const session = await getSession(pool!, tenantId!, closeSessionId);
       if (!session) {
         criticalLog(req, ROUTE_BOARD_READY_PACK, 'error', { code: 'NOT_FOUND', closeSessionId, startMs });
         return res.status(404).json({
@@ -173,29 +193,29 @@ router.post('/board-ready-pack', async (req: Request, res: Response) => {
       }
       const allowLegacy = effectiveAllowLegacyCertifiedSource(req);
       const baseUrl = getBaseUrlForEndpoints(req);
-      pbcIndex = await buildPbcIndexPayload(pool, tenantId, closeSessionId, { allowLegacy, baseUrl });
+      pbcIndex = await buildPbcIndexPayload(pool!, tenantId!, closeSessionId, { allowLegacy, baseUrl });
       trustTokens = {
-        certifiedSnapshotId: pbcIndex.evidence.snapshot.snapshotId,
-        snapshotHash: pbcIndex.evidence.snapshot.snapshotHash,
-        hashVersion: pbcIndex.evidence.snapshot.hashVersion,
-        certifiedSource: pbcIndex.evidence.certifiedStatements.source,
+        certifiedSnapshotId: pbcIndex!.evidence.snapshot.snapshotId,
+        snapshotHash: pbcIndex!.evidence.snapshot.snapshotHash,
+        hashVersion: pbcIndex!.evidence.snapshot.hashVersion,
+        certifiedSource: pbcIndex!.evidence.certifiedStatements.source,
       };
     }
 
-    const evidenceSummary = pbcIndex?.evidenceSummary ?? null;
+    // const evidenceSummary = pbcIndex?.evidenceSummary ?? null;
 
-    res.json({
-      contractVersion: PACK_CONTRACT_VERSION,
-      precheck,
-      pbcIndex,
-      trustTokens,
-      evidenceSummary,
-    });
-    criticalLog(req, ROUTE_BOARD_READY_PACK, 'ok', { closeSessionId: closeSessionId || undefined, startMs });
-  } catch (err) {
-    criticalLog(req, ROUTE_BOARD_READY_PACK, 'error', { closeSessionId: closeSessionId || undefined, startMs });
-    send500(res, err as Error, 'precheck.board-ready-pack');
-  }
+    // res.json({
+    //   contractVersion: PACK_CONTRACT_VERSION,
+    //   precheck,
+    //   pbcIndex,
+    //   trustTokens,
+    //   evidenceSummary,
+    // });
+    // criticalLog(req, ROUTE_BOARD_READY_PACK, 'ok', { closeSessionId: closeSessionId || undefined, startMs });
+  // } catch (err) {
+  //   criticalLog(req, ROUTE_BOARD_READY_PACK, 'error', { closeSessionId: closeSessionId || undefined, startMs });
+  //   send500(res, err as Error, 'precheck.board-ready-pack');
+  // }
 });
 
 export default router;

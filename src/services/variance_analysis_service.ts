@@ -68,6 +68,52 @@ export async function approveVariance(
   return repo.approveVariance(pool, tenantId, varianceId, approvedBy);
 }
 
+/** Generate a deterministic draft variance explanation. Advisory; human edits and submits. */
+export function generateVarianceDraftExplanation(v: VarianceRecord): string {
+  const lineName = v.label ?? v.fsLineId ?? 'Line item';
+  const direction = v.changeAmount >= 0 ? 'increased' : 'decreased';
+  const absChange = Math.abs(v.changeAmount).toLocaleString();
+  const absPct = v.changePercentage != null ? Math.abs(v.changePercentage).toFixed(1) : '';
+  const currentStr = v.currentAmount.toLocaleString();
+  const priorStr = v.priorAmount.toLocaleString();
+  let draft = `${lineName} ${direction} by $${absChange}`;
+  if (absPct) draft += ` (${absPct}%)`;
+  draft += ` compared to the prior period. Current period balance: $${currentStr}. Prior period balance: $${priorStr}. [Please provide specific drivers for this change.]`;
+  return draft;
+}
+
+/** Get AI draft explanation (cached or generate deterministic fallback). Graceful degradation. */
+export async function getVarianceAiDraft(
+  pool: Pool,
+  tenantId: string,
+  varianceId: string
+): Promise<{
+  varianceId: string;
+  draftExplanation: string | null;
+  generatedAt: string | null;
+  cached: boolean;
+  error?: string;
+}> {
+  const variance = await repo.getVarianceById(pool, tenantId, varianceId);
+  if (!variance) throw new Error('Variance not found');
+  if (variance.aiDraftExplanation) {
+    return { varianceId, draftExplanation: variance.aiDraftExplanation, generatedAt: variance.createdAt, cached: true };
+  }
+  try {
+    const draft = generateVarianceDraftExplanation(variance);
+    await repo.updateAiDraftExplanation(pool, tenantId, varianceId, draft);
+    return { varianceId, draftExplanation: draft, generatedAt: new Date().toISOString(), cached: false };
+  } catch {
+    return {
+      varianceId,
+      draftExplanation: null,
+      generatedAt: null,
+      cached: false,
+      error: 'Unable to generate AI draft at this time. Please write the explanation manually.',
+    };
+  }
+}
+
 /** Check if material variances are explained and (optionally) approved. */
 export async function checkVarianceCompleteness(
   pool: Pool,

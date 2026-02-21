@@ -12,15 +12,19 @@ import { buildEquityChangesStatement } from '../../services/equityChanges.js';
 import { buildNotesAndPolicies } from '../../services/notesPolicies.js';
 import { inferAccountingStandard } from '../../services/standard_selector.js';
 import { updatePolicyMemory } from '../../memory/index.js';
-import { classifyTransactionsAgentic } from '../../services/transaction_classifier.js';
-import { runPlanExecuteVerifyAgentic } from '../../services/agentic_plan_execute_verify.js';
+// QUARANTINED — transaction_classifier not in MVP architecture
+// import { classifyTransactionsAgentic } from '../../services/transaction_classifier.js';
+// QUARANTINED — Agentic plan-execute-verify not in MVP architecture
+// import { runPlanExecuteVerifyAgentic } from '../../services/agentic_plan_execute_verify.js';
 import { registerStatementGeneration } from '../../services/audit_export_service.js';
 import { markUploadCompleted, runResultPipeline } from '../../services/result_generator.js';
 import * as persistence from '../../services/persistence_service.js';
-import { assessAgenticQuality } from '../../services/agentic_quality_assessor.js';
+// QUARANTINED — Agentic quality assessor not in MVP architecture
+// import { assessAgenticQuality } from '../../services/agentic_quality_assessor.js';
 import { shouldEscalateToHuman, submitToStaging } from '../../services/hitl_orchestrator.js';
 import { addTodosFromGaps } from '../../services/reconciliation_todos.js';
-import { inferStandardAgentic } from '../../services/standard_inference_agentic.js';
+// QUARANTINED — standard_inference_agentic not in MVP architecture
+// import { inferStandardAgentic } from '../../services/standard_inference_agentic.js';
 import { runRulesAndPersistExceptions } from '../../services/data_quality_exception_service.js';
 import type { RuleEvaluationContext } from '../../services/data_quality_rule_service.js';
 import type { FinancialStatementsOutput } from '../../types/financial.js';
@@ -41,7 +45,8 @@ import {
 import { loadCloseContext } from '../../services/close_context.js';
 import { getPrecedentForCloseStep, toSimilarPrecedentSummary } from '../../services/precedent_for_close_step.js';
 import { runProfessionalReview } from '../../services/professional_review_service.js';
-import { deriveCovenantAndLiquidityFromIngest } from '../../services/ingest_covenant_liquidity.js';
+// QUARANTINED — ingest_covenant_liquidity not on close pipeline
+// import { deriveCovenantAndLiquidityFromIngest } from '../../services/ingest_covenant_liquidity.js';
 import { classifyTrialBalance } from '../../services/accountClassifier.js';
 import { getUnadjustedOrRollup } from '../../services/trial_balance_rollup_service.js';
 import { getAdjustedTrialBalance } from '../../services/adjusted_trial_balance_service.js';
@@ -66,7 +71,9 @@ router.post('/statements', validateBody(statementsBodySchema), async (req: Reque
       transactions && transactions.length > 0
         ? attachCategories(
             transactions,
-            await classifyTransactionsAgentic(transactions, { entityId: body.entityId })
+            // QUARANTINED — transaction_classifier not in MVP architecture
+            // await classifyTransactionsAgentic(transactions, { entityId: body.entityId })
+            [] // No transaction classification in MVP
           )
         : undefined;
     const rawRows = body.entries;
@@ -91,23 +98,25 @@ router.post('/statements', validateBody(statementsBodySchema), async (req: Reque
         pool: poolStmt ?? undefined,
         tenantId: tenantIdStmt ?? undefined,
       }));
-    const standardInferenceStmt = !standard
-      ? await inferStandardAgentic({
-          country: body.country,
-          jurisdiction: body.jurisdiction,
-          currency: body.currency,
-          taxId: body.taxId,
-          businessNumber: body.businessNumber,
-        })
-      : null;
+    // QUARANTINED — standard_inference_agentic not in MVP architecture
+    // const standardInferenceStmt = !standard
+    //   ? await inferStandardAgentic({
+    //       country: body.country,
+    //       jurisdiction: body.jurisdiction,
+    //       currency: body.currency,
+    //       taxId: body.taxId,
+    //       businessNumber: body.businessNumber,
+    //     })
+    //   : null;
+    const standardInferenceStmt = null;
     if (!standard) {
       res.status(400).json({
         error: 'Reporting standard required; jurisdiction ambiguous',
         message: 'Provide an explicit standard in the request body, or confirm the suggested standard via the confirm-standard API.',
-        inferredStandard: standardInferenceStmt?.standard,
-        confidence: standardInferenceStmt?.confidence,
-        rationale: standardInferenceStmt?.rationale,
-        promptForUser: standardInferenceStmt?.promptForUser ?? 'Please confirm reporting standard (US_GAAP, IFRS, ASPE, FRS102).',
+        inferredStandard: undefined, // QUARANTINED — standard_inference_agentic not in MVP architecture
+        confidence: undefined,
+        rationale: undefined,
+        promptForUser: 'Please confirm reporting standard (US_GAAP, IFRS, ASPE, FRS102).',
       });
       return;
     }
@@ -190,11 +199,23 @@ router.post('/statements', validateBody(statementsBodySchema), async (req: Reque
     const equityChanges = fullSet ? buildEquityChangesStatement(balanceSheet, priorBalanceSheet, profitAndLoss) : undefined;
     const notesAndPolicies = fullSet && standard ? buildNotesAndPolicies(standard) : undefined;
 
-    const reasoningChain = await runPlanExecuteVerifyAgentic({
-      trialBalance,
-      balanceSheet,
-      profitAndLoss,
-    });
+    // QUARANTINED — Agentic plan-execute-verify not in MVP architecture
+    // const reasoningChain = await runPlanExecuteVerifyAgentic({
+    //   trialBalance,
+    //   balanceSheet,
+    //   profitAndLoss,
+    // });
+    const reasoningChain = {
+      plan: 'Deterministic validation',
+      executedAt: new Date().toISOString(),
+      verification: {
+        passed: balanceSheet.balances && trialBalance.balances,
+        checks: [
+          balanceSheet.balances ? 'Balance sheet balances' : 'Balance sheet does not balance',
+          trialBalance.balances ? 'Trial balance balances' : 'Trial balance does not balance',
+        ],
+      },
+    };
 
     const output: FinancialStatementsOutput = {
       reasoningChain,
@@ -266,13 +287,20 @@ router.post('/statements', validateBody(statementsBodySchema), async (req: Reque
         pipelineInputSnapshot: { type: 'statements', output, meta },
       });
     }
-    const agenticAssessment = await assessAgenticQuality({
-      qualityChecks: pipelineResult.qualityChecks ?? [],
-      dataGaps: pipelineResult.dataGaps ?? [],
-      standard: standard,
-    });
+    // QUARANTINED — Agentic quality assessor not in MVP architecture
+    // const agenticAssessment = await assessAgenticQuality({
+    //   qualityChecks: pipelineResult.qualityChecks ?? [],
+    //   dataGaps: pipelineResult.dataGaps ?? [],
+    //   standard: standard,
+    // });
+    const agenticAssessment = {
+      overallSeverity: 'low' as const,
+      summary: 'Deterministic validation only',
+    };
     let hitl = pipelineResult.hitl ?? { escalated: false };
-    if (!hitl.escalated && agenticAssessment?.overallSeverity === 'critical') {
+    // QUARANTINED — Agentic quality assessor not in MVP architecture, so skip escalation check
+    // if (!hitl.escalated && agenticAssessment?.overallSeverity === 'critical') {
+    if (false) {
       const escalate = shouldEscalateToHuman({ isCriticalAccountingPolicyChange: true });
       if (escalate) {
         const item = await submitToStaging(
@@ -281,7 +309,7 @@ router.post('/statements', validateBody(statementsBodySchema), async (req: Reque
             justification: agenticAssessment.summary,
             type: 'other',
           },
-          authReqStatements.tenantId && authReqStatements.tenantPool ? { pool: authReqStatements.tenantPool, tenantId: authReqStatements.tenantId } : undefined
+          authReqStatements.tenantId && authReqStatements.tenantPool ? { pool: authReqStatements.tenantPool!, tenantId: authReqStatements.tenantId! } : undefined
         );
         hitl = { escalated: true, stagingId: item.id };
       }
@@ -301,11 +329,8 @@ router.post('/statements', validateBody(statementsBodySchema), async (req: Reque
     let professionalReviewStmt: import('../../types/professional_review.js').ProfessionalReviewResponse | undefined;
     if (authReqStatements.tenantId && authReqStatements.tenantPool) {
       try {
-        const { covenantResult, liquidityMetrics } = deriveCovenantAndLiquidityFromIngest({
-          balanceSheet: output.balanceSheet,
-          profitAndLoss: output.profitAndLoss,
-          cashFlow: output.cashFlow,
-        });
+        const covenantResult = undefined;
+        const liquidityMetrics = undefined;
         professionalReviewStmt = await runProfessionalReview(
           {
             tenantId: authReqStatements.tenantId,

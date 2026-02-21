@@ -13,11 +13,12 @@ import type {
 import * as flagsRepo from '../db/repositories/professional_audit_flags_repository.js';
 import { appendFlags as riskContextAppendFlags } from './risk_context_store.js';
 import { recordObservation } from './audit_ledger_service.js';
-import { runSubstanceOverForm } from './judgment_substance_over_form.js';
-import { runRevenueRecognition } from './judgment_revenue_recognition.js';
-import { runGipsEthics } from './judgment_gips_ethics.js';
+// QUARANTINED — Judgment services not in MVP architecture
+// import { runSubstanceOverForm } from './judgment_substance_over_form.js';
+// import { runRevenueRecognition } from './judgment_revenue_recognition.js';
+// import { runGipsEthics } from './judgment_gips_ethics.js';
 import { runGoingConcern } from './judgment_going_concern.js';
-import { runFraudSkepticism } from './judgment_fraud_skepticism.js';
+// import { runFraudSkepticism } from './judgment_fraud_skepticism.js';
 
 /**
  * Run the full professional review: call all five protocols, persist flags, compute overall risk.
@@ -52,19 +53,26 @@ export async function runProfessionalReview(
     });
   };
 
-  const [substanceFlags, revenueFlags, gipsFlags, goingConcernResult, fraudFlags] = await Promise.all([
-    runSubstanceOverForm(input, pool),
-    runRevenueRecognition(input, pool),
-    runGipsEthics(input, pool),
-    runGoingConcern(input, pool),
-    runFraudSkepticism(input, pool),
-  ]);
+  // QUARANTINED — Judgment services not in MVP architecture
+  // const [substanceFlags, revenueFlags, gipsFlags, goingConcernResult, fraudFlags] = await Promise.all([
+  //   runSubstanceOverForm(input, pool),
+  //   runRevenueRecognition(input, pool),
+  //   runGipsEthics(input, pool),
+  //   runGoingConcern(input, pool),
+  //   runFraudSkepticism(input, pool),
+  // ]);
+  // QUARANTINED — Judgment services not in MVP architecture
+  const substanceFlags: Array<{ category: string; severity: string; message: string; recommendation: string; citationStandard: string }> = [];
+  const revenueFlags: Array<{ category: string; severity: string; message: string; recommendation: string; citationStandard: string }> = [];
+  const gipsFlags: Array<{ category: string; severity: string; message: string; recommendation: string; citationStandard: string }> = [];
+  const goingConcernResult = await runGoingConcern(input, pool);
+  const fraudFlags: Array<{ category: string; severity: string; message: string; recommendation: string; citationStandard: string }> = [];
 
-  for (const f of substanceFlags) await persist(f);
-  for (const f of revenueFlags) await persist(f);
-  for (const f of gipsFlags) await persist(f);
+  // for (const f of substanceFlags) await persist(f);
+  // for (const f of revenueFlags) await persist(f);
+  // for (const f of gipsFlags) await persist(f);
   for (const f of goingConcernResult.flags) await persist(f);
-  for (const f of fraudFlags) await persist(f);
+  // for (const f of fraudFlags) await persist(f);
 
   riskContextAppendFlags(
     tenantId,

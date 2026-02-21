@@ -24,6 +24,9 @@ interface JournalEntryRow {
   approved_by: string | null;
   posted_at: string | null;
   reversal_date: string | null;
+  rejection_reason: string | null;
+  rejected_by: string | null;
+  rejected_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -50,6 +53,9 @@ function rowToJE(row: JournalEntryRow): JournalEntry {
     approvedBy: row.approved_by ?? undefined,
     postedAt: row.posted_at ?? undefined,
     reversalDate: row.reversal_date ?? undefined,
+    rejectionReason: row.rejection_reason ?? undefined,
+    rejectedBy: row.rejected_by ?? undefined,
+    rejectedAt: row.rejected_at ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -70,7 +76,7 @@ function rowToLine(row: JournalEntryLineRow): JournalEntryLine {
   };
 }
 
-const JE_COLS = `id, close_session_id, tenant_id, status, memo, source, created_by, approved_by, posted_at, reversal_date, created_at, updated_at`;
+const JE_COLS = `id, close_session_id, tenant_id, status, memo, source, created_by, approved_by, posted_at, reversal_date, rejection_reason, rejected_by, rejected_at, created_at, updated_at`;
 const LINE_COLS = `je_id, line_index, account_ref, debit, credit, description, amount_provenance`;
 
 export async function insertJournalEntry(
@@ -153,6 +159,10 @@ export async function updateJournalEntryStatus(
     approvedBy?: string;
     postedAt?: string;
     reversalDate?: string | null;
+    /** For status 'rejected': rejection reason, rejected_by, rejected_at. */
+    rejectedBy?: string;
+    rejectedAt?: string;
+    rejectionReason?: string;
   }
 ): Promise<JournalEntry | null> {
   const now = new Date().toISOString();
@@ -160,14 +170,35 @@ export async function updateJournalEntryStatus(
   const postedAt = patch?.postedAt ?? null;
   const reversalDate = patch?.reversalDate !== undefined ? patch.reversalDate : undefined;
   const setReversal = reversalDate !== undefined;
-  await pool.query(
-    `UPDATE journal_entries SET status = $3, updated_at = $4,
-       approved_by = COALESCE($5, approved_by), posted_at = COALESCE($6, posted_at),
-       reversal_date = CASE WHEN $8 THEN $7::date ELSE reversal_date END
-     WHERE id = $1 AND tenant_id = $2`,
-    [id, tenantId, status, now, approvedBy, postedAt, reversalDate ?? null, setReversal]
-  );
+  const rejectedBy = patch?.rejectedBy ?? null;
+  const rejectedAt = patch?.rejectedAt ?? now;
+  const rejectionReason = patch?.rejectionReason ?? null;
+  if (status === 'rejected' && rejectionReason) {
+    await pool.query(
+      `UPDATE journal_entries SET status = $3, updated_at = $4,
+         rejection_reason = $5, rejected_by = $6, rejected_at = $7
+       WHERE id = $1 AND tenant_id = $2`,
+      [id, tenantId, status, now, rejectionReason, rejectedBy, rejectedAt]
+    );
+  } else {
+    await pool.query(
+      `UPDATE journal_entries SET status = $3, updated_at = $4,
+         approved_by = COALESCE($5, approved_by), posted_at = COALESCE($6, posted_at),
+         reversal_date = CASE WHEN $8 THEN $7::date ELSE reversal_date END
+       WHERE id = $1 AND tenant_id = $2`,
+      [id, tenantId, status, now, approvedBy, postedAt, reversalDate ?? null, setReversal]
+    );
+  }
   return getJournalEntryById(pool, id, tenantId);
+}
+
+/** Delete evidence links and then the journal entry. Caller must enforce status (draft/rejected only). */
+export async function deleteJournalEntry(pool: Pool, id: string, tenantId: string): Promise<void> {
+  await pool.query(
+    `DELETE FROM evidence_links WHERE tenant_id = $1 AND object_type = 'journal_entry' AND object_id = $2`,
+    [tenantId, id]
+  );
+  await pool.query(`DELETE FROM journal_entries WHERE id = $1 AND tenant_id = $2`, [id, tenantId]);
 }
 
 export async function insertJournalEntryLines(

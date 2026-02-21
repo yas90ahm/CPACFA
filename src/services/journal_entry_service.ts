@@ -129,14 +129,44 @@ export async function approveJE(
   return updated!;
 }
 
-/** Reject a proposed JE (proposed → rejected). */
-export async function rejectJE(pool: Pool, tenantId: string, id: string): Promise<JournalEntry> {
+/** Reject a proposed JE (proposed → rejected). Reason is required (min 10 chars). */
+export async function rejectJE(
+  pool: Pool,
+  tenantId: string,
+  id: string,
+  reason: string,
+  rejectedBy: string
+): Promise<JournalEntry> {
   const je = await repo.getJournalEntryById(pool, id, tenantId);
   if (!je) throw new JournalEntryError('Journal entry not found', 'NOT_FOUND');
   if (je.status !== 'proposed') {
     throw new JournalEntryError(`Only proposed JEs can be rejected; current status: ${je.status}`, 'INVALID_STATUS');
   }
-  const updated = await repo.updateJournalEntryStatus(pool, id, tenantId, 'rejected');
+  const reasonTrimmed = reason?.trim() ?? '';
+  if (reasonTrimmed.length < 10) {
+    throw new JournalEntryError('Rejection reason is required (minimum 10 characters)', 'VALIDATION');
+  }
+  const now = new Date().toISOString();
+  const updated = await repo.updateJournalEntryStatus(pool, id, tenantId, 'rejected', {
+    rejectionReason: reasonTrimmed,
+    rejectedBy,
+    rejectedAt: now,
+  });
+  const periodLabel = je.closeSessionId
+    ? (await getCloseSessionById(pool, tenantId, je.closeSessionId))?.periodEnd?.slice(0, 7)
+    : undefined;
+  await recordMaterialEvent(pool, {
+    tenantId,
+    periodLabel,
+    eventType: 'je_posting',
+    deterministicFlagSnapshot: {
+      jeId: id,
+      event: 'je_rejected',
+      reason: reasonTrimmed,
+      rejectedBy,
+      rejectedAt: now,
+    },
+  });
   return updated!;
 }
 
@@ -389,6 +419,39 @@ export async function getPostableJEAdjustments(
     result.push({ debits, credits });
   }
   return result;
+}
+
+/** Delete a draft or rejected JE. Only draft/rejected can be deleted. */
+export async function deleteDraftJE(
+  pool: Pool,
+  tenantId: string,
+  id: string,
+  userId: string
+): Promise<{ deleted: true; id: string }> {
+  const je = await repo.getJournalEntryById(pool, id, tenantId);
+  if (!je) throw new JournalEntryError('Journal entry not found', 'NOT_FOUND');
+  if (!['draft', 'rejected'].includes(je.status)) {
+    throw new JournalEntryError(
+      `Cannot delete journal entry in '${je.status}' status. Only draft or rejected entries can be deleted.`,
+      'INVALID_STATUS'
+    );
+  }
+  await repo.deleteJournalEntry(pool, id, tenantId);
+  const periodLabel = je.closeSessionId
+    ? (await getCloseSessionById(pool, tenantId, je.closeSessionId))?.periodEnd?.slice(0, 7)
+    : undefined;
+  await recordMaterialEvent(pool, {
+    tenantId,
+    periodLabel,
+    eventType: 'je_posting',
+    deterministicFlagSnapshot: {
+      event: 'je_deleted',
+      jeId: id,
+      previousStatus: je.status,
+      deletedBy: userId,
+    },
+  });
+  return { deleted: true, id };
 }
 
 export async function addJEAttachment(

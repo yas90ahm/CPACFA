@@ -14,7 +14,8 @@ import type {
   RAGResult,
   StoredJustification,
 } from '../types/justification.js';
-import { getDefaultRAGStore } from './rag_handbook.js';
+// QUARANTINED — rag_handbook not in MVP architecture
+// import { getDefaultRAGStore } from './rag_handbook.js';
 import { isDbConfigured } from '../db/index.js';
 import { disallowMemoryStoreInProduction } from '../lib/env.js';
 import * as justificationsRepo from '../db/repositories/tenant_justifications_repository.js';
@@ -155,7 +156,9 @@ export async function justifyWithRAG(
   question: string,
   options?: JustifyOptions
 ): Promise<JustificationResponse> {
-  const store = options?.ragStore ?? getDefaultRAGStore();
+  // QUARANTINED — rag_handbook not in MVP architecture
+  // const store = options?.ragStore ?? getDefaultRAGStore();
+  const store = options?.ragStore ?? { query: async (q: string) => ({ chunks: [], query: q }) };
   const rag: RAGResult = await store.query(question, {
     topK: 3,
     framework: options?.framework,

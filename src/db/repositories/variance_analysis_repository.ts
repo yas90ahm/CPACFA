@@ -19,6 +19,7 @@ interface VarianceRow {
   change_percentage: string | null;
   material_threshold_pct: string;
   explanation: string | null;
+  ai_draft_explanation: string | null;
   approved_at: string | null;
   approved_by: string | null;
   created_at: string;
@@ -39,6 +40,7 @@ function rowToVariance(row: VarianceRow): VarianceRecord {
     changePercentage: row.change_percentage != null ? Number(row.change_percentage) : null,
     materialThresholdPct: Number(row.material_threshold_pct),
     explanation: row.explanation ?? undefined,
+    aiDraftExplanation: row.ai_draft_explanation ?? undefined,
     approvedAt: row.approved_at ?? undefined,
     approvedBy: row.approved_by ?? undefined,
     createdAt: row.created_at,
@@ -83,7 +85,7 @@ export async function upsertVariance(
   const r = await pool.query<VarianceRow>(
     `SELECT id, tenant_id, close_session_id, period_label, fs_line_id, statement, label,
             current_amount, prior_amount, change_amount, change_percentage, material_threshold_pct,
-            explanation, approved_at, approved_by, created_at
+            explanation, ai_draft_explanation, approved_at, approved_by, created_at
      FROM tenant_variance_analysis WHERE tenant_id = $1 AND close_session_id = $2 AND fs_line_id = $3 AND statement = $4`,
     [input.tenantId, input.closeSessionId, input.fsLineId, input.statement]
   );
@@ -99,7 +101,7 @@ export async function listVariancesForSession(
   const r = await pool.query<VarianceRow>(
     `SELECT id, tenant_id, close_session_id, period_label, fs_line_id, statement, label,
             current_amount, prior_amount, change_amount, change_percentage, material_threshold_pct,
-            explanation, approved_at, approved_by, created_at
+            explanation, ai_draft_explanation, approved_at, approved_by, created_at
      FROM tenant_variance_analysis WHERE tenant_id = $1 AND close_session_id = $2 ORDER BY statement, fs_line_id`,
     [tenantId, closeSessionId]
   );
@@ -119,11 +121,38 @@ export async function updateExplanation(
   const r = await pool.query<VarianceRow>(
     `SELECT id, tenant_id, close_session_id, period_label, fs_line_id, statement, label,
             current_amount, prior_amount, change_amount, change_percentage, material_threshold_pct,
-            explanation, approved_at, approved_by, created_at
+            explanation, ai_draft_explanation, approved_at, approved_by, created_at
      FROM tenant_variance_analysis WHERE id = $1 AND tenant_id = $2`,
     [id, tenantId]
   );
   return r.rows.length > 0 ? rowToVariance(r.rows[0]) : null;
+}
+
+export async function getVarianceById(
+  pool: Pool,
+  tenantId: string,
+  id: string
+): Promise<VarianceRecord | null> {
+  const r = await pool.query<VarianceRow>(
+    `SELECT id, tenant_id, close_session_id, period_label, fs_line_id, statement, label,
+            current_amount, prior_amount, change_amount, change_percentage, material_threshold_pct,
+            explanation, ai_draft_explanation, approved_at, approved_by, created_at
+     FROM tenant_variance_analysis WHERE id = $1 AND tenant_id = $2`,
+    [id, tenantId]
+  );
+  return r.rows.length > 0 ? rowToVariance(r.rows[0]) : null;
+}
+
+export async function updateAiDraftExplanation(
+  pool: Pool,
+  tenantId: string,
+  id: string,
+  aiDraftExplanation: string
+): Promise<void> {
+  await pool.query(
+    `UPDATE tenant_variance_analysis SET ai_draft_explanation = $1 WHERE id = $2 AND tenant_id = $3`,
+    [aiDraftExplanation, id, tenantId]
+  );
 }
 
 export async function approveVariance(

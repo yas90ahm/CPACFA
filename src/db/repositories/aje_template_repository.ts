@@ -27,6 +27,7 @@ interface ApplicationRow {
   status: string;
   applied_je_id: string | null;
   skipped_at: string | null;
+  skip_reason: string | null;
   created_at: string;
 }
 
@@ -60,6 +61,7 @@ function rowToApplication(row: ApplicationRow): AjeTemplateApplication {
     status: row.status as AjeTemplateApplication['status'],
     appliedJeId: row.applied_je_id ?? undefined,
     skippedAt: row.skipped_at ?? undefined,
+    skipReason: row.skip_reason ?? undefined,
     createdAt: row.created_at,
   };
 }
@@ -199,7 +201,7 @@ export async function insertApplication(
     ]
   );
   const r = await pool.query<ApplicationRow>(
-    `SELECT id, tenant_id, template_id, close_session_id, period_label, status, applied_je_id, skipped_at, created_at
+    `SELECT id, tenant_id, template_id, close_session_id, period_label, status, applied_je_id, skipped_at, skip_reason, created_at
      FROM tenant_aje_template_applications WHERE id = $1`,
     [id]
   );
@@ -213,7 +215,7 @@ export async function getApplicationsForSession(
   closeSessionId: string
 ): Promise<AjeTemplateApplication[]> {
   const r = await pool.query<ApplicationRow>(
-    `SELECT id, tenant_id, template_id, close_session_id, period_label, status, applied_je_id, skipped_at, created_at
+    `SELECT id, tenant_id, template_id, close_session_id, period_label, status, applied_je_id, skipped_at, skip_reason, created_at
      FROM tenant_aje_template_applications WHERE tenant_id = $1 AND close_session_id = $2 ORDER BY created_at`,
     [tenantId, closeSessionId]
   );
@@ -225,25 +227,24 @@ export async function updateApplicationStatus(
   tenantId: string,
   applicationId: string,
   status: 'applied' | 'skipped',
-  appliedJeId?: string,
-  skippedAt?: string
+  options?: { appliedJeId?: string; skippedAt?: string; skipReason?: string }
 ): Promise<AjeTemplateApplication | null> {
   const now = new Date().toISOString();
   if (status === 'applied') {
     await pool.query(
-      `UPDATE tenant_aje_template_applications SET status = 'applied', applied_je_id = $1, skipped_at = NULL
+      `UPDATE tenant_aje_template_applications SET status = 'applied', applied_je_id = $1, skipped_at = NULL, skip_reason = NULL
        WHERE id = $2 AND tenant_id = $3`,
-      [appliedJeId ?? null, applicationId, tenantId]
+      [options?.appliedJeId ?? null, applicationId, tenantId]
     );
   } else {
     await pool.query(
-      `UPDATE tenant_aje_template_applications SET status = 'skipped', skipped_at = $1, applied_je_id = NULL
+      `UPDATE tenant_aje_template_applications SET status = 'skipped', skipped_at = $1, applied_je_id = NULL, skip_reason = $4
        WHERE id = $2 AND tenant_id = $3`,
-      [skippedAt ?? now, applicationId, tenantId]
+      [options?.skippedAt ?? now, applicationId, tenantId, options?.skipReason ?? null]
     );
   }
   const r = await pool.query<ApplicationRow>(
-    `SELECT id, tenant_id, template_id, close_session_id, period_label, status, applied_je_id, skipped_at, created_at
+    `SELECT id, tenant_id, template_id, close_session_id, period_label, status, applied_je_id, skipped_at, skip_reason, created_at
      FROM tenant_aje_template_applications WHERE id = $1 AND tenant_id = $2`,
     [applicationId, tenantId]
   );

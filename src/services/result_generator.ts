@@ -28,8 +28,9 @@ import { evaluateQualityChecks, type QualityCheck } from './quality_checks.js';
 import { shouldEscalateToHuman, submitToStaging } from './hitl_orchestrator.js';
 import { runGapAnalysis, type DataGap } from '../agents/cpa_brain.js';
 import type { PolicyProposal } from './policy_inference_agentic.js';
-import { computeLiquidityMetrics, assessLiquidityRisk } from './analysis_agent.js';
-import type { LiquidityInputs } from '../types/analysis.js';
+// QUARANTINED — analysis_agent (CFA) not in CPA product
+// import { computeLiquidityMetrics, assessLiquidityRisk } from './analysis_agent.js';
+// import type { LiquidityInputs } from '../types/analysis.js';
 import type { ConflictVariance } from '../types/orchestrator.js';
 import { runPlanExecuteVerify } from './planExecuteVerify.js';
 
@@ -289,6 +290,7 @@ export async function step1CPA(
 
 // --- Step 2 (CFA): 5 key ratios ---
 
+/** CPA-only: compute five key ratios without CFA analysis_agent. */
 export function step2CFA(
   balanceSheet: BalanceSheet,
   profitAndLoss: ProfitAndLoss
@@ -298,24 +300,11 @@ export function step2CFA(
   const totalLiabilities = balanceSheet.totalLiabilities;
   const totalEquity = balanceSheet.totalEquity;
   const inventory = balanceSheet.assets.find((a) => /inventory/i.test(a.label ?? ''))?.amount ?? 0;
-  const ar = balanceSheet.assets.find((a) => /receivable/i.test(a.label ?? ''))?.amount ?? 0;
-  const ap = balanceSheet.liabilities.find((l) => /payable/i.test(l.label ?? ''))?.amount ?? 0;
   const revenue = profitAndLoss.totalRevenue || 1;
   const netIncome = profitAndLoss.netIncome ?? 0;
 
-  const liquidityInputs: LiquidityInputs = {
-    currentAssets,
-    inventory,
-    currentLiabilities,
-    revenue,
-    accountsReceivable: ar,
-    accountsPayable: ap,
-  };
-  const metrics = computeLiquidityMetrics(liquidityInputs);
-  assessLiquidityRisk(liquidityInputs); // optional: use for risk level in memo
-
-  const currentRatio = metrics.currentRatio;
-  const quickRatio = metrics.quickRatio;
+  const currentRatio = currentLiabilities !== 0 ? currentAssets / currentLiabilities : 0;
+  const quickRatio = currentLiabilities !== 0 ? (currentAssets - inventory) / currentLiabilities : 0;
   const debtToEquity = totalEquity !== 0 ? totalLiabilities / totalEquity : 0;
   const roe = totalEquity !== 0 ? netIncome / totalEquity : 0;
   const netMargin = revenue !== 0 ? netIncome / revenue : 0;

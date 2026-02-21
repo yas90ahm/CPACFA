@@ -6,7 +6,7 @@
 import { randomUUID } from 'crypto';
 import { createHash } from 'crypto';
 import type { Pool } from 'pg';
-import type { TrialBalanceResult, TrialBalanceEntry, BalanceSheet, CashFlowStatement, EquityChangesStatement } from '../types/financial.js';
+import type { TrialBalanceResult, BalanceSheet, CashFlowStatement, EquityChangesStatement } from '../types/financial.js';
 import type { StatementPackage, StatementLine, StatementDiffJson, ValidationResult } from '../types/statement_package.js';
 import { buildValidatedStatements, buildBalanceSheet, MathematicalIntegrityError } from './financialStatements.js';
 import { buildCashFlowStatement } from './cashFlow.js';
@@ -17,6 +17,7 @@ import { recordMaterialEvent } from './audit_service.js';
 import { clearStatementsStaleSince } from '../db/repositories/close_session_repository.js';
 import * as repo from '../db/repositories/statement_package_repository.js';
 import { computeVariances } from './variance_analysis_service.js';
+import { getEntitySettings } from './entity_settings_service.js';
 import { from as decimalFrom } from '../utils/decimal.js';
 
 const ENGINE_VERSION = 'financialStatements.v1';
@@ -107,67 +108,163 @@ function hashStatementInput(closeSessionId: string, entries: Array<{ accountName
   return createHash('sha256').update(canonical).digest('hex');
 }
 
-/** Flatten BS, P&L, Cash Flow, and Equity to statement lines with stable fs_line_id. */
+interface LineItem {
+  label: string;
+  amount: number;
+  accountCode?: string;
+}
+
+/** Flatten BS, P&L, Cash Flow, and Equity to statement lines with hierarchy. */
 function flattenToLines(
   packageId: string,
-  balanceSheet: { assets: { label: string; amount: number }[]; liabilities: { label: string; amount: number }[]; equity: { label: string; amount: number }[] },
-  profitAndLoss: { revenue: { label: string; amount: number }[]; expenses: { label: string; amount: number }[] },
+  balanceSheet: BalanceSheet,
+  profitAndLoss: { revenue: LineItem[]; expenses: LineItem[]; totalRevenue: number; totalExpenses: number; netIncome: number },
   cashFlowStatement?: CashFlowStatement,
   equityStatement?: EquityChangesStatement
 ): StatementLine[] {
   const lines: StatementLine[] = [];
-  const sections: { statement: 'balance_sheet' | 'profit_and_loss'; section: string; items: { label: string; amount: number }[] }[] = [
-    { statement: 'balance_sheet', section: 'assets', items: balanceSheet.assets },
-    { statement: 'balance_sheet', section: 'liabilities', items: balanceSheet.liabilities },
-    { statement: 'balance_sheet', section: 'equity', items: balanceSheet.equity },
-    { statement: 'profit_and_loss', section: 'revenue', items: profitAndLoss.revenue },
-    { statement: 'profit_and_loss', section: 'expenses', items: profitAndLoss.expenses },
-  ];
-  for (const { statement, section, items } of sections) {
-    const prefix = statement === 'balance_sheet' ? 'bs' : 'pl';
-    items.forEach((item, i) => {
-      lines.push({
-        packageId,
-        fsLineId: `${prefix}_${section}_${i}`,
-        amount: item.amount,
-        statement,
-        metadata: { label: item.label, section },
-      });
+  let order = 0;
+
+  const pushLine = (
+    fsLineId: string,
+    amount: number,
+    statement: StatementLine['statement'],
+    opts: { label: string; section: string; indentLevel?: number; isSubtotal?: boolean; isGrandTotal?: boolean; accountCode?: string; accountCodes?: string[] }
+  ) => {
+    lines.push({
+      packageId,
+      fsLineId,
+      amount,
+      statement,
+      metadata: {
+        label: opts.label,
+        section: opts.section,
+        ...(opts.accountCode && { accountCode: opts.accountCode }),
+        ...(opts.accountCodes && opts.accountCodes.length > 0 && { accountCodes: opts.accountCodes }),
+      },
+      displayOrder: order++,
+      indentLevel: opts.indentLevel ?? 1,
+      isSubtotal: opts.isSubtotal ?? false,
+      isGrandTotal: opts.isGrandTotal ?? false,
+      sectionName: opts.section,
     });
-  }
+  };
+
+  // Balance Sheet: Assets
+  pushLine('bs_header_assets', 0, 'balance_sheet', { label: 'ASSETS', section: 'Assets', indentLevel: 0 });
+  balanceSheet.assets.forEach((item, i) => {
+    pushLine(`bs_assets_${i}`, item.amount, 'balance_sheet', {
+      label: item.label,
+      section: 'Current Assets',
+      accountCode: item.accountCode,
+    });
+  });
+  pushLine('bs_total_assets', balanceSheet.totalAssets, 'balance_sheet', {
+    label: 'TOTAL ASSETS',
+    section: 'Assets',
+    indentLevel: 0,
+    isSubtotal: false,
+    isGrandTotal: true,
+  });
+
+  // Balance Sheet: Liabilities & Equity
+  pushLine('bs_header_libe', 0, 'balance_sheet', { label: 'LIABILITIES & EQUITY', section: 'Liabilities & Equity', indentLevel: 0 });
+  balanceSheet.liabilities.forEach((item, i) => {
+    pushLine(`bs_liabilities_${i}`, item.amount, 'balance_sheet', {
+      label: item.label,
+      section: 'Liabilities',
+      accountCode: item.accountCode,
+    });
+  });
+  pushLine('bs_total_liabilities', balanceSheet.totalLiabilities, 'balance_sheet', {
+    label: 'Total Liabilities',
+    section: 'Liabilities',
+    indentLevel: 0,
+    isSubtotal: true,
+  });
+  balanceSheet.equity.forEach((item, i) => {
+    pushLine(`bs_equity_${i}`, item.amount, 'balance_sheet', {
+      label: item.label,
+      section: 'Equity',
+      accountCode: item.accountCode,
+    });
+  });
+  pushLine('bs_total_equity', balanceSheet.totalEquity, 'balance_sheet', {
+    label: 'TOTAL LIABILITIES & EQUITY',
+    section: 'Equity',
+    indentLevel: 0,
+    isGrandTotal: true,
+  });
+
+  // P&L: Revenue
+  profitAndLoss.revenue.forEach((item, i) => {
+    pushLine(`pl_revenue_${i}`, item.amount, 'profit_and_loss', {
+      label: item.label,
+      section: 'Revenue',
+      accountCode: item.accountCode,
+    });
+  });
+  pushLine('pl_total_revenue', profitAndLoss.totalRevenue, 'profit_and_loss', {
+    label: 'Total Revenue',
+    section: 'Revenue',
+    indentLevel: 0,
+    isSubtotal: true,
+  });
+
+  // P&L: Expenses
+  profitAndLoss.expenses.forEach((item, i) => {
+    pushLine(`pl_expenses_${i}`, item.amount, 'profit_and_loss', {
+      label: item.label,
+      section: 'Expenses',
+      accountCode: item.accountCode,
+    });
+  });
+  pushLine('pl_total_expenses', profitAndLoss.totalExpenses, 'profit_and_loss', {
+    label: 'Total Expenses',
+    section: 'Expenses',
+    indentLevel: 0,
+    isSubtotal: true,
+  });
+
+  // P&L: Net Income (grand total)
+  pushLine('pl_net_income', profitAndLoss.netIncome, 'profit_and_loss', {
+    label: 'Net Income',
+    section: 'Net Income',
+    indentLevel: 0,
+    isGrandTotal: true,
+  });
+
+  // Cash Flow
   if (cashFlowStatement) {
     ['operating', 'investing', 'financing'].forEach((section) => {
       const items = cashFlowStatement[section as keyof CashFlowStatement] as Array<{ label: string; amount: number }> | undefined;
       if (!Array.isArray(items)) return;
       items.forEach((item, i) => {
-        lines.push({
-          packageId,
-          fsLineId: `cf_${section}_${i}`,
-          amount: item.amount,
-          statement: 'cash_flow',
-          metadata: { label: item.label, section },
-        });
+        pushLine(`cf_${section}_${i}`, item.amount, 'cash_flow', { label: item.label, section });
       });
     });
     if (cashFlowStatement.beginningCash != null) {
-      lines.push({ packageId, fsLineId: 'cf_beginning_cash', amount: cashFlowStatement.beginningCash, statement: 'cash_flow', metadata: { label: 'Beginning cash', section: 'opening' } });
+      pushLine('cf_beginning_cash', cashFlowStatement.beginningCash, 'cash_flow', { label: 'Beginning cash', section: 'opening' });
     }
     if (cashFlowStatement.endingCash != null) {
-      lines.push({ packageId, fsLineId: 'cf_ending_cash', amount: cashFlowStatement.endingCash, statement: 'cash_flow', metadata: { label: 'Ending cash', section: 'closing' } });
+      pushLine('cf_ending_cash', cashFlowStatement.endingCash, 'cash_flow', { label: 'Ending cash', section: 'closing' });
     }
-    lines.push({ packageId, fsLineId: 'cf_net_change', amount: cashFlowStatement.netChangeInCash, statement: 'cash_flow', metadata: { label: 'Net change in cash', section: 'summary' } });
+    pushLine('cf_net_change', cashFlowStatement.netChangeInCash, 'cash_flow', { label: 'Net change in cash', section: 'summary' });
   }
+
+  // Equity
   if (equityStatement) {
     if (equityStatement.openingEquity != null) {
-      lines.push({ packageId, fsLineId: 'eq_opening', amount: equityStatement.openingEquity, statement: 'equity', metadata: { label: 'Opening equity', section: 'opening' } });
+      pushLine('eq_opening', equityStatement.openingEquity, 'equity', { label: 'Opening equity', section: 'opening' });
     }
     equityStatement.changes.forEach((item, i) => {
-      lines.push({ packageId, fsLineId: `eq_change_${i}`, amount: item.amount, statement: 'equity', metadata: { label: item.label, section: 'changes' } });
+      pushLine(`eq_change_${i}`, item.amount, 'equity', { label: item.label, section: 'changes' });
     });
     if (equityStatement.closingEquity != null) {
-      lines.push({ packageId, fsLineId: 'eq_closing', amount: equityStatement.closingEquity, statement: 'equity', metadata: { label: 'Closing equity', section: 'closing' } });
+      pushLine('eq_closing', equityStatement.closingEquity, 'equity', { label: 'Closing equity', section: 'closing' });
     }
   }
+
   return lines;
 }
 
@@ -228,6 +325,11 @@ export async function generateStatements(
       amount: line.amount,
       statement: line.statement,
       metadata: line.metadata,
+      displayOrder: line.displayOrder,
+      indentLevel: line.indentLevel,
+      isSubtotal: line.isSubtotal,
+      isGrandTotal: line.isGrandTotal,
+      sectionName: line.sectionName,
     });
   }
   const previousPackages = await repo.listStatementPackagesByCloseSessionId(pool, tenantId, closeSessionId, 2);
@@ -262,12 +364,15 @@ export async function generateStatements(
         statement: l.statement,
         label: (l.metadata as { label?: string })?.label,
       }));
+      const entitySettings = await getEntitySettings(pool, tenantId, session.entityId);
+      const materialPct = Number(entitySettings.varianceMaterialityPercent) || 10;
       await computeVariances(pool, {
         tenantId,
         closeSessionId,
         periodLabel,
         currentLines,
         priorLines: priorLinesInput,
+        materialThresholdPct: materialPct,
       });
     }
   }
@@ -324,14 +429,73 @@ export async function getStatementPackage(pool: Pool, tenantId: string, id: stri
   return repo.getStatementPackageById(pool, tenantId, id);
 }
 
+/** Get the most recent prior-period statement package for the same entity. */
+async function getPriorPeriodStatementPackage(
+  pool: Pool,
+  tenantId: string,
+  entityId: string,
+  currentPeriodEnd: string
+): Promise<StatementPackage | null> {
+  const r = await pool.query<{ id: string }>(
+    `SELECT sp.id FROM statement_packages sp
+     JOIN close_sessions cs ON cs.id = sp.close_session_id
+     WHERE cs.tenant_id = $1 AND cs.entity_id = $2
+       AND cs.period_end < $3
+     ORDER BY cs.period_end DESC, sp.generated_at DESC
+     LIMIT 1`,
+    [tenantId, entityId, currentPeriodEnd]
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  return repo.getStatementPackageById(pool, tenantId, row.id);
+}
+
 export async function getStatementPackageWithLines(
   pool: Pool,
   tenantId: string,
-  id: string
+  id: string,
+  includePrior?: boolean
 ): Promise<{ package: StatementPackage; lines: StatementLine[] } | null> {
   const pkg = await repo.getStatementPackageById(pool, tenantId, id);
   if (!pkg) return null;
   const lines = await repo.listStatementLinesByPackageId(pool, id);
+
+  if (includePrior) {
+    const session = await getSession(pool, tenantId, pkg.closeSessionId);
+    if (session?.entityId && session?.periodEnd) {
+      const priorPkg = await getPriorPeriodStatementPackage(
+        pool,
+        tenantId,
+        session.entityId,
+        session.periodEnd
+      );
+      const priorLines = priorPkg
+        ? await repo.listStatementLinesByPackageId(pool, priorPkg.id)
+        : [];
+      const priorByFs = new Map(priorLines.map((l) => [l.fsLineId, l]));
+      for (const line of lines) {
+        const prior = priorByFs.get(line.fsLineId);
+        const priorAmount = prior ? String(Number(prior.amount).toFixed(2)) : '0.00';
+        const current = decimalFrom(line.amount);
+        const priorDec = decimalFrom(priorAmount);
+        const changeAmount = current.minus(priorDec).toDecimalPlaces(2).toString();
+        const changePercent =
+          priorDec.isZero() || priorDec.abs().isZero()
+            ? null
+            : current.minus(priorDec).div(priorDec.abs()).times(100).toDecimalPlaces(2).toString();
+        (line as StatementLine & { priorAmount?: string; changeAmount?: string; changePercent?: string | null }).priorAmount = priorAmount;
+        (line as StatementLine & { priorAmount?: string; changeAmount?: string; changePercent?: string | null }).changeAmount = changeAmount;
+        (line as StatementLine & { priorAmount?: string; changeAmount?: string; changePercent?: string | null }).changePercent = changePercent;
+      }
+    } else {
+      for (const line of lines) {
+        (line as StatementLine & { priorAmount?: string; changeAmount?: string; changePercent?: string | null }).priorAmount = '0.00';
+        (line as StatementLine & { priorAmount?: string; changeAmount?: string; changePercent?: string | null }).changeAmount = String(Number(line.amount).toFixed(2));
+        (line as StatementLine & { priorAmount?: string; changeAmount?: string; changePercent?: string | null }).changePercent = null;
+      }
+    }
+  }
+
   return { package: pkg, lines };
 }
 

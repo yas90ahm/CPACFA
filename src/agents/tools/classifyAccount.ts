@@ -5,7 +5,9 @@
 
 import { z } from 'zod';
 import { classifyAccount as classifyAccountService, codificationRefForType } from '../../services/accountClassifier.js';
-import { classifyAccountsAgentic } from '../../services/agentic_account_classifier.js';
+// QUARANTINED — Agentic account classifier not in MVP architecture
+// // QUARANTINED — Agentic account classifier not in MVP architecture
+// import { classifyAccountsAgentic } from '../../services/agentic_account_classifier.js';
 import type { ToolDefinition, ToolResult } from './types.js';
 
 export const classifyAccountSchema = z.object({
@@ -31,9 +33,10 @@ export async function runClassifyAccount(input: ClassifyAccountInput): Promise<T
 }>> {
   try {
     const parsed = classifyAccountSchema.parse(input);
-    const agentic = await classifyAccountsAgentic([parsed.accountName]);
+    // QUARANTINED — Agentic account classifier not in MVP architecture
+    // const agentic = await classifyAccountsAgentic([parsed.accountName]);
     const fallback = classifyAccountService(parsed.accountName);
-    const accountType = agentic?.[0] ?? fallback.accountType;
+    const accountType = /* agentic?.[0] ?? */ fallback.accountType;
     const codificationRef = codificationRefForType(accountType);
     return {
       success: true,

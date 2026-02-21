@@ -6,7 +6,8 @@
 import { z } from 'zod';
 import { parseTrialBalance } from '../../services/trialBalanceParser.js';
 import { buildValidatedStatements } from '../../services/financialStatements.js';
-import { runPlanExecuteVerifyAgentic } from '../../services/agentic_plan_execute_verify.js';
+// QUARANTINED — Agentic plan-execute-verify not in MVP architecture
+// import { runPlanExecuteVerifyAgentic } from '../../services/agentic_plan_execute_verify.js';
 import type { ToolDefinition, ToolResult } from './types.js';
 
 const trialBalanceEntrySchema = z.object({
@@ -56,11 +57,23 @@ export async function runForensicRescan(input: ForensicRescanInput): Promise<Too
     const parsed = forensicRescanSchema.parse(input);
     const trialBalance = parseTrialBalance(parsed.entries);
     const { balanceSheet, profitAndLoss } = await buildValidatedStatements(trialBalance);
-    const reasoningChain = await runPlanExecuteVerifyAgentic({
-      trialBalance,
-      balanceSheet,
-      profitAndLoss,
-    });
+    // QUARANTINED — Agentic plan-execute-verify not in MVP architecture
+    // const reasoningChain = await runPlanExecuteVerifyAgentic({
+    //   trialBalance,
+    //   balanceSheet,
+    //   profitAndLoss,
+    // });
+    const reasoningChain = {
+      plan: 'Deterministic validation',
+      executedAt: new Date().toISOString(),
+      verification: {
+        passed: balanceSheet.balances && trialBalance.balances,
+        checks: [
+          balanceSheet.balances ? 'Balance sheet balances' : 'Balance sheet does not balance',
+          trialBalance.balances ? 'Trial balance balances' : 'Trial balance does not balance',
+        ],
+      },
+    };
 
     const suggestions: string[] = [];
     if (!reasoningChain.verification.passed) {

@@ -25,9 +25,10 @@ import {
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { send500 } from '../../lib/errorHandler.js';
 import { getClassificationSuggestions, applyUserClassificationOverrides } from '../../services/accountClassifier.js';
-import { generateCashFlowNarrativeAgentic } from '../../services/agentic_cash_flow_narrative.js';
-import { generateNotesNarrativeAgentic } from '../../services/agentic_notes_narrative.js';
-import { generateEquityChangesNarrativeAgentic } from '../../services/agentic_equity_changes_narrative.js';
+// QUARANTINED — Agentic narrative services not in MVP architecture
+// import { generateCashFlowNarrativeAgentic } from '../../services/agentic_cash_flow_narrative.js';
+// import { generateNotesNarrativeAgentic } from '../../services/agentic_notes_narrative.js';
+// import { generateEquityChangesNarrativeAgentic } from '../../services/agentic_equity_changes_narrative.js';
 import type { TrialBalanceEntry } from '../../types/financial.js';
 
 const router = Router();
@@ -85,42 +86,43 @@ router.post('/confirm-standard', validateBody(confirmStandardBodySchema), async 
   }
 });
 
-/** POST /api/trial-balance/cash-flow-narrative */
-router.post('/cash-flow-narrative', validateBody(cashFlowNarrativeBodySchema), async (req: Request, res: Response) => {
-  try {
-    const body: CashFlowNarrativeBody = req.body;
-    const narrative = await generateCashFlowNarrativeAgentic(
-      body.cashFlowStatement as import('../../types/financial.js').CashFlowStatement,
-      body.periodLabel
-    );
-    res.json({ narrative });
-  } catch (e) {
-    send500(res, e, 'Cash flow narrative failed');
-  }
-});
+// QUARANTINED — Agentic narrative endpoints not in MVP architecture
+// /** POST /api/trial-balance/cash-flow-narrative */
+// router.post('/cash-flow-narrative', validateBody(cashFlowNarrativeBodySchema), async (req: Request, res: Response) => {
+//   try {
+//     const body: CashFlowNarrativeBody = req.body;
+//     const narrative = await generateCashFlowNarrativeAgentic(
+//       body.cashFlowStatement as import('../../types/financial.js').CashFlowStatement,
+//       body.periodLabel
+//     );
+//     res.json({ narrative });
+//   } catch (e) {
+//     send500(res, e, 'Cash flow narrative failed');
+//   }
+// });
 
-/** POST /api/trial-balance/notes-narrative */
-router.post('/notes-narrative', validateBody(notesNarrativeBodySchema), async (req: Request, res: Response) => {
-  try {
-    const body: NotesNarrativeBody = req.body;
-    const narrative = await generateNotesNarrativeAgentic(body.standard, body.context);
-    res.json({ narrative });
-  } catch (e) {
-    send500(res, e, 'Notes narrative failed');
-  }
-});
+// /** POST /api/trial-balance/notes-narrative */
+// router.post('/notes-narrative', validateBody(notesNarrativeBodySchema), async (req: Request, res: Response) => {
+//   try {
+//     const body: NotesNarrativeBody = req.body;
+//     const narrative = await generateNotesNarrativeAgentic(body.standard, body.context);
+//     res.json({ narrative });
+//   } catch (e) {
+//     send500(res, e, 'Notes narrative failed');
+//   }
+// });
 
-/** POST /api/trial-balance/equity-changes-narrative */
-router.post('/equity-changes-narrative', validateBody(equityChangesNarrativeBodySchema), async (req: Request, res: Response) => {
-  try {
-    const body: EquityChangesNarrativeBody = req.body;
-    const narrative = await generateEquityChangesNarrativeAgentic(
-      body.equityChangesStatement as unknown as import('../../types/financial.js').EquityChangesStatement
-    );
-    res.json({ narrative });
-  } catch (e) {
-    send500(res, e, 'Equity changes narrative failed');
-  }
-});
+// /** POST /api/trial-balance/equity-changes-narrative */
+// router.post('/equity-changes-narrative', validateBody(equityChangesNarrativeBodySchema), async (req: Request, res: Response) => {
+//   try {
+//     const body: EquityChangesNarrativeBody = req.body;
+//     const narrative = await generateEquityChangesNarrativeAgentic(
+//       body.equityChangesStatement as unknown as import('../../types/financial.js').EquityChangesStatement
+//     );
+//     res.json({ narrative });
+//   } catch (e) {
+//     send500(res, e, 'Equity changes narrative failed');
+//   }
+// });
 
 export default router;

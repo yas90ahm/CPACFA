@@ -50,6 +50,55 @@ router.get('/connections', async (req: Request, res: Response) => {
   }
 });
 
+router.delete('/connections/:id', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req) ?? 'default';
+    const pool = getTenantPool(req);
+    const id = req.params.id;
+    if (!pool) return res.status(400).json({ error: 'Tenant pool required' });
+    const conn = await getConnection(id, pool, tenantId);
+    if (!conn) return res.status(404).json({ error: 'Connection not found' });
+    const { recordMaterialEvent } = await import('../services/audit_service.js');
+    await pool.query('DELETE FROM accounting_connections WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
+    await recordMaterialEvent(pool, {
+      tenantId,
+      eventType: 'mapping_rule_update',
+      deterministicFlagSnapshot: {
+        event: 'erp_connection_deleted',
+        connectionId: id,
+        provider: conn.provider,
+        name: conn.name,
+        userId: (req as AuthRequest).userId ?? 'anonymous',
+      },
+    });
+    res.json({ deleted: true });
+  } catch (e) {
+    send500(res, e, 'Delete connection failed');
+  }
+});
+
+router.post('/connections/:id/test', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req) ?? 'default';
+    const pool = getTenantPool(req);
+    const id = req.params.id;
+    if (!pool) return res.status(400).json({ error: 'Tenant pool required' });
+    const conn = await getConnection(id, pool, tenantId);
+    if (!conn) return res.status(404).json({ error: 'Connection not found' });
+    const hasCreds = Boolean(conn.credentialRef && conn.credentialRef.trim().length > 0);
+    const status = hasCreds ? 'connected' : 'failed';
+    res.json({
+      connectionId: id,
+      provider: conn.provider,
+      status,
+      testedAt: new Date().toISOString(),
+      ...(!hasCreds && { error: 'Connection has no credentials configured' }),
+    });
+  } catch (e) {
+    send500(res, e, 'Test connection failed');
+  }
+});
+
 router.get('/connections/:id', async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);

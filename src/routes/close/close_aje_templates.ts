@@ -72,6 +72,61 @@ router.post('/templates', async (req: Request, res: Response) => {
   }
 });
 
+/** PUT /api/close/templates/:id — update template */
+router.put('/templates/:id', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const id = req.params.id;
+    const body = req.body as {
+      name?: string;
+      memo?: string;
+      lines?: Array<{ accountRef: string; debit?: number; credit?: number; description?: string }>;
+      frequency?: 'monthly' | 'quarterly' | 'annually';
+      isActive?: boolean;
+    };
+    const template = await repo.updateTemplate(pool, tenantId, id, {
+      name: body.name,
+      memo: body.memo,
+      lines: body.lines,
+      frequency: body.frequency,
+      isActive: body.isActive,
+    });
+    if (!template) {
+      res.status(404).json({ error: 'Template not found' });
+      return;
+    }
+    res.json({ template });
+  } catch (e) {
+    send500(res, e, 'Update template failed');
+  }
+});
+
+/** DELETE /api/close/templates/:id — deactivate template (sets isActive=false) */
+router.delete('/templates/:id', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const id = req.params.id;
+    const template = await repo.updateTemplate(pool, tenantId, id, { isActive: false });
+    if (!template) {
+      res.status(404).json({ error: 'Template not found' });
+      return;
+    }
+    res.json({ deactivated: true, template });
+  } catch (e) {
+    send500(res, e, 'Deactivate template failed');
+  }
+});
+
 /** GET /api/close/templates/:id — get template by id */
 router.get('/templates/:id', async (req: Request, res: Response) => {
   try {
@@ -159,7 +214,7 @@ router.post('/templates/apply', async (req: Request, res: Response) => {
   }
 });
 
-/** POST /api/close/templates/skip — skip proposed template */
+/** POST /api/close/templates/skip — skip proposed template. body: { applicationId, closeSessionId, reason } (reason min 5 chars) */
 router.post('/templates/skip', async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
@@ -171,15 +226,22 @@ router.post('/templates/skip', async (req: Request, res: Response) => {
     const body = req.body as {
       applicationId: string;
       closeSessionId: string;
+      reason?: string;
     };
     if (!body.applicationId || !body.closeSessionId) {
       res.status(400).json({ error: 'applicationId and closeSessionId required' });
+      return;
+    }
+    const reason = body.reason?.trim() ?? '';
+    if (reason.length < 5) {
+      res.status(400).json({ error: 'Skip reason is required (minimum 5 characters)' });
       return;
     }
     const application = await ajeTemplateService.skipTemplate(pool, {
       tenantId,
       applicationId: body.applicationId,
       closeSessionId: body.closeSessionId,
+      reason,
     });
     res.json({ application });
   } catch (e) {

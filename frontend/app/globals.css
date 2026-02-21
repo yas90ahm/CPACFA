@@ -2,121 +2,53 @@
 @tailwind components;
 @tailwind utilities;
 
-@import '../styles/calm-design.css';
-
 @layer base {
   :root {
-    /* Calm Design palette */
-    --background: 210 14% 98%;           /* Stone-50 #F8F9FA — main background */
-    --foreground: 217 56% 18%;          /* Deep Navy text */
-    --card: 0 0% 100%;
-    --card-foreground: 217 56% 18%;
-    --primary: 217 56% 22%;             /* Deep Navy #1A365D */
-    --primary-foreground: 0 0% 100%;
-    --secondary: 210 20% 94%;
-    --secondary-foreground: 217 56% 18%;
-    --muted: 210 20% 94%;
-    --muted-foreground: 215 16% 47%;
-    --accent: 152 39% 30%;              /* Audit Green */
-    --accent-foreground: 0 0% 100%;
-    --destructive: 357 65% 37%;
-    --border: 214 32% 91%;              /* Slate-200 #E2E8F0 — subtle card borders */
-    --input: 214 32% 91%;
-    --ring: 217 56% 22%;
-    --audit-green: 152 39% 30%;
-    --risk-red: 357 65% 37%;
-    --radius: 6px;
-    /* Close workspace: soft blue/grey (FloQast-style) */
-    --close-status-bg: 210 20% 98%;
-    --close-status-border: 214 32% 91%;
-    --close-due-soon: 38 92% 50%;
+    --bg-primary: #0C0E13;
+    --bg-surface: #13151C;
+    --bg-elevated: #181B24;
+    --bg-hover: #1E2130;
+    --bg-input: #0F1119;
+    --border-default: #252836;
+    --border-light: #1E2130;
+    --border-focus: #4A6CF7;
+    --text-primary: #E8EAF0;
+    --text-secondary: #8B90A0;
+    --text-tertiary: #5A5F73;
+    --text-muted: #3D4155;
+    --accent: #4A6CF7;
+    --accent-dim: rgba(74,108,247,0.12);
+    --status-green: #34D399;
+    --status-green-dim: rgba(52,211,153,0.12);
+    --status-amber: #FBBF24;
+    --status-amber-dim: rgba(251,191,36,0.12);
+    --status-red: #F87171;
+    --status-red-dim: rgba(248,113,113,0.12);
+    --status-blue: #60A5FA;
+    --status-blue-dim: rgba(96,165,250,0.12);
+    --ai-purple: #A78BFA;
+    --ai-purple-dim: rgba(167,139,250,0.06);
+    --ai-purple-border: rgba(167,139,250,0.20);
   }
 
-  .dark {
-    --background: 217 56% 8%;
-    --foreground: 210 20% 98%;
-    --card: 217 56% 10%;
-    --card-foreground: 210 20% 98%;
-    --primary: 214 32% 85%;
-    --primary-foreground: 217 56% 18%;
-    --border: 217 30% 18%;
-    --input: 217 30% 18%;
-    --ring: 214 32% 85%;
-    --audit-green: 152 39% 45%;
-    --risk-red: 357 65% 55%;
-  }
-}
-
-@layer base {
   * {
     @apply border-border;
   }
-  body {
-    @apply bg-background text-foreground antialiased font-sans;
-    font-family: var(--font-sans), 'Inter', system-ui, sans-serif;
+
+  html {
+    @apply antialiased;
   }
-  /* Currency values: JetBrains Mono for vertical alignment in tables */
-  .font-currency,
-  .font-tabular,
-  [data-currency],
-  .tabular-nums {
+
+  body {
+    @apply bg-primary text-primary font-sans;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+  }
+
+  .font-mono,
+  .tabular-nums,
+  [data-currency] {
     font-variant-numeric: tabular-nums;
     font-family: var(--font-mono), 'JetBrains Mono', ui-monospace, monospace;
   }
-  /* Table: highlight Net Income / Total Assets with Audit Green */
-  .table-row-highlight {
-    font-weight: 700;
-    font-size: 1rem;
-    background-color: hsl(var(--audit-green) / 0.08);
-  }
-}
-
-/* Calm Design: card borders use Slate-200 (#E2E8F0) */
-.card-calm {
-  box-shadow: 0 2px 4px -1px rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.03);
-  border-radius: 6px;
-  border: 1px solid #E2E8F0;
-}
-
-/* Close workspace: status strip and at-risk use soft palette */
-.close-status-strip {
-  background-color: hsl(var(--close-status-bg));
-  border-color: hsl(var(--close-status-border));
-}
-.close-at-risk-row {
-  border-left: 4px solid hsl(var(--close-due-soon));
-}
-
-/* Export: subtle pulse when report needs re-generation */
-@keyframes export-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0.2); }
-  50% { box-shadow: 0 0 0 6px hsl(var(--primary) / 0); }
-}
-
-.export-download-pulse {
-  animation: export-pulse 1.8s ease-in-out infinite;
-}
-
-/* Smart Ingestion: subtle pulse on active Activity Chip */
-@keyframes chip-pulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 hsl(var(--audit-green) / 0.2); }
-  50% { opacity: 0.92; box-shadow: 0 0 0 4px hsl(var(--audit-green) / 0); }
-}
-.chip-pulse {
-  animation: chip-pulse 1.5s ease-in-out infinite;
-}
-
-/* Dashboard: smooth slide-in when Supervisor has verified (completed) */
-@keyframes dashboard-slide-in {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-.dashboard-reveal {
-  animation: dashboard-slide-in 0.4s ease-out forwards;
 }

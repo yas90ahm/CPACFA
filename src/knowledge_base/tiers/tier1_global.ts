@@ -4,7 +4,8 @@
  */
 
 import type { MemoryEntry } from '../types.js';
-import { getDefaultRAGStore, getHandbookChunks } from '../../services/rag_handbook.js';
+// QUARANTINED — rag_handbook not in MVP architecture
+// import { getDefaultRAGStore, getHandbookChunks } from '../../services/rag_handbook.js';
 
 /** Tax code sample chunks (expand with real IRC/regulations in production). */
 const TAX_CHUNKS: MemoryEntry[] = [
@@ -36,15 +37,17 @@ const TAX_CHUNKS: MemoryEntry[] = [
 
 /** Convert RAG handbook chunks to MemoryEntry (FASB/IFRS). Called once and cached. */
 function handbookToMemoryEntries(): MemoryEntry[] {
-  const chunks = getHandbookChunks();
-  return chunks.map((c) => ({
-    id: c.id,
-    tier: 'global' as const,
-    source: c.framework,
-    text: [c.citation, c.section, c.text].filter(Boolean).join(' — '),
-    payload: { citation: c.citation, section: c.section },
-    storedAt: new Date().toISOString(),
-  }));
+  // QUARANTINED — rag_handbook not in MVP architecture
+  // const chunks = getHandbookChunks();
+  // return chunks.map((c) => ({
+  //   id: c.id,
+  //   tier: 'global' as const,
+  //   source: c.framework,
+  //   text: [c.citation, c.section, c.text].filter(Boolean).join(' — '),
+  //   payload: { citation: c.citation, section: c.section },
+  //   storedAt: new Date().toISOString(),
+  // }));
+  return []; // No handbook chunks in MVP
 }
 
 let cachedGlobal: MemoryEntry[] | null = null;
@@ -72,12 +75,14 @@ export async function queryGlobal(
     return keywordScoreAndTake(taxOnly, query, topK);
   }
 
-  const store = getDefaultRAGStore();
-  const result = await store.query(query, {
-    topK,
-    framework: framework === 'FASB' || framework === 'IFRS' ? framework : undefined,
-  });
-  const fromRag = result.chunks.map((c) => ({
+  // QUARANTINED — rag_handbook not in MVP architecture
+  // const store = getDefaultRAGStore();
+  // const result = await store.query(query, {
+  //   topK,
+  //   framework: framework === 'FASB' || framework === 'IFRS' ? framework : undefined,
+  // });
+  const result = { chunks: [], query: query };
+  const fromRag = result.chunks.map((c: any) => ({
     id: c.id,
     tier: 'global' as const,
     source: c.framework,
