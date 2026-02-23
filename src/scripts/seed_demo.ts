@@ -100,7 +100,7 @@ export async function seedDemo(): Promise<void> {
       '2025-01-31',
       'accrual',
       'GAAP',
-      'open'
+      'in_progress'
     );
   }
 

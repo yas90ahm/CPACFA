@@ -1,12 +1,42 @@
 'use client';
 
-import { useState } from 'react';
-import { mockTaxonomyFull } from '@/lib/mock/taxonomy-full';
-import type { TaxonomyNode } from '@/lib/mock/taxonomy';
+import { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { apiFetch } from '@/lib/api';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 
-function formatBal(n: number): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
+interface TaxonomyLine {
+  id: string;
+  code: string;
+  name: string;
+  statement: string;
+  parentId?: string;
+}
+
+interface TaxonomyNode {
+  id: string;
+  label: string;
+  children?: TaxonomyNode[];
+}
+
+function buildTaxonomyTree(lines: TaxonomyLine[]): TaxonomyNode[] {
+  if (!lines.length) return [];
+  const map = new Map<string, TaxonomyNode>();
+  for (const l of lines) {
+    map.set(l.id, { id: l.id, label: l.name, children: [] });
+  }
+  const roots: TaxonomyNode[] = [];
+  for (const l of lines) {
+    const node = map.get(l.id)!;
+    if (!l.parentId || !map.has(l.parentId)) {
+      roots.push(node);
+    } else {
+      const parent = map.get(l.parentId)!;
+      if (!parent.children) parent.children = [];
+      parent.children.push(node);
+    }
+  }
+  return roots;
 }
 
 function TaxonomyTree({ nodes, depth = 0, openIds, toggle }: { nodes: TaxonomyNode[]; depth?: number; openIds: Set<string>; toggle: (id: string) => void }) {
@@ -29,14 +59,6 @@ function TaxonomyTree({ nodes, depth = 0, openIds, toggle }: { nodes: TaxonomyNo
                 <span className="w-4 shrink-0" />
               )}
               <span className="text-sm text-primary">{node.label}</span>
-              {node.accountCount != null && (
-                <span className="text-xs text-text-secondary ml-2">
-                  {node.accountCount} account{node.accountCount !== 1 ? 's' : ''} mapped
-                </span>
-              )}
-              {node.totalBalance != null && (
-                <span className="text-xs font-mono text-text-secondary ml-2">{formatBal(node.totalBalance)}</span>
-              )}
             </div>
             {hasChildren && isOpen && <TaxonomyTree nodes={node.children!} depth={depth + 1} openIds={openIds} toggle={toggle} />}
           </li>
@@ -47,7 +69,7 @@ function TaxonomyTree({ nodes, depth = 0, openIds, toggle }: { nodes: TaxonomyNo
 }
 
 export default function TaxonomySettingsPage() {
-  const [openIds, setOpenIds] = useState<Set<string>>(new Set(['is', 'rev', 'cogs', 'opex', 'bs']));
+  const [openIds, setOpenIds] = useState<Set<string>>(new Set());
   const toggle = (id: string) => {
     setOpenIds((prev) => {
       const next = new Set(prev);
@@ -57,6 +79,13 @@ export default function TaxonomySettingsPage() {
     });
   };
 
+  const { data, isLoading } = useQuery({
+    queryKey: ['taxonomy'],
+    queryFn: () => apiFetch<{ lines: TaxonomyLine[] }>('/api/coa-mapping/taxonomy'),
+  });
+  const taxonomyLines = data?.lines ?? [];
+  const tree = useMemo(() => buildTaxonomyTree(taxonomyLines), [taxonomyLines]);
+
   return (
     <div className="max-w-4xl space-y-6">
       <div>
@@ -65,7 +94,13 @@ export default function TaxonomySettingsPage() {
       </div>
 
       <div className="bg-surface border border-border rounded-card p-4">
-        <TaxonomyTree nodes={mockTaxonomyFull} openIds={openIds} toggle={toggle} />
+        {isLoading ? (
+          <p className="text-text-secondary text-sm">Loading taxonomy...</p>
+        ) : tree.length === 0 ? (
+          <p className="text-text-secondary text-sm">No taxonomy lines configured.</p>
+        ) : (
+          <TaxonomyTree nodes={tree} openIds={openIds} toggle={toggle} />
+        )}
       </div>
 
       <div className="flex items-center gap-2">

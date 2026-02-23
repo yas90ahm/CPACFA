@@ -7,15 +7,40 @@ import { useCloseSession, useCloseReadiness, useCloseIssues } from '@/lib/querie
 import { useReconciliations } from '@/lib/queries/reconciliations';
 import { useAjeTemplates, useJournalEntries } from '@/lib/queries/adjustments';
 import { useVariances } from '@/lib/queries/variance';
+import { useAuditTrail } from '@/lib/queries/audit-trail';
 import { useTrialBalanceContext } from '../context/trial-balance-context';
-import {
-  mockPhaseProgress,
-  mockNextActions,
-  mockRecentActivity,
-} from '@/lib/mock/close-session';
 import { cn } from '@/lib/utils';
 import { Check, Circle, CircleDot, ArrowRight } from 'lucide-react';
 import { OpenStateDashboard } from './OpenStateDashboard';
+
+function formatRelativeTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const now = Date.now();
+    const diffMs = now - d.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins} min ago`;
+    if (diffHours < 24) return `${diffHours} hr ago`;
+    if (diffDays < 7) return `${diffDays} days ago`;
+    return d.toLocaleDateString();
+  } catch {
+    return iso;
+  }
+}
+
+/** Static phase definitions (id + name). Status/detail/fraction are derived from real data below. */
+const PHASE_LIST = [
+  { id: '1', name: 'Ingest & Validate' },
+  { id: '2', name: 'Account Mapping' },
+  { id: '3', name: 'Reconciliation' },
+  { id: '4', name: 'Adjusting Entries' },
+  { id: '5', name: 'Statement Generation' },
+  { id: '6', name: 'Variance Analysis' },
+  { id: '7', name: 'Review & Certify' },
+] as const;
 
 export default function CloseDashboardPage() {
   const params = useParams();
@@ -29,7 +54,7 @@ export default function CloseDashboardPage() {
   const ingested = searchParams.get('ingested') === '1';
   const accounts = searchParams.get('accounts') ?? '52';
   const unmapped = searchParams.get('unmapped') ?? '5';
-  const effectiveState = ingested ? 'IN_PROGRESS' : session?.state;
+  const effectiveState = session?.state;
 
   useEffect(() => {
     if (!ingested) return;
@@ -45,6 +70,7 @@ export default function CloseDashboardPage() {
   const { data: ajeTemplates = [] } = useAjeTemplates(sessionId);
   const { data: journalEntries = [] } = useJournalEntries(sessionId);
   const { data: variances = [] } = useVariances(sessionId);
+  const { data: auditTrail } = useAuditTrail(sessionId, { limit: 8 });
   const { mappedCount, unmappedCount, rows: tbRows } = useTrialBalanceContext();
 
   if (effectiveState === 'OPEN') {
@@ -109,11 +135,15 @@ export default function CloseDashboardPage() {
         <section className="bg-surface border border-border rounded-card p-5">
           <h2 className="text-sm font-medium text-text-secondary mb-4">Phase progress</h2>
           <ul className="space-y-3">
-            {mockPhaseProgress.map((phase, i) => {
-              const phaseWithRecon = phase.id === '3'
-                ? { ...phase, fraction: `${reconComplete}/${reconTotal}`, detail: `${reconComplete} of ${reconTotal} complete${reconOverTolerance > 0 ? `, ${reconOverTolerance} over tolerance` : ''}${reconciliations.filter((r) => r.status === 'not_started').length > 0 ? `, ${reconciliations.filter((r) => r.status === 'not_started').length} not started` : ''}` }
+            {PHASE_LIST.map((phase, i) => {
+              const phaseWithRecon = phase.id === '1'
+                ? { ...phase, status: (effectiveState !== 'OPEN' ? 'complete' : 'not_started') as const, fraction: effectiveState !== 'OPEN' ? '1/1' : '', detail: effectiveState !== 'OPEN' ? 'Complete' : '' }
+                : phase.id === '2'
+                  ? { ...phase, status: (mappingGatePassing ? 'complete' : totalAccounts > 0 ? 'in_progress' : 'not_started') as const, fraction: totalAccounts > 0 ? `${mappedCount}/${totalAccounts}` : '', detail: totalAccounts > 0 ? (unmappedCount === 0 ? 'All mapped' : `${unmappedCount} unmapped`) : '' }
+                  : phase.id === '3'
+                ? { ...phase, status: (reconTotal > 0 && reconComplete === reconTotal ? 'complete' : reconTotal > 0 ? 'in_progress' : 'not_started') as const, fraction: `${reconComplete}/${reconTotal}`, detail: `${reconComplete} of ${reconTotal} complete${reconOverTolerance > 0 ? `, ${reconOverTolerance} over tolerance` : ''}${reconciliations.filter((r) => r.status === 'not_started').length > 0 ? `, ${reconciliations.filter((r) => r.status === 'not_started').length} not started` : ''}` }
                 : phase.id === '4'
-                  ? { ...phase, fraction: ajeTemplateTotal ? `${ajeTemplateResolved}/${ajeTemplateTotal}` : '', detail: ajeTemplatePending > 0 ? `${ajeTemplatePending} templates pending${ajeEntryAwaitingApproval > 0 ? `, ${ajeEntryAwaitingApproval} entry awaiting approval` : ''}` : 'All templates resolved' }
+                  ? { ...phase, status: (ajeTemplateTotal > 0 && ajeTemplatePending === 0 ? 'complete' : ajeTemplateTotal > 0 ? 'in_progress' : 'not_started') as const, fraction: ajeTemplateTotal ? `${ajeTemplateResolved}/${ajeTemplateTotal}` : '', detail: ajeTemplatePending > 0 ? `${ajeTemplatePending} templates pending${ajeEntryAwaitingApproval > 0 ? `, ${ajeEntryAwaitingApproval} entry awaiting approval` : ''}` : 'All templates resolved' }
                   : phase.id === '5'
                     ? { ...phase, status: statementsGenerated && !statementsStale ? 'complete' as const : statementsGenerated ? 'in_progress' as const : 'not_started' as const, fraction: statementsStale ? 'Stale' : statementsGenerated ? 'Generated ✓' : '', detail: statementsStale ? 'Regeneration needed' : statementsGenerated ? 'Generated' : 'Not yet generated' }
                     : phase.id === '6'
@@ -312,46 +342,35 @@ export default function CloseDashboardPage() {
                 </div>
               </li>
             )}
-            {mockNextActions.map((action) => (
-              <li key={action.id}>
-                <div
-                  className={cn(
-                    'p-3 rounded-input border border-border-light',
-                    action.priority === 'BLOCKING' && 'border-l-4 border-l-status-amber',
-                    action.priority === 'WARNING' && 'border-l-4 border-l-status-amber/50'
-                  )}
-                  style={{ borderLeftWidth: action.priority === 'BLOCKING' || action.priority === 'WARNING' ? '4px' : undefined }}
-                >
-                  <div className="font-medium text-primary">{action.title}</div>
-                  <div className="text-xs text-text-secondary mt-1">{action.context}</div>
-                  <Link
-                    href={action.href.replace('[sessionId]', sessionId)}
-                    className="mt-2 inline-flex items-center gap-1 text-xs text-accent hover:underline"
-                  >
-                    {action.cta}
-                    <ArrowRight className="w-3 h-3" />
-                  </Link>
+            {reconciliations.length === 0 && unmappedCount === 0 && ajeTemplatePending === 0 && !statementsStale && varianceUnexplained.length === 0 && !ajeApprovedNotPosted && !ajeRejected && session?.state !== 'IN_PROGRESS' && (
+              <li>
+                <div className="p-3 rounded-input border border-border-light text-text-secondary text-sm">
+                  No pending actions. Open a phase from the list to continue.
                 </div>
               </li>
-            ))}
+            )}
           </ul>
         </section>
 
         <section className="bg-surface border border-border rounded-card p-5">
           <h2 className="text-sm font-medium text-text-secondary mb-4">Recent activity</h2>
           <ul className="space-y-2">
-            {mockRecentActivity.map((a) => (
-              <li key={a.id} className="flex items-start gap-3 text-sm">
-                <div className="w-7 h-7 rounded-full bg-hover flex items-center justify-center text-text-tertiary text-xs shrink-0">
-                  {a.user.slice(0, 2)}
-                </div>
-                <div>
-                  <span className="text-primary">{a.user}</span>
-                  <span className="text-text-secondary"> {a.description}</span>
-                  <span className="text-text-tertiary text-xs block">{a.time}</span>
-                </div>
-              </li>
-            ))}
+            {(auditTrail?.events ?? []).length === 0 ? (
+              <li className="text-sm text-text-tertiary">No recent activity</li>
+            ) : (
+              (auditTrail?.events ?? []).map((a) => (
+                <li key={a.id} className="flex items-start gap-3 text-sm">
+                  <div className="w-7 h-7 rounded-full bg-hover flex items-center justify-center text-text-tertiary text-xs shrink-0">
+                    {(a.userName ?? a.userId ?? 'S').slice(0, 2).toUpperCase()}
+                  </div>
+                  <div>
+                    <span className="text-primary">{a.userName ?? a.userId ?? 'System'}</span>
+                    <span className="text-text-secondary"> {a.description || a.eventType}</span>
+                    <span className="text-text-tertiary text-xs block">{formatRelativeTime(a.timestamp)}</span>
+                  </div>
+                </li>
+              ))
+            )}
           </ul>
           <Link href={`/close/${sessionId}/audit-trail`} className="mt-3 inline-block text-xs text-accent hover:underline">
             View full audit trail
@@ -409,9 +428,13 @@ export default function CloseDashboardPage() {
             <div><dt className="text-text-tertiary inline">Entity: </dt><dd className="inline text-primary">{session?.entityName ?? '—'}</dd></div>
             <div><dt className="text-text-tertiary inline">Period: </dt><dd className="inline font-mono text-primary">{session?.periodLabel ?? '—'}</dd></div>
             <div><dt className="text-text-tertiary inline">Status: </dt><dd className="inline text-primary">{session?.state ?? '—'}</dd></div>
-            <div><dt className="text-text-tertiary inline">Started: </dt><dd className="inline font-mono text-primary">Feb 1, 2026 by {session?.createdBy ?? '—'}</dd></div>
-            <div><dt className="text-text-tertiary inline">Days in close: </dt><dd className="inline font-mono text-primary">4</dd></div>
-            <div><dt className="text-text-tertiary inline">Prior period close: </dt><dd className="inline font-mono text-primary">6 days</dd></div>
+            <div><dt className="text-text-tertiary inline">Started: </dt><dd className="inline font-mono text-primary">
+              {(session?.startedAt ?? session?.createdAt) ? new Date(session.startedAt ?? session?.createdAt ?? '').toLocaleDateString('en-US') : '—'} by {session?.createdBy ?? '—'}
+            </dd></div>
+            <div><dt className="text-text-tertiary inline">Days in close: </dt><dd className="inline font-mono text-primary">
+              {(session?.startedAt ?? session?.createdAt) ? Math.max(0, Math.floor((Date.now() - new Date(session.startedAt ?? session.createdAt ?? 0).getTime()) / 86400000)) : '—'}
+            </dd></div>
+            <div><dt className="text-text-tertiary inline">Prior period close: </dt><dd className="inline font-mono text-primary">—</dd></div>
           </dl>
         </section>
       </div>

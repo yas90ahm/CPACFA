@@ -68,13 +68,18 @@ export async function initializeReconciliations(
   const required = requirements.filter((r) => r.isRequired);
   if (required.length === 0) return [];
 
-  const tbResult = await getTrialBalanceForCertification(
-    pool,
-    tenantId,
-    periodLabel,
-    periodId
-  );
-  const tb = tbResult.trialBalance;
+  let tb: { accountCode?: string; accountName: string; debit: number; credit: number }[] = [];
+  try {
+    const tbResult = await getTrialBalanceForCertification(
+      pool,
+      tenantId,
+      periodLabel,
+      periodId
+    );
+    tb = tbResult.trialBalance;
+  } catch {
+    // No trial balance yet (e.g. session just advanced before GL/TB ingest). Create recons with null GL balance.
+  }
 
   const existing = await reconRepo.listPeriodReconciliationsByPeriod(pool, tenantId, periodId);
   const existingAccounts = new Set(existing.map((e) => e.accountCode));

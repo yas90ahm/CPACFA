@@ -1,24 +1,55 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { MoneyInput } from '@/components/shared/MoneyInput';
-import { mockEvidencePolicy } from '@/lib/mock/evidence-policy';
+import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
-const ACTIVE_SESSION_ID = 'c925645f-3831-4d81-93a9-a12a2819cd3e';
+type EvidencePolicyResponse = {
+  enforcementMode?: 'off' | 'warn_only' | 'hard_block';
+  materialityThreshold?: string | null;
+  requiredAssertionTypes?: Record<string, string[]> | null;
+};
 
 export default function EvidencePolicyPage() {
-  const [jeThreshold, setJeThreshold] = useState(mockEvidencePolicy.jeThreshold);
-  const [reconEvidenceRequired, setReconEvidenceRequired] = useState(mockEvidencePolicy.reconEvidenceRequired);
-  const [maxFileSizeMB, setMaxFileSizeMB] = useState(String(mockEvidencePolicy.maxFileSizeMB));
-  const [sha256Enabled, setSha256Enabled] = useState(mockEvidencePolicy.sha256Enabled);
-  const [saved, setSaved] = useState(false);
+  const queryClient = useQueryClient();
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['evidence-policy'],
+    queryFn: () => apiFetch<EvidencePolicyResponse>('/api/close/evidence-policy'),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (payload: { enforcementMode: 'off' | 'warn_only' | 'hard_block'; materialityThreshold?: string }) =>
+      apiFetch('/api/close/evidence-policy', { method: 'PUT', body: payload }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['evidence-policy'] }),
+  });
+
+  const [jeThreshold, setJeThreshold] = useState(data?.materialityThreshold ?? '');
+  const [enforcementMode, setEnforcementMode] = useState<'off' | 'warn_only' | 'hard_block'>(data?.enforcementMode ?? 'off');
+  const [reconEvidenceRequired, setReconEvidenceRequired] = useState(true);
+  const [maxFileSizeMB, setMaxFileSizeMB] = useState('10');
+  const [sha256Enabled, setSha256Enabled] = useState(true);
+  const saved = updateMutation.isSuccess;
+
+  useEffect(() => {
+    if (data) {
+      setJeThreshold(data.materialityThreshold ?? '');
+      setEnforcementMode((data.enforcementMode as 'off' | 'warn_only' | 'hard_block') ?? 'off');
+    }
+  }, [data]);
 
   const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    const mode: 'off' | 'warn_only' | 'hard_block' = reconEvidenceRequired ? 'hard_block' : enforcementMode;
+    updateMutation.mutate({
+      enforcementMode: mode,
+      materialityThreshold: jeThreshold || undefined,
+    });
   };
+
+  if (isLoading && !data) return <div className="text-text-secondary">Loading...</div>;
 
   return (
     <div className="max-w-2xl space-y-10">
@@ -29,7 +60,7 @@ export default function EvidencePolicyPage() {
 
       <p className="text-sm text-text-secondary">
         This policy applies to journal entries and reconciliations.{' '}
-        <Link href={`/close/${ACTIVE_SESSION_ID}/adjustments`} className="text-accent hover:underline">View current adjustments</Link>
+        <Link href="/close" className="text-accent hover:underline">View close sessions</Link>
       </p>
 
       <section className="space-y-6">

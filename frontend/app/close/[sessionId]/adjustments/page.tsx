@@ -2,7 +2,11 @@
 
 import { useParams, useSearchParams } from 'next/navigation';
 import { useState, useMemo, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { useAjeTemplates, useJournalEntries } from '@/lib/queries/adjustments';
+import { useAuth } from '@/lib/auth';
+import { apiFetch } from '@/lib/api';
 import { AdjustmentsTemplatesTab } from './AdjustmentsTemplatesTab';
 import { AdjustmentsEntriesTab } from './AdjustmentsEntriesTab';
 import { JournalEntryForm } from './JournalEntryForm';
@@ -11,20 +15,62 @@ import { MoneyCell } from '@/components/shared/MoneyCell';
 import { cn } from '@/lib/utils';
 import type { JournalEntry, JournalEntryStatus, AJETemplate } from '@/lib/types/journal-entry';
 
+const displayUser = (user: { userId: string; email?: string } | null) => user?.email ?? user?.userId ?? 'Unknown';
+
 export default function AdjustmentsPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const sessionId = params.sessionId as string;
   const tab = searchParams.get('tab') === 'templates' ? 'templates' : 'entries';
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
 
   const { data: templatesFromQuery = [] } = useAjeTemplates(sessionId);
   const { data: entriesFromQuery = [] } = useJournalEntries(sessionId);
 
+  const proposeMutation = useMutation({
+    mutationFn: (jeId: string) => apiFetch(`/api/close/journal-entries/${jeId}/propose`, { method: 'POST' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+    },
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: (jeId: string) =>
+      apiFetch(`/api/close/journal-entries/${jeId}/approve`, {
+        method: 'POST',
+        body: { approvedBy: displayUser(user) },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+      queryClient.invalidateQueries({ queryKey: ['trial-balance'] });
+      queryClient.invalidateQueries({ queryKey: ['readiness'] });
+    },
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: ({ jeId, reason }: { jeId: string; reason: string }) =>
+      apiFetch(`/api/close/journal-entries/${jeId}/reject`, {
+        method: 'POST',
+        body: { reason },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+    },
+  });
+
+  const postMutation = useMutation({
+    mutationFn: (jeId: string) => apiFetch(`/api/close/journal-entries/${jeId}/post`, { method: 'POST' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+      queryClient.invalidateQueries({ queryKey: ['trial-balance'] });
+      queryClient.invalidateQueries({ queryKey: ['readiness'] });
+      queryClient.invalidateQueries({ queryKey: ['reconciliations'] });
+    },
+  });
+
   const [localTemplateSkips, setLocalTemplateSkips] = useState<Record<string, { reason: string }>>({});
   const [localAppliedTemplates, setLocalAppliedTemplates] = useState<Record<string, { resultingJeId: string }>>({});
-  const [localDraftJEs, setLocalDraftJEs] = useState<JournalEntry[]>([]);
-  const [localEntryPatches, setLocalEntryPatches] = useState<Record<string, Partial<JournalEntry> & { lines?: JournalEntry['lines'] }>>({});
-  const [localDeletedJeIds, setLocalDeletedJeIds] = useState<string[]>([]);
   const [expandedJeId, setExpandedJeId] = useState<string | null>(null);
   const [slideOverOpen, setSlideOverOpen] = useState(false);
   const [slideOverMode, setSlideOverMode] = useState<'create' | 'edit' | 'view'>('create');
@@ -47,19 +93,14 @@ export default function AdjustmentsPage() {
   }, [templatesFromQuery, localTemplateSkips, localAppliedTemplates]);
 
   const nextJeNumber = useMemo(() => {
-    const all = [...entriesFromQuery, ...localDraftJEs];
-    const max = all.length ? Math.max(...all.map((e) => e.jeNumber)) : 1045;
+    const max = entriesFromQuery.length ? Math.max(...entriesFromQuery.map((e) => e.jeNumber)) : 1045;
     return max + 1;
-  }, [entriesFromQuery, localDraftJEs]);
+  }, [entriesFromQuery]);
 
-  const allEntries = useMemo(() => {
-    const combined = [...entriesFromQuery, ...localDraftJEs].filter((e) => !localDeletedJeIds.includes(e.id));
-    const patched = combined.map((e) => {
-      const patch = localEntryPatches[e.id];
-      return patch ? { ...e, ...patch, lines: patch.lines ?? e.lines } : e;
-    });
-    return patched.sort((a, b) => b.jeNumber - a.jeNumber);
-  }, [entriesFromQuery, localDraftJEs, localEntryPatches, localDeletedJeIds]);
+  const allEntries = useMemo(
+    () => [...entriesFromQuery].sort((a, b) => b.jeNumber - a.jeNumber),
+    [entriesFromQuery]
+  );
 
   const draftCount = allEntries.filter((e) => e.status === 'draft').length;
   const proposedCount = allEntries.filter((e) => e.status === 'proposed').length;
@@ -71,6 +112,29 @@ export default function AdjustmentsPage() {
   );
   const pendingTemplatesCount = templates.filter((t) => t.periodStatus === 'pending').length;
 
+  const createDraftMutation = useMutation({
+    mutationFn: (payload: { closeSessionId: string; memo: string; source: 'manual' | 'template'; lines: Array<{ accountRef: string; debit?: number; credit?: number; description?: string }>; templateId?: string | null }) =>
+      apiFetch<JournalEntry>(`/api/close/journal-entries`, {
+        method: 'POST',
+        body: {
+          closeSessionId: payload.closeSessionId,
+          memo: payload.memo,
+          source: payload.source,
+          createdBy: displayUser(user),
+          lines: payload.lines,
+        },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+    },
+  });
+
+  const deleteJeMutation = useMutation({
+    mutationFn: (jeId: string) => apiFetch(`/api/close/journal-entries/${jeId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+    },
+  });
   const setTab = useCallback(
     (t: 'entries' | 'templates') => {
       const url = new URL(window.location.href);
@@ -82,40 +146,27 @@ export default function AdjustmentsPage() {
 
   const handleApplyTemplate = useCallback(
     (template: AJETemplate) => {
-      const newJe: JournalEntry = {
-        id: `je-local-${Date.now()}`,
-        sessionId,
-        jeNumber: nextJeNumber,
-        date: '2026-01-31',
-        memo: template.name,
-        status: 'draft',
-        source: 'template',
-        templateId: template.id,
-        templateName: template.name,
-        lines: [
-          { id: `l-${Date.now()}-1`, accountCode: template.debitAccountCode, accountName: template.debitAccountName, description: null, debit: template.amount, credit: 0 },
-          { id: `l-${Date.now()}-2`, accountCode: template.creditAccountCode, accountName: template.creditAccountName, description: null, debit: 0, credit: template.amount },
-        ],
-        evidenceCount: 0,
-        createdBy: 'Sarah Chen',
-        createdAt: new Date().toISOString(),
-        proposedBy: null,
-        proposedAt: null,
-        approvedBy: null,
-        approvedAt: null,
-        postedBy: null,
-        postedAt: null,
-        rejectedBy: null,
-        rejectedAt: null,
-        rejectionReason: null,
-      };
-      setLocalDraftJEs((prev) => [...prev, newJe]);
-      setLocalAppliedTemplates((prev) => ({ ...prev, [template.id]: { resultingJeId: newJe.id } }));
-      setTab('entries');
-      setExpandedJeId(newJe.id);
-      setSlideOverOpen(false);
+      createDraftMutation.mutate(
+        {
+          closeSessionId: sessionId,
+          memo: template.name,
+          source: 'template',
+          lines: [
+            { accountRef: template.debitAccountCode, debit: template.amount, credit: 0 },
+            { accountRef: template.creditAccountCode, debit: 0, credit: template.amount },
+          ],
+        },
+        {
+          onSuccess: (je) => {
+            setLocalAppliedTemplates((prev) => ({ ...prev, [template.id]: { resultingJeId: je.id } }));
+            setTab('entries');
+            setExpandedJeId(je.id);
+            setSlideOverOpen(false);
+          },
+        }
+      );
     },
-    [sessionId, nextJeNumber, setTab]
+    [sessionId, createDraftMutation, setTab]
   );
 
   const handleSkipTemplate = useCallback((templateId: string, reason: string) => {
@@ -130,50 +181,29 @@ export default function AdjustmentsPage() {
     });
   }, []);
 
-  const handleBulkApply = useCallback(() => {
+  const handleBulkApply = useCallback(async () => {
     const pending = templates.filter((t) => t.periodStatus === 'pending');
-    let num = nextJeNumber;
-    const newJEs: JournalEntry[] = pending.map((t) => {
-      const je: JournalEntry = {
-        id: `je-local-${Date.now()}-${t.id}`,
-        sessionId,
-        jeNumber: num++,
-        date: '2026-01-31',
-        memo: t.name,
-        status: 'draft',
-        source: 'template',
-        templateId: t.id,
-        templateName: t.name,
-        lines: [
-          { id: `l-${t.id}-1`, accountCode: t.debitAccountCode, accountName: t.debitAccountName, description: null, debit: t.amount, credit: 0 },
-          { id: `l-${t.id}-2`, accountCode: t.creditAccountCode, accountName: t.creditAccountName, description: null, debit: 0, credit: t.amount },
-        ],
-        evidenceCount: 0,
-        createdBy: 'Sarah Chen',
-        createdAt: new Date().toISOString(),
-        proposedBy: null,
-        proposedAt: null,
-        approvedBy: null,
-        approvedAt: null,
-        postedBy: null,
-        postedAt: null,
-        rejectedBy: null,
-        rejectedAt: null,
-        rejectionReason: null,
-      };
-      return je;
-    });
-    setLocalDraftJEs((prev) => [...prev, ...newJEs]);
-    setLocalAppliedTemplates((prev) => {
-      const next = { ...prev };
-      newJEs.forEach((j) => {
-        if (j.templateId) next[j.templateId] = { resultingJeId: j.id };
-      });
-      return next;
-    });
+    const next = { ...localAppliedTemplates };
+    for (const t of pending) {
+      try {
+        const je = await createDraftMutation.mutateAsync({
+          closeSessionId: sessionId,
+          memo: t.name,
+          source: 'template',
+          lines: [
+            { accountRef: t.debitAccountCode, debit: t.amount, credit: 0 },
+            { accountRef: t.creditAccountCode, debit: 0, credit: t.amount },
+          ],
+        });
+        next[t.id] = { resultingJeId: (je as { id: string }).id };
+      } catch (_) {
+        // skip on error
+      }
+    }
+    setLocalAppliedTemplates(next);
     setTab('entries');
-    if (newJEs.length) setExpandedJeId(newJEs[0].id);
-  }, [templates, sessionId, nextJeNumber, setTab]);
+    if (pending.length) setExpandedJeId((next[pending[0].id] as { resultingJeId: string })?.resultingJeId ?? null);
+  }, [templates, sessionId, createDraftMutation, setTab, localAppliedTemplates]);
 
   const openCreate = useCallback(() => {
     setSlideOverMode('create');
@@ -197,114 +227,72 @@ export default function AdjustmentsPage() {
 
   const handleSaveDraft = useCallback(
     (payload: Partial<JournalEntry> & { lines: JournalEntry['lines'] }) => {
-      if (slideOverMode === 'edit' && slideOverJeId) {
-        if (slideOverJeId.startsWith('je-local-')) {
-          setLocalDraftJEs((prev) =>
-            prev.map((e) =>
-              e.id === slideOverJeId ? { ...e, date: payload.date ?? e.date, memo: payload.memo ?? e.memo, lines: payload.lines ?? e.lines } : e
-            )
-          );
-        } else {
-          setLocalEntryPatches((prev) => ({ ...prev, [slideOverJeId]: { date: payload.date, memo: payload.memo, lines: payload.lines } }));
-        }
+      if (slideOverMode === 'create') {
+        createDraftMutation.mutate(
+          {
+            closeSessionId: sessionId,
+            memo: (payload.memo ?? '').trim(),
+            source: 'manual',
+            lines: (payload.lines ?? []).map((l) => ({
+              accountRef: l.accountCode,
+              debit: l.debit,
+              credit: l.credit,
+              description: l.description ?? undefined,
+            })),
+          },
+          { onSuccess: () => setSlideOverOpen(false) }
+        );
       } else {
-        const newJe: JournalEntry = {
-          id: `je-local-${Date.now()}`,
-          sessionId,
-          jeNumber: nextJeNumber,
-          date: payload.date ?? '2026-01-31',
-          memo: payload.memo ?? '',
-          status: 'draft',
-          source: 'manual',
-          templateId: null,
-          templateName: null,
-          lines: payload.lines ?? [],
-          evidenceCount: 0,
-          createdBy: 'Sarah Chen',
-          createdAt: new Date().toISOString(),
-          proposedBy: null,
-          proposedAt: null,
-          approvedBy: null,
-          approvedAt: null,
-          postedBy: null,
-          postedAt: null,
-          rejectedBy: null,
-          rejectedAt: null,
-          rejectionReason: null,
-        };
-        setLocalDraftJEs((prev) => [...prev, newJe]);
+        setSlideOverOpen(false);
       }
-      setSlideOverOpen(false);
     },
-    [slideOverMode, slideOverJeId, sessionId, nextJeNumber]
+    [slideOverMode, sessionId, createDraftMutation]
   );
 
   const handleSaveAndPropose = useCallback(
     (payload: Partial<JournalEntry> & { lines: JournalEntry['lines'] }) => {
-      if (slideOverMode === 'edit' && slideOverJeId) {
-        if (slideOverJeId.startsWith('je-local-')) {
-          setLocalDraftJEs((prev) =>
-            prev.map((e) =>
-              e.id === slideOverJeId ? { ...e, date: payload.date ?? e.date, memo: payload.memo ?? e.memo, lines: payload.lines ?? e.lines, status: 'proposed' as const, proposedBy: 'Sarah Chen', proposedAt: new Date().toISOString() } : e
-            )
-          );
-        } else {
-          setLocalEntryPatches((prev) => ({
-            ...prev,
-            [slideOverJeId]: { date: payload.date, memo: payload.memo, lines: payload.lines, status: 'proposed', proposedBy: 'Sarah Chen', proposedAt: new Date().toISOString() },
-          }));
-        }
+      if (slideOverMode === 'create') {
+        createDraftMutation.mutate(
+          {
+            closeSessionId: sessionId,
+            memo: (payload.memo ?? '').trim(),
+            source: 'manual',
+            lines: (payload.lines ?? []).map((l) => ({
+              accountRef: l.accountCode,
+              debit: l.debit,
+              credit: l.credit,
+              description: l.description ?? undefined,
+            })),
+          },
+          {
+            onSuccess: async (je) => {
+              const id = (je as { id: string }).id;
+              try {
+                await proposeMutation.mutateAsync(id);
+              } finally {
+                setSlideOverOpen(false);
+              }
+            },
+          }
+        );
       } else {
-        const newJe: JournalEntry = {
-          id: `je-local-${Date.now()}`,
-          sessionId,
-          jeNumber: nextJeNumber,
-          date: payload.date ?? '2026-01-31',
-          memo: payload.memo ?? '',
-          status: 'proposed',
-          source: 'manual',
-          templateId: null,
-          templateName: null,
-          lines: payload.lines ?? [],
-          evidenceCount: 0,
-          createdBy: 'Sarah Chen',
-          createdAt: new Date().toISOString(),
-          proposedBy: 'Sarah Chen',
-          proposedAt: new Date().toISOString(),
-          approvedBy: null,
-          approvedAt: null,
-          postedBy: null,
-          postedAt: null,
-          rejectedBy: null,
-          rejectedAt: null,
-          rejectionReason: null,
-        };
-        setLocalDraftJEs((prev) => [...prev, newJe]);
+        setSlideOverOpen(false);
       }
-      setSlideOverOpen(false);
     },
-    [slideOverMode, slideOverJeId, sessionId, nextJeNumber]
+    [slideOverMode, sessionId, createDraftMutation, proposeMutation]
   );
 
   const handlePropose = useCallback((je: JournalEntry) => {
     if (je.status !== 'draft') return;
-    if (je.id.startsWith('je-local-')) {
-      setLocalDraftJEs((prev) => prev.map((e) => (e.id === je.id ? { ...e, status: 'proposed' as const, proposedBy: 'Sarah Chen', proposedAt: new Date().toISOString() } : e)));
-    } else {
-      setLocalEntryPatches((prev) => ({ ...prev, [je.id]: { ...prev[je.id], status: 'proposed', proposedBy: 'Sarah Chen', proposedAt: new Date().toISOString() } }));
-    }
+    proposeMutation.mutate(je.id);
     setSlideOverOpen(false);
-  }, []);
+  }, [proposeMutation]);
 
   const handleApprove = useCallback((je: JournalEntry) => {
     if (je.status !== 'proposed') return;
-    if (je.id.startsWith('je-local-')) {
-      setLocalDraftJEs((prev) => prev.map((e) => (e.id === je.id ? { ...e, status: 'approved' as const, approvedBy: 'Mike Torres', approvedAt: new Date().toISOString() } : e)));
-    } else {
-      setLocalEntryPatches((prev) => ({ ...prev, [je.id]: { ...prev[je.id], status: 'approved', approvedBy: 'Mike Torres', approvedAt: new Date().toISOString() } }));
-    }
+    approveMutation.mutate(je.id);
     setSlideOverOpen(false);
-  }, []);
+  }, [approveMutation]);
 
   const handleReject = useCallback((je: JournalEntry) => {
     setRejectJeId(je.id);
@@ -314,19 +302,14 @@ export default function AdjustmentsPage() {
 
   const confirmReject = useCallback(() => {
     if (!rejectJeId || rejectReason.trim().length < 10) return;
-    if (rejectJeId.startsWith('je-local-')) {
-      setLocalDraftJEs((prev) =>
-        prev.map((e) =>
-          e.id === rejectJeId ? { ...e, status: 'rejected' as const, rejectedBy: 'Mike Torres', rejectedAt: new Date().toISOString(), rejectionReason: rejectReason.trim() } : e
-        )
-      );
-    } else {
-      setLocalEntryPatches((prev) => ({ ...prev, [rejectJeId]: { ...prev[rejectJeId], status: 'rejected', rejectedBy: 'Mike Torres', rejectedAt: new Date().toISOString(), rejectionReason: rejectReason.trim() } }));
-    }
-    setRejectJeId(null);
-    setRejectReason('');
-    setSlideOverOpen(false);
-  }, [rejectJeId, rejectReason]);
+    rejectMutation.mutate({ jeId: rejectJeId, reason: rejectReason.trim() }, {
+      onSuccess: () => {
+        setRejectJeId(null);
+        setRejectReason('');
+        setSlideOverOpen(false);
+      },
+    });
+  }, [rejectJeId, rejectReason, rejectMutation]);
 
   const handlePost = useCallback((je: JournalEntry) => {
     setPostConfirmJe(je);
@@ -334,27 +317,20 @@ export default function AdjustmentsPage() {
 
   const confirmPost = useCallback(() => {
     if (!postConfirmJe) return;
-    if (postConfirmJe.id.startsWith('je-local-')) {
-      setLocalDraftJEs((prev) =>
-        prev.map((e) => (e.id === postConfirmJe.id ? { ...e, status: 'posted' as const, postedBy: 'Sarah Chen', postedAt: new Date().toISOString() } : e))
-      );
-    } else {
-      setLocalEntryPatches((prev) => ({ ...prev, [postConfirmJe.id]: { ...prev[postConfirmJe.id], status: 'posted', postedBy: 'Sarah Chen', postedAt: new Date().toISOString() } }));
-    }
-    setPostSuccessJe(postConfirmJe);
-    setPostConfirmJe(null);
-    setSlideOverOpen(false);
-  }, [postConfirmJe]);
+    postMutation.mutate(postConfirmJe.id, {
+      onSuccess: () => {
+        setPostSuccessJe(postConfirmJe);
+        setPostConfirmJe(null);
+        setSlideOverOpen(false);
+      },
+    });
+  }, [postConfirmJe, postMutation]);
 
   const handleDelete = useCallback((je: JournalEntry) => {
-    if (je.id.startsWith('je-local-')) {
-      setLocalDraftJEs((prev) => prev.filter((e) => e.id !== je.id));
-    } else {
-      setLocalDeletedJeIds((prev) => (prev.includes(je.id) ? prev : [...prev, je.id]));
-    }
+    deleteJeMutation.mutate(je.id);
     setSlideOverOpen(false);
     setExpandedJeId((id) => (id === je.id ? null : id));
-  }, []);
+  }, [deleteJeMutation]);
 
   return (
     <div className="space-y-4">

@@ -1,26 +1,98 @@
 'use client';
 
 import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { MoneyInput } from '@/components/shared/MoneyInput';
-import { mockGeneralSettings } from '@/lib/mock/general-settings';
+import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 const FISCAL_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const CURRENCIES = [{ value: 'USD', label: 'USD — US Dollar' }];
 
 export default function GeneralSettingsPage() {
-  const [entityName, setEntityName] = useState(mockGeneralSettings.entityName);
-  const [fiscalYearEnd, setFiscalYearEnd] = useState(mockGeneralSettings.fiscalYearEnd);
-  const [baseCurrency, setBaseCurrency] = useState(mockGeneralSettings.baseCurrency);
-  const [autoLockDays, setAutoLockDays] = useState(String(mockGeneralSettings.autoLockDays));
-  const [varianceDollar, setVarianceDollar] = useState(mockGeneralSettings.varianceDollarThreshold);
-  const [variancePercent, setVariancePercent] = useState(mockGeneralSettings.variancePercentThreshold);
-  const [saved, setSaved] = useState(false);
+  const queryClient = useQueryClient();
+  const { data: entitiesData } = useQuery({
+    queryKey: ['settings-entities'],
+    queryFn: () => apiFetch<{ entities: Array<{ id: string; name: string }> }>('/api/settings/entities'),
+  });
+  const entityId = entitiesData?.entities?.[0]?.id ?? null;
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['settings-general', entityId],
+    queryFn: () => apiFetch<{ entityName?: string; fiscalYearEnd?: number; baseCurrency?: string; autoLockDays?: number; varianceMaterialityDollar?: string; varianceMaterialityPercent?: string }>(`/api/settings/general?entityId=${entityId}`),
+    enabled: !!entityId,
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (payload: { entityName?: string; fiscalYearEnd?: number; baseCurrency?: string; autoLockDays?: number; varianceMaterialityDollar?: string; varianceMaterialityPercent?: string }) =>
+      apiFetch(`/api/settings/general?entityId=${entityId}`, { method: 'PUT', body: payload }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings-general', entityId] }),
+  });
+
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { MoneyInput } from '@/components/shared/MoneyInput';
+import { apiFetch } from '@/lib/api';
+import { cn } from '@/lib/utils';
+
+const FISCAL_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const CURRENCIES = [{ value: 'USD', label: 'USD — US Dollar' }];
+
+export default function GeneralSettingsPage() {
+  const queryClient = useQueryClient();
+  const { data: entitiesData } = useQuery({
+    queryKey: ['settings-entities'],
+    queryFn: () => apiFetch<{ entities: Array<{ id: string; name: string }> }>('/api/settings/entities'),
+  });
+  const entityId = entitiesData?.entities?.[0]?.id ?? null;
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['settings-general', entityId],
+    queryFn: () => apiFetch<{ entityName?: string; fiscalYearEnd?: number; baseCurrency?: string; autoLockDays?: number; varianceMaterialityDollar?: string; varianceMaterialityPercent?: string }>(`/api/settings/general?entityId=${entityId}`),
+    enabled: !!entityId,
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (payload: { entityName?: string; fiscalYearEnd?: number; baseCurrency?: string; autoLockDays?: number; varianceMaterialityDollar?: string; varianceMaterialityPercent?: string }) =>
+      apiFetch(`/api/settings/general?entityId=${entityId}`, { method: 'PUT', body: payload }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings-general', entityId] }),
+  });
+
+  const [entityName, setEntityName] = useState('');
+  const [fiscalYearEnd, setFiscalYearEnd] = useState('December');
+  const [baseCurrency, setBaseCurrency] = useState('USD');
+  const [autoLockDays, setAutoLockDays] = useState('0');
+  const [varianceDollar, setVarianceDollar] = useState('');
+  const [variancePercent, setVariancePercent] = useState('');
+  const saved = updateMutation.isSuccess;
+
+  useEffect(() => {
+    if (!data) return;
+    setEntityName(data.entityName ?? '');
+    setFiscalYearEnd(data.fiscalYearEnd != null ? (FISCAL_MONTHS[data.fiscalYearEnd - 1] ?? 'December') : 'December');
+    setBaseCurrency(data.baseCurrency ?? 'USD');
+    setAutoLockDays(String(data.autoLockDays ?? 0));
+    setVarianceDollar(data.varianceMaterialityDollar ?? '');
+    setVariancePercent(data.varianceMaterialityPercent ?? '');
+  }, [data]);
 
   const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    const monthIndex = FISCAL_MONTHS.indexOf(fiscalYearEnd) + 1;
+    updateMutation.mutate({
+      entityName: entityName || undefined,
+      fiscalYearEnd: monthIndex || undefined,
+      baseCurrency: baseCurrency || undefined,
+      autoLockDays: autoLockDays ? Number(autoLockDays) : undefined,
+      varianceMaterialityDollar: varianceDollar || undefined,
+      varianceMaterialityPercent: variancePercent || undefined,
+    });
   };
+
+  if (!entitiesData) return <div className="text-text-secondary">Loading...</div>;
+  if (!entityId) return <div className="text-text-secondary">No entity found. Create a close session first.</div>;
+  if (isLoading && !data) return <div className="text-text-secondary">Loading settings...</div>;
 
   return (
     <div className="max-w-2xl space-y-10">

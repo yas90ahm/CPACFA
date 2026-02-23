@@ -2,13 +2,84 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { ColumnMapper } from '@/components/ingest/ColumnMapper';
 import { StepProgress } from '@/components/shared/StepProgress';
+import { useAdvanceSession } from '@/lib/queries/close-session';
+import { apiUpload } from '@/lib/api';
 import type { FieldMapping } from '@/lib/types/ingest';
 import type { GLParseResult, ValidationResult, TBPreview } from '@/lib/types/ingest';
-import { parseGLFile, validateGL } from '@/lib/mock/gl-upload';
-import { getTBPreviewForIngest } from '@/lib/mock/tb-preview';
 import { Check, AlertTriangle, X } from 'lucide-react';
+
+/** Backend parse response shape */
+interface ParsePreviewResponse {
+  success: boolean;
+  headers: string[];
+  appliedMapping: Record<string, string | null>;
+  suggestedMapping: Record<string, string | null>;
+  errors: string[];
+  warnings: string[];
+  preview: {
+    totalRows: number;
+    validRows: number;
+    uniqueAccounts: number;
+    totalDebits: string;
+    totalCredits: string;
+    balanced: boolean;
+    accounts: Array<{
+      accountCode: string;
+      accountName: string;
+      totalDebit: string;
+      totalCredit: string;
+      netBalance: string;
+      entryCount: number;
+    }>;
+  } | null;
+}
+
+/** Frontend fieldId -> backend GL column key */
+const FIELD_TO_BACKEND: Record<string, string> = {
+  account_code: 'accountCode',
+  account_name: 'accountName',
+  debit_amount: 'debit',
+  credit_amount: 'credit',
+  date: 'date',
+  description: 'description',
+  reference: 'entryId',
+};
+
+function backendToAutoDetected(backend: Record<string, string | null>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [frontId, backKey] of Object.entries(FIELD_TO_BACKEND)) {
+    const v = backend[backKey];
+    if (v) out[frontId] = v;
+  }
+  return out;
+}
+
+function mappingsToBackend(mappings: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [frontId, header] of Object.entries(mappings)) {
+    if (!header?.trim()) continue;
+    const backKey = FIELD_TO_BACKEND[frontId];
+    if (backKey) out[backKey] = header.trim();
+  }
+  return out;
+}
+
+/** Convert "January 2026" -> "2026-01" for API period param */
+function periodLabelToParam(periodLabel: string): string {
+  const months: Record<string, string> = {
+    January: '01', February: '02', March: '03', April: '04', May: '05', June: '06',
+    July: '07', August: '08', September: '09', October: '10', November: '11', December: '12',
+  };
+  const match = periodLabel.trim().match(/^(\w+)\s+(\d{4})$/);
+  if (match) {
+    const month = months[match[1]!];
+    if (month) return `${match[2]}-${month}`;
+  }
+  return periodLabel.replace(/\s+/g, '-');
+}
 
 const GL_REQUIRED_FIELDS: FieldMapping[] = [
   { fieldId: 'account_code', label: 'Account Code', required: true },
@@ -28,28 +99,56 @@ function formatMoney(s: string): string {
 
 export interface GLUploadFlowProps {
   sessionId: string;
+  periodLabel: string;
   file: File;
   onBack: () => void;
 }
 
 type Step = 'parsing' | 'mapping' | 'validating' | 'preview' | 'confirm' | 'ingesting' | 'error';
 
-export function GLUploadFlow({ sessionId, file, onBack }: GLUploadFlowProps) {
+export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadFlowProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const advanceSession = useAdvanceSession(sessionId);
   const [parseResult, setParseResult] = useState<GLParseResult | null>(null);
   const [step, setStep] = useState<Step>('parsing');
   const [mappings, setMappings] = useState<Record<string, string>>({});
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [tbPreview, setTBPreview] = useState<TBPreview | null>(null);
   const [validationError, setValidationError] = useState<ValidationResult | null>(null);
+  const [advanceError, setAdvanceError] = useState<string | null>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
 
   useEffect(() => {
     setStep('parsing');
-    parseGLFile(file).then((result) => {
-      setParseResult(result);
-      setMappings(result.autoDetectedMappings ? { ...result.autoDetectedMappings } : {});
-      setStep('mapping');
-    });
+    setParseError(null);
+    const formData = new FormData();
+    formData.append('file', file);
+    apiUpload<ParsePreviewResponse>('/api/gl/parse', formData)
+      .then((result) => {
+        const columns = result.headers ?? [];
+        const suggested = result.suggestedMapping ?? {};
+        const prev = result.preview;
+        const rows: Record<string, string>[] = prev?.accounts?.map((a) => ({
+          accountCode: a.accountCode,
+          accountName: a.accountName,
+          totalDebit: a.totalDebit,
+          totalCredit: a.totalCredit,
+        })) ?? [];
+        setParseResult({
+          columns,
+          rows,
+          rowCount: prev?.totalRows ?? 0,
+          accountCount: prev?.uniqueAccounts ?? 0,
+          autoDetectedMappings: backendToAutoDetected(suggested),
+        });
+        setMappings(backendToAutoDetected(suggested));
+        setStep('mapping');
+      })
+      .catch((err) => {
+        setParseError(err instanceof Error ? err.message : 'Parse failed');
+        setStep('error');
+      });
   }, [file]);
 
   const allRequiredMapped = useMemo(() => {
@@ -58,26 +157,81 @@ export function GLUploadFlow({ sessionId, file, onBack }: GLUploadFlowProps) {
 
   const runValidation = () => {
     setStep('validating');
-    const rows = parseResult?.rows ?? [];
-    Promise.all([validateGL(mappings, rows), getTBPreviewForIngest()]).then(([v, tb]) => {
-      setTBPreview(tb);
-      if (v.passed) {
-        setValidation(v);
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('columnMapping', JSON.stringify(mappingsToBackend(mappings)));
+    apiUpload<ParsePreviewResponse>('/api/gl/parse', formData)
+      .then((result) => {
+        const prev = result.preview;
+        if (!result.success && result.errors?.length) {
+          setValidationError({
+            passed: false,
+            errors: result.errors.map((e) => ({ message: e })),
+            warnings: result.warnings?.map((w) => ({ message: w })) ?? [],
+          });
+          setTBPreview(null);
+          setStep('error');
+          return;
+        }
+        if (!prev) {
+          setValidationError({
+            passed: false,
+            errors: [{ message: 'No preview data from parse' }],
+            warnings: [],
+          });
+          setStep('error');
+          return;
+        }
+        setValidation({
+          passed: true,
+          errors: [],
+          warnings: (result.warnings ?? []).map((w) => ({ message: w })),
+        });
         setValidationError(null);
+        setTBPreview({
+          rows: prev.accounts.map((a) => ({
+            accountCode: a.accountCode,
+            accountName: a.accountName,
+            debit: a.totalDebit,
+            credit: a.totalCredit,
+          })),
+          totalDebits: prev.totalDebits,
+          totalCredits: prev.totalCredits,
+          balanced: prev.balanced,
+          accountCount: prev.uniqueAccounts,
+          newAccounts: [],
+          inactiveAccounts: [],
+          priorMappedCount: 0,
+        });
         setStep('preview');
-      } else {
-        setValidationError(v);
-        setValidation(null);
+      })
+      .catch((err) => {
+        setValidationError({
+          passed: false,
+          errors: [{ message: err instanceof Error ? err.message : 'Validation failed' }],
+          warnings: [],
+        });
         setStep('error');
-      }
-    });
+      });
   };
 
-  const ingest = () => {
+  const ingest = async () => {
     setStep('ingesting');
-    setTimeout(() => {
-      router.push(`/close/${sessionId}/dashboard?ingested=1&accounts=52&unmapped=5`);
-    }, 1500);
+    setAdvanceError(null);
+    try {
+      const period = periodLabelToParam(periodLabel);
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('columnMapping', JSON.stringify(mappingsToBackend(mappings)));
+      await apiUpload(`/api/gl/ingest?period=${encodeURIComponent(period)}`, formData);
+      await advanceSession.mutateAsync();
+      queryClient.invalidateQueries({ queryKey: ['trial-balance', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      router.push(`/close/${sessionId}/dashboard`);
+    } catch (err) {
+      setStep('confirm');
+      setAdvanceError(err instanceof Error ? err.message : 'Failed to ingest or advance. Try again.');
+    }
   };
 
   if (step === 'parsing') {
@@ -153,7 +307,7 @@ export function GLUploadFlow({ sessionId, file, onBack }: GLUploadFlowProps) {
         <h2 className="text-lg font-display text-primary">Validation Results</h2>
         <div className="bg-surface border border-border rounded-card p-5 space-y-2">
           <p className="flex items-center gap-2 text-sm text-status-green">
-            <Check className="w-4 h-4 shrink-0" /> File parsed successfully (1,247 entries)
+            <Check className="w-4 h-4 shrink-0" /> File parsed successfully ({parseResult?.rowCount ?? 0} entries)
           </p>
           <p className="flex items-center gap-2 text-sm text-status-green">
             <Check className="w-4 h-4 shrink-0" /> {tbPreview.accountCount} unique accounts identified
@@ -209,7 +363,7 @@ export function GLUploadFlow({ sessionId, file, onBack }: GLUploadFlowProps) {
         </div>
 
         <div className="bg-surface-alt border border-border rounded-card p-4 text-sm">
-          <h4 className="font-medium text-primary mb-2">Compared to January 2026:</h4>
+          <h4 className="font-medium text-primary mb-2">Compared to {periodLabel}:</h4>
           <ul className="list-disc list-inside text-text-secondary space-y-1">
             <li>5 new accounts: {tbPreview.newAccounts.join(', ')}</li>
             <li>3 accounts with no activity: {tbPreview.inactiveAccounts.join(', ')}</li>
@@ -234,10 +388,16 @@ export function GLUploadFlow({ sessionId, file, onBack }: GLUploadFlowProps) {
     return (
       <div className="max-w-2xl space-y-6">
         <h2 className="text-lg font-display text-primary">Ready to ingest</h2>
+        {advanceError && (
+          <div className="bg-status-red/10 border border-status-red rounded-card p-4 flex items-start gap-2 text-sm text-status-red">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{advanceError}</span>
+          </div>
+        )}
         <div className="bg-surface border border-border rounded-card p-6 space-y-4">
           <p className="text-sm text-text-secondary">This will:</p>
           <ul className="list-disc list-inside text-sm text-primary space-y-1">
-            <li>Import 1,247 GL entries</li>
+            <li>Import {parseResult?.rowCount ?? 0} GL entries</li>
             <li>Create a trial balance with {tbPreview.accountCount} accounts</li>
             <li>Advance the session to IN_PROGRESS</li>
             <li>Carry forward {tbPreview.priorMappedCount} account mappings from prior period</li>
@@ -271,7 +431,24 @@ export function GLUploadFlow({ sessionId, file, onBack }: GLUploadFlowProps) {
     );
   }
 
-  if (step === 'error' && validationError) {
+  if (step === 'error') {
+    if (parseError) {
+      return (
+        <div className="max-w-2xl space-y-6">
+          <h2 className="text-lg font-display text-status-red flex items-center gap-2">
+            <X className="w-5 h-5" /> Parse Failed
+          </h2>
+          <div className="bg-surface border border-border rounded-card p-5">
+            <p className="text-sm text-primary">{parseError}</p>
+            <p className="text-sm text-text-secondary mt-4">Check the file format and try again.</p>
+          </div>
+          <button type="button" onClick={onBack} className="px-4 py-2 rounded-input border border-border text-sm font-medium hover:bg-hover">
+            Upload New File
+          </button>
+        </div>
+      );
+    }
+    if (validationError) {
     return (
       <div className="max-w-2xl space-y-6">
         <h2 className="text-lg font-display text-status-red flex items-center gap-2">

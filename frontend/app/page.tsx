@@ -2,19 +2,25 @@
 
 import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useAuth } from '@/lib/auth';
 
 function RootRedirect() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { token, user } = useAuth();
 
   useEffect(() => {
-    const role = searchParams.get('role');
+    if (token === null) {
+      router.replace('/login');
+      return;
+    }
+    const role = searchParams.get('role') ?? user?.role;
     if (role === 'operating_partner' || role === 'admin') {
       router.replace('/portfolio');
     } else {
       router.replace('/close');
     }
-  }, [router, searchParams]);
+  }, [router, searchParams, token, user?.role]);
 
   return (
     <div className="min-h-screen bg-primary flex items-center justify-center">

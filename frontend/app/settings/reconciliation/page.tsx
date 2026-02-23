@@ -2,26 +2,72 @@
 
 import { useState, useMemo } from 'react';
 import Link from 'next/link';
-import { mockReconRequirements, type ReconRequirement, type ToleranceType } from '@/lib/mock/recon-requirements';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SlideOverPanel } from '@/components/shared/SlideOverPanel';
 import { MoneyInput } from '@/components/shared/MoneyInput';
+import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 
-const ACTIVE_SESSION_ID = 'c925645f-3831-4d81-93a9-a12a2819cd3e';
+type ToleranceType = 'absolute' | 'percentage';
+
+interface ReconRequirementApi {
+  requirementId: string;
+  accountCode: string;
+  accountName: string | null;
+  isRequired: boolean;
+  toleranceAmount: string;
+  toleranceType: ReconToleranceType;
+  tolerancePercentage: string | null;
+  expectedSource: string;
+  requiresReviewerApproval: boolean;
+}
 
 export default function ReconciliationSettingsPage() {
-  const [requirements, setRequirements] = useState<ReconRequirement[]>(mockReconRequirements);
+  const queryClient = useQueryClient();
+  const { data: entitiesData } = useQuery({
+    queryKey: ['settings-entities'],
+    queryFn: () => apiFetch<{ entities: Array<{ id: string; name: string }> }>('/api/settings/entities'),
+  });
+  const entityId = entitiesData?.entities?.[0]?.id ?? null;
+
+  const { data: reqData, isLoading } = useQuery({
+    queryKey: ['recon-requirements', entityId],
+    queryFn: () => apiFetch<{ requirements: ReconRequirementApi[] }>(`/api/close/recon-requirements?entity_id=${entityId}`),
+    enabled: !!entityId,
+  });
+  const requirements = reqData?.requirements ?? [];
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => apiFetch(`/api/close/recon-requirements/${id}`, { method: 'DELETE' }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['recon-requirements', entityId] }),
+  });
+  const createMutation = useMutation({
+    mutationFn: (body: { entity_id: string; account_code: string; account_name?: string; tolerance_amount?: number; tolerance_type?: string; tolerance_percentage?: number | null; expected_source?: string; requires_reviewer_approval?: boolean }) =>
+      apiFetch('/api/close/recon-requirements', { method: 'POST', body }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['recon-requirements', entityId] }),
+  });
+  const updateMutation = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: { account_name?: string; tolerance_amount?: number; tolerance_type?: string; tolerance_percentage?: number | null; expected_source?: string; requires_reviewer_approval?: boolean }) =>
+      apiFetch(`/api/close/recon-requirements/${id}`, { method: 'PUT', body }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['recon-requirements', entityId] }),
+  });
+  const autoGenMutation = useMutation({
+    mutationFn: (body: { entity_id: string; materiality_threshold?: number }) =>
+      apiFetch('/api/close/recon-requirements/auto-generate', { method: 'POST', body }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['recon-requirements', entityId] }),
+  });
+
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('');
   const [panelOpen, setPanelOpen] = useState(false);
-  const [editing, setEditing] = useState<ReconRequirement | null>(null);
+  const [editing, setEditing] = useState<ReconRequirementApi | null>(null);
   const [autoGenConfirm, setAutoGenConfirm] = useState(false);
   const [formAccountCode, setFormAccountCode] = useState('');
   const [formAccountName, setFormAccountName] = useState('');
   const [formToleranceDollar, setFormToleranceDollar] = useState('500.00');
   const [formTolerancePercent, setFormTolerancePercent] = useState('0');
-  const [formToleranceType, setFormToleranceType] = useState<ToleranceType>('dollar');
+  const [formToleranceType, setFormToleranceType] = useState<ToleranceType>('absolute');
   const [formEvidenceRequired, setFormEvidenceRequired] = useState(true);
   const [formSourceDocument, setFormSourceDocument] = useState('');
 
@@ -29,23 +75,40 @@ export default function ReconciliationSettingsPage() {
     let list = requirements;
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      list = list.filter((r) => r.accountCode.toLowerCase().includes(q) || r.accountName.toLowerCase().includes(q));
+      list = list.filter((r) => r.accountCode.toLowerCase().includes(q) || (r.accountName ?? '').toLowerCase().includes(q));
     }
-    if (typeFilter) list = list.filter((r) => r.accountType === typeFilter);
     return [...list].sort((a, b) => a.accountCode.localeCompare(b.accountCode));
-  }, [requirements, search, typeFilter]);
-
-  const accountTypes = useMemo(() => Array.from(new Set(requirements.map((r) => r.accountType))), [requirements]);
+  }, [requirements, search]);
 
   const handleDelete = (id: string) => {
-    setRequirements((prev) => prev.filter((r) => r.id !== id));
+    deleteMutation.mutate(id);
   };
 
-  const handleSaveRequirement = (req: Partial<ReconRequirement> & { accountCode: string; accountName: string }) => {
+  const handleSaveRequirement = (req: { accountCode: string; accountName: string; toleranceDollar: string; tolerancePercent: string; toleranceType: ToleranceType; evidenceRequired: boolean; sourceDocument: string }) => {
+    const expectedSource = (req.sourceDocument?.toLowerCase().replace(/\s+/g, '_') || 'other') as ReconRequirementApi['expectedSource'];
     if (editing) {
-      setRequirements((prev) => prev.map((r) => (r.id === editing.id ? { ...r, ...req } as ReconRequirement : r)));
-    } else {
-      setRequirements((prev) => [...prev, { ...req, id: `rr-${req.accountCode}`, accountType: req.accountType ?? 'ASSET', tolerancePercent: req.tolerancePercent ?? '0', toleranceType: req.toleranceType ?? 'dollar', active: req.active ?? true } as ReconRequirement]);
+      updateMutation.mutate({
+        id: editing.requirementId,
+        body: {
+          account_name: req.accountName || undefined,
+          tolerance_amount: parseFloat(req.toleranceDollar) || 0,
+          tolerance_type: req.toleranceType,
+          tolerance_percentage: req.tolerancePercent ? parseFloat(req.tolerancePercent) : null,
+          expected_source: expectedSource,
+          requires_reviewer_approval: req.evidenceRequired,
+        },
+      });
+    } else if (entityId) {
+      createMutation.mutate({
+        entity_id: entityId,
+        account_code: req.accountCode,
+        account_name: req.accountName || undefined,
+        tolerance_amount: parseFloat(req.toleranceDollar) || 0,
+        tolerance_type: req.toleranceType,
+        tolerance_percentage: req.tolerancePercent ? parseFloat(req.tolerancePercent) : null,
+        expected_source: expectedSource,
+        requires_reviewer_approval: req.evidenceRequired,
+      });
     }
     setPanelOpen(false);
     setEditing(null);
@@ -57,22 +120,30 @@ export default function ReconciliationSettingsPage() {
     setFormAccountName('');
     setFormToleranceDollar('500.00');
     setFormTolerancePercent('0');
-    setFormToleranceType('dollar');
+    setFormToleranceType('absolute');
     setFormEvidenceRequired(true);
     setFormSourceDocument('');
     setPanelOpen(true);
   };
-  const openEdit = (r: ReconRequirement) => {
+  const openEdit = (r: ReconRequirementApi) => {
     setEditing(r);
     setFormAccountCode(r.accountCode);
-    setFormAccountName(r.accountName);
-    setFormToleranceDollar(r.toleranceDollar);
-    setFormTolerancePercent(r.tolerancePercent);
-    setFormToleranceType(r.toleranceType);
-    setFormEvidenceRequired(r.evidenceRequired);
-    setFormSourceDocument(r.sourceDocument);
+    setFormAccountName(r.accountName ?? '');
+    setFormToleranceDollar(r.toleranceAmount);
+    setFormTolerancePercent(r.tolerancePercentage ?? '0');
+    setFormToleranceType((r.toleranceType as ToleranceType) ?? 'absolute');
+    setFormEvidenceRequired(r.requiresReviewerApproval);
+    setFormSourceDocument(r.expectedSource?.replace(/_/g, ' ') ?? '');
     setPanelOpen(true);
   };
+
+  const runAutoGenerate = () => {
+    if (entityId) autoGenMutation.mutate({ entity_id: entityId });
+    setAutoGenConfirm(false);
+  };
+
+  if (!entityId) return <div className="text-text-secondary">No entity found. Create a close session first.</div>;
+  if (isLoading && requirements.length === 0) return <div className="text-text-secondary">Loading...</div>;
 
   return (
     <div className="max-w-5xl space-y-6">
@@ -88,7 +159,7 @@ export default function ReconciliationSettingsPage() {
 
       <p className="text-sm text-text-secondary">
         These requirements are used when initializing reconciliations for a new close period.{' '}
-        <Link href={`/close/${ACTIVE_SESSION_ID}/reconciliation`} className="text-accent hover:underline">View current reconciliations →</Link>
+        <Link href="/close" className="text-accent hover:underline">View close sessions →</Link>
       </p>
 
       <div className="flex flex-wrap gap-3">
@@ -99,16 +170,6 @@ export default function ReconciliationSettingsPage() {
           onChange={(e) => setSearch(e.target.value)}
           className="rounded-input border border-border bg-input px-3 py-2 text-sm w-64"
         />
-        <select
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
-          className="rounded-input border border-border bg-input px-3 py-2 text-sm"
-        >
-          <option value="">All types</option>
-          {accountTypes.map((t) => (
-            <option key={t} value={t}>{t}</option>
-          ))}
-        </select>
         <button
           type="button"
           onClick={() => setAutoGenConfirm(true)}
@@ -120,10 +181,10 @@ export default function ReconciliationSettingsPage() {
 
       {autoGenConfirm && (
         <div className="bg-surface-alt border border-border rounded-card p-4 flex items-center justify-between">
-          <p className="text-sm text-primary">This will create requirements for 15 balance sheet accounts with default tolerances. You can adjust each one individually.</p>
+          <p className="text-sm text-primary">This will create requirements for balance sheet accounts with default tolerances. You can adjust each one individually.</p>
           <div className="flex gap-2 shrink-0">
             <button type="button" onClick={() => setAutoGenConfirm(false)} className="px-3 py-1.5 rounded-input border border-border text-sm">Cancel</button>
-            <button type="button" onClick={() => { setAutoGenConfirm(false); }} className="px-3 py-1.5 rounded-input bg-accent text-accent-contrast text-sm">Confirm</button>
+            <button type="button" onClick={runAutoGenerate} className="px-3 py-1.5 rounded-input bg-accent text-accent-contrast text-sm">Confirm</button>
           </div>
         </div>
       )}
@@ -134,31 +195,27 @@ export default function ReconciliationSettingsPage() {
             <tr className="border-b border-border bg-surface-alt">
               <th className="text-left py-3 px-4 font-medium text-text-secondary">Account Code</th>
               <th className="text-left py-3 px-4 font-medium text-text-secondary">Account Name</th>
-              <th className="text-left py-3 px-4 font-medium text-text-secondary">Type</th>
               <th className="text-left py-3 px-4 font-medium text-text-secondary">Tolerance ($)</th>
               <th className="text-left py-3 px-4 font-medium text-text-secondary">Tolerance (%)</th>
               <th className="text-left py-3 px-4 font-medium text-text-secondary">Evidence</th>
-              <th className="text-left py-3 px-4 font-medium text-text-secondary">Source Document</th>
+              <th className="text-left py-3 px-4 font-medium text-text-secondary">Source</th>
               <th className="text-left py-3 px-4 font-medium text-text-secondary">Active</th>
               <th className="w-20" />
             </tr>
           </thead>
           <tbody>
             {filtered.map((r) => (
-              <tr key={r.id} className="border-b border-border-light hover:bg-hover/50">
+              <tr key={r.requirementId} className="border-b border-border-light hover:bg-hover/50">
                 <td className="py-2.5 px-4 font-mono">{r.accountCode}</td>
-                <td className="py-2.5 px-4">{r.accountName}</td>
-                <td className="py-2.5 px-4">
-                  <span className="px-1.5 py-0.5 rounded text-xs bg-surface-alt border border-border">{r.accountType}</span>
-                </td>
-                <td className="py-2.5 px-4 font-mono">${r.toleranceDollar}</td>
-                <td className="py-2.5 px-4 font-mono">{r.tolerancePercent}%</td>
-                <td className="py-2.5 px-4">{r.evidenceRequired ? 'Yes' : 'No'}</td>
-                <td className="py-2.5 px-4 text-text-secondary">{r.sourceDocument}</td>
-                <td className="py-2.5 px-4">{r.active ? 'Yes' : 'No'}</td>
+                <td className="py-2.5 px-4">{r.accountName ?? '—'}</td>
+                <td className="py-2.5 px-4 font-mono">${r.toleranceAmount}</td>
+                <td className="py-2.5 px-4 font-mono">{r.tolerancePercentage ?? '0'}%</td>
+                <td className="py-2.5 px-4">{r.requiresReviewerApproval ? 'Yes' : 'No'}</td>
+                <td className="py-2.5 px-4 text-text-secondary">{r.expectedSource?.replace(/_/g, ' ') ?? '—'}</td>
+                <td className="py-2.5 px-4">{r.isRequired ? 'Yes' : 'No'}</td>
                 <td className="py-2.5 px-4 flex items-center gap-1">
                   <button type="button" onClick={() => openEdit(r)} className="p-1.5 rounded-input text-text-secondary hover:bg-hover hover:text-primary" aria-label="Edit"><Pencil className="w-4 h-4" /></button>
-                  <button type="button" onClick={() => handleDelete(r.id)} className="p-1.5 rounded-input text-text-secondary hover:bg-status-red-dim hover:text-status-red" aria-label="Delete"><Trash2 className="w-4 h-4" /></button>
+                  <button type="button" onClick={() => handleDelete(r.requirementId)} className="p-1.5 rounded-input text-text-secondary hover:bg-status-red-dim hover:text-status-red" aria-label="Delete"><Trash2 className="w-4 h-4" /></button>
                 </td>
               </tr>
             ))}
@@ -187,8 +244,6 @@ export default function ReconciliationSettingsPage() {
                   evidenceRequired: formEvidenceRequired,
                   sourceDocument: formSourceDocument,
                 });
-                setPanelOpen(false);
-                setEditing(null);
               }}
             >
               Save Requirement
@@ -235,7 +290,7 @@ function ReconRequirementForm({
   setEvidenceRequired,
   setSourceDocument,
 }: {
-  initial: ReconRequirement | null;
+  initial: ReconRequirementApi | null;
   accountCode: string;
   accountName: string;
   toleranceDollar: string;
@@ -254,30 +309,33 @@ function ReconRequirementForm({
   return (
     <div className="space-y-4">
       <div>
-        <label className="block text-xs font-medium text-text-secondary mb-1">Account *</label>
+        <label className="block text-xs font-medium text-text-secondary mb-1">Account Code *</label>
         <input
           type="text"
-          placeholder="Search by account code or name..."
-          value={accountCode ? `${accountCode} — ${accountName}` : ''}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v.includes(' — ')) {
-              const [code, ...rest] = v.split(' — ');
-              setAccountCode(code?.trim() ?? '');
-              setAccountName(rest.join(' — ').trim());
-            }
-          }}
+          value={accountCode}
+          onChange={(e) => setAccountCode(e.target.value)}
+          placeholder="e.g. 1010"
+          className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm"
+          readOnly={!!initial}
+        />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-text-secondary mb-1">Account Name</label>
+        <input
+          type="text"
+          value={accountName}
+          onChange={(e) => setAccountName(e.target.value)}
+          placeholder="e.g. Chase Checking"
           className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm"
         />
-        {!initial && <p className="text-xs text-text-tertiary mt-1">SearchableSelect — accounts that already have requirements are disabled.</p>}
       </div>
       <div>
         <label className="block text-xs font-medium text-text-secondary mb-2">Tolerance Type</label>
         <div className="flex gap-4">
-          {(['dollar', 'percentage', 'both'] as const).map((t) => (
+          {(['absolute', 'percentage'] as const).map((t) => (
             <label key={t} className="flex items-center gap-2 text-sm">
               <input type="radio" name="tolType" checked={toleranceType === t} onChange={() => setToleranceType(t)} className="rounded-full" />
-              {t === 'dollar' ? 'Dollar Amount' : t === 'percentage' ? 'Percentage' : 'Both (stricter)'}
+              {t === 'absolute' ? 'Dollar Amount' : 'Percentage'}
             </label>
           ))}
         </div>

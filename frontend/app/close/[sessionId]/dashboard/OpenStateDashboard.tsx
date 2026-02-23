@@ -1,11 +1,13 @@
 'use client';
 
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { FileUploadZone } from '@/components/shared/FileUploadZone';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { GLUploadFlow } from './GLUploadFlow';
 import { TBUploadFlow } from './TBUploadFlow';
+import { apiFetch } from '@/lib/api';
 
 export interface OpenStateDashboardProps {
   sessionId: string;
@@ -13,10 +15,14 @@ export interface OpenStateDashboardProps {
   entityName: string;
 }
 
-const MOCK_ERP_CONNECTED = false;
 const PRIOR_PERIOD_SESSION_ID = 'c925645f-3831-4d81-93a9-a12a2819cd3e';
 
 export function OpenStateDashboard({ sessionId, periodLabel, entityName }: OpenStateDashboardProps) {
+  const { data: connections } = useQuery({
+    queryKey: ['erp-connections'],
+    queryFn: () => apiFetch<Array<{ id: string; name?: string }>>('/api/accounting-integration/connections'),
+  });
+  const erpConnected = (connections?.length ?? 0) > 0;
   const [glFile, setGlFile] = useState<File | null>(null);
   const [tbFile, setTbFile] = useState<File | null>(null);
   const [showTBUpload, setShowTBUpload] = useState(false);
@@ -32,7 +38,7 @@ export function OpenStateDashboard({ sessionId, periodLabel, entityName }: OpenS
             Status: <StatusBadge variant="neutral" label="OPEN" />
           </p>
         </div>
-        <GLUploadFlow sessionId={sessionId} file={glFile} onBack={() => setGlFile(null)} />
+        <GLUploadFlow sessionId={sessionId} periodLabel={periodLabel} file={glFile} onBack={() => setGlFile(null)} />
       </div>
     );
   }
@@ -113,7 +119,7 @@ export function OpenStateDashboard({ sessionId, periodLabel, entityName }: OpenS
           <div className="flex-1 border-t border-border" />
         </div>
 
-        {MOCK_ERP_CONNECTED ? (
+        {erpConnected ? (
           <button type="button" className="w-full py-3 rounded-input border border-border text-sm font-medium hover:bg-hover">
             Sync from ERP
           </button>

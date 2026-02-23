@@ -42,9 +42,10 @@ export async function verifySchema(pool: Pool): Promise<VerifyResult> {
       [schema, table]
     );
     if (tableExists.rows.length === 0) {
+      const fallbackSchema = schema === 'public' ? 'core' : 'public';
       const fallback = await pool.query(
-        `SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1`,
-        [table]
+        `SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2`,
+        [fallbackSchema, table]
       );
       if (fallback.rows.length > 0) {
         continue;

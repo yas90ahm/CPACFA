@@ -277,13 +277,16 @@ export default function TrialBalancePage() {
           );
         }}
         footer={
+          filtered.length > 0 ? (
           <tr>
             <td colSpan={3} className="px-3 py-2.5 text-right font-medium text-primary">Total</td>
             <td className="px-3 py-2.5 text-right font-mono text-primary"><MoneyCell value={totalDebits} showDollar /></td>
             <td className="px-3 py-2.5 text-right font-mono text-primary"><MoneyCell value={totalCredits} showDollar /></td>
             <td colSpan={3} />
           </tr>
+          ) : undefined
         }
+        emptyMessage={rows.length === 0 ? 'No trial balance data yet. Upload a GL or trial balance from the dashboard.' : undefined}
         loading={isLoading}
         rowClassName={(r) => (r.mappingStatus === 'unmapped' ? 'border-l-4 border-l-status-red' : '')}
       />

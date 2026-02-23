@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSessions } from '@/lib/queries/sessions';
+import { useEntities } from '@/lib/queries/entities';
+import { useCreateSession } from '@/lib/queries/close-session';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { SlideOverPanel } from '@/components/shared/SlideOverPanel';
 import { TopBar } from '@/components/shell/TopBar';
@@ -11,8 +13,8 @@ import type { SessionListItem } from '@/lib/types/session-list';
 import type { CloseState } from '@/lib/types/close-session';
 import { Lock, Plus } from 'lucide-react';
 
-const ENTITY_ID = 'entity-apex';
-const ENTITY_NAME = 'Apex Manufacturing Co.';
+const DEFAULT_ENTITY_ID = 'entity-1';
+const DEFAULT_ENTITY_NAME = 'My Company';
 
 function stateBadge(state: CloseState) {
   const map: Record<CloseState, { variant: 'success' | 'warning' | 'error' | 'info' | 'neutral'; label: string }> = {
@@ -39,21 +41,41 @@ function formatStarted(iso: string | null): string {
 
 export default function ClosePage() {
   const router = useRouter();
-  const { data: sessions = [] } = useSessions(ENTITY_ID);
+  const { data: entities = [] } = useEntities();
+  const entityId = entities.length > 0 ? entities[0].id : DEFAULT_ENTITY_ID;
+  const entityName = entities.length > 0 ? entities[0].name : DEFAULT_ENTITY_NAME;
+  const { data: sessions = [] } = useSessions(entityId);
+  const createSession = useCreateSession();
   const [newSessionOpen, setNewSessionOpen] = useState(false);
-  const [entitySelect, setEntitySelect] = useState(ENTITY_NAME);
-  const [periodSelect, setPeriodSelect] = useState('February 2026');
+  const [entitySelect, setEntitySelect] = useState(entityId);
   const [periodStart, setPeriodStart] = useState('2026-02-01');
   const [periodEnd, setPeriodEnd] = useState('2026-02-28');
+
+  useEffect(() => {
+    if (entities.length > 0 && entitySelect === DEFAULT_ENTITY_ID) {
+      setEntitySelect(entities[0].id);
+    }
+  }, [entities, entitySelect]);
 
   const sortedSessions = [...sessions].sort((a, b) => {
     return new Date(b.periodStart).getTime() - new Date(a.periodStart).getTime();
   });
 
-  const handleCreateSession = () => {
+  const handleCreateSession = async () => {
+    const eid = entitySelect || entityId;
+    if (!eid || !periodStart || !periodEnd) return;
     setNewSessionOpen(false);
-    const newId = 'session-feb-2026';
-    window.location.href = `/close/${newId}/dashboard`;
+    try {
+      const res = await createSession.mutateAsync({
+        entityId: eid,
+        periodStart,
+        periodEnd,
+      });
+      const id = (res as { id?: string }).id ?? (res as { closeSessionId?: string }).closeSessionId;
+      if (id) router.push(`/close/${id}/dashboard`);
+    } catch {
+      // Error shown via mutation state if needed
+    }
   };
 
   const isHistorical = (s: SessionListItem) => s.state === 'CERTIFIED' || s.state === 'LOCKED';
@@ -61,13 +83,13 @@ export default function ClosePage() {
 
   return (
     <>
-      <TopBar entityName={ENTITY_NAME} showPeriod={false} />
+      <TopBar entityName={entityName} showPeriod={false} />
       <div className="min-h-screen bg-primary pt-14">
       <div className="max-w-5xl mx-auto p-8">
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-2xl font-display text-primary">Month-End Close</h1>
-            <p className="text-text-secondary text-sm mt-0.5">{ENTITY_NAME}</p>
+            <p className="text-text-secondary text-sm mt-0.5">{entityName}</p>
           </div>
           <button
             type="button"
@@ -159,8 +181,8 @@ export default function ClosePage() {
             <button type="button" className="px-4 py-2 rounded-input border border-border text-sm" onClick={() => setNewSessionOpen(false)}>
               Cancel
             </button>
-            <button type="button" className="px-4 py-2 rounded-input bg-accent text-white text-sm font-medium" onClick={handleCreateSession}>
-              Create Session
+            <button type="button" className="px-4 py-2 rounded-input bg-accent text-white text-sm font-medium" onClick={handleCreateSession} disabled={createSession.isPending}>
+              {createSession.isPending ? 'Creating...' : 'Create Session'}
             </button>
           </>
         }
@@ -173,25 +195,11 @@ export default function ClosePage() {
               onChange={(e) => setEntitySelect(e.target.value)}
               className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm"
             >
-              <option value={ENTITY_NAME}>{ENTITY_NAME}</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-text-secondary mb-1">Period</label>
-            <select
-              value={periodSelect}
-              onChange={(e) => {
-                setPeriodSelect(e.target.value);
-                if (e.target.value === 'February 2026') {
-                  setPeriodStart('2026-02-01');
-                  setPeriodEnd('2026-02-28');
-                }
-              }}
-              className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm"
-            >
-              <option value="February 2026">February 2026</option>
-              <option value="January 2026" disabled>January 2026 — IN_PROGRESS</option>
-              <option value="December 2025" disabled>December 2025 — LOCKED</option>
+              {entities.length > 0
+                ? entities.map((e) => (
+                    <option key={e.id} value={e.id}>{e.name}</option>
+                  ))
+                : <option value={DEFAULT_ENTITY_ID}>{DEFAULT_ENTITY_NAME}</option>}
             </select>
           </div>
           <div className="grid grid-cols-2 gap-4">
@@ -204,6 +212,9 @@ export default function ClosePage() {
               <input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm" />
             </div>
           </div>
+          {createSession.isError && (
+            <p className="text-sm text-status-red">Failed to create session. Try again.</p>
+          )}
         </div>
       </SlideOverPanel>
     </div>

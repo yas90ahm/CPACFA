@@ -1,14 +1,11 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { CloseSession } from '@/lib/types/close-session';
 import type { CloseReadiness } from '@/lib/types/readiness';
 import type { CloseIssue } from '@/lib/types/issues';
-import {
-  getCloseSessionById,
-  mockReadiness,
-  mockIssues,
-} from '@/lib/mock/close-session';
+import { apiFetch } from '@/lib/api';
+import { toCloseSession as adaptCloseSession } from '@/lib/adapters';
 
 const STALE_TIME = 30_000;
 
@@ -17,8 +14,8 @@ export function useCloseSession(sessionId: string | null) {
     queryKey: ['close-session', sessionId],
     queryFn: async (): Promise<CloseSession> => {
       if (!sessionId) throw new Error('No sessionId');
-      // Replace with: return apiFetch<CloseSession>(`/api/close/sessions/${sessionId}`);
-      return Promise.resolve(getCloseSessionById(sessionId));
+      const raw = await apiFetch<Record<string, unknown>>(`/api/close/sessions/${sessionId}`);
+      return adaptCloseSession(raw, sessionId) as unknown as CloseSession;
     },
     enabled: !!sessionId,
     staleTime: STALE_TIME,
@@ -28,11 +25,28 @@ export function useCloseSession(sessionId: string | null) {
 
 export function useCloseReadiness(sessionId: string | null) {
   return useQuery({
-    queryKey: ['close-readiness', sessionId],
+    queryKey: ['readiness', sessionId],
     queryFn: async (): Promise<CloseReadiness> => {
       if (!sessionId) throw new Error('No sessionId');
-      // return apiFetch<CloseReadiness>(`/api/close/sessions/${sessionId}/readiness`);
-      return Promise.resolve({ ...mockReadiness, sessionId });
+      const raw = await apiFetch<Record<string, unknown>>(
+        `/api/close/sessions/${sessionId}/readiness`,
+        { params: { format: 'gates' } }
+      );
+      const gates = (raw.gates as Array<Record<string, unknown>>) ?? [];
+      const base = `/close/${sessionId}`;
+      const gatesWithNav = gates.map((g) => ({
+        ...g,
+        navigateTo: (g.navigateTo as string)?.startsWith('/')
+          ? `${base}${(g.navigateTo as string)}`
+          : `${base}/${g.navigateTo ?? ''}`,
+      }));
+      return {
+        sessionId,
+        gatesPassing: (raw.gatesPassing as number) ?? 0,
+        gatesTotal: (raw.gatesTotal as number) ?? gates.length,
+        canAdvance: (raw.canAdvance as boolean) ?? false,
+        gates: gatesWithNav,
+      } as CloseReadiness;
     },
     enabled: !!sessionId,
     staleTime: STALE_TIME,
@@ -42,19 +56,80 @@ export function useCloseReadiness(sessionId: string | null) {
 
 export function useCloseIssues(
   sessionId: string | null,
-  _filters?: { severity?: string; category?: string }
+  filters?: { severity?: string; status?: string; category?: string }
 ) {
   return useQuery({
-    queryKey: ['close-issues', sessionId, _filters],
+    queryKey: ['issues', sessionId, filters],
     queryFn: async (): Promise<CloseIssue[]> => {
       if (!sessionId) throw new Error('No sessionId');
-      // return apiFetch<CloseIssue[]>(`/api/close/sessions/${sessionId}/issues`, { ... });
-      return Promise.resolve(
-        mockIssues.map((i) => ({ ...i, navigateTo: i.navigateTo.replace('[sessionId]', sessionId) }))
-      );
+      const res = await apiFetch<{ issues: unknown[] }>(`/api/close/sessions/${sessionId}/issues`, {
+        params: filters as Record<string, string>,
+      });
+      const issues = res.issues ?? [];
+      return issues.map((i) => {
+        const r = i as Record<string, unknown>;
+        const base = `/close/${sessionId}`;
+        let navigateTo = `${base}/dashboard`;
+        if (r.category === 'reconciliation' && (r.affectedAccounts as string[])?.[0]) {
+          const acc = (r.affectedAccounts as string[])[0];
+          navigateTo = `${base}/reconciliation/${acc?.replace(/\s*—\s*.*$/, '').trim() || 'recon'}`;
+        } else if (r.category === 'mapping') navigateTo = `${base}/mapping`;
+        else if (r.category === 'variance') navigateTo = `${base}/variance`;
+        else if (r.category === 'adjustments') navigateTo = `${base}/adjustments`;
+        else if (r.category === 'review') navigateTo = `${base}/review`;
+        return {
+          id: r.id,
+          title: r.title,
+          description: r.description,
+          severity: String(r.severity ?? 'INFO').toUpperCase(),
+          status: String(r.status ?? 'DETECTED').toUpperCase(),
+          category: (r.category as string) ?? '',
+          affectedAccounts: (r.affectedAccounts as string[]) ?? [],
+          assignedTo: r.assignedTo ?? null,
+          detectedAt: (r.detectedAt ?? r.createdAt ?? new Date().toISOString()) as string,
+          resolvedAt: r.resolvedAt ?? null,
+          navigateTo,
+        } as CloseIssue;
+      });
     },
     enabled: !!sessionId,
     staleTime: STALE_TIME,
     refetchOnWindowFocus: true,
+  });
+}
+
+export function useAdvanceSession(sessionId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body?: { certifiedBy?: string }) => {
+      if (!sessionId) throw new Error('No sessionId');
+      return apiFetch(`/api/close/sessions/${sessionId}/advance`, {
+        method: 'POST',
+        body: body ?? {},
+      });
+    },
+    onSuccess: () => {
+      if (sessionId) {
+        qc.invalidateQueries({ queryKey: ['close-session', sessionId] });
+        qc.invalidateQueries({ queryKey: ['readiness', sessionId] });
+        qc.invalidateQueries({ queryKey: ['issues', sessionId] });
+      }
+    },
+  });
+}
+
+export function useCreateSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { entityId: string; periodStart: string; periodEnd: string }) => {
+      return apiFetch<{ id?: string; closeSessionId?: string }>('/api/close/sessions', {
+        method: 'POST',
+        body,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sessions'] });
+      qc.invalidateQueries({ queryKey: ['settings', 'entities'] });
+    },
   });
 }

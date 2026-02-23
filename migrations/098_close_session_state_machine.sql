@@ -16,14 +16,16 @@ ALTER TABLE close_sessions
   ADD COLUMN IF NOT EXISTS reopened_by TEXT,
   ADD COLUMN IF NOT EXISTS reopen_reason TEXT;
 
--- Map existing data to new status values (must run before dropping constraint).
+-- Drop old status constraint before mapping (so UPDATE to 'open' etc. is allowed).
+ALTER TABLE close_sessions DROP CONSTRAINT IF EXISTS chk_status;
+
+-- Map existing data to new status values.
 UPDATE close_sessions SET status = 'open'            WHERE status = 'draft';
 UPDATE close_sessions SET status = 'under_review'   WHERE status IN ('ready_for_review', 'finalized', 'locked');
 UPDATE close_sessions SET status = 'locked'         WHERE status = 'certified';
 -- in_progress stays in_progress (no change)
 
--- Drop old status constraint and add new one.
-ALTER TABLE close_sessions DROP CONSTRAINT IF EXISTS chk_status;
+-- Add new status constraint.
 ALTER TABLE close_sessions ADD CONSTRAINT chk_status
   CHECK (status IN ('open', 'in_progress', 'under_review', 'certified', 'locked'));
 

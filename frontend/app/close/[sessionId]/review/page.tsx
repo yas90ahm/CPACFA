@@ -1,9 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import { useCloseSession, useCloseReadiness } from '@/lib/queries/close-session';
 import { useCertification } from '@/lib/queries/certification';
+import { useAuth } from '@/lib/auth';
+import { useStatements } from '@/lib/queries/statements';
+import { useAuditTrail } from '@/lib/queries/audit-trail';
+import { useJournalEntries } from '@/lib/queries/adjustments';
+import { useReconciliations } from '@/lib/queries/reconciliations';
+import { useVariances } from '@/lib/queries/variance';
+import { apiFetch } from '@/lib/api';
 import { CertificationChecklist } from './CertificationChecklist';
 import { CertificationRecord } from './CertificationRecord';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
@@ -11,29 +19,115 @@ import { MoneyCell } from '@/components/shared/MoneyCell';
 import { cn } from '@/lib/utils';
 import type { CloseState } from '@/lib/types/close-session';
 import type { ReadinessGate } from '@/lib/types/readiness';
-import { 
-  CheckCircle2, 
-  Lock, 
-  FileText, 
-  Users, 
-  Clock, 
+import {
+  CheckCircle2,
+  Lock,
+  FileText,
+  Users,
+  Clock,
   Hash,
   AlertCircle,
   XCircle
 } from 'lucide-react';
 
-// Mock user role - in production, this would come from auth context
-const MOCK_USER_ROLE: 'preparer' | 'reviewer' = 'reviewer';
-const MOCK_USER_NAME = 'Mike Torres';
-
 export default function ReviewPage() {
   const params = useParams();
   const sessionId = params.sessionId as string;
+  const { user } = useAuth();
   const { data: session } = useCloseSession(sessionId);
   const { data: readiness } = useCloseReadiness(sessionId);
   const { data: certification } = useCertification(sessionId);
 
-  // Mock state management - override session state locally for transitions
+  const userRole = (user?.role ?? 'preparer') as 'preparer' | 'reviewer';
+  const userName = user?.email ?? user?.userId ?? 'Unknown';
+
+  const { data: teamData } = useQuery({
+    queryKey: ['team'],
+    queryFn: () => apiFetch<{ members: Array<{ id: string; name?: string; email?: string; role?: string }> }>('/api/settings/team'),
+  });
+  const participants = useMemo(() => (teamData?.members ?? []).map((m) => m.name || m.email || m.id), [teamData]);
+
+  const { data: statementsData } = useStatements(sessionId);
+  const { data: auditData } = useAuditTrail(sessionId, { limit: 20 });
+  const { data: journalEntries = [] } = useJournalEntries(sessionId);
+  const { data: reconciliations = [] } = useReconciliations(sessionId);
+  const { data: variances = [] } = useVariances(sessionId);
+
+  const { data: manifestData } = useQuery({
+    queryKey: ['evidence-manifest', sessionId],
+    queryFn: () =>
+      apiFetch<{
+        reconEvidence: Array<{ files: Array<{ fileName: string; sizeBytes: number; sha256Hash: string }> }>;
+        jeEvidence: Array<{ files: Array<{ fileName: string; sizeBytes: number; sha256Hash: string }> }>;
+        totalFiles: number;
+      }>(`/api/close/sessions/${sessionId}/evidence-manifest`),
+    enabled: !!sessionId,
+  });
+
+  const financialHighlights = useMemo(() => {
+    const is = statementsData?.incomeStatement?.lines ?? [];
+    const bs = statementsData?.balanceSheet?.lines ?? [];
+    const revenueLine = is.find((l) => /revenue|sales/i.test(l.lineItemName) && l.isGrandTotal) ?? is.find((l) => /revenue/i.test(l.lineItemName));
+    const netIncomeLine = is.find((l) => /net income|net income \(loss\)/i.test(l.lineItemName));
+    const totalAssetsLine = bs.find((l) => /total assets/i.test(l.lineItemName));
+    const totalLiabLine = bs.find((l) => /total liabilities/i.test(l.lineItemName));
+    const totalEquityLine = bs.find((l) => /total equity|stockholders'? equity/i.test(l.lineItemName));
+    const cashLine = bs.find((l) => /cash|cash and/i.test(l.lineItemName));
+    const parse = (s: string) => (s ? parseFloat(String(s).replace(/,/g, '')) : 0);
+    return {
+      revenue: revenueLine ? parse(revenueLine.amount) : 0,
+      grossProfit: 0,
+      operatingIncome: 0,
+      netIncome: netIncomeLine ? parse(netIncomeLine.amount) : 0,
+      assets: totalAssetsLine ? parse(totalAssetsLine.amount) : 0,
+      liabilities: totalLiabLine ? parse(totalLiabLine.amount) : 0,
+      equity: totalEquityLine ? parse(totalEquityLine.amount) : 0,
+      cash: cashLine ? parse(cashLine.amount) : 0,
+    };
+  }, [statementsData]);
+
+  const evidenceManifest = useMemo(() => {
+    const list: Array<{ filename: string; hash: string; size: string }> = [];
+    manifestData?.reconEvidence?.forEach((r) => {
+      r.files?.forEach((f) => {
+        list.push({
+          filename: f.fileName,
+          hash: f.sha256Hash ?? '',
+          size: f.sizeBytes != null ? `${(f.sizeBytes / 1024).toFixed(1)} KB` : '—',
+        });
+      });
+    });
+    manifestData?.jeEvidence?.forEach((j) => {
+      j.files?.forEach((f) => {
+        list.push({
+          filename: f.fileName,
+          hash: f.sha256Hash ?? '',
+          size: f.sizeBytes != null ? `${(f.sizeBytes / 1024).toFixed(1)} KB` : '—',
+        });
+      });
+    });
+    return list;
+  }, [manifestData]);
+
+  const activitySummary = useMemo(() => {
+    const startedAt = session?.startedAt ?? session?.createdAt;
+    const duration = startedAt
+      ? `${Math.max(1, Math.ceil((Date.now() - new Date(startedAt).getTime()) / 86400000))} days`
+      : '—';
+    const reconsComplete = reconciliations.filter((r) => r.status === 'completed' || r.status === 'approved').length;
+    const explained = variances.filter((v) => (v as { status?: string }).status === 'explained' || (v as { explained?: boolean }).explained).length;
+    return {
+      adjustingEntries: journalEntries.length,
+      reconciliations: reconciliations.length,
+      reconciliationsComplete: reconsComplete,
+      variances: variances.length,
+      variancesExplained: explained,
+      evidenceFiles: manifestData?.totalFiles ?? 0,
+      duration,
+      participants,
+    };
+  }, [session, reconciliations, variances, journalEntries.length, manifestData?.totalFiles, participants]);
+
   const [localState, setLocalState] = useState<CloseState | null>(null);
   const [showSubmitDialog, setShowSubmitDialog] = useState(false);
   const [showCertifyDialog, setShowCertifyDialog] = useState(false);
@@ -47,10 +141,8 @@ export default function ReviewPage() {
   const [certifyStep, setCertifyStep] = useState<'input' | 'progress' | 'complete'>('input');
 
   const currentState = localState || session?.state || 'IN_PROGRESS';
-  const isReviewer = MOCK_USER_ROLE === 'reviewer';
-  const isPreparer = MOCK_USER_ROLE === 'preparer';
-
-  // Add "ties" gate to readiness gates if not present
+  const isReviewer = userRole === 'reviewer' || userRole === 'approver' || userRole === 'admin';
+  const isPreparer = !isReviewer;
   const gatesWithTies: ReadinessGate[] = readiness?.gates ? [...readiness.gates] : [];
   const hasTiesGate = gatesWithTies.some(g => g.id === 'ties');
   if (!hasTiesGate) {
@@ -156,38 +248,6 @@ export default function ReviewPage() {
     setReopenInput('');
     setReopenReason('');
   };
-
-  // Mock financial highlights data
-  const financialHighlights = {
-    revenue: 12450000,
-    grossProfit: 8750000,
-    operatingIncome: 3405250,
-    netIncome: 3405250,
-    assets: 17563134.57,
-    liabilities: 13482533.33,
-    equity: 4080801.24,
-    cash: 1745678.90,
-  };
-
-  // Mock activity summary data
-  const activitySummary = {
-    adjustingEntries: 12,
-    reconciliations: 12,
-    reconciliationsComplete: 12,
-    variances: 8,
-    variancesExplained: 8,
-    evidenceFiles: 24,
-    duration: '14 days',
-    participants: ['Sarah Chen', 'Mike Torres', 'David Kim'],
-  };
-
-  // Mock evidence manifest
-  const evidenceManifest = [
-    { filename: 'trial-balance-2026-01.csv', hash: 'a3f2c891d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2', size: '245 KB' },
-    { filename: 'bank-reconciliation-chase.pdf', hash: 'b4e3d982e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3', size: '1.2 MB' },
-    { filename: 'aje-depreciation-2026-01.xlsx', hash: 'c5f4e093f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4', size: '89 KB' },
-    { filename: 'variance-analysis-report.pdf', hash: 'd6g5f104a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5', size: '456 KB' },
-  ];
 
   return (
     <div className="space-y-6">

@@ -2,12 +2,13 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import { useState, useMemo, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useReconciliations, useReconciliation } from '@/lib/queries/reconciliations';
+import { useCloseSession } from '@/lib/queries/close-session';
+import { useAuth } from '@/lib/auth';
+import { apiFetch, apiUpload } from '@/lib/api';
 import { parseMoney } from '@/lib/format';
-import { mockReconItemsByRecon } from '@/lib/mock/recon-items';
-import { mockEvidenceByRecon } from '@/lib/mock/evidence-files';
-import { mockActivityByRecon } from '@/lib/mock/recon-activity';
 import { MoneyInput } from '@/components/shared/MoneyInput';
 import { MoneyCell } from '@/components/shared/MoneyCell';
 import { StatusBadge } from '@/components/shared/StatusBadge';
@@ -59,11 +60,67 @@ function formatDateTime(d: string): string {
 export default function ReconDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const sessionId = params.sessionId as string;
   const reconId = params.reconId as string;
+  const { user } = useAuth();
 
+  const { data: session } = useCloseSession(sessionId);
   const { data: reconciliations = [] } = useReconciliations(sessionId);
-  const { data: recon } = useReconciliation(sessionId, reconId);
+  const { data: reconData } = useReconciliation(sessionId, reconId);
+  const recon = reconData?.reconciliation ?? null;
+  const baseItems = reconData?.items ?? [];
+
+  const { data: evidenceData } = useQuery({
+    queryKey: ['recon-evidence', sessionId, reconId],
+    queryFn: () =>
+      apiFetch<{ attachments: Array<{ id: string; originalFilename?: string; label?: string; sizeBytes?: number; mimeType?: string; hashSha256?: string; attachedBy?: string; attachedAt?: string }> }>(
+        `/api/close/sessions/${sessionId}/reconciliations/${reconId}/evidence`
+      ),
+    enabled: !!sessionId && !!reconId,
+  });
+
+  const completeMutation = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/complete`, { method: 'POST' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reconciliation', sessionId, reconId] });
+      queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+    },
+  });
+  const approveMutation = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/approve`, { method: 'POST' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reconciliation', sessionId, reconId] });
+      queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+    },
+  });
+  const rejectMutation = useMutation({
+    mutationFn: (reason: string) =>
+      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/reject`, {
+        method: 'POST',
+        body: { reason },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reconciliation', sessionId, reconId] });
+      queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+    },
+  });
+  const uploadEvidenceMutation = useMutation({
+    mutationFn: (file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return apiUpload(
+        `/api/close/sessions/${sessionId}/reconciliations/${reconId}/evidence`,
+        formData
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['recon-evidence', sessionId, reconId] });
+      queryClient.invalidateQueries({ queryKey: ['reconciliation', sessionId, reconId] });
+    },
+  });
 
   const sortedIds = useMemo(() => {
     const copy = [...reconciliations].sort((a, b) => {
@@ -91,11 +148,23 @@ export default function ReconDetailPage() {
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
 
-  const baseItems = mockReconItemsByRecon[reconId] ?? [];
+  const evidenceFromApi: EvidenceFile[] = useMemo(
+    () =>
+      (evidenceData?.attachments ?? []).map((a) => ({
+        id: a.id,
+        fileName: a.originalFilename ?? a.label ?? 'evidence',
+        fileSize: a.sizeBytes ?? 0,
+        mimeType: a.mimeType ?? '',
+        uploadedBy: a.attachedBy ?? 'Unknown',
+        uploadedAt: a.attachedAt ?? '',
+        sha256Hash: a.hashSha256 ?? '',
+        downloadUrl: '#',
+      })),
+    [evidenceData]
+  );
+  const evidence = [...evidenceFromApi, ...localEvidence];
   const items = localItems ?? baseItems;
-  const baseEvidence = mockEvidenceByRecon[reconId] ?? [];
-  const evidence = [...baseEvidence, ...localEvidence];
-  const activity = mockActivityByRecon[reconId] ?? [];
+  const activity: Array<{ id: string; user: string; description: string; timestamp: string }> = [];
 
   const supportingNum = useMemo(() => {
     if (supportingBalanceLocal != null && supportingBalanceLocal.trim() !== '') return parseMoney(supportingBalanceLocal);
@@ -106,9 +175,11 @@ export default function ReconDetailPage() {
   const notesDisplay = notesLocal !== '' ? notesLocal : (recon?.notes ?? '');
   const isCompleted = recon?.status === 'completed' || recon?.status === 'approved';
   const isApproved = recon?.status === 'approved';
-  const isPreparer = recon?.preparer === 'Sarah Chen'; // Mock current user
+  const isPreparer = recon?.preparer != null && (user?.userId === recon.preparer || user?.email === recon.preparer);
   const isReviewer = !isPreparer;
   const canApproveOwn = false;
+  const periodEnd = session?.periodEnd ?? session?.createdAt ?? null;
+  const periodEndDisplay = periodEnd ? new Date(periodEnd).toISOString().slice(0, 10) : '—';
 
   const variance = recon && supportingNum != null ? recon.glBalance - supportingNum : 0;
   const itemsTotal = items.reduce((s, i) => s + i.amount, 0);
@@ -162,22 +233,12 @@ export default function ReconDetailPage() {
     [baseItems]
   );
 
-  const handleUpload = useCallback(async (file: File) => {
-    const hash = Array.from(crypto.getRandomValues(new Uint8Array(32)))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-    const ev: EvidenceFile = {
-      id: `ev-local-${Date.now()}`,
-      fileName: file.name,
-      fileSize: file.size,
-      mimeType: file.type,
-      uploadedBy: 'Sarah Chen',
-      uploadedAt: new Date().toISOString(),
-      sha256Hash: hash,
-      downloadUrl: '#',
-    };
-    setLocalEvidence((prev) => [...prev, ev]);
-  }, []);
+  const handleUpload = useCallback(
+    (file: File) => {
+      uploadEvidenceMutation.mutate(file);
+    },
+    [uploadEvidenceMutation]
+  );
 
   const handleDeleteEvidence = useCallback((id: string) => {
     if (id.startsWith('ev-local-')) {
@@ -188,20 +249,24 @@ export default function ReconDetailPage() {
 
   const handleMarkComplete = useCallback(() => {
     if (!canMarkComplete) return;
-    router.refresh();
-  }, [canMarkComplete, router]);
+    completeMutation.mutate(undefined, { onSuccess: () => router.refresh() });
+  }, [canMarkComplete, completeMutation, router]);
 
   const handleApprove = useCallback(() => {
     if (!recon || recon.status !== 'completed' || !isReviewer || canApproveOwn) return;
-    router.refresh();
-  }, [recon, isReviewer, canApproveOwn, router]);
+    approveMutation.mutate(undefined, { onSuccess: () => router.refresh() });
+  }, [recon, isReviewer, canApproveOwn, approveMutation, router]);
 
   const handleReject = useCallback(() => {
     if (rejectReason.trim().length < 10) return;
-    setShowRejectInput(false);
-    setRejectReason('');
-    router.refresh();
-  }, [rejectReason, router]);
+    rejectMutation.mutate(rejectReason.trim(), {
+      onSuccess: () => {
+        setShowRejectInput(false);
+        setRejectReason('');
+        router.refresh();
+      },
+    });
+  }, [rejectReason, rejectMutation, router]);
 
   if (!recon) {
     return (
@@ -213,8 +278,6 @@ export default function ReconDetailPage() {
       </div>
     );
   }
-
-  const periodEnd = '2026-01-31'; // From mock session
 
   return (
     <div className="space-y-6">
@@ -341,7 +404,7 @@ export default function ReconDetailPage() {
                 <div className="font-mono text-xl tabular-nums">
                   <MoneyCell value={recon.glBalance} showDollar />
                 </div>
-                <div className="text-xs text-text-muted mt-1">from adjusted trial balance as of {periodEnd}</div>
+                <div className="text-xs text-text-muted mt-1">from adjusted trial balance as of {periodEndDisplay}</div>
               </div>
               <div>
                 <div className="text-xs text-text-secondary mb-1">Supporting Balance</div>

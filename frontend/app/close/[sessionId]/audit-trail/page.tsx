@@ -248,7 +248,8 @@ function EventCard({ event, isExpanded, onToggle }: EventCardProps) {
 export default function AuditTrailPage() {
   const params = useParams();
   const sessionId = params.sessionId as string;
-  const { data: events = [], isLoading } = useAuditTrail(sessionId);
+  const { data, isLoading } = useAuditTrail(sessionId);
+  const events = data?.events ?? [];
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [eventTypeFilter, setEventTypeFilter] = useState<Set<AuditEventType>>(new Set());

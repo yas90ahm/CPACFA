@@ -2,17 +2,77 @@
 
 import { useParams, useSearchParams } from 'next/navigation';
 import { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useTrialBalanceContext } from '../context/trial-balance-context';
 import { MoneyCell } from '@/components/shared/MoneyCell';
 import { FilterBar } from '@/components/shared/FilterBar';
 import { AISuggestionCard } from '@/components/shared/AISuggestionCard';
-import { mockTaxonomy, mockTaxonomyFlat } from '@/lib/mock/taxonomy';
-import { mockAISuggestions } from '@/lib/mock/ai-suggestions';
+import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import type { TrialBalanceRow, AccountType } from '@/lib/types/trial-balance';
-import type { AIMappingSuggestion, ConfidenceLevel } from '@/lib/mock/ai-suggestions';
-import type { TaxonomyNode } from '@/lib/mock/taxonomy';
 import { ChevronDown, Pencil, Check, X } from 'lucide-react';
+
+/** API taxonomy line (flat). */
+interface TaxonomyLine {
+  id: string;
+  code: string;
+  name: string;
+  statement: string;
+  parentId?: string;
+  normalBalance?: string;
+}
+
+/** Tree node for taxonomy UI. */
+interface TaxonomyNode {
+  id: string;
+  label: string;
+  children?: TaxonomyNode[];
+}
+
+/** AI suggestion from API. */
+interface AIMappingSuggestion {
+  id: string;
+  accountCode: string;
+  accountName: string;
+  suggestedReportingLineId: string;
+  suggestedReportingLineName: string;
+  confidence: 'High' | 'Medium' | 'Low';
+  reasoning: string;
+}
+
+const STATEMENT_LABELS: Record<string, string> = {
+  PL: 'Income Statement',
+  BS: 'Balance Sheet',
+  CF: 'Cash Flow Statement',
+};
+
+function buildTaxonomyTree(lines: TaxonomyLine[]): TaxonomyNode[] {
+  if (!lines.length) return [];
+  const map = new Map<string, TaxonomyNode>();
+  for (const l of lines) {
+    map.set(l.id, { id: l.id, label: l.name, children: [] });
+  }
+  const roots: TaxonomyNode[] = [];
+  for (const l of lines) {
+    const node = map.get(l.id)!;
+    if (!l.parentId || !map.has(l.parentId)) {
+      roots.push(node);
+    } else {
+      const parent = map.get(l.parentId)!;
+      if (!parent.children) parent.children = [];
+      parent.children.push(node);
+    }
+  }
+  return roots;
+}
+
+function flattenForSelect(lines: TaxonomyLine[]): { id: string; label: string; statementLabel: string }[] {
+  return lines.map((l) => ({
+    id: l.id,
+    label: l.name,
+    statementLabel: STATEMENT_LABELS[l.statement] ?? l.statement,
+  }));
+}
 
 const ACCOUNT_TYPE_STYLE: Record<AccountType, string> = {
   ASSET: 'bg-status-blue-dim text-status-blue',
@@ -22,7 +82,15 @@ const ACCOUNT_TYPE_STYLE: Record<AccountType, string> = {
   EXPENSE: 'bg-status-red-dim text-status-red',
 };
 
-const CONFIDENCE_STYLE: Record<ConfidenceLevel, string> = {
+const ACCOUNT_TYPE_STYLE: Record<AccountType, string> = {
+  ASSET: 'bg-status-blue-dim text-status-blue',
+  LIABILITY: 'bg-status-amber-dim text-status-amber',
+  EQUITY: 'bg-equity-dim text-equity',
+  REVENUE: 'bg-status-green-dim text-status-green',
+  EXPENSE: 'bg-status-red-dim text-status-red',
+};
+
+const CONFIDENCE_STYLE: Record<'High' | 'Medium' | 'Low', string> = {
   High: 'text-status-green',
   Medium: 'text-status-amber',
   Low: 'text-status-red',
@@ -33,6 +101,43 @@ export default function MappingPage() {
   const sessionId = p.sessionId as string;
   const searchParams = useSearchParams();
   const unmappedOnlyDefault = searchParams.get('unmapped') === '1';
+
+  const { data: taxonomyData } = useQuery({
+    queryKey: ['taxonomy'],
+    queryFn: () => apiFetch<{ lines: TaxonomyLine[] }>('/api/coa-mapping/taxonomy'),
+  });
+  const taxonomyLines = taxonomyData?.lines ?? [];
+  const taxonomy = useMemo(() => buildTaxonomyTree(taxonomyLines), [taxonomyLines]);
+  const taxonomyFlat = useMemo(() => flattenForSelect(taxonomyLines), [taxonomyLines]);
+
+  const { data: suggestionsData } = useQuery({
+    queryKey: ['ai-suggestions', sessionId],
+    queryFn: () => apiFetch<{ suggestions: Array<{
+      accountCode: string;
+      accountName: string;
+      suggestedLineItemId: string | null;
+      suggestedLineItemName: string | null;
+      confidence: string;
+      reasoning: string;
+    }> }>(`/api/coa-mapping/suggestions?sessionId=${sessionId}`),
+    enabled: !!sessionId,
+  });
+  const aiSuggestionsRaw = suggestionsData?.suggestions ?? [];
+  const aiSuggestions: AIMappingSuggestion[] = useMemo(
+    () =>
+      aiSuggestionsRaw
+        .filter((s) => s.suggestedLineItemId != null)
+        .map((s, i) => ({
+          id: `sug-${s.accountCode}-${i}`,
+          accountCode: s.accountCode,
+          accountName: s.accountName,
+          suggestedReportingLineId: s.suggestedLineItemId!,
+          suggestedReportingLineName: s.suggestedLineItemName ?? s.suggestedLineItemId!,
+          confidence: (s.confidence === 'high' ? 'High' : s.confidence === 'low' ? 'Low' : 'Medium') as 'High' | 'Medium' | 'Low',
+          reasoning: s.reasoning,
+        })),
+    [aiSuggestionsRaw]
+  );
 
   const { rows, setOverrides } = useTrialBalanceContext();
   const [search, setSearch] = useState('');
@@ -60,8 +165,8 @@ export default function MappingPage() {
   const progressPct = totalAccounts ? Math.round((mappedCount / totalAccounts) * 1000) / 10 : 0;
 
   const suggestions = useMemo(
-    () => mockAISuggestions.filter((s) => !dismissedSuggestions.has(s.id) && rows.some((r) => r.accountCode === s.accountCode && !r.mappingReportingLineId)),
-    [dismissedSuggestions, rows]
+    () => aiSuggestions.filter((s) => !dismissedSuggestions.has(s.id) && rows.some((r) => r.accountCode === s.accountCode && !r.mappingReportingLineId)),
+    [aiSuggestions, dismissedSuggestions, rows]
   );
   const highConfidenceSuggestions = suggestions.filter((s) => s.confidence === 'High');
 
@@ -80,12 +185,12 @@ export default function MappingPage() {
 
   const lineItemsByStatement = useMemo(() => {
     const map: Record<string, { id: string; label: string }[]> = {};
-    mockTaxonomyFlat.forEach((item) => {
+    taxonomyFlat.forEach((item) => {
       if (!map[item.statementLabel]) map[item.statementLabel] = [];
       map[item.statementLabel].push({ id: item.id, label: item.label });
     });
     return map;
-  }, []);
+  }, [taxonomyFlat]);
 
   return (
     <div className="space-y-4">
@@ -126,6 +231,13 @@ export default function MappingPage() {
           </FilterBar>
 
           <div className="rounded-card border border-border overflow-hidden">
+            {rows.length === 0 ? (
+              <div className="px-6 py-12 text-center">
+                <p className="text-primary font-medium mb-1">No trial balance data</p>
+                <p className="text-text-secondary text-sm">Upload a GL or trial balance from the dashboard to see accounts and map them to reporting lines.</p>
+              </div>
+            ) : (
+            <>
             <div className="overflow-x-auto">
               <table className="w-full border-collapse">
                 <thead className="sticky top-0 z-10 bg-surface border-b border-border">
@@ -221,6 +333,8 @@ export default function MappingPage() {
             {filtered.length === 0 && (
               <div className="px-3 py-8 text-center text-text-secondary text-sm">No accounts match filters.</div>
             )}
+            </>
+            )}
           </div>
         </div>
 
@@ -291,7 +405,7 @@ export default function MappingPage() {
           {rightTab === 'taxonomy' && (
             <div className="rounded-card border border-border p-3 max-h-[500px] overflow-y-auto">
               <TaxonomyTree
-                nodes={mockTaxonomy}
+                nodes={taxonomy}
                 selectedId={taxonomySelectedId}
                 onSelect={setTaxonomySelectedId}
                 rows={rows}

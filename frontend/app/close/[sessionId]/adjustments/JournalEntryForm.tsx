@@ -1,6 +1,9 @@
 'use client';
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { SlideOverPanel } from '@/components/shared/SlideOverPanel';
 import { MoneyInput } from '@/components/shared/MoneyInput';
 import { MoneyCell } from '@/components/shared/MoneyCell';
@@ -8,7 +11,8 @@ import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import { FileUpload } from '@/components/shared/FileUpload';
 import { FileList } from '@/components/shared/FileList';
 import { useTrialBalanceContext } from '../context/trial-balance-context';
-import { mockJEEvidenceByJe } from '@/lib/mock/je-evidence';
+import { useAuth } from '@/lib/auth';
+import { apiFetch, apiUpload } from '@/lib/api';
 import { parseMoney } from '@/lib/format';
 import { MATERIALITY_THRESHOLD } from '@/lib/types/journal-entry';
 import type { JournalEntry, JournalEntryLine } from '@/lib/types/journal-entry';
@@ -50,7 +54,46 @@ export function JournalEntryForm({
   onReject,
   onPost,
 }: JournalEntryFormProps) {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const { rows: tbRows } = useTrialBalanceContext();
+
+  const { data: manifest } = useQuery({
+    queryKey: ['evidence-manifest', sessionId],
+    queryFn: () =>
+      apiFetch<{ jeEvidence: Array<{ jeId: string; files: Array<{ id: string; fileName: string; sizeBytes: number; mimeType?: string; sha256Hash: string; uploadedBy: string; createdAt: string }> }> }>(
+        `/api/close/sessions/${sessionId}/evidence-manifest`
+      ),
+    enabled: !!sessionId && !!entry?.id,
+  });
+
+  const evidenceFromApi: EvidenceFile[] = useMemo(() => {
+    if (!entry?.id || !manifest?.jeEvidence) return [];
+    const je = manifest.jeEvidence.find((j) => j.jeId === entry.id);
+    return (je?.files ?? []).map((f) => ({
+      id: f.id,
+      fileName: f.fileName,
+      fileSize: f.sizeBytes,
+      mimeType: f.mimeType ?? '',
+      uploadedBy: f.uploadedBy,
+      uploadedAt: f.createdAt,
+      sha256Hash: f.sha256Hash,
+      downloadUrl: `#`,
+    }));
+  }, [entry?.id, manifest]);
+
+  const uploadEvidenceMutation = useMutation({
+    mutationFn: ({ jeId, file }: { jeId: string; file: File }) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return apiUpload(`/api/close/journal-entries/${jeId}/evidence/upload`, formData);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['evidence-manifest', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+    },
+  });
+
   const mappedAccounts = useMemo(() => tbRows.filter((r) => r.mappingReportingLineId), [tbRows]);
 
   const accountOptions: SearchableSelectOption[] = useMemo(
@@ -103,7 +146,7 @@ export function JournalEntryForm({
   const allLinesHaveAccount = lines.every((l) => l.accountCode != null);
   const entryTotal = totalDebits;
   const evidenceRequired = entryTotal >= MATERIALITY_THRESHOLD;
-  const evidenceOk = !evidenceRequired || (entry?.evidenceCount ?? 0) + localEvidence.length >= 1;
+  const evidenceOk = !evidenceRequired || evidenceFromApi.length + localEvidence.length >= 1;
   const canSubmit = isBalanced && hasMemo && hasTwoLinesWithAmounts && allLinesHaveAccount && evidenceOk;
 
   const updateLine = useCallback((lineId: string, updates: Partial<FormLine>) => {
@@ -140,24 +183,31 @@ export function JournalEntryForm({
     [updateLine]
   );
 
-  const handleUpload = useCallback(async (file: File) => {
-    const hash = Array.from(crypto.getRandomValues(new Uint8Array(32)))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-    setLocalEvidence((prev) => [
-      ...prev,
-      {
-        id: `ev-${Date.now()}`,
-        fileName: file.name,
-        fileSize: file.size,
-        mimeType: file.type,
-        uploadedBy: 'Sarah Chen',
-        uploadedAt: new Date().toISOString(),
-        sha256Hash: hash,
-        downloadUrl: '#',
-      },
-    ]);
-  }, []);
+  const handleUpload = useCallback(
+    async (file: File) => {
+      if (entry?.id) {
+        uploadEvidenceMutation.mutate({ jeId: entry.id, file });
+      } else {
+        const hash = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join('');
+        setLocalEvidence((prev) => [
+          ...prev,
+          {
+            id: `ev-${Date.now()}`,
+            fileName: file.name,
+            fileSize: file.size,
+            mimeType: file.type,
+            uploadedBy: user?.email ?? user?.userId ?? 'Unknown',
+            uploadedAt: new Date().toISOString(),
+            sha256Hash: hash,
+            downloadUrl: '#',
+          },
+        ]);
+      }
+    },
+    [entry?.id, user, uploadEvidenceMutation]
+  );
 
   const buildEntry = useCallback((): Partial<JournalEntry> & { lines: JournalEntryLine[] } => {
     const jeLines: JournalEntryLine[] = lines.map((l) => ({
@@ -323,8 +373,8 @@ export function JournalEntryForm({
           <div>
             <p className="text-sm text-status-amber mb-2">Entries of $10,000 or more require supporting documentation</p>
             {!readonly && <FileUpload onUpload={handleUpload} maxSizeMB={10} />}
-            {((entry?.id ? mockJEEvidenceByJe[entry.id] ?? [] : []).length + localEvidence.length > 0) && (
-              <FileList files={entry?.id ? [...(mockJEEvidenceByJe[entry.id] ?? []), ...localEvidence] : localEvidence} showHash readonly={readonly} />
+            {((entry?.id ? evidenceFromApi : []).length + localEvidence.length > 0) && (
+              <FileList files={entry?.id ? [...evidenceFromApi, ...localEvidence] : localEvidence} showHash readonly={readonly} />
             )}
           </div>
         ) : (

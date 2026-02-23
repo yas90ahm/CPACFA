@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { TopBar } from '@/components/shell/TopBar';
+import { AuthGuard } from '@/components/auth/AuthGuard';
 import { cn } from '@/lib/utils';
 import {
   Building2,
@@ -29,6 +30,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   const pathname = usePathname();
 
   return (
+    <AuthGuard>
     <div className="min-h-screen bg-primary">
       <TopBar entityName="Apex Manufacturing Co." showPeriod={false} />
       <div className="pt-14 flex">
@@ -63,5 +65,6 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         <main className="flex-1 pl-56 pr-8 py-8">{children}</main>
       </div>
     </div>
+    </AuthGuard>
   );
 }

@@ -71,10 +71,10 @@ app.use(helmet());
 const corsOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)
   : (process.env.CORS_ORIGIN ? [process.env.CORS_ORIGIN] : []);
-// When no CORS env is set, allow local dev (frontend on 3000 calling API on 3001)
+// When no CORS env is set, allow local dev (frontend on 3000 or 3002 calling API on 3001)
 const corsOptions = corsOrigins.length
   ? { origin: corsOrigins }
-  : { origin: ['http://localhost:3000', 'http://127.0.0.1:3000'] };
+  : { origin: ['http://localhost:3000', 'http://localhost:3002', 'http://127.0.0.1:3000', 'http://127.0.0.1:3002'] };
 app.use(cors(corsOptions));
 
 app.use(express.json({ limit: '1mb' }));
@@ -245,7 +245,13 @@ async function start(): Promise<void> {
   await runStartupValidation();
   printStartupBanner();
   if (getMode() === 'demo' && isDbConfigured()) {
-    await seedDemo();
+    try {
+      await seedDemo();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[seed_demo] Failed (server will still start):', msg);
+      console.error('[seed_demo] You can create a session via the UI or retry: npx tsx src/scripts/seed_demo.ts');
+    }
   }
   app.listen(PORT, () => {
     console.log(`FinOS Agent API listening on http://localhost:${PORT}`);

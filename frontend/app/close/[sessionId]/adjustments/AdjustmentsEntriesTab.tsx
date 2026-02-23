@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useJournalEntries } from '@/lib/queries/adjustments';
-import { mockJEEvidenceByJe } from '@/lib/mock/je-evidence';
+import { apiFetch } from '@/lib/api';
 import { DataTable } from '@/components/shared/DataTable';
 import { MoneyCell } from '@/components/shared/MoneyCell';
 import { StatusBadge } from '@/components/shared/StatusBadge';
@@ -64,6 +65,23 @@ export function AdjustmentsEntriesTab({
   search,
   onSearchChange,
 }: AdjustmentsEntriesTabProps) {
+  const { data: manifest } = useQuery({
+    queryKey: ['evidence-manifest', sessionId],
+    queryFn: () =>
+      apiFetch<{ jeEvidence: Array<{ jeId: string; files: Array<{ id: string; fileName: string }> }> }>(
+        `/api/close/sessions/${sessionId}/evidence-manifest`
+      ),
+    enabled: !!sessionId,
+  });
+
+  const evidenceByJeId = useMemo(() => {
+    const map: Record<string, Array<{ id: string; fileName: string }>> = {};
+    manifest?.jeEvidence?.forEach((j) => {
+      map[j.jeId] = j.files ?? [];
+    });
+    return map;
+  }, [manifest]);
+
   const filtered = useMemo(() => {
     let list = entries;
     if (statusFilter !== 'all') list = list.filter((e) => e.status === statusFilter);
@@ -141,7 +159,7 @@ export function AdjustmentsEntriesTab({
   const renderExpanded = (row: JournalEntry) => {
     const debitTotal = row.lines.reduce((s, l) => s + l.debit, 0);
     const creditTotal = row.lines.reduce((s, l) => s + l.credit, 0);
-    const evidence = mockJEEvidenceByJe[row.id] ?? [];
+    const evidence = evidenceByJeId[row.id] ?? [];
     return (
       <div className="py-4 space-y-4">
         <div>

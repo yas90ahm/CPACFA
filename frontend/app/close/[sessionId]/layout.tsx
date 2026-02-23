@@ -73,8 +73,10 @@ function CloseSessionInner({ children }: { children: React.ReactNode }) {
 }
 
 export default function CloseSessionLayout({ children }: { children: React.ReactNode }) {
+  const params = useParams();
+  const sessionId = (params?.sessionId as string) ?? '';
   return (
-    <TrialBalanceProvider>
+    <TrialBalanceProvider sessionId={sessionId}>
       <CloseSessionInner>{children}</CloseSessionInner>
     </TrialBalanceProvider>
   );

@@ -1,10 +1,24 @@
 'use client';
 
 import { useState } from 'react';
-import { mockTeam, type TeamMember, type TeamRole } from '@/lib/mock/team';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SlideOverPanel } from '@/components/shared/SlideOverPanel';
+import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { Plus, Pencil, UserX } from 'lucide-react';
+
+type TeamRole = 'CONTROLLER' | 'REVIEWER' | 'CERTIFIER' | 'ADMIN';
+
+interface TeamMember {
+  id: string;
+  name: string;
+  email: string;
+  role: TeamRole;
+  status: string;
+  lastActiveAt?: string | null;
+  invitedAt?: string | null;
+  createdAt?: string;
+}
 
 const ROLE_LABELS: Record<TeamRole, string> = {
   CONTROLLER: 'Controller',
@@ -21,7 +35,28 @@ const ROLE_BADGE_STYLE: Record<TeamRole, string> = {
 };
 
 export default function TeamPage() {
-  const [members, setMembers] = useState<TeamMember[]>(mockTeam);
+  const queryClient = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ['settings-team'],
+    queryFn: () => apiFetch<{ members: TeamMember[]; roles: string[] }>('/api/settings/team'),
+  });
+  const members = data?.members ?? [];
+
+  const inviteMutation = useMutation({
+    mutationFn: (body: { email: string; name?: string; role: string }) =>
+      apiFetch('/api/settings/team/invite', { method: 'POST', body }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings-team'] }),
+  });
+  const roleMutation = useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: string }) =>
+      apiFetch(`/api/settings/team/${userId}/role`, { method: 'PUT', body: { role } }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings-team'] }),
+  });
+  const deactivateMutation = useMutation({
+    mutationFn: (userId: string) => apiFetch(`/api/settings/team/${userId}/deactivate`, { method: 'PUT' }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings-team'] }),
+  });
+
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<TeamRole>('CONTROLLER');
@@ -32,11 +67,13 @@ export default function TeamPage() {
 
   const handleSendInvite = () => {
     if (!inviteEmail.trim()) return;
-    setMembers((prev) => [...prev, { id: `inv-${Date.now()}`, name: '', email: inviteEmail.trim(), role: inviteRole, status: 'invited', lastActive: null }]);
+    inviteMutation.mutate({ email: inviteEmail.trim(), role: inviteRole });
     setInviteEmail('');
     setInviteRole('CONTROLLER');
     setInviteOpen(false);
   };
+
+  if (isLoading && members.length === 0) return <div className="text-text-secondary">Loading team...</div>;
 
   return (
     <div className="max-w-4xl space-y-8">
@@ -79,10 +116,10 @@ export default function TeamPage() {
                   <span className={cn('px-1.5 py-0.5 rounded text-xs', ROLE_BADGE_STYLE[m.role])}>{ROLE_LABELS[m.role]}</span>
                 </td>
                 <td className="py-2.5 px-4 capitalize">{m.status}</td>
-                <td className="py-2.5 px-4 text-text-secondary">{m.lastActive ?? '—'}</td>
+                <td className="py-2.5 px-4 text-text-secondary">{m.lastActiveAt ? new Date(m.lastActiveAt).toLocaleDateString() : '—'}</td>
                 <td className="py-2.5 px-4 flex items-center gap-1">
                   <button type="button" className="p-1.5 rounded-input text-text-secondary hover:bg-hover" aria-label="Edit role"><Pencil className="w-4 h-4" /></button>
-                  <button type="button" className="p-1.5 rounded-input text-text-secondary hover:bg-status-red-dim hover:text-status-red" aria-label="Deactivate"><UserX className="w-4 h-4" /></button>
+                  <button type="button" onClick={() => deactivateMutation.mutate(m.id)} className="p-1.5 rounded-input text-text-secondary hover:bg-status-red-dim hover:text-status-red" aria-label="Deactivate"><UserX className="w-4 h-4" /></button>
                 </td>
               </tr>
             ))}
