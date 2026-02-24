@@ -5,7 +5,7 @@
  */
 
 import type { BalanceSheet, ProfitAndLoss, CashFlowStatement, EquityChangesStatement } from '../types/financial.js';
-import { from as decimalFrom } from '../utils/decimal.js';
+import { from as decimalFrom, sumRound2 } from '../utils/decimal.js';
 
 export interface ValidationCheck {
   check_name: string;
@@ -17,9 +17,7 @@ export interface ValidationCheck {
 
 /** Sum BS assets whose label matches cash/bank. */
 function getCashFromBalanceSheet(bs: BalanceSheet): number {
-  return bs.assets
-    .filter((a) => /cash|bank/i.test(a.label ?? ''))
-    .reduce((s, a) => s + a.amount, 0);
+  return sumRound2(bs.assets.filter((a) => /cash|bank/i.test(a.label ?? '')).map((a) => a.amount));
 }
 
 /**

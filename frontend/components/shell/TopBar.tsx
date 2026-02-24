@@ -28,11 +28,11 @@ export interface TopBarProps {
 }
 
 export function TopBar(p: TopBarProps) {
-  const entityName = p.entityName ?? 'Apex Manufacturing Co.';
-  const periodLabel = p.periodLabel ?? 'January 2026';
-  const state = p.state ?? 'IN_PROGRESS';
-  const userName = p.userName ?? 'Sarah Chen';
-  const userInitials = p.userInitials ?? 'SC';
+  const entityName = p.entityName ?? 'Entity';
+  const periodLabel = p.periodLabel ?? '';
+  const state = p.state;
+  const userName = p.userName ?? '';
+  const userInitials = p.userInitials ?? (userName ? userName.slice(0, 2).toUpperCase() : '');
   const showPeriod = p.showPeriod !== false;
   const isPortfolio = p.mode === 'portfolio';
 
@@ -54,7 +54,7 @@ export function TopBar(p: TopBarProps) {
               {entityName}
               <ChevronDown className="w-4 h-4 text-text-secondary" />
             </button>
-            {showPeriod && (
+            {showPeriod && periodLabel && (
               <button type="button" className="flex items-center gap-2 px-3 py-1.5 rounded-input bg-hover border border-border-light text-primary text-sm">
                 {periodLabel}
                 <ChevronDown className="w-4 h-4 text-text-secondary" />
@@ -64,14 +64,14 @@ export function TopBar(p: TopBarProps) {
         )}
       </div>
       <div className="flex items-center gap-4">
-        {!isPortfolio && (
+        {!isPortfolio && state != null && (
           <span className={cn('px-2.5 py-1 text-xs font-medium rounded border', stateClass(state))}>
             {state.replace('_', ' ')}
           </span>
         )}
         <div className="flex items-center gap-2 pl-4 border-l border-border">
-          <div className="w-8 h-8 rounded-full bg-accent-dim flex items-center justify-center text-accent text-sm font-medium">{userInitials}</div>
-          <span className="text-sm text-primary">{userName}</span>
+          <div className="w-8 h-8 rounded-full bg-accent-dim flex items-center justify-center text-accent text-sm font-medium">{userInitials || '?'}</div>
+          <span className="text-sm text-primary">{userName || 'User'}</span>
         </div>
         <Link href="/settings" className="p-2 rounded-input text-text-secondary hover:text-primary hover:bg-hover" aria-label="Settings">
           <Settings className="w-5 h-5" />

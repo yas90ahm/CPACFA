@@ -7,9 +7,11 @@ import type { CertificationArtifact } from '@/lib/types/certification';
 
 export interface CertificationRecordProps {
   artifact: CertificationArtifact;
+  entityName?: string;
+  periodLabel?: string;
 }
 
-export function CertificationRecord({ artifact }: CertificationRecordProps) {
+export function CertificationRecord({ artifact, entityName, periodLabel }: CertificationRecordProps) {
   const [expandedHash, setExpandedHash] = useState(false);
   const [expandedKey, setExpandedKey] = useState(false);
   const [verifyResult, setVerifyResult] = useState<boolean | null>(null);
@@ -52,11 +54,11 @@ export function CertificationRecord({ artifact }: CertificationRecordProps) {
         </div>
         <div className="flex justify-between">
           <span className="text-sm text-text-secondary">Period</span>
-          <span className="text-primary">January 2026</span>
+          <span className="text-primary">{periodLabel ?? '—'}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-sm text-text-secondary">Entity</span>
-          <span className="text-primary">Apex Manufacturing Co.</span>
+          <span className="text-primary">{entityName ?? '—'}</span>
         </div>
       </div>
 

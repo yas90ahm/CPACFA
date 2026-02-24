@@ -11,6 +11,8 @@ export interface StateMachineBannerProps {
   gatesRemaining?: number;
   canAdvance?: boolean;
   isReviewer?: boolean;
+  /** When true (e.g. operating partner), hide advance/approve/lock buttons. */
+  isReadOnly?: boolean;
 }
 
 export function StateMachineBanner({
@@ -18,6 +20,7 @@ export function StateMachineBanner({
   gatesRemaining = 3,
   canAdvance = false,
   isReviewer = false,
+  isReadOnly = false,
 }: StateMachineBannerProps) {
   const idx = states.indexOf(currentState);
 
@@ -46,7 +49,7 @@ export function StateMachineBanner({
         })}
       </div>
       <div className="flex items-center gap-2">
-        {currentState === 'IN_PROGRESS' && (
+        {!isReadOnly && currentState === 'IN_PROGRESS' && (
           <button
             type="button"
             disabled={!canAdvance}
@@ -59,13 +62,13 @@ export function StateMachineBanner({
             Submit for Review
           </button>
         )}
-        {currentState === 'UNDER_REVIEW' && isReviewer && (
+        {!isReadOnly && currentState === 'UNDER_REVIEW' && isReviewer && (
           <>
             <button type="button" className="px-3 py-1.5 text-xs font-medium rounded border border-status-green bg-status-green-dim text-status-green">Approve & Certify</button>
             <button type="button" className="px-3 py-1.5 text-xs font-medium rounded border border-status-red bg-status-red-dim text-status-red">Reject</button>
           </>
         )}
-        {currentState === 'CERTIFIED' && (
+        {!isReadOnly && currentState === 'CERTIFIED' && (
           <button type="button" className="px-3 py-1.5 text-xs font-medium rounded border border-accent bg-accent-dim text-accent">Lock Period</button>
         )}
       </div>

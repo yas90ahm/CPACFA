@@ -82,14 +82,6 @@ const ACCOUNT_TYPE_STYLE: Record<AccountType, string> = {
   EXPENSE: 'bg-status-red-dim text-status-red',
 };
 
-const ACCOUNT_TYPE_STYLE: Record<AccountType, string> = {
-  ASSET: 'bg-status-blue-dim text-status-blue',
-  LIABILITY: 'bg-status-amber-dim text-status-amber',
-  EQUITY: 'bg-equity-dim text-equity',
-  REVENUE: 'bg-status-green-dim text-status-green',
-  EXPENSE: 'bg-status-red-dim text-status-red',
-};
-
 const CONFIDENCE_STYLE: Record<'High' | 'Medium' | 'Low', string> = {
   High: 'text-status-green',
   Medium: 'text-status-amber',

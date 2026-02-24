@@ -105,7 +105,7 @@ router.put('/general', async (req: Request, res: Response) => {
   }
 });
 
-/** GET /api/settings/entities — list entity IDs for tenant (from close_sessions) */
+/** GET /api/settings/entities — list entity IDs for tenant (from close_sessions); when none, return one default from tenant name */
 router.get('/entities', async (req: Request, res: Response) => {
   try {
     const pool = getTenantPool(req);
@@ -120,9 +120,27 @@ router.get('/entities', async (req: Request, res: Response) => {
     );
     const entityIds = r.rows.map((row) => row.entity_id);
     const entities: Array<{ id: string; name: string }> = [];
-    for (const id of entityIds) {
-      const settings = await entitySettingsService.getEntitySettings(pool, tenantId, id);
-      entities.push({ id, name: settings.entityName || id });
+    if (entityIds.length === 0) {
+      const control = await import('../db/index.js').then((m) => m.getControlPool());
+      const tenantRow = await control.query<{ name: string }>('SELECT name FROM tenants WHERE id = $1', [tenantId]);
+      const tenantName = tenantRow.rows[0]?.name ?? 'Default';
+      entities.push({ id: 'default', name: tenantName });
+    } else {
+      let tenantName: string | null = null;
+      for (const id of entityIds) {
+        const settings = await entitySettingsService.getEntitySettings(pool, tenantId, id);
+        const name = settings.entityName || id;
+        if (id === 'default' && !settings.entityName) {
+          if (tenantName == null) {
+            const control = await import('../db/index.js').then((m) => m.getControlPool());
+            const tenantRow = await control.query<{ name: string }>('SELECT name FROM tenants WHERE id = $1', [tenantId]);
+            tenantName = tenantRow.rows[0]?.name ?? 'Default';
+          }
+          entities.push({ id, name: tenantName });
+        } else {
+          entities.push({ id, name });
+        }
+      }
     }
     res.json({ entities });
   } catch (e) {

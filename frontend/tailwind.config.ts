@@ -5,6 +5,7 @@ const config: Config = {
   content: [
     './app/**/*.{js,ts,jsx,tsx,mdx}',
     './components/**/*.{js,ts,jsx,tsx,mdx}',
+    './lib/**/*.{js,ts,jsx,tsx,mdx}',
   ],
   theme: {
     extend: {
@@ -15,6 +16,7 @@ const config: Config = {
       },
       colors: {
         primary: '#0C0E13',
+        background: '#0C0E13',
         surface: '#13151C',
         elevated: '#181B24',
         hover: '#1E2130',
@@ -50,9 +52,13 @@ const config: Config = {
       },
       textColor: {
         primary: '#E8EAF0',
+        'text-primary': '#E8EAF0',
         secondary: '#8B90A0',
+        'text-secondary': '#8B90A0',
         tertiary: '#5A5F73',
+        'text-tertiary': '#5A5F73',
         muted: '#3D4155',
+        'text-muted': '#3D4155',
       },
       borderRadius: {
         card: '8px',

@@ -10,6 +10,7 @@ export interface GeneralLedgerLine {
   line_number: number;
   entry_date: Date | string;
   account_code: string;
+  account_name?: string;
   debit: number;
   credit: number;
   description?: string;
@@ -31,6 +32,7 @@ export interface GLUploadRow {
   line_number?: number;
   entry_date: string | Date;
   account_code: string;
+  account_name?: string;
   debit?: number | string;
   credit?: number | string;
   description?: string;

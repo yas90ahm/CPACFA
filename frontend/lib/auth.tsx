@@ -58,12 +58,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (email: string, password: string, tenantId?: string) => {
       setIsLoading(true);
       try {
-        const res = await fetch(`${API_BASE}/api/auth/login`, {
+        const url = `${API_BASE}/api/auth/login`;
+        const res = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, password, tenantId: tenantId || undefined }),
         });
-        const data = await res.json();
+        let data: { error?: string; token?: string; userId?: string; tenantId?: string; role?: string };
+        try {
+          data = await res.json();
+        } catch {
+          throw new Error(res.status === 404 ? 'Login endpoint not found. Is the backend running on ' + API_BASE + '?' : 'Invalid response from server');
+        }
         if (!res.ok) {
           throw new Error((data as { error?: string }).error ?? 'Login failed');
         }
@@ -75,11 +81,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
         setToken(t);
         setUser({ userId, tenantId: tid, role, email });
-        if (role === 'operating_partner' || role === 'admin') {
-          router.replace('/portfolio');
+        if (role === 'operating_partner') {
+          router.push('/portfolio');
+        } else if (role === 'admin') {
+          router.push('/portfolio');
         } else {
-          router.replace('/close');
+          router.push('/close');
         }
+      } catch (err) {
+        throw err;
       } finally {
         setIsLoading(false);
       }

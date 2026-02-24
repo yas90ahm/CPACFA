@@ -1,36 +1,5 @@
 'use client';
 
-import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MoneyInput } from '@/components/shared/MoneyInput';
-import { apiFetch } from '@/lib/api';
-import { cn } from '@/lib/utils';
-
-const FISCAL_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const CURRENCIES = [{ value: 'USD', label: 'USD — US Dollar' }];
-
-export default function GeneralSettingsPage() {
-  const queryClient = useQueryClient();
-  const { data: entitiesData } = useQuery({
-    queryKey: ['settings-entities'],
-    queryFn: () => apiFetch<{ entities: Array<{ id: string; name: string }> }>('/api/settings/entities'),
-  });
-  const entityId = entitiesData?.entities?.[0]?.id ?? null;
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['settings-general', entityId],
-    queryFn: () => apiFetch<{ entityName?: string; fiscalYearEnd?: number; baseCurrency?: string; autoLockDays?: number; varianceMaterialityDollar?: string; varianceMaterialityPercent?: string }>(`/api/settings/general?entityId=${entityId}`),
-    enabled: !!entityId,
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: (payload: { entityName?: string; fiscalYearEnd?: number; baseCurrency?: string; autoLockDays?: number; varianceMaterialityDollar?: string; varianceMaterialityPercent?: string }) =>
-      apiFetch(`/api/settings/general?entityId=${entityId}`, { method: 'PUT', body: payload }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings-general', entityId] }),
-  });
-
-'use client';
-
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { MoneyInput } from '@/components/shared/MoneyInput';

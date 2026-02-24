@@ -91,16 +91,23 @@ router.post('/sessions/:periodId/reconciliations/initialize', async (req: Reques
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
     const periodId = req.params.periodId ?? '';
-    const body = req.body as { entity_id?: string };
-    if (!tenantId || !pool || !periodId || !body?.entity_id) {
-      res.status(400).json({ error: 'Tenant context, periodId, and entity_id required' });
+    if (!tenantId || !pool || !periodId) {
+      res.status(400).json({ error: 'Tenant context and periodId required' });
       return;
+    }
+    const body = req.body as { entity_id?: string };
+    let entityId = body?.entity_id;
+    if (!entityId) {
+      // Derive entity_id from the session
+      const { getCloseSessionById } = await import('../../db/repositories/close_session_repository.js');
+      const session = await getCloseSessionById(pool, tenantId, periodId);
+      entityId = session?.entityId ?? 'default';
     }
     const created = await initializeReconciliations(
       pool,
       tenantId,
       periodId,
-      body.entity_id
+      entityId
     );
     res.status(201).json({ reconciliations: created });
   } catch (e) {

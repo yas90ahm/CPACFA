@@ -53,6 +53,7 @@ import {
 } from '../../services/statement_drilldown_service.js';
 import { getSessionTrialBalance } from '../../services/session_trial_balance_service.js';
 import * as auditLedgerRepo from '../../db/repositories/audit_ledger_repository.js';
+import { normalizeMoney } from '../../utils/decimal.js';
 
 const router = Router();
 
@@ -900,7 +901,7 @@ router.get('/statement-packages/:id/lines', async (req: Request, res: Response) 
       id: `${result.package.id}:${l.fsLineId}`,
       fsLineId: l.fsLineId,
       name: (l.metadata as { label?: string })?.label ?? l.fsLineId,
-      amount: String(Number(l.amount).toFixed(2)),
+      amount: normalizeMoney(l.amount),
       statement: l.statement,
       displayOrder: l.displayOrder ?? 0,
       indentLevel: l.indentLevel ?? 0,
@@ -909,7 +910,7 @@ router.get('/statement-packages/:id/lines', async (req: Request, res: Response) 
       sectionName: l.sectionName ?? null,
       ...(includePrior && {
         priorAmount: lineWithMeta(l).priorAmount ?? '0.00',
-        changeAmount: lineWithMeta(l).changeAmount ?? String(Number(l.amount).toFixed(2)),
+        changeAmount: lineWithMeta(l).changeAmount ?? normalizeMoney(l.amount),
         changePercent: lineWithMeta(l).changePercent ?? null,
       }),
     }));

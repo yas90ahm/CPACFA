@@ -2,7 +2,10 @@
 
 import { useParams, useSearchParams } from 'next/navigation';
 import { useCallback, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
+import { apiFetch } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { useCloseSession } from '@/lib/queries/close-session';
 import { useStatements, useValidation } from '@/lib/queries/statements';
 import { StatementTable } from './StatementTable';
@@ -61,14 +64,59 @@ export default function StatementsPage() {
     []
   );
 
+  const queryClient = useQueryClient();
+  const { getAuthToken } = useAuth();
+
+  const generateMutation = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/close/sessions/${sessionId}/statement-packages/generate`, { method: 'POST' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['statements', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['validation', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['close-session', sessionId] });
+      setGenerating(false);
+      setRegenerateConfirm(false);
+      setToast({ type: 'success', message: 'Statements generated successfully.' });
+    },
+    onError: (err: Error) => {
+      setGenerating(false);
+      setToast({ type: 'warning', message: err.message || 'Failed to generate statements' });
+    },
+  });
+
   const handleGenerate = useCallback(() => {
     setGenerating(true);
-    setTimeout(() => {
-      setGenerating(false);
-      setToast({ type: 'success', message: 'Statements generated successfully. All validation checks passing.' });
-      setRegenerateConfirm(false);
-    }, 1500);
-  }, []);
+    generateMutation.mutate();
+  }, [generateMutation]);
+
+  const handleExportPdf = useCallback(async () => {
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+      const token = getAuthToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(`${baseUrl}/api/export/pdf`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ closeSessionId: sessionId, exportMode: 'draft' }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Export failed' }));
+        throw new Error((err as { error?: string }).error || 'Export failed');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'Draft_Financials.pdf';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setToast({ type: 'warning', message: err instanceof Error ? err.message : 'Export failed' });
+    }
+  }, [sessionId, getAuthToken]);
 
   const handleRegenerate = useCallback(() => {
     if (hasStatements) {
@@ -140,6 +188,7 @@ export default function StatementsPage() {
           </label>
           <button
             type="button"
+            onClick={handleExportPdf}
             className="px-3 py-1.5 rounded-input border border-border text-sm text-text-secondary hover:bg-hover print:hidden"
             aria-label="Export PDF"
           >

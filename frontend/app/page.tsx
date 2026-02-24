@@ -1,42 +1,44 @@
 'use client';
 
-import { Suspense, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useRef } from 'react';
 import { useAuth } from '@/lib/auth';
+import { useRouter } from 'next/navigation';
 
-function RootRedirect() {
+const FALLBACK_REDIRECT_MS = 2000;
+
+export default function HomePage() {
+  const { user, token, isLoading } = useAuth();
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const { token, user } = useAuth();
+  const fallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (token === null) {
-      router.replace('/login');
-      return;
+    if (isLoading) return;
+    if (!user && token === null) {
+      router.push('/login');
+      fallbackRef.current = setTimeout(() => {
+        if (typeof window !== 'undefined') {
+          window.location.replace('/login');
+        }
+      }, FALLBACK_REDIRECT_MS);
+      return () => {
+        if (fallbackRef.current) clearTimeout(fallbackRef.current);
+      };
     }
-    const role = searchParams.get('role') ?? user?.role;
-    if (role === 'operating_partner' || role === 'admin') {
-      router.replace('/portfolio');
+    if (fallbackRef.current) {
+      clearTimeout(fallbackRef.current);
+      fallbackRef.current = null;
+    }
+    if (!user) return;
+    if (user.role === 'operating_partner' || user.role === 'admin') {
+      router.push('/portfolio');
     } else {
-      router.replace('/close');
+      router.push('/close');
     }
-  }, [router, searchParams, token, user?.role]);
+  }, [user, token, isLoading, router]);
 
   return (
-    <div className="min-h-screen bg-primary flex items-center justify-center">
-      <span className="text-text-secondary text-sm">Loading...</span>
+    <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
+      <p style={{ color: 'var(--text-secondary)' }}>Redirecting...</p>
     </div>
-  );
-}
-
-export default function RootPage() {
-  return (
-    <Suspense fallback={
-      <div className="min-h-screen bg-primary flex items-center justify-center">
-        <span className="text-text-secondary text-sm">Loading...</span>
-      </div>
-    }>
-      <RootRedirect />
-    </Suspense>
   );
 }

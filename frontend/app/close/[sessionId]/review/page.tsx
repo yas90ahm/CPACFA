@@ -141,7 +141,7 @@ export default function ReviewPage() {
   const [certifyStep, setCertifyStep] = useState<'input' | 'progress' | 'complete'>('input');
 
   const currentState = localState || session?.state || 'IN_PROGRESS';
-  const isReviewer = userRole === 'reviewer' || userRole === 'approver' || userRole === 'admin';
+  const isReviewer = (userRole as string) === 'reviewer' || (userRole as string) === 'approver' || (userRole as string) === 'admin';
   const isPreparer = !isReviewer;
   const gatesWithTies: ReadinessGate[] = readiness?.gates ? [...readiness.gates] : [];
   const hasTiesGate = gatesWithTies.some(g => g.id === 'ties');
@@ -409,7 +409,7 @@ export default function ReviewPage() {
       {/* Certification Record (visible in CERTIFIED and LOCKED) */}
       {(currentState === 'CERTIFIED' || currentState === 'LOCKED') && certification && (
         <div className="space-y-4">
-          <CertificationRecord artifact={certification} />
+          <CertificationRecord artifact={certification} entityName={session?.entityName} periodLabel={session?.periodLabel} />
           {currentState === 'CERTIFIED' && isReviewer && (
             <div className="flex gap-3">
               <button

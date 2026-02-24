@@ -3,6 +3,7 @@
  */
 
 import type { BalanceSheet, EquityChangesStatement, ProfitAndLoss } from '../types/financial.js';
+import { from, minus } from '../utils/decimal.js';
 
 export function buildEquityChangesStatement(
   currentBalanceSheet: BalanceSheet,
@@ -18,8 +19,8 @@ export function buildEquityChangesStatement(
     changes.push({ label: 'Net income', amount: netIncome });
   }
   if (openingEquity != null) {
-    const residual = closingEquity - openingEquity - netIncome;
-    if (Math.abs(residual) > 0.01) {
+    const residual = minus(minus(closingEquity, openingEquity), netIncome);
+    if (from(residual).abs().greaterThan(0.01)) {
       changes.push({ label: 'Owner contributions / distributions (net)', amount: residual });
     }
   }

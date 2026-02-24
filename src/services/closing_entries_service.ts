@@ -6,6 +6,7 @@
 import type { TrialBalanceEntry } from '../types/financial.js';
 import type { JournalEntrySuggestion } from '../types/close_and_controls.js';
 import { classifyTrialBalanceDeterministic } from './accountClassifier.js';
+import { from, plus, minus, round2, sumRound2 } from '../utils/decimal.js';
 
 const RETAINED_EARNINGS_LABEL = 'Retained Earnings';
 
@@ -31,34 +32,34 @@ export function buildClosingEntrySuggestion(
 
   let totalRevenue = 0;
   for (const e of revenueEntries) {
-    const balance = (e.credit ?? 0) - (e.debit ?? 0);
-    if (Math.abs(balance) < 0.01) continue;
-    totalRevenue += balance;
+    const balance = round2(minus(e.credit ?? 0, e.debit ?? 0));
+    if (from(balance).abs().lessThan(0.01)) continue;
+    totalRevenue = plus(totalRevenue, balance);
     debits.push({ account: e.accountName ?? e.accountCode ?? 'Revenue', amount: balance });
   }
 
   let totalExpense = 0;
   for (const e of expenseEntries) {
-    const balance = (e.debit ?? 0) - (e.credit ?? 0);
-    if (Math.abs(balance) < 0.01) continue;
-    totalExpense += balance;
+    const balance = round2(minus(e.debit ?? 0, e.credit ?? 0));
+    if (from(balance).abs().lessThan(0.01)) continue;
+    totalExpense = plus(totalExpense, balance);
     credits.push({ account: e.accountName ?? e.accountCode ?? 'Expense', amount: balance });
   }
 
-  const netIncome = totalRevenue - totalExpense;
-  if (Math.abs(netIncome) < 0.01 && debits.length === 0 && credits.length === 0) {
+  const netIncome = minus(totalRevenue, totalExpense);
+  if (from(netIncome).abs().lessThan(0.01) && debits.length === 0 && credits.length === 0) {
     return null;
   }
 
   if (netIncome > 0) {
     credits.push({ account: revenueLabel, amount: netIncome });
   } else if (netIncome < 0) {
-    debits.push({ account: revenueLabel, amount: -netIncome });
+    debits.push({ account: revenueLabel, amount: round2(-netIncome) });
   }
 
-  const totalDebit = debits.reduce((s, d) => s + d.amount, 0);
-  const totalCredit = credits.reduce((s, c) => s + c.amount, 0);
-  if (Math.abs(totalDebit - totalCredit) > 0.02) {
+  const totalDebit = sumRound2(debits.map((d) => d.amount));
+  const totalCredit = sumRound2(credits.map((c) => c.amount));
+  if (from(totalDebit).minus(totalCredit).abs().greaterThan(0.02)) {
     return null;
   }
 

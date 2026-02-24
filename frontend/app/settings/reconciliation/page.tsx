@@ -17,11 +17,20 @@ interface ReconRequirementApi {
   accountName: string | null;
   isRequired: boolean;
   toleranceAmount: string;
-  toleranceType: ReconToleranceType;
+  toleranceType: ToleranceType;
   tolerancePercentage: string | null;
   expectedSource: string;
   requiresReviewerApproval: boolean;
 }
+
+type UpdateReconBody = {
+  account_name?: string;
+  tolerance_amount?: number;
+  tolerance_type?: string;
+  tolerance_percentage?: number | null;
+  expected_source?: string;
+  requires_reviewer_approval?: boolean;
+};
 
 export default function ReconciliationSettingsPage() {
   const queryClient = useQueryClient();
@@ -48,8 +57,8 @@ export default function ReconciliationSettingsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['recon-requirements', entityId] }),
   });
   const updateMutation = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: { account_name?: string; tolerance_amount?: number; tolerance_type?: string; tolerance_percentage?: number | null; expected_source?: string; requires_reviewer_approval?: boolean }) =>
-      apiFetch(`/api/close/recon-requirements/${id}`, { method: 'PUT', body }),
+    mutationFn: (payload: { id: string; body: UpdateReconBody }) =>
+      apiFetch(`/api/close/recon-requirements/${payload.id}`, { method: 'PUT', body: payload.body }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['recon-requirements', entityId] }),
   });
   const autoGenMutation = useMutation({

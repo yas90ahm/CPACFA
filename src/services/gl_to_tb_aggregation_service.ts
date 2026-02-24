@@ -20,7 +20,25 @@ import type { TrialBalanceEntry, DerivedTrialBalance } from '../types/trial_bala
 import type { CoaAccount } from '../types/coa.js';
 import * as glRepository from '../db/repositories/general_ledger_repository.js';
 import * as coaRepository from '../db/repositories/coa_repository.js';
+import type { AccountType } from '../types/coa.js';
 import { from, plus, minus, sumRound2, round2, absGt } from '../utils/decimal.js';
+
+/**
+ * Infer account type from account code prefix when no COA is available.
+ * Standard chart-of-accounts numbering convention:
+ *   1xxx = Asset, 2xxx = Liability, 3xxx = Equity,
+ *   4xxx = Revenue, 5xxx/6xxx = Expense,
+ *   7xxx = Other Income, 8xxx/9xxx = Other Expense.
+ */
+function inferAccountType(accountCode: string): AccountType | undefined {
+  const prefix = parseInt(accountCode.charAt(0));
+  if (prefix === 1) return 'Asset';
+  if (prefix === 2) return 'Liability';
+  if (prefix === 3) return 'Equity';
+  if (prefix === 4) return 'Revenue';
+  if (prefix === 5 || prefix === 6) return 'Expense';
+  return undefined;
+}
 
 /**
  * Aggregate GL lines into trial balance entries.
@@ -37,7 +55,7 @@ export function aggregateGLToTB(
 
   const accountMap = new Map<
     string,
-    { total_debits: number; total_credits: number }
+    { total_debits: number; total_credits: number; gl_account_name?: string }
   >();
 
   for (const line of glLines) {
@@ -47,6 +65,10 @@ export function aggregateGLToTB(
     };
     existing.total_debits = plus(existing.total_debits, line.debit ?? 0);
     existing.total_credits = plus(existing.total_credits, line.credit ?? 0);
+    // Capture account_name from the first GL line that has one
+    if (!existing.gl_account_name && line.account_name) {
+      existing.gl_account_name = line.account_name;
+    }
     accountMap.set(line.account_code, existing);
   }
 
@@ -60,8 +82,8 @@ export function aggregateGLToTB(
 
     tbEntries.push({
       account_code: accountCode,
-      account_name: coaAccount?.account_name ?? accountCode,
-      account_type: coaAccount?.account_type,
+      account_name: coaAccount?.account_name ?? totals.gl_account_name ?? accountCode,
+      account_type: coaAccount?.account_type ?? inferAccountType(accountCode),
       total_debits: totals.total_debits,
       total_credits: totals.total_credits,
       net_balance: netBalance,
@@ -135,7 +157,9 @@ export async function buildDerivedTrialBalance(
   const coaAccounts = await coaRepository.getAccountsByTenant(pool, tenantId);
 
   if (coaAccounts.length === 0) {
-    throw new Error(`No COA found for tenant ${tenantId}`);
+    // COA may not be populated yet — aggregateGLToTB gracefully falls
+    // back to account_code for name and undefined for type.
+    console.warn(`No COA found for tenant ${tenantId}; TB will use account codes as names.`);
   }
 
   const entries = aggregateGLToTB(glLines, coaAccounts);

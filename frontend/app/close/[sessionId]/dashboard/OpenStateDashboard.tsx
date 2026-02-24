@@ -8,6 +8,8 @@ import { StatusBadge } from '@/components/shared/StatusBadge';
 import { GLUploadFlow } from './GLUploadFlow';
 import { TBUploadFlow } from './TBUploadFlow';
 import { apiFetch } from '@/lib/api';
+import { useSessions } from '@/lib/queries/sessions';
+import { useEntities } from '@/lib/queries/entities';
 
 export interface OpenStateDashboardProps {
   sessionId: string;
@@ -15,9 +17,14 @@ export interface OpenStateDashboardProps {
   entityName: string;
 }
 
-const PRIOR_PERIOD_SESSION_ID = 'c925645f-3831-4d81-93a9-a12a2819cd3e';
-
 export function OpenStateDashboard({ sessionId, periodLabel, entityName }: OpenStateDashboardProps) {
+  const { data: entities = [] } = useEntities();
+  const entityId = entities.length > 0 ? entities[0].id : null;
+  const { data: allSessions = [] } = useSessions(entityId);
+  const priorSession = allSessions
+    .filter((s) => s.id !== sessionId && (s.state === 'CERTIFIED' || s.state === 'LOCKED'))
+    .sort((a, b) => new Date(b.periodStart).getTime() - new Date(a.periodStart).getTime())[0] ?? null;
+
   const { data: connections } = useQuery({
     queryKey: ['erp-connections'],
     queryFn: () => apiFetch<Array<{ id: string; name?: string }>>('/api/accounting-integration/connections'),
@@ -139,12 +146,18 @@ export function OpenStateDashboard({ sessionId, periodLabel, entityName }: OpenS
 
       <div className="border-t border-border pt-6">
         <h3 className="text-sm font-medium text-text-secondary mb-2">Prior Period Reference</h3>
-        <p className="text-sm text-primary">
-          January 2026 — CERTIFIED (6 days, 47 accounts, 8 AJEs)
-        </p>
-        <Link href={`/close/${PRIOR_PERIOD_SESSION_ID}/dashboard`} className="text-sm text-accent hover:underline mt-1 inline-block">
-          View prior close →
-        </Link>
+        {priorSession ? (
+          <>
+            <p className="text-sm text-primary">
+              {priorSession.periodLabel} — {priorSession.state}{priorSession.duration ? ` (${priorSession.duration})` : ''}
+            </p>
+            <Link href={`/close/${priorSession.id}/dashboard`} className="text-sm text-accent hover:underline mt-1 inline-block">
+              View prior close →
+            </Link>
+          </>
+        ) : (
+          <p className="text-sm text-text-tertiary">No prior period data available.</p>
+        )}
       </div>
     </div>
   );

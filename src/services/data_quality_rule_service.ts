@@ -5,6 +5,7 @@
 import type { Pool } from 'pg';
 import type { DataQualityRule, DataQualityRuleConfig, DataQualityScope } from '../types/data_quality.js';
 import type { BalanceSheet, ProfitAndLoss } from '../types/financial.js';
+import { from, sumRound2 } from '../utils/decimal.js';
 import {
   createRule as createRuleRepo,
   getRule,
@@ -44,7 +45,7 @@ function evaluateBalanceRule(
     return { ruleId: rule.id, passed: true };
   }
   if (rule.type === 'threshold' && config.threshold != null) {
-    const totalAssets = bs.assets.reduce((s, a) => s + (a.amount ?? 0), 0);
+    const totalAssets = sumRound2(bs.assets.map((a) => a.amount ?? 0));
     if (totalAssets > config.threshold) {
       return {
         ruleId: rule.id,
@@ -63,9 +64,9 @@ export function evaluateRule(rule: DataQualityRule, ctx: RuleEvaluationContext):
   if (rule.scope === 'balance_sheet') return evaluateBalanceRule(rule, ctx);
   if (rule.scope === 'trial_balance' && ctx.trialBalanceEntries) {
     const entries = ctx.trialBalanceEntries;
-    const totalDebit = entries.reduce((s, e) => s + e.debit, 0);
-    const totalCredit = entries.reduce((s, e) => s + e.credit, 0);
-    const diff = Math.abs(totalDebit - totalCredit);
+    const totalDebit = sumRound2(entries.map((e) => e.debit));
+    const totalCredit = sumRound2(entries.map((e) => e.credit));
+    const diff = from(totalDebit).minus(totalCredit).abs().toNumber();
     if (diff > 0.01) {
       return {
         ruleId: rule.id,

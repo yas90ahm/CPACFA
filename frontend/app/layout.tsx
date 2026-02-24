@@ -37,7 +37,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${dmSans.variable} ${jetbrainsMono.variable} ${instrumentSerif.variable} font-sans min-h-screen bg-primary text-primary`}
+        className={`${dmSans.variable} ${jetbrainsMono.variable} ${instrumentSerif.variable} font-sans antialiased min-h-screen bg-primary text-primary`}
       >
         <Providers>{children}</Providers>
       </body>

@@ -54,6 +54,8 @@ function getGLBalanceForAccount(
 /**
  * Initialize period reconciliations for all required accounts.
  * Pulls GL balance from adjusted TB; creates one recon per required account.
+ * If no requirements exist for this entity, auto-generates them from the TB's
+ * balance sheet accounts (ASSET and LIABILITY) with a $100 tolerance.
  */
 export async function initializeReconciliations(
   pool: Pool,
@@ -64,11 +66,8 @@ export async function initializeReconciliations(
   const session = await getCloseSessionById(pool, tenantId, periodId);
   if (!session) throw new PeriodReconciliationError('Close session not found', 'NOT_FOUND');
   const periodLabel = (session.periodEnd ?? '').slice(0, 7);
-  const requirements = await reqRepo.listRequirements(pool, tenantId, entityId);
-  const required = requirements.filter((r) => r.isRequired);
-  if (required.length === 0) return [];
 
-  let tb: { accountCode?: string; accountName: string; debit: number; credit: number }[] = [];
+  let tb: { accountCode?: string; accountName: string; debit: number; credit: number; accountType?: string }[] = [];
   try {
     const tbResult = await getTrialBalanceForCertification(
       pool,
@@ -80,6 +79,35 @@ export async function initializeReconciliations(
   } catch {
     // No trial balance yet (e.g. session just advanced before GL/TB ingest). Create recons with null GL balance.
   }
+
+  let requirements = await reqRepo.listRequirements(pool, tenantId, entityId);
+
+  // Auto-generate requirements from balance sheet accounts if none exist
+  if (requirements.length === 0 && tb.length > 0) {
+    const bsAccounts = tb.filter((row) => {
+      const t = (row.accountType ?? '').toUpperCase();
+      return t === 'ASSET' || t === 'LIABILITY';
+    });
+    for (const account of bsAccounts) {
+      const code = (account.accountCode ?? account.accountName ?? '').trim();
+      if (!code) continue;
+      await reqRepo.insertRequirement(pool, randomUUID(), {
+        tenantId,
+        entityId,
+        accountCode: code,
+        accountName: account.accountName || code,
+        isRequired: true,
+        toleranceAmount: '100.00',
+        toleranceType: 'absolute',
+        expectedSource: 'other',
+        requiresReviewerApproval: false,
+      });
+    }
+    requirements = await reqRepo.listRequirements(pool, tenantId, entityId);
+  }
+
+  const required = requirements.filter((r) => r.isRequired);
+  if (required.length === 0) return [];
 
   const existing = await reconRepo.listPeriodReconciliationsByPeriod(pool, tenantId, periodId);
   const existingAccounts = new Set(existing.map((e) => e.accountCode));

@@ -78,7 +78,7 @@ function rowToItem(row: ReconItemRow): ReconItem {
     id: row.id,
     reconRunId: row.recon_run_id,
     source: row.source as ReconItemSource,
-    amount: Number(row.amount),
+    amount: Number(row.amount ?? '0'),
     itemDate: row.item_date ?? undefined,
     description: row.description ?? undefined,
     ref: row.ref != null && typeof row.ref === 'object' ? (row.ref as Record<string, unknown>) : undefined,

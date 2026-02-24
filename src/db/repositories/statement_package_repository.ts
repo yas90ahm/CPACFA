@@ -66,7 +66,7 @@ function rowToLine(row: LineRow): StatementLine {
   return {
     packageId: row.package_id,
     fsLineId: row.fs_line_id,
-    amount: Number(row.amount),
+    amount: Number(row.amount ?? '0'),
     statement: row.statement as StatementType,
     metadata: row.metadata != null && typeof row.metadata === 'object' ? (row.metadata as Record<string, unknown>) : undefined,
     displayOrder: row.display_order ?? 0,

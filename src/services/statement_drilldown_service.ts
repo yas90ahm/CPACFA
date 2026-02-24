@@ -9,6 +9,7 @@ import { getSession } from './close_session_service.js';
 import * as glRepository from '../db/repositories/general_ledger_repository.js';
 import * as jeRepository from '../db/repositories/journal_entry_repository.js';
 import * as coaRepository from '../db/repositories/coa_repository.js';
+import { normalizeMoney, minus } from '../utils/decimal.js';
 
 function periodLabelFromSession(session: { periodEnd: string }): string {
   return session.periodEnd.slice(0, 7);
@@ -78,8 +79,8 @@ export async function getAccountsForLineItem(
     if (!code || seen.has(code)) continue;
     seen.add(code);
     const tbRow = tbByCode.get(code);
-    const netBalance = tbRow ? tbRow.debit - tbRow.credit : 0;
-    const balanceStr = String(netBalance.toFixed(2));
+    const netBalance = tbRow ? minus(tbRow.debit, tbRow.credit) : 0;
+    const balanceStr = normalizeMoney(netBalance);
     accounts.push({
       accountCode: code,
       accountName: tbRow?.accountName ?? code,
@@ -91,7 +92,7 @@ export async function getAccountsForLineItem(
       lineItemId: lineId,
       lineItemName: ((line.metadata as { label?: string })?.label) ?? line.fsLineId,
       statement: line.statement,
-      totalAmount: String(Number(line.amount).toFixed(2)),
+      totalAmount: normalizeMoney(line.amount),
       accounts: [],
     };
   }
@@ -101,7 +102,7 @@ export async function getAccountsForLineItem(
     lineItemId: lineId,
     lineItemName: label,
     statement: line.statement,
-    totalAmount: String(Number(line.amount).toFixed(2)),
+    totalAmount: normalizeMoney(line.amount),
     accounts,
   };
 }

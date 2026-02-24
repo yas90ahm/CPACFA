@@ -1,14 +1,14 @@
 'use client';
 
 import { useParams, useRouter } from 'next/navigation';
-import { useState, useMemo } from 'react';
-import Link from 'next/link';
+import { useState, useMemo, useEffect, useRef } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useReconciliations } from '@/lib/queries/reconciliations';
+import { apiFetch } from '@/lib/api';
 import { DataTable } from '@/components/shared/DataTable';
 import { MoneyCell } from '@/components/shared/MoneyCell';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { FilterBar } from '@/components/shared/FilterBar';
-import { cn } from '@/lib/utils';
 import type { Reconciliation, ReconStatus } from '@/lib/types/reconciliation';
 import { Paperclip, Check } from 'lucide-react';
 
@@ -31,7 +31,34 @@ export default function ReconciliationPage() {
   const router = useRouter();
   const sessionId = params.sessionId as string;
 
-  const { data: reconciliations = [] } = useReconciliations(sessionId);
+  const queryClient = useQueryClient();
+  const { data: reconciliations, isLoading } = useReconciliations(sessionId);
+  const recons = reconciliations ?? [];
+  const initAttempted = useRef(false);
+
+  const initializeMutation = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/initialize`, {
+        method: 'POST',
+        body: {},
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+    },
+  });
+
+  useEffect(() => {
+    if (
+      !isLoading &&
+      reconciliations &&
+      reconciliations.length === 0 &&
+      !initializeMutation.isPending &&
+      !initAttempted.current
+    ) {
+      initAttempted.current = true;
+      initializeMutation.mutate();
+    }
+  }, [isLoading, reconciliations, initializeMutation.isPending]);
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<ReconStatus | 'all'>('all');
@@ -40,7 +67,7 @@ export default function ReconciliationPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   const filtered = useMemo(() => {
-    let list = reconciliations;
+    let list = recons;
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter((r) => r.accountCode.toLowerCase().includes(q) || r.accountName.toLowerCase().includes(q));
@@ -50,7 +77,7 @@ export default function ReconciliationPage() {
       list = list.filter((r) => r.supportingBalance != null && Math.abs(r.unexplainedVariance) > r.tolerance);
     }
     return list;
-  }, [reconciliations, search, statusFilter, overToleranceOnly]);
+  }, [recons, search, statusFilter, overToleranceOnly]);
 
   const sorted = useMemo(() => {
     const copy = [...filtered];
@@ -78,12 +105,12 @@ export default function ReconciliationPage() {
     return copy;
   }, [filtered, sortKey, sortDir]);
 
-  const total = reconciliations.length;
-  const completed = reconciliations.filter((r) => r.status === 'completed' || r.status === 'approved').length;
-  const inProgress = reconciliations.filter((r) => r.status === 'in_progress').length;
-  const notStarted = reconciliations.filter((r) => r.status === 'not_started').length;
-  const approved = reconciliations.filter((r) => r.status === 'approved').length;
-  const overTolerance = reconciliations.filter((r) => r.supportingBalance != null && Math.abs(r.unexplainedVariance) > r.tolerance).length;
+  const total = recons.length;
+  const completed = recons.filter((r) => r.status === 'completed' || r.status === 'approved').length;
+  const inProgress = recons.filter((r) => r.status === 'in_progress').length;
+  const notStarted = recons.filter((r) => r.status === 'not_started').length;
+  const approved = recons.filter((r) => r.status === 'approved').length;
+  const overTolerance = recons.filter((r) => r.supportingBalance != null && Math.abs(r.unexplainedVariance) > r.tolerance).length;
   const progressPct = total ? Math.round((completed / total) * 1000) / 10 : 0;
 
   const totals = useMemo(() => {
@@ -282,7 +309,16 @@ export default function ReconciliationPage() {
     </tr>
   );
 
-  const needsInit = false; // Mock: reconciliations already exist
+  if (isLoading || initializeMutation.isPending) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h1 className="font-display text-2xl text-primary">Reconciliation</h1>
+          <p className="text-text-secondary text-sm mt-0.5">Loading reconciliations...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -326,14 +362,6 @@ export default function ReconciliationPage() {
             />
             Over tolerance only
           </label>
-          {needsInit && (
-            <button
-              type="button"
-              className="px-4 py-2 rounded-input bg-accent text-white text-sm font-medium hover:bg-accent/90"
-            >
-              Initialize Reconciliations
-            </button>
-          )}
         </FilterBar>
       </div>
 

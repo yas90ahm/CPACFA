@@ -2,6 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Base styles using CSS variables so layout is always styled even if Tailwind purges */
 @layer base {
   :root {
     --bg-primary: #0C0E13;
@@ -40,9 +41,10 @@
   }
 
   body {
-    @apply bg-primary text-primary font-sans;
-    background-color: var(--bg-primary);
-    color: var(--text-primary);
+    background-color: var(--bg-primary) !important;
+    color: var(--text-primary) !important;
+    font-family: var(--font-sans), 'DM Sans', system-ui, sans-serif;
+    min-height: 100vh;
   }
 
   .font-mono,
@@ -51,4 +53,22 @@
     font-variant-numeric: tabular-nums;
     font-family: var(--font-mono), 'JetBrains Mono', ui-monospace, monospace;
   }
+}
+
+/* Form fallbacks so login is always styled */
+input[type="email"],
+input[type="password"],
+input[type="text"] {
+  background-color: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+}
+button[type="submit"] {
+  background-color: var(--accent);
+  color: white;
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-weight: 500;
 }

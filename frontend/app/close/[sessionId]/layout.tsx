@@ -10,13 +10,17 @@ import { useCloseSession, useCloseIssues, useCloseReadiness } from '@/lib/querie
 import { useReconciliations } from '@/lib/queries/reconciliations';
 import { useAjeTemplates, useJournalEntries } from '@/lib/queries/adjustments';
 import { useVariances } from '@/lib/queries/variance';
+import { useAuth } from '@/lib/auth';
 import { TrialBalanceProvider, useTrialBalanceContext } from './context/trial-balance-context';
 
 function CloseSessionInner({ children }: { children: React.ReactNode }) {
   const params = useParams();
   const sessionId = params.sessionId as string;
+  const { user } = useAuth();
   const [issuePanelOpen, setIssuePanelOpen] = useState(false);
   const { unmappedCount } = useTrialBalanceContext();
+  const showBackToPortfolio = user?.role === 'operating_partner' || user?.role === 'admin';
+  const isReadOnly = user?.role === 'operating_partner';
   useEffect(() => {
     const handler = () => setIssuePanelOpen(true);
     window.addEventListener('open-issue-panel', handler);
@@ -47,15 +51,16 @@ function CloseSessionInner({ children }: { children: React.ReactNode }) {
         entityName={session?.entityName}
         periodLabel={session?.periodLabel}
         state={state}
-        userName={session?.createdBy}
-        userInitials={session?.createdBy?.slice(0, 2).toUpperCase()}
-        showBackToPortfolio
+        userName={session?.createdBy ?? user?.email}
+        userInitials={session?.createdBy?.slice(0, 2).toUpperCase() ?? user?.email?.slice(0, 2).toUpperCase() ?? 'U'}
+        showBackToPortfolio={showBackToPortfolio}
       />
       <StateMachineBanner
         currentState={state}
         gatesRemaining={gatesRemaining}
         canAdvance={canAdvance}
         isReviewer={false}
+        isReadOnly={isReadOnly}
       />
       <Sidebar sessionId={sessionId} unmappedCount={unmappedCount} reconIncompleteCount={reconIncompleteCount} adjustmentsBadge={adjustmentsBadge} statementsStale={statementsStale} varianceUnexplainedCount={varianceUnexplainedCount} sessionState={state} />
       <main className="pl-[240px] pt-[56px] pb-6 print:pl-0 print:pt-6" style={{ paddingTop: 'calc(56px + 40px)' }}>

@@ -33,6 +33,8 @@ export interface CreateJustificationFromAIParams {
   prompt_version: string;
   model?: string;
   inputs_hash: string;
+  /** When 'draft', justification requires human review before association with the JE. */
+  status?: 'draft' | 'approved';
 }
 
 // --- In-memory store (fallback when no DB/tenant; production disallows) ---

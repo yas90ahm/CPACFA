@@ -101,7 +101,7 @@ export async function getVarianceAiDraft(
   }
   try {
     const draft = generateVarianceDraftExplanation(variance);
-    await repo.updateAiDraftExplanation(pool, tenantId, varianceId, draft);
+    // Do NOT auto-save to database. Return draft for human review; controller saves explicitly.
     return { varianceId, draftExplanation: draft, generatedAt: new Date().toISOString(), cached: false };
   } catch {
     return {

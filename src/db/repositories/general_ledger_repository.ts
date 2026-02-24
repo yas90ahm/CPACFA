@@ -14,6 +14,7 @@ interface GLLineRow {
   line_number: number;
   entry_date: string;
   account_code: string;
+  account_name: string | null;
   debit: string;
   credit: string;
   description: string | null;
@@ -32,8 +33,9 @@ function rowToLine(row: GLLineRow): GeneralLedgerLine {
     line_number: row.line_number,
     entry_date: row.entry_date,
     account_code: row.account_code,
-    debit: parseFloat(row.debit),
-    credit: parseFloat(row.credit),
+    account_name: row.account_name ?? undefined,
+    debit: Number(row.debit ?? '0'),
+    credit: Number(row.credit ?? '0'),
     description: row.description ?? undefined,
     amount_provenance: row.amount_provenance ?? undefined,
     source: row.source,
@@ -74,8 +76,8 @@ export async function upsertGLForPeriod(
         const params: unknown[] = [];
 
         batch.forEach((line, idx) => {
-          const debit = Number(line.debit ?? 0);
-          const credit = Number(line.credit ?? 0);
+          const debit = String(line.debit ?? 0);
+          const credit = String(line.credit ?? 0);
           const desc = line.description?.trim() || null;
           const prov = line.amount_provenance?.trim() || null;
           const entryDate =
@@ -83,9 +85,10 @@ export async function upsertGLForPeriod(
               ? line.entry_date.toISOString().slice(0, 10)
               : String(line.entry_date ?? '').slice(0, 10);
 
-          const offset = idx * 12;
+          const acctName = line.account_name?.trim() || null;
+          const offset = idx * 13;
           valuesClauses.push(
-            `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, $${offset + 11}, $${offset + 12})`
+            `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, $${offset + 11}, $${offset + 12}, $${offset + 13})`
           );
           params.push(
             tenantId,
@@ -94,6 +97,7 @@ export async function upsertGLForPeriod(
             line.line_number,
             entryDate,
             line.account_code,
+            acctName,
             debit,
             credit,
             desc,
@@ -106,7 +110,7 @@ export async function upsertGLForPeriod(
         await client.query(
           `INSERT INTO core.general_ledger (
             tenant_id, period_label, entry_id, line_number, entry_date,
-            account_code, debit, credit, description, amount_provenance, source, created_by
+            account_code, account_name, debit, credit, description, amount_provenance, source, created_by
           ) VALUES ${valuesClauses.join(', ')}`,
           params
         );
@@ -132,7 +136,7 @@ export async function getGLForPeriod(
 ): Promise<GeneralLedgerLine[]> {
   const r = await pool.query<GLLineRow>(
     `SELECT id, tenant_id, period_label, entry_id, line_number, entry_date::text,
-            account_code, debit::text, credit::text, description, amount_provenance,
+            account_code, account_name, debit::text, credit::text, description, amount_provenance,
             source, created_at::text, created_by
      FROM core.general_ledger
      WHERE tenant_id = $1 AND period_label = $2
@@ -153,7 +157,7 @@ export async function getGLEntry(
 ): Promise<GeneralLedgerLine[]> {
   const r = await pool.query<GLLineRow>(
     `SELECT id, tenant_id, period_label, entry_id, line_number, entry_date::text,
-            account_code, debit::text, credit::text, description, amount_provenance,
+            account_code, account_name, debit::text, credit::text, description, amount_provenance,
             source, created_at::text, created_by
      FROM core.general_ledger
      WHERE tenant_id = $1 AND period_label = $2 AND entry_id = $3

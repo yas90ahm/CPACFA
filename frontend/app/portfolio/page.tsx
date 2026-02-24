@@ -9,7 +9,23 @@ import { cn } from '@/lib/utils';
 import { ChevronLeft, ChevronRight, Lock, AlertTriangle, TrendingDown, TrendingUp, Minus } from 'lucide-react';
 
 const MARGIN_THRESHOLD = 10;
-const PERIODS = ['December 2025', 'January 2026', 'February 2026'];
+
+function buildPeriods(currentPeriod: string | undefined): string[] {
+  const now = currentPeriod ? new Date(currentPeriod + '-01') : new Date();
+  if (isNaN(now.getTime())) {
+    const fallback = new Date();
+    return [
+      new Date(fallback.getFullYear(), fallback.getMonth() - 1, 1),
+      new Date(fallback.getFullYear(), fallback.getMonth(), 1),
+      new Date(fallback.getFullYear(), fallback.getMonth() + 1, 1),
+    ].map((d) => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }));
+  }
+  return [
+    new Date(now.getFullYear(), now.getMonth() - 1, 1),
+    new Date(now.getFullYear(), now.getMonth(), 1),
+    new Date(now.getFullYear(), now.getMonth() + 1, 1),
+  ].map((d) => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }));
+}
 
 function stateBadge(state: CloseState) {
   const map: Record<CloseState, { cls: string; label: string }> = {
@@ -56,12 +72,20 @@ function Sparkline({ history, target }: { history: (number | null)[]; target: nu
 
 export default function PortfolioPage() {
   const router = useRouter();
-  const { data: companies = [] } = usePortfolioCompanies();
-  const { data: summary } = usePortfolioSummary();
+  const { data: companies = [], isLoading: entitiesLoading, error: entitiesError } = usePortfolioCompanies();
+  const { data: summary, isLoading: summaryLoading } = usePortfolioSummary();
+  const periods = buildPeriods(summary?.currentPeriod);
   const [periodIndex, setPeriodIndex] = useState(1);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const isLoading = entitiesLoading || summaryLoading;
+
+  const openCompany = (c: PortfolioCompany) => {
+    if (!c.currentSessionId) return;
+    router.push(`/close/${c.currentSessionId}/dashboard`);
+  };
 
   const filtered = useMemo(() => {
     let list = companies;
@@ -84,9 +108,38 @@ export default function PortfolioPage() {
   const attentionCompanies = companies.filter((c) => c.needsAttention);
   const avgImproving = summary && summary.avgCloseDays < summary.priorAvgCloseDays;
 
-  const openCompany = (c: PortfolioCompany) => {
-    router.push(`/close/${c.currentSessionId}/dashboard`);
-  };
+  if (isLoading) {
+    return (
+      <div className="p-8 max-w-[1600px] mx-auto">
+        <div className="min-h-[200px] flex items-center justify-center">
+          <p className="text-text-secondary">Loading portfolio...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (entitiesError) {
+    return (
+      <div className="p-8 max-w-[1600px] mx-auto">
+        <div className="bg-status-red-dim border border-status-red/50 rounded-card p-6 text-status-red">
+          <p className="font-medium">Could not load portfolio data</p>
+          <p className="text-sm mt-1">{entitiesError instanceof Error ? entitiesError.message : 'An error occurred.'}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!companies?.length) {
+    return (
+      <div className="p-8 max-w-[1600px] mx-auto">
+        <h1 className="text-2xl font-display text-primary mb-6">Portfolio Dashboard</h1>
+        <div className="bg-surface border border-border rounded-card p-8 text-center">
+          <p className="text-text-secondary">No portfolio companies yet.</p>
+          <p className="text-sm text-text-muted mt-2">Companies will appear here when close sessions are created.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8 space-y-8 max-w-[1600px] mx-auto">
@@ -96,45 +149,49 @@ export default function PortfolioPage() {
           <button type="button" onClick={() => setPeriodIndex(Math.max(0, periodIndex - 1))} className="p-1.5 rounded-input hover:bg-hover" aria-label="Prior period">
             <ChevronLeft className="w-5 h-5" />
           </button>
-          <span className="font-medium text-primary min-w-[120px] text-center">{PERIODS[periodIndex]}</span>
-          <button type="button" onClick={() => setPeriodIndex(Math.min(PERIODS.length - 1, periodIndex + 1))} className="p-1.5 rounded-input hover:bg-hover" aria-label="Next period">
+          <span className="font-medium text-primary min-w-[120px] text-center">{periods[periodIndex]}</span>
+          <button type="button" onClick={() => setPeriodIndex(Math.min(periods.length - 1, periodIndex + 1))} className="p-1.5 rounded-input hover:bg-hover" aria-label="Next period">
             <ChevronRight className="w-5 h-5" />
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div className="bg-surface border border-border rounded-card p-4">
           <p className="text-xs font-medium text-text-secondary uppercase">Companies</p>
-          <p className="text-2xl font-display text-primary mt-1">{summary?.totalEntities ?? 12}</p>
+          <p className="text-2xl font-display text-primary mt-1">{summary?.totalEntities ?? 0}</p>
         </div>
         <div className="bg-surface border border-border rounded-card p-4">
           <p className="text-xs font-medium text-text-secondary uppercase">Closed</p>
-          <p className="text-2xl font-display text-status-green mt-1">{summary?.closedThisPeriod ?? 8}</p>
+          <p className="text-2xl font-display text-status-green mt-1">{summary?.closedThisPeriod ?? 0}</p>
         </div>
         <div className="bg-surface border border-border rounded-card p-4">
           <p className="text-xs font-medium text-text-secondary uppercase">In Progress</p>
-          <p className="text-2xl font-display text-accent mt-1">{summary?.inProgress ?? 3}</p>
+          <p className="text-2xl font-display text-accent mt-1">{summary?.inProgress ?? 0}</p>
         </div>
         <div className="bg-surface border border-border rounded-card p-4">
           <p className="text-xs font-medium text-text-secondary uppercase">Not Started</p>
-          <p className="text-2xl font-display text-text-muted mt-1">{summary?.notStarted ?? 1}</p>
+          <p className="text-2xl font-display text-text-muted mt-1">{summary?.notStarted ?? 0}</p>
         </div>
         <div className="bg-surface border border-border rounded-card p-4">
           <p className="text-xs font-medium text-text-secondary uppercase">Attention</p>
-          <p className="text-2xl font-display text-status-red mt-1">{summary?.needsAttention ?? 2}</p>
+          <p className="text-2xl font-display text-status-red mt-1">{summary?.needsAttention ?? 0}</p>
         </div>
       </div>
 
       <div className="bg-surface border border-border rounded-card p-4 flex flex-wrap items-center justify-between gap-4">
         <p className="text-sm text-primary">
-          <span className="text-text-secondary">Current Period:</span> {summary?.currentPeriod ?? 'January 2026'}
+          <span className="text-text-secondary">Current Period:</span> {summary?.currentPeriod ?? '—'}
         </p>
         <p className="text-sm text-primary">
           <span className="text-text-secondary">Avg Close Duration:</span>{' '}
-          <span className="font-mono font-medium">{summary?.avgCloseDays ?? 5.2} days</span>
-          <span className="text-text-tertiary ml-1">(vs {(summary?.priorAvgCloseDays ?? 6.8)} prior)</span>
-          {avgImproving ? <TrendingDown className="inline w-4 h-4 text-status-green ml-1" /> : <TrendingUp className="inline w-4 h-4 text-status-amber ml-1" />}
+          <span className="font-mono font-medium">{summary?.avgCloseDays != null ? summary.avgCloseDays : '—'} days</span>
+          {(summary?.priorAvgCloseDays ?? 0) > 0 && (
+            <>
+              <span className="text-text-tertiary ml-1">(vs {summary?.priorAvgCloseDays} prior)</span>
+              {avgImproving ? <TrendingDown className="inline w-4 h-4 text-status-green ml-1" /> : <TrendingUp className="inline w-4 h-4 text-status-amber ml-1" />}
+            </>
+          )}
         </p>
       </div>
 
@@ -227,9 +284,17 @@ export default function PortfolioPage() {
                   <Fragment key={c.id}>
                     <tr
                       key={c.id}
-                      onClick={() => setExpandedId(expandedId === c.id ? null : c.id)}
+                      onClick={() => {
+                        if (c.currentSessionId) {
+                          router.push(`/close/${c.currentSessionId}/dashboard`);
+                        } else {
+                          setExpandedId(expandedId === c.id ? null : c.id);
+                        }
+                      }}
                       className={cn(
-                        'border-b border-border-light hover:bg-hover cursor-pointer',
+                        'border-b border-border-light transition-colors',
+                        c.currentSessionId && 'cursor-pointer hover:bg-hover',
+                        !c.currentSessionId && 'cursor-default opacity-90',
                         c.needsAttention && 'border-l-4 border-l-status-red',
                         isHistorical && 'opacity-85'
                       )}
@@ -237,6 +302,9 @@ export default function PortfolioPage() {
                     >
                       <td className="py-2.5 px-4">
                         <span className={cn('font-medium', c.needsAttention && 'font-semibold')}>{c.name}</span>
+                        {!c.currentSessionId && (
+                          <span className="ml-2 text-xs text-text-muted">(No active session)</span>
+                        )}
                       </td>
                       <td className="py-2.5 px-4">{c.currentPeriod}</td>
                       <td className="py-2.5 px-4">
@@ -299,7 +367,7 @@ export default function PortfolioPage() {
       </div>
 
       <section>
-        <h2 className="text-lg font-display text-primary mb-4">Financial Overview — {summary?.currentPeriod ?? 'January 2026'}</h2>
+        <h2 className="text-lg font-display text-primary mb-4">Financial Overview — {summary?.currentPeriod ?? '—'}</h2>
         <div className="bg-surface border border-border rounded-card overflow-hidden">
           <table className="w-full text-sm">
             <thead>
@@ -336,7 +404,7 @@ export default function PortfolioPage() {
                 <td className="py-3 px-4 text-right font-mono">{summary && formatRev(summary.portfolioRevenue)}</td>
                 <td className="py-3 px-4 text-right font-mono">{summary && formatRev(summary.portfolioNetIncome)}</td>
                 <td className="py-3 px-4 text-right font-mono">{summary?.portfolioMargin ?? '—'}%</td>
-                <td className="py-3 px-4 text-right">+0.4pp</td>
+                <td className="py-3 px-4 text-right">—</td>
               </tr>
             </tfoot>
           </table>

@@ -224,7 +224,7 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
       formData.append('file', file);
       formData.append('columnMapping', JSON.stringify(mappingsToBackend(mappings)));
       await apiUpload(`/api/gl/ingest?period=${encodeURIComponent(period)}`, formData);
-      await advanceSession.mutateAsync();
+      await advanceSession.mutateAsync({});
       queryClient.invalidateQueries({ queryKey: ['trial-balance', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       router.push(`/close/${sessionId}/dashboard`);
@@ -476,6 +476,8 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
         </div>
       </div>
     );
+  }
+
   }
 
   return null;

@@ -18,7 +18,7 @@ import { clearStatementsStaleSince } from '../db/repositories/close_session_repo
 import * as repo from '../db/repositories/statement_package_repository.js';
 import { computeVariances } from './variance_analysis_service.js';
 import { getEntitySettings } from './entity_settings_service.js';
-import { from as decimalFrom } from '../utils/decimal.js';
+import { from as decimalFrom, sumRound2, normalizeMoney } from '../utils/decimal.js';
 
 const ENGINE_VERSION = 'financialStatements.v1';
 const TOLERANCE = 0.01;
@@ -37,22 +37,20 @@ async function getPriorPeriodAdjustedTB(
   if (!prior) return null;
   const priorPeriodLabel = (prior.periodEnd as string).slice(0, 7);
   const entries = await getAdjustedTrialBalance(tenantId, priorPeriodLabel, pool, prior.id);
-  const totalDebits = entries.reduce((s, e) => s + (e.debit ?? 0), 0);
-  const totalCredits = entries.reduce((s, e) => s + (e.credit ?? 0), 0);
+  const totalDebits = sumRound2(entries.map((e) => e.debit ?? 0));
+  const totalCredits = sumRound2(entries.map((e) => e.credit ?? 0));
   return {
     entries,
     totalDebits,
     totalCredits,
-    balances: Math.abs(totalDebits - totalCredits) < TOLERANCE,
+    balances: decimalFrom(totalDebits).minus(totalCredits).abs().lessThan(TOLERANCE),
     errors: [],
   };
 }
 
 /** Sum BS assets whose label matches cash/bank (for cash tie check). */
 function getCashFromBalanceSheet(bs: BalanceSheet): number {
-  return bs.assets
-    .filter((a) => /cash|bank/i.test(a.label ?? ''))
-    .reduce((s, a) => s + a.amount, 0);
+  return sumRound2(bs.assets.filter((a) => /cash|bank/i.test(a.label ?? '')).map((a) => a.amount));
 }
 
 /** Run cross-statement validation; returns results for storage (package still stored on failure). */
@@ -475,7 +473,7 @@ export async function getStatementPackageWithLines(
       const priorByFs = new Map(priorLines.map((l) => [l.fsLineId, l]));
       for (const line of lines) {
         const prior = priorByFs.get(line.fsLineId);
-        const priorAmount = prior ? String(Number(prior.amount).toFixed(2)) : '0.00';
+        const priorAmount = prior ? normalizeMoney(prior.amount) : '0.00';
         const current = decimalFrom(line.amount);
         const priorDec = decimalFrom(priorAmount);
         const changeAmount = current.minus(priorDec).toDecimalPlaces(2).toString();
@@ -490,7 +488,7 @@ export async function getStatementPackageWithLines(
     } else {
       for (const line of lines) {
         (line as StatementLine & { priorAmount?: string; changeAmount?: string; changePercent?: string | null }).priorAmount = '0.00';
-        (line as StatementLine & { priorAmount?: string; changeAmount?: string; changePercent?: string | null }).changeAmount = String(Number(line.amount).toFixed(2));
+        (line as StatementLine & { priorAmount?: string; changeAmount?: string; changePercent?: string | null }).changeAmount = normalizeMoney(line.amount);
         (line as StatementLine & { priorAmount?: string; changeAmount?: string; changePercent?: string | null }).changePercent = null;
       }
     }

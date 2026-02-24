@@ -6,6 +6,7 @@
 
 import type { Pool } from 'pg';
 import type { TrialBalanceEntry } from '../types/financial.js';
+import { from, sumRound2 } from '../utils/decimal.js';
 import type {
   AccountingConnection,
   AccountingProvider,
@@ -67,9 +68,9 @@ class MockAccountingAdapter implements IAccountingAdapter {
   }
 
   async pushJournalEntry(conn: AccountingConnection, input: PushJournalEntryInput): Promise<PushJournalEntryResult> {
-    const sumDebit = input.lines.reduce((s, l) => s + l.debit, 0);
-    const sumCredit = input.lines.reduce((s, l) => s + l.credit, 0);
-    if (Math.abs(sumDebit - sumCredit) > 0.01) {
+    const sumDebit = sumRound2(input.lines.map((l) => l.debit));
+    const sumCredit = sumRound2(input.lines.map((l) => l.credit));
+    if (from(sumDebit).minus(sumCredit).abs().greaterThan(0.01)) {
       return { success: false, errors: ['Journal entry must balance (debits = credits)'] };
     }
     const externalId = `${conn.provider}-je-${Date.now()}`;

@@ -1,94 +1,121 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, FormEvent } from 'react';
+import Link from 'next/link';
 import { useAuth } from '@/lib/auth';
 
 export default function LoginPage() {
-  const { login, isLoading } = useAuth();
+  const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [tenantId, setTenantId] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    setError(null);
+    setError('');
+    setLoading(true);
     try {
       await login(email, password, tenantId || undefined);
-    } catch (err) {
+    } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Login failed');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-primary flex items-center justify-center p-4">
-      <div className="w-full max-w-sm">
-        <h1 className="text-2xl font-display text-primary text-center mb-2">
+    <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg-primary, #0C0E13)' }}>
+      <div className="w-full max-w-md p-8 rounded-xl" style={{ backgroundColor: 'var(--bg-surface, #14161D)', border: '1px solid var(--border-default, #2A2D37)' }}>
+        <h1 className="text-3xl font-display mb-1" style={{ color: 'var(--text-primary, #E8EAF0)', fontStyle: 'italic' }}>
           Sovereign
         </h1>
-        <p className="text-text-secondary text-sm text-center mb-8">
+        <p className="mb-8" style={{ color: 'var(--text-secondary, #9DA3B0)', fontSize: '14px' }}>
           CPA Close Engine
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label htmlFor="email" className="block text-xs font-medium text-text-secondary mb-1">
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-primary, #E8EAF0)' }}>
               Email
             </label>
             <input
-              id="email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              required
-              autoComplete="email"
-              className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
               placeholder="you@company.com"
+              required
+              className="w-full px-3 py-2 rounded-lg text-sm"
+              style={{
+                backgroundColor: 'var(--bg-input, #1A1D27)',
+                border: '1px solid var(--border-default, #2A2D37)',
+                color: 'var(--text-primary, #E8EAF0)',
+              }}
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-xs font-medium text-text-secondary mb-1">
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-primary, #E8EAF0)' }}>
               Password
             </label>
             <input
-              id="password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              autoComplete="current-password"
-              className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+              className="w-full px-3 py-2 rounded-lg text-sm"
+              style={{
+                backgroundColor: 'var(--bg-input, #1A1D27)',
+                border: '1px solid var(--border-default, #2A2D37)',
+                color: 'var(--text-primary, #E8EAF0)',
+              }}
             />
           </div>
 
           <div>
-            <label htmlFor="tenantId" className="block text-xs font-medium text-text-secondary mb-1">
-              Tenant ID <span className="text-text-muted">(optional)</span>
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-primary, #E8EAF0)' }}>
+              Tenant ID (optional)
             </label>
             <input
-              id="tenantId"
               type="text"
               value={tenantId}
               onChange={(e) => setTenantId(e.target.value)}
-              autoComplete="off"
-              className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
               placeholder="tenant-xxx"
+              className="w-full px-3 py-2 rounded-lg text-sm"
+              style={{
+                backgroundColor: 'var(--bg-input, #1A1D27)',
+                border: '1px solid var(--border-default, #2A2D37)',
+                color: 'var(--text-primary, #E8EAF0)',
+              }}
             />
           </div>
 
           {error && (
-            <p className="text-sm text-status-red">{error}</p>
+            <div className="p-3 rounded-lg text-sm" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#EF4444' }}>
+              {error}
+            </div>
           )}
 
           <button
             type="submit"
-            disabled={isLoading}
-            className="w-full py-2 px-4 rounded-input bg-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
+            disabled={loading}
+            className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors"
+            style={{
+              backgroundColor: loading ? 'var(--accent-muted, #4A4FC7)' : 'var(--accent, #6366F1)',
+              color: '#FFFFFF',
+            }}
           >
-            {isLoading ? 'Signing in...' : 'Sign in'}
+            {loading ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
+
+        <p className="mt-6 text-center text-sm" style={{ color: 'var(--text-secondary, #9DA3B0)' }}>
+          Don&apos;t have an account?{' '}
+          <Link href="/register" style={{ color: 'var(--accent, #6366F1)' }} className="hover:underline">
+            Register
+          </Link>
+        </p>
       </div>
     </div>
   );

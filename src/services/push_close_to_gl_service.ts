@@ -6,6 +6,7 @@
 import type { Pool } from 'pg';
 import type { CloseAdjustment } from '../types/close_and_controls.js';
 import { pushJournalEntry } from './accounting_integration_service.js';
+import { from, sumRound2 } from '../utils/decimal.js';
 
 export interface PushAdjustmentToGLResult {
   success: boolean;
@@ -50,9 +51,9 @@ export async function pushAdjustmentToGL(
   }
   const debits = adjustment.debits ?? [];
   const credits = adjustment.credits ?? [];
-  const debitTotal = debits.reduce((s, d) => s + d.amount, 0);
-  const creditTotal = credits.reduce((s, c) => s + c.amount, 0);
-  if (Math.abs(debitTotal - creditTotal) > 0.01) {
+  const debitTotal = sumRound2(debits.map((d) => d.amount));
+  const creditTotal = sumRound2(credits.map((c) => c.amount));
+  if (from(debitTotal).minus(creditTotal).abs().greaterThan(0.01)) {
     return { success: false, errors: ['Adjustment must balance (debits = credits)'] };
   }
 

@@ -234,8 +234,9 @@ export default function ReconDetailPage() {
   );
 
   const handleUpload = useCallback(
-    (file: File) => {
+    (file: File): Promise<void> => {
       uploadEvidenceMutation.mutate(file);
+      return Promise.resolve();
     },
     [uploadEvidenceMutation]
   );

@@ -4,6 +4,7 @@
  */
 
 import type { TrialBalanceResult, ProfitAndLoss, CashFlowStatement, TrialBalanceEntry } from '../types/financial.js';
+import { from, minus, plus, round2, sumRound2 } from '../utils/decimal.js';
 
 export interface CashTransaction {
   date?: string;
@@ -53,7 +54,7 @@ export function buildCashFlowStatement(
   ];
   if (depreciation !== 0) operating.push({ label: 'Depreciation & amortization', amount: depreciation });
   if (changeDeferredTax != null && changeDeferredTax !== 0) {
-    operating.push({ label: 'Change in deferred tax (net)', amount: -changeDeferredTax });
+    operating.push({ label: 'Change in deferred tax (net)', amount: round2(-changeDeferredTax) });
   }
   if (unrealizedFX !== 0) operating.push({ label: 'Unrealized (gain)/loss on FX', amount: unrealizedFX });
   if (sbc !== 0) operating.push({ label: 'Stock-based compensation', amount: sbc });
@@ -91,7 +92,7 @@ export function buildCashFlowStatement(
     operating,
     investing,
     financing,
-    netChangeInCash: beginningCash != null && endingCash != null ? endingCash - beginningCash : netIncome,
+    netChangeInCash: beginningCash != null && endingCash != null ? minus(endingCash, beginningCash) : netIncome,
     beginningCash,
     endingCash,
     estimated: !priorTrialBalance,
@@ -122,8 +123,8 @@ export function buildCashFlowFromTransactions(
     else operating.push(line);
   }
 
-  const sum = (lines: Array<{ amount: number }>) => lines.reduce((s, l) => s + l.amount, 0);
-  const netChangeInCash = sum(operating) + sum(investing) + sum(financing);
+  const sum = (lines: Array<{ amount: number }>) => sumRound2(lines.map((l) => l.amount));
+  const netChangeInCash = plus(plus(sum(operating), sum(investing)), sum(financing));
 
   return {
     operating,
@@ -139,13 +140,13 @@ export function buildCashFlowFromTransactions(
 }
 
 function sumPLExpense(pl: ProfitAndLoss, re: RegExp): number {
-  return pl.expenses.reduce((s, e) => (re.test(e.label ?? '') ? s + e.amount : s), 0);
+  return sumRound2(pl.expenses.filter((e) => re.test(e.label ?? '')).map((e) => e.amount));
 }
 
 function getNetAmount(entries: TrialBalanceEntry[], re: RegExp): number | undefined {
   const match = entries.filter((e) => re.test(e.accountName ?? ''));
   if (!match.length) return undefined;
-  return match.reduce((s, e) => s + normalizeNet(e), 0);
+  return sumRound2(match.map((e) => normalizeNet(e)));
 }
 
 function deltaByRegex(
@@ -155,13 +156,13 @@ function deltaByRegex(
 ): number {
   const priorAmt = getNetAmount(prior.entries, re) ?? 0;
   const currAmt = getNetAmount(current.entries, re) ?? 0;
-  return currAmt - priorAmt;
+  return minus(currAmt, priorAmt);
 }
 
 function normalizeNet(e: TrialBalanceEntry): number {
-  const net = e.debit - e.credit;
+  const net = minus(e.debit, e.credit);
   if (e.accountType === 'LIABILITY' || e.accountType === 'EQUITY' || e.accountType === 'REVENUE') {
-    return -net;
+    return round2(-net);
   }
   return net;
 }

@@ -8,6 +8,7 @@
 import type { Pool } from 'pg';
 import { getEvidencePolicy } from '../db/repositories/evidence_policy_repository.js';
 import * as jeRepo from '../db/repositories/journal_entry_repository.js';
+import { sumRound2 } from '../utils/decimal.js';
 import {
   listAssertionTypesByJournalEntryForSession,
 } from '../db/repositories/evidence_repository.js';
@@ -48,8 +49,8 @@ function deriveJeType(je: { source: string }, _lines?: { accountRef: string; deb
 
 /** Compute JE amount (max of sum debits / sum credits for materiality comparison). */
 function computeJeAmount(lines: { debit: number; credit: number }[]): number {
-  const sumDebits = lines.reduce((a, l) => a + (l.debit ?? 0), 0);
-  const sumCredits = lines.reduce((a, l) => a + (l.credit ?? 0), 0);
+  const sumDebits = sumRound2(lines.map((l) => l.debit ?? 0));
+  const sumCredits = sumRound2(lines.map((l) => l.credit ?? 0));
   return Math.max(sumDebits, sumCredits);
 }
 

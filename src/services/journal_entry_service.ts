@@ -187,6 +187,9 @@ export async function postJE(pool: Pool, tenantId: string, id: string, aiPool?: 
   if (je.status !== 'approved') {
     throw new JournalEntryError(`Only approved JEs can be posted; current status: ${je.status}`, 'INVALID_STATUS');
   }
+  if (!je.memo || je.memo.trim().length === 0) {
+    throw new JournalEntryError('Cannot post journal entry without a memo', 'VALIDATION');
+  }
   const lines = await repo.listJournalEntryLines(pool, id);
 
   const { getEvidencePolicy } = await import('../db/repositories/evidence_policy_repository.js');
@@ -263,6 +266,7 @@ export async function postJE(pool: Pool, tenantId: string, id: string, aiPool?: 
     facts,
   });
   const inputsHash = hashJustifierInputs(facts, JUSTIFIER_PROMPT_VERSION);
+  // Save as draft status — AI justification requires human review before it's linked to the JE.
   await createJustificationFromAI({
     tenantId,
     pool,
@@ -274,6 +278,7 @@ export async function postJE(pool: Pool, tenantId: string, id: string, aiPool?: 
     prompt_version: justifierResult.prompt_version,
     model: process.env.AI_MODEL ?? undefined,
     inputs_hash: inputsHash,
+    status: 'draft',
   });
   const aiWarnings =
     !justifierResult.ok

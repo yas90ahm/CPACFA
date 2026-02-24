@@ -46,12 +46,12 @@ const GL_COLUMN_MAP: Record<string, readonly string[]> = {
     'accountcode',
     'account_code',
     'account code',
-    'account',
     'glaccount',
     'gl account',
   ],
   debit: ['debit', 'debits', 'dr', 'debit_amount', 'debit amount'],
   credit: ['credit', 'credits', 'cr', 'credit_amount', 'credit amount'],
+  account_name: ['accountname', 'account_name', 'account name'],
   description: ['description', 'desc', 'memo', 'notes', 'narrative'],
 };
 
@@ -74,26 +74,33 @@ export type GLColumnMapping = {
 /** Auto-detect column mapping from CSV headers. */
 export function autoDetectColumnMapping(headers: string[]): GLColumnMapping {
   const lower = headers.map((h) => (h ?? '').toLowerCase().trim());
+  const claimed = new Set<number>();
   const find = (pred: (h: string) => boolean): string | null => {
-    const i = lower.findIndex(pred);
-    return i >= 0 ? headers[i]! : null;
+    const i = lower.findIndex((h, idx) => !claimed.has(idx) && pred(h));
+    if (i >= 0) { claimed.add(i); return headers[i]!; }
+    return null;
   };
-  return {
-    accountCode:
-      find((h) => (h.includes('account') && (h.includes('code') || h.includes('number') || h.includes('#') || h.includes('id'))) || h === 'gl account' || h === 'glaccount') ??
-      find((h) => h === 'account' || h === 'account code'),
-    accountName:
-      find((h) => h.includes('account') && h.includes('name')) ??
-      find((h) => h === 'name' || h === 'account name' || h === 'description'),
-    debit: find((h) => h.includes('debit') || h === 'dr'),
-    credit: find((h) => h.includes('credit') || h === 'cr'),
-    date: find((h) => h.includes('date') || h.includes('period') || h === 'posted'),
-    description: find((h) => h.includes('memo') || h.includes('desc') || h.includes('narration') || h === 'notes'),
-    reference: find((h) => h.includes('ref') || h.includes('doc') || h.includes('voucher')),
-    entryId:
-      find((h) => h.includes('entry') && (h.includes('id') || h.includes('#') || h.includes('number'))) ??
-      find((h) => h === 'je #' || h === 'je#' || h === 'journal entry'),
-  };
+
+  // Match in priority order: financial columns first, then descriptive columns.
+  // This prevents 'Description' from being grabbed by accountName before
+  // the description field gets a chance, and ensures debit/credit are claimed
+  // before any broad pattern can steal them.
+  const accountCode =
+    find((h) => (h.includes('account') && (h.includes('code') || h.includes('number') || h.includes('#') || h.includes('id'))) || h === 'gl account' || h === 'glaccount') ??
+    find((h) => h === 'account' || h === 'account code');
+  const debit = find((h) => h === 'debit' || h === 'debits' || h === 'dr' || h === 'debit amount' || h === 'debit_amount');
+  const credit = find((h) => h === 'credit' || h === 'credits' || h === 'cr' || h === 'credit amount' || h === 'credit_amount');
+  const entryId =
+    find((h) => h.includes('entry') && (h.includes('id') || h.includes('#') || h.includes('number'))) ??
+    find((h) => h === 'je #' || h === 'je#' || h === 'journal entry');
+  const date = find((h) => h.includes('date') || h.includes('period') || h === 'posted');
+  const accountName =
+    find((h) => h.includes('account') && h.includes('name')) ??
+    find((h) => h === 'name' || h === 'account name');
+  const description = find((h) => h === 'description' || h === 'desc' || h.includes('memo') || h.includes('narration') || h === 'notes');
+  const reference = find((h) => h.includes('ref') || h.includes('doc') || h.includes('voucher'));
+
+  return { accountCode, accountName, debit, credit, date, description, reference, entryId };
 }
 
 function mapHeaderToCanonical(rawHeader: string): string | null {
@@ -101,7 +108,10 @@ function mapHeaderToCanonical(rawHeader: string): string | null {
   for (const [canonical, variants] of Object.entries(GL_COLUMN_MAP)) {
     for (const v of variants) {
       const vn = normalizeHeader(v);
-      if (n === vn || n.includes(vn) || vn.includes(n)) return canonical;
+      if (n === vn) return canonical;
+      // Only use substring matching for variants >= 4 chars to avoid
+      // false positives like "description".includes("cr") matching credit.
+      if (vn.length >= 4 && (n.includes(vn) || vn.includes(n))) return canonical;
     }
   }
   return null;
@@ -326,7 +336,7 @@ function parseDecimalSafe(value: unknown): number {
 export function parseGLCsvWithMapping(
   fileBuffer: Buffer,
   columnMapping?: GLColumnMapping | null
-): GLUploadRow[] {
+): { rows: GLUploadRow[]; hasEntryId: boolean } {
   const input = fileBuffer.toString('utf8');
   const records = parse(input, {
     columns: true,
@@ -336,7 +346,7 @@ export function parseGLCsvWithMapping(
     bom: true,
   }) as Record<string, unknown>[];
 
-  if (records.length === 0) return [];
+  if (records.length === 0) return { rows: [], hasEntryId: false };
 
   const rawHeaders = Object.keys(records[0]!);
   let headerToCanonical: Record<string, string>;
@@ -345,6 +355,7 @@ export function parseGLCsvWithMapping(
     headerToCanonical = {};
     const map: Record<string, string> = {
       account_code: columnMapping.accountCode ?? '',
+      account_name: columnMapping.accountName ?? '',
       debit: columnMapping.debit ?? '',
       credit: columnMapping.credit ?? '',
       entry_date: columnMapping.date ?? columnMapping.entryId ?? '',
@@ -367,6 +378,7 @@ export function parseGLCsvWithMapping(
   const hasAccount = Object.values(headerToCanonical).includes('account_code');
   const hasDebit = Object.values(headerToCanonical).includes('debit');
   const hasCredit = Object.values(headerToCanonical).includes('credit');
+  const hasEntryId = Object.values(headerToCanonical).includes('entry_id');
 
   if (!hasAccount || (!hasDebit && !hasCredit)) {
     throw new Error('CSV must have account_code (or Account, GL Account) and debit/credit columns.');
@@ -392,25 +404,27 @@ export function parseGLCsvWithMapping(
       new Date().toISOString().slice(0, 10);
     const debit = hasDebit ? parseGlAmount(mapped.debit) : 0;
     const credit = hasCredit ? parseGlAmount(mapped.credit) : 0;
+    const accountName = mapped.account_name ? String(mapped.account_name).trim() : undefined;
     const description = mapped.description ? String(mapped.description).trim() : undefined;
 
     rows.push({
       entry_id: entryId || `ENTRY-${i + 1}`,
       entry_date: typeof entryDate === 'string' ? entryDate : String(entryDate),
       account_code: String(accountCode),
+      account_name: accountName,
       debit,
       credit,
       description,
     });
   }
-  return rows;
+  return { rows, hasEntryId };
 }
 
 /**
  * Parse GL CSV file to structured data.
  * Expected columns: entry_id, date/entry_date, account_code, debit, credit, description.
  */
-export function parseGLCsv(fileBuffer: Buffer): GLUploadRow[] {
+export function parseGLCsv(fileBuffer: Buffer): { rows: GLUploadRow[]; hasEntryId: boolean } {
   const input = fileBuffer.toString('utf8');
   const records = parse(input, {
     columns: true,
@@ -420,7 +434,7 @@ export function parseGLCsv(fileBuffer: Buffer): GLUploadRow[] {
     bom: true,
   }) as Record<string, unknown>[];
 
-  if (records.length === 0) return [];
+  if (records.length === 0) return { rows: [], hasEntryId: false };
 
   const rawHeaders = Object.keys(records[0]!);
   const headerToCanonical: Record<string, string> = {};
@@ -465,6 +479,9 @@ export function parseGLCsv(fileBuffer: Buffer): GLUploadRow[] {
       new Date().toISOString().slice(0, 10);
     const debit = hasDebit ? parseGlAmount(mapped.debit) : 0;
     const credit = hasCredit ? parseGlAmount(mapped.credit) : 0;
+    const accountName = mapped.account_name
+      ? String(mapped.account_name).trim()
+      : undefined;
     const description = mapped.description
       ? String(mapped.description).trim()
       : undefined;
@@ -473,12 +490,13 @@ export function parseGLCsv(fileBuffer: Buffer): GLUploadRow[] {
       entry_id: entryId || `ENTRY-${i + 1}`,
       entry_date: typeof entryDate === 'string' ? entryDate : String(entryDate),
       account_code: String(accountCode),
+      account_name: accountName,
       debit,
       credit,
       description,
     });
   }
-  return rows;
+  return { rows, hasEntryId };
 }
 
 /**
@@ -503,6 +521,7 @@ export function groupAndNumberLines(rows: GLUploadRow[]): GeneralLedgerLine[] {
         line_number: idx + 1,
         entry_date: row.entry_date,
         account_code: row.account_code,
+        account_name: row.account_name,
         debit,
         credit,
         description: row.description,
@@ -516,15 +535,17 @@ export function groupAndNumberLines(rows: GLUploadRow[]): GeneralLedgerLine[] {
 
 /**
  * Validate GL entries:
- * 1. Each entry_id group must have debits = credits (within tolerance)
- * 2. All account_codes must exist in COA
- * 3. Lines cannot have both debit and credit
+ * - JE format (isRegisterFormat=false): each entry_id group must balance (D=C)
+ * - Register format (isRegisterFormat=true): only total D=C across entire file
+ * - All account_codes must exist in COA (if COA exists)
+ * - Lines cannot have both debit and credit
  */
 export async function validateGLEntries(
   pool: Pool,
   tenantId: string,
   lines: GeneralLedgerLine[],
-  tolerance = 0.01
+  tolerance = 0.01,
+  isRegisterFormat = false
 ): Promise<GLValidationResult> {
   const errors: string[] = [];
   const balancedEntries: JournalEntry[] = [];
@@ -537,20 +558,36 @@ export async function validateGLEntries(
 
   const entries = glRepository.groupLinesByEntry(lines);
 
-  for (const entry of entries) {
-    const totalDebits = sumRound2(entry.lines.map((line) => line.debit ?? 0));
-    const totalCredits = sumRound2(entry.lines.map((line) => line.credit ?? 0));
-    const imbalance = Math.abs(minus(totalDebits, totalCredits));
-
+  if (isRegisterFormat) {
+    // Account register format: each row is independent. Validate only total D=C.
+    const totalDebits = sumRound2(lines.map((l) => l.debit ?? 0));
+    const totalCredits = sumRound2(lines.map((l) => l.credit ?? 0));
     if (absGt(totalDebits, totalCredits, tolerance)) {
-      imbalancedEntries.push({
-        entry,
-        totalDebits,
-        totalCredits,
-        imbalance,
-      });
-    } else {
+      console.warn(
+        `[GL Register] Total debits (${totalDebits.toFixed(2)}) ≠ total credits (${totalCredits.toFixed(2)}). Difference: ${Math.abs(minus(totalDebits, totalCredits)).toFixed(2)} — this is normal for GL registers with opening balances.`
+      );
+    }
+    // All entries are considered "balanced" in register format — they're standalone lines.
+    for (const entry of entries) {
       balancedEntries.push(entry);
+    }
+  } else {
+    // JE format: each entry_id group must balance individually.
+    for (const entry of entries) {
+      const totalDebits = sumRound2(entry.lines.map((line) => line.debit ?? 0));
+      const totalCredits = sumRound2(entry.lines.map((line) => line.credit ?? 0));
+      const imbalance = Math.abs(minus(totalDebits, totalCredits));
+
+      if (absGt(totalDebits, totalCredits, tolerance)) {
+        imbalancedEntries.push({
+          entry,
+          totalDebits,
+          totalCredits,
+          imbalance,
+        });
+      } else {
+        balancedEntries.push(entry);
+      }
     }
   }
 
@@ -563,10 +600,16 @@ export async function validateGLEntries(
 
   const uniqueAccounts = new Set(lines.map((l) => l.account_code));
   const coaAccounts = await coaRepository.getAccountsByTenant(pool, tenantId);
-  const coaCodes = new Set(coaAccounts.map((a) => a.account_code));
-  const invalidAccounts = Array.from(uniqueAccounts).filter((code) => !coaCodes.has(code));
-  if (invalidAccounts.length > 0) {
-    errors.push(`Invalid account codes (not in COA): ${invalidAccounts.join(', ')}`);
+  if (coaAccounts.length > 0) {
+    // COA exists for this tenant — validate GL account codes against it.
+    const coaCodes = new Set(coaAccounts.map((a) => a.account_code));
+    const invalidAccounts = Array.from(uniqueAccounts).filter((code) => !coaCodes.has(code));
+    if (invalidAccounts.length > 0) {
+      errors.push(`Invalid account codes (not in COA): ${invalidAccounts.join(', ')}`);
+    }
+  } else {
+    // Fresh tenant, no COA yet — skip COA validation so first GL upload can proceed.
+    console.warn(`No COA for tenant ${tenantId}; skipping account code validation for first upload.`);
   }
 
   return {
@@ -589,6 +632,11 @@ function toFinancialAccountType(t?: string): TrialBalanceEntry['accountType'] {
     Equity: 'EQUITY',
     Revenue: 'REVENUE',
     Expense: 'EXPENSE',
+    ASSET: 'ASSET',
+    LIABILITY: 'LIABILITY',
+    EQUITY: 'EQUITY',
+    REVENUE: 'REVENUE',
+    EXPENSE: 'EXPENSE',
   };
   return map[t] ?? undefined;
 }
@@ -613,7 +661,7 @@ async function deriveAndPersistTB(
     }, pool);
   } catch (err) {
     console.error('Failed to persist derived TB:', err);
-    // Do not throw: GL upload succeeded; TB persistence is secondary
+    throw err;
   }
 }
 
@@ -663,9 +711,10 @@ export async function uploadGLForPeriod(
 
   try {
     const parseStart = Date.now();
-    const rows = columnMapping
+    const parsed = columnMapping
       ? parseGLCsvWithMapping(fileBuffer, columnMapping)
       : parseGLCsv(fileBuffer);
+    const { rows, hasEntryId } = parsed;
     perfMetrics.parse_ms = Date.now() - parseStart;
 
     if (rows.length === 0) {
@@ -679,6 +728,10 @@ export async function uploadGLForPeriod(
       };
     }
 
+    // Account register format (no entry_id): each row is a standalone GL line.
+    // JE format (has entry_id): rows are grouped by entry_id and each group must balance.
+    const isRegisterFormat = !hasEntryId;
+
     const groupStart = Date.now();
     let lines = groupAndNumberLines(rows);
     lines = lines.map((line) => ({
@@ -690,7 +743,7 @@ export async function uploadGLForPeriod(
     perfMetrics.group_ms = Date.now() - groupStart;
 
     const validateStart = Date.now();
-    const validation = await validateGLEntries(pool, tenantId, lines);
+    const validation = await validateGLEntries(pool, tenantId, lines, 0.01, isRegisterFormat);
     perfMetrics.validate_ms = Date.now() - validateStart;
 
     if (validation.errors.length > 0) {

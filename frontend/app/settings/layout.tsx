@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { TopBar } from '@/components/shell/TopBar';
 import { AuthGuard } from '@/components/auth/AuthGuard';
+import { useAuth } from '@/lib/auth';
+import { useEntities } from '@/lib/queries/entities';
 import { cn } from '@/lib/utils';
 import {
   Building2,
@@ -28,11 +30,16 @@ const NAV_ITEMS: { href: string; label: string; icon: React.ComponentType<{ clas
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { user } = useAuth();
+  const { data: entities = [] } = useEntities();
+  const entityName = entities.length > 0 ? entities[0].name : 'My Company';
+  const userName = user?.email ?? '';
+  const userInitials = user?.email?.slice(0, 2).toUpperCase() ?? '';
 
   return (
     <AuthGuard>
     <div className="min-h-screen bg-primary">
-      <TopBar entityName="Apex Manufacturing Co." showPeriod={false} />
+      <TopBar entityName={entityName} showPeriod={false} userName={userName} userInitials={userInitials} />
       <div className="pt-14 flex">
         <aside className="fixed left-0 top-14 w-56 h-[calc(100vh-56px)] bg-surface border-r border-border py-4 flex flex-col z-20">
           <Link

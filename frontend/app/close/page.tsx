@@ -8,13 +8,11 @@ import { useCreateSession } from '@/lib/queries/close-session';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { SlideOverPanel } from '@/components/shared/SlideOverPanel';
 import { TopBar } from '@/components/shell/TopBar';
+import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 import type { SessionListItem } from '@/lib/types/session-list';
 import type { CloseState } from '@/lib/types/close-session';
 import { Lock, Plus } from 'lucide-react';
-
-const DEFAULT_ENTITY_ID = 'entity-1';
-const DEFAULT_ENTITY_NAME = 'My Company';
 
 function stateBadge(state: CloseState) {
   const map: Record<CloseState, { variant: 'success' | 'warning' | 'error' | 'info' | 'neutral'; label: string }> = {
@@ -41,18 +39,20 @@ function formatStarted(iso: string | null): string {
 
 export default function ClosePage() {
   const router = useRouter();
-  const { data: entities = [] } = useEntities();
-  const entityId = entities.length > 0 ? entities[0].id : DEFAULT_ENTITY_ID;
-  const entityName = entities.length > 0 ? entities[0].name : DEFAULT_ENTITY_NAME;
+  const { user } = useAuth();
+  const { data: entities = [], isLoading: entitiesLoading } = useEntities();
+  const entitiesReady = !entitiesLoading && entities.length > 0;
+  const entityId = entitiesReady ? entities[0].id : null;
+  const entityName = entitiesReady ? entities[0].name : 'My Company';
   const { data: sessions = [] } = useSessions(entityId);
   const createSession = useCreateSession();
   const [newSessionOpen, setNewSessionOpen] = useState(false);
-  const [entitySelect, setEntitySelect] = useState(entityId);
+  const [entitySelect, setEntitySelect] = useState('');
   const [periodStart, setPeriodStart] = useState('2026-02-01');
   const [periodEnd, setPeriodEnd] = useState('2026-02-28');
 
   useEffect(() => {
-    if (entities.length > 0 && entitySelect === DEFAULT_ENTITY_ID) {
+    if (entities.length > 0 && !entitySelect) {
       setEntitySelect(entities[0].id);
     }
   }, [entities, entitySelect]);
@@ -62,12 +62,11 @@ export default function ClosePage() {
   });
 
   const handleCreateSession = async () => {
-    const eid = entitySelect || entityId;
-    if (!eid || !periodStart || !periodEnd) return;
+    if (!entitySelect || !periodStart || !periodEnd) return;
     setNewSessionOpen(false);
     try {
       const res = await createSession.mutateAsync({
-        entityId: eid,
+        entityId: entitySelect,
         periodStart,
         periodEnd,
       });
@@ -81,9 +80,16 @@ export default function ClosePage() {
   const isHistorical = (s: SessionListItem) => s.state === 'CERTIFIED' || s.state === 'LOCKED';
   const mostRecentInProgress = sortedSessions.find((s) => s.state === 'IN_PROGRESS');
 
+  const canCreate = !!entitySelect && !!periodStart && !!periodEnd && !createSession.isPending;
+
   return (
     <>
-      <TopBar entityName={entityName} showPeriod={false} />
+      <TopBar
+        entityName={entityName}
+        showPeriod={false}
+        userName={user?.email ?? ''}
+        userInitials={user?.email?.slice(0, 2).toUpperCase() ?? ''}
+      />
       <div className="min-h-screen bg-primary pt-14">
       <div className="max-w-5xl mx-auto p-8">
         <div className="flex items-center justify-between mb-8">
@@ -181,7 +187,15 @@ export default function ClosePage() {
             <button type="button" className="px-4 py-2 rounded-input border border-border text-sm" onClick={() => setNewSessionOpen(false)}>
               Cancel
             </button>
-            <button type="button" className="px-4 py-2 rounded-input bg-accent text-white text-sm font-medium" onClick={handleCreateSession} disabled={createSession.isPending}>
+            <button
+              type="button"
+              className={cn(
+                'px-4 py-2 rounded-input text-sm font-medium',
+                canCreate ? 'bg-accent text-white' : 'bg-surface-alt text-text-muted cursor-not-allowed'
+              )}
+              onClick={handleCreateSession}
+              disabled={!canCreate}
+            >
               {createSession.isPending ? 'Creating...' : 'Create Session'}
             </button>
           </>
@@ -190,17 +204,25 @@ export default function ClosePage() {
         <div className="space-y-6">
           <div>
             <label className="block text-xs font-medium text-text-secondary mb-1">Entity</label>
-            <select
-              value={entitySelect}
-              onChange={(e) => setEntitySelect(e.target.value)}
-              className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm"
-            >
-              {entities.length > 0
-                ? entities.map((e) => (
-                    <option key={e.id} value={e.id}>{e.name}</option>
-                  ))
-                : <option value={DEFAULT_ENTITY_ID}>{DEFAULT_ENTITY_NAME}</option>}
-            </select>
+            {entitiesLoading ? (
+              <div className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm text-text-muted">
+                Loading entities...
+              </div>
+            ) : entities.length === 0 ? (
+              <div className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm text-text-muted">
+                No entities found. Create one in Settings first.
+              </div>
+            ) : (
+              <select
+                value={entitySelect}
+                onChange={(e) => setEntitySelect(e.target.value)}
+                className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm"
+              >
+                {entities.map((e) => (
+                  <option key={e.id} value={e.id}>{e.name}</option>
+                ))}
+              </select>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>

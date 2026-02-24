@@ -276,6 +276,9 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 116, file: '116_aje_template_skip_reason.sql' },
   { version: 117, file: '117_variance_ai_draft_explanation.sql' },
   { version: 118, file: '118_tenant_entity_settings.sql' },
+  { version: 120, file: '120_certification_artifacts_immutability.sql' },
+  { version: 121, file: '121_money_column_precision.sql' },
+  { version: 122, file: '122_gl_account_name.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 

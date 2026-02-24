@@ -18,6 +18,7 @@ interface ReconRow {
   entity_id: string;
   requirement_id: string;
   account_code: string;
+  account_name: string | null;
   gl_balance: string | null;
   supporting_balance: string | null;
   variance: string | null;
@@ -62,6 +63,7 @@ function rowToRecon(r: ReconRow): PeriodReconciliation {
     entityId: r.entity_id,
     requirementId: r.requirement_id,
     accountCode: r.account_code,
+    accountName: r.account_name ?? null,
     glBalance: r.gl_balance,
     supportingBalance: r.supporting_balance,
     variance: r.variance,
@@ -138,7 +140,15 @@ export async function getPeriodReconciliationById(
   reconId: string
 ): Promise<PeriodReconciliation | null> {
   const r = await pool.query<ReconRow>(
-    `SELECT ${RECON_COLS} FROM tenant_period_reconciliations WHERE tenant_id = $1 AND recon_id = $2`,
+    `SELECT r.recon_id, r.tenant_id, r.period_id, r.entity_id, r.requirement_id, r.account_code,
+       req.account_name,
+       r.gl_balance, r.supporting_balance, r.variance, r.tolerance_amount, r.is_within_tolerance,
+       r.reconciling_items_total, r.unexplained_variance, r.supporting_source, r.supporting_document_refs,
+       r.variance_explanation, r.status, r.prepared_by, r.prepared_at, r.reviewed_by, r.reviewed_at,
+       r.created_at, r.updated_at
+     FROM tenant_period_reconciliations r
+     LEFT JOIN tenant_recon_requirements req ON r.requirement_id = req.requirement_id
+     WHERE r.tenant_id = $1 AND r.recon_id = $2`,
     [tenantId, reconId]
   );
   const row = r.rows[0];
@@ -151,7 +161,16 @@ export async function listPeriodReconciliationsByPeriod(
   periodId: string
 ): Promise<PeriodReconciliation[]> {
   const r = await pool.query<ReconRow>(
-    `SELECT ${RECON_COLS} FROM tenant_period_reconciliations WHERE tenant_id = $1 AND period_id = $2 ORDER BY account_code`,
+    `SELECT r.recon_id, r.tenant_id, r.period_id, r.entity_id, r.requirement_id, r.account_code,
+       req.account_name,
+       r.gl_balance, r.supporting_balance, r.variance, r.tolerance_amount, r.is_within_tolerance,
+       r.reconciling_items_total, r.unexplained_variance, r.supporting_source, r.supporting_document_refs,
+       r.variance_explanation, r.status, r.prepared_by, r.prepared_at, r.reviewed_by, r.reviewed_at,
+       r.created_at, r.updated_at
+     FROM tenant_period_reconciliations r
+     LEFT JOIN tenant_recon_requirements req ON r.requirement_id = req.requirement_id
+     WHERE r.tenant_id = $1 AND r.period_id = $2
+     ORDER BY r.account_code`,
     [tenantId, periodId]
   );
   return r.rows.map(rowToRecon);

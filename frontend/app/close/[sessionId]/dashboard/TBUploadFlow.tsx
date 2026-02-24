@@ -93,9 +93,6 @@ export function TBUploadFlow({ sessionId, file, onBack }: TBUploadFlowProps) {
   const [tbPreview, setTBPreview] = useState<TBPreview | null>(null);
   const [validationError, setValidationError] = useState<ValidationResult | null>(null);
   const [advanceError, setAdvanceError] = useState<string | null>(null);
-
-  const [validationError, setValidationError] = useState<ValidationResult | null>(null);
-  const [advanceError, setAdvanceError] = useState<string | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -198,7 +195,7 @@ export function TBUploadFlow({ sessionId, file, onBack }: TBUploadFlowProps) {
     setStep('ingesting');
     setAdvanceError(null);
     try {
-      await advanceSession.mutateAsync();
+      await advanceSession.mutateAsync({});
       queryClient.invalidateQueries({ queryKey: ['trial-balance', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       router.push(`/close/${sessionId}/dashboard`);
@@ -419,6 +416,8 @@ export function TBUploadFlow({ sessionId, file, onBack }: TBUploadFlowProps) {
         </div>
       </div>
     );
+  }
+
   }
 
   return null;

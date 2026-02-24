@@ -202,7 +202,8 @@ export async function computeReadiness(
     const postedJes = jes.filter((j) => j.status === 'posted' || j.status === 'exported');
     for (const je of postedJes) {
       const jeLines = await listJournalEntryLines(pool, je.id);
-      const totalAmount = jeLines.reduce((s, l) => s + (l.debit ?? 0), 0);
+      const { sumRound2 } = await import('../utils/decimal.js');
+      const totalAmount = sumRound2(jeLines.map((l) => l.debit ?? 0));
       if (totalAmount >= jeThreshold) {
         const jeAttachments = await listEvidenceForObject(pool, tenantId, 'journal_entry', je.id);
         if (jeAttachments.length === 0) {

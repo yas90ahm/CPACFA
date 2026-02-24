@@ -66,8 +66,8 @@ function rowToLine(row: JournalEntryLineRow): JournalEntryLine {
     jeId: row.je_id,
     lineIndex: row.line_index,
     accountRef: row.account_ref,
-    debit: Number(row.debit),
-    credit: Number(row.credit),
+    debit: Number(row.debit ?? '0'),
+    credit: Number(row.credit ?? '0'),
     description: row.description ?? undefined,
     amountProvenance:
       row.amount_provenance != null && typeof row.amount_provenance === 'object'

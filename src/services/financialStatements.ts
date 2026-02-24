@@ -19,7 +19,7 @@ import type {
   AccountType,
 } from '../types/financial.js';
 import { BALANCE_SHEET, COMPREHENSIVE_INCOME } from '../constants/codification.js';
-import { round2, sumRound2 } from '../utils/decimal.js';
+import { from, round2, minus, plus, sumRound2 } from '../utils/decimal.js';
 import { classifyTrialBalanceDeterministic } from './accountClassifier.js';
 import { MathematicalIntegrityError } from '../errors.js';
 import {
@@ -37,7 +37,7 @@ const CREDIT_POSITIVE_FS_LINES = new Set(['fs_liability', 'fs_equity', 'fs_reven
 
 /** Net amount for an account (debit − credit). Assets/Expenses: positive = debit. Liabilities/Equity/Revenue: positive = credit. Uses decimal round for display. */
 function netAmount(entry: TrialBalanceEntry): number {
-  const net = entry.debit - entry.credit;
+  const net = minus(entry.debit, entry.credit);
   const u = entry.accountType != null ? String(entry.accountType).toUpperCase() : '';
   const creditPositive =
     entry.fsLineId != null
@@ -127,10 +127,10 @@ export function buildBalanceSheet(
   const equityOnly = sumLines(equity);
   const totalRevenue = sumLines(revenueLines);
   const totalExpenses = sumLines(expenseLines);
-  const totalEquity = round2(equityOnly + totalRevenue - totalExpenses);
+  const totalEquity = round2(plus(equityOnly, minus(totalRevenue, totalExpenses)));
 
-  const totalDebits = entries.reduce((s, e) => s + (e.debit ?? 0), 0);
-  const totalCredits = entries.reduce((s, e) => s + (e.credit ?? 0), 0);
+  const totalDebits = sumRound2(entries.map((e) => e.debit ?? 0));
+  const totalCredits = sumRound2(entries.map((e) => e.credit ?? 0));
 
   const gateResult = runIntegrityGate({
     trialBalance: { totalDebits, totalCredits },
@@ -182,7 +182,7 @@ export function buildProfitAndLoss(
 
   const totalRevenue = sumLines(revenue);
   const totalExpenses = sumLines(expenses);
-  const netIncome = round2(totalRevenue - totalExpenses);
+  const netIncome = round2(minus(totalRevenue, totalExpenses));
 
   return {
     revenue,
@@ -226,11 +226,11 @@ export function validateTrialBalanceAndBalanceSheet(
   const totalDebits =
     'totalDebits' in trialBalance && typeof trialBalance.totalDebits === 'number'
       ? trialBalance.totalDebits
-      : entries.reduce((s, e) => s + (e.debit ?? 0), 0);
+      : sumRound2(entries.map((e) => e.debit ?? 0));
   const totalCredits =
     'totalCredits' in trialBalance && typeof trialBalance.totalCredits === 'number'
       ? trialBalance.totalCredits
-      : entries.reduce((s, e) => s + (e.credit ?? 0), 0);
+      : sumRound2(entries.map((e) => e.credit ?? 0));
 
   assertIntegrityGateOrThrow({
     trialBalance: { totalDebits, totalCredits },
@@ -271,11 +271,11 @@ export function buildValidatedStatements(
   const totalDebits =
     trialBalanceResult.totalDebits != null
       ? trialBalanceResult.totalDebits
-      : entries.reduce((s, e) => s + (e.debit ?? 0), 0);
+      : sumRound2(entries.map((e) => e.debit ?? 0));
   const totalCredits =
     trialBalanceResult.totalCredits != null
       ? trialBalanceResult.totalCredits
-      : entries.reduce((s, e) => s + (e.credit ?? 0), 0);
+      : sumRound2(entries.map((e) => e.credit ?? 0));
 
   const result = buildFinancialStatements(trialBalanceResult, options);
 

@@ -56,6 +56,20 @@ export async function runMigrations(): Promise<void> {
     await queryControl('INSERT INTO schema_migrations (version) VALUES ($1)', [version]);
   }
   console.log('Control migrations complete.');
+
+  // When using shared DB (no tenant-specific database_url), run tenant migrations on control pool
+  // so tenant tables exist before first API request (avoids 500 on first /api/settings/entities or /api/close/sessions).
+  const r = await queryControl<{ database_url: string | null }>('SELECT database_url FROM tenants WHERE database_url IS NOT NULL AND database_url != \'\' LIMIT 1');
+  const hasTenantDb = r?.rows?.length > 0;
+  if (!hasTenantDb) {
+    try {
+      console.log('Running tenant migrations on control DB (shared schema)...');
+      await runTenantMigrations(pool);
+      console.log('Tenant migrations complete.');
+    } catch (e) {
+      console.warn('Tenant migrations failed (first request may still run them):', (e as Error).message);
+    }
+  }
 }
 
 /**

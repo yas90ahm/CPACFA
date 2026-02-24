@@ -50,6 +50,7 @@ export interface PeriodReconciliation {
   entityId: string;
   requirementId: string;
   accountCode: string;
+  accountName: string | null;
   glBalance: string | null;
   supportingBalance: string | null;
   variance: string | null;
