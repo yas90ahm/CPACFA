@@ -6,6 +6,7 @@ import type { Pool } from 'pg';
 import type { z } from 'zod';
 import { callClaude } from './adapters/claude_adapter.js';
 import { insertCallLog } from './ai_call_log_repository.js';
+import { enterAdvisoryContext, exitAdvisoryContext } from '../lib/ai_boundary.js';
 
 const AI_MODEL = process.env.AI_MODEL ?? 'claude-sonnet-4-5-20250929';
 const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS ?? '15000', 10) || 15000;
@@ -31,6 +32,15 @@ export interface CallAIWithSchemaResult<T> {
 }
 
 export async function callAIWithSchema<T>(params: CallAIWithSchemaParams<T>): Promise<CallAIWithSchemaResult<T>> {
+  enterAdvisoryContext();
+  try {
+    return await _callAIWithSchemaImpl(params);
+  } finally {
+    exitAdvisoryContext();
+  }
+}
+
+async function _callAIWithSchemaImpl<T>(params: CallAIWithSchemaParams<T>): Promise<CallAIWithSchemaResult<T>> {
   const {
     pool,
     tenantId,

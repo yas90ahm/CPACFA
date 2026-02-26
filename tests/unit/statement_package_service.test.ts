@@ -72,6 +72,7 @@ describe('Statement package — generateStatements', () => {
 
   it('creates package with version 1 when no previous packages', async () => {
     jest.spyOn(closeSessionService, 'getSession').mockResolvedValue(sampleSession as any);
+    jest.spyOn(closeSessionService, 'listSessions').mockResolvedValue([]);
     jest.spyOn(adjustedTB, 'getAdjustedTrialBalance').mockResolvedValue([
       { accountName: 'Cash', debit: 1000, credit: 0 },
       { accountName: 'AP', debit: 0, credit: 200 },
@@ -92,16 +93,23 @@ describe('Statement package — generateStatements', () => {
     jest.spyOn(auditLedger, 'recordMaterialEvent').mockResolvedValue();
     const pkg = await generateStatements(mockPool, 't1', 'sess-1');
     expect(pkg.version).toBe(1);
-    expect(repo.getMaxVersionByCloseSessionId).toHaveBeenCalledWith(mockPool, 'sess-1');
+    expect(repo.getMaxVersionByCloseSessionId).toHaveBeenCalledWith(mockPool, 't1', 'sess-1');
     expect(repo.insertStatementPackage).toHaveBeenCalledWith(
       mockPool,
+      't1',
       expect.any(String),
-      expect.objectContaining({ closeSessionId: 'sess-1', version: 1, engineVersion: 'financialStatements.v1' })
+      expect.objectContaining({
+        closeSessionId: 'sess-1',
+        version: 1,
+        engineVersion: 'financialStatements.v1',
+        validationResults: expect.any(Array),
+      })
     );
   });
 
   it('creates package with version 2 when previous package exists', async () => {
     jest.spyOn(closeSessionService, 'getSession').mockResolvedValue(sampleSession as any);
+    jest.spyOn(closeSessionService, 'listSessions').mockResolvedValue([]);
     jest.spyOn(adjustedTB, 'getAdjustedTrialBalance').mockResolvedValue([
       { accountName: 'Cash', debit: 1000, credit: 0 },
       { accountName: 'AP', debit: 0, credit: 200 },
@@ -130,7 +138,7 @@ describe('Statement package — generateStatements', () => {
     jest.spyOn(auditLedger, 'recordMaterialEvent').mockResolvedValue();
     const pkg = await generateStatements(mockPool, 't1', 'sess-1');
     expect(pkg.version).toBe(2);
-    expect(repo.getMaxVersionByCloseSessionId).toHaveBeenCalledWith(mockPool, 'sess-1');
+    expect(repo.getMaxVersionByCloseSessionId).toHaveBeenCalledWith(mockPool, 't1', 'sess-1');
   });
 });
 
@@ -202,7 +210,7 @@ describe('Statement package — getStatementPackage / listStatementPackages / ge
 
   it('getStatementPackage returns null when not found', async () => {
     jest.spyOn(repo, 'getStatementPackageById').mockResolvedValue(null);
-    const result = await getStatementPackage(mockPool, 'pkg-missing');
+    const result = await getStatementPackage(mockPool, 'tenant-1', 'pkg-missing');
     expect(result).toBeNull();
   });
 
@@ -210,14 +218,14 @@ describe('Statement package — getStatementPackage / listStatementPackages / ge
     jest.spyOn(repo, 'listStatementPackagesByCloseSessionId').mockResolvedValue([
       { ...samplePackage },
     ]);
-    const result = await listStatementPackages(mockPool, 'sess-1', 10);
+    const result = await listStatementPackages(mockPool, 'tenant-1', 'sess-1', 10);
     expect(result).toHaveLength(1);
     expect(result[0].closeSessionId).toBe('sess-1');
   });
 
   it('getStatementDiff returns null when diff not found', async () => {
     jest.spyOn(repo, 'getStatementDiff').mockResolvedValue(null);
-    const result = await getStatementDiff(mockPool, 'pkg-1', 'pkg-2');
+    const result = await getStatementDiff(mockPool, 'tenant-1', 'pkg-1', 'pkg-2');
     expect(result).toBeNull();
   });
 });

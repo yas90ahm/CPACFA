@@ -14,14 +14,22 @@ import { buildBalanceSheet, buildProfitAndLoss, buildFinancialStatements, valida
 import { classifyTrialBalanceDeterministic } from './accountClassifier.js';
 import { getStandardsRegistry, requiresLeaseLiabilityCalculation, usesSimplifiedDepreciation } from '../constants/accounting/index.js';
 import type { AccountingStandard } from '../constants/accounting/index.js';
-import { computeLeaseLiability, type LeaseLiabilityInput } from './leaseLiabilityCalc.js';
+// QUARANTINED — leaseLiabilityCalc not in MVP (CPA close only)
+// import { computeLeaseLiability, type LeaseLiabilityInput } from './leaseLiabilityCalc.js';
+/** Local type for lease option; lease calculation not available in MVP. */
+export interface LeaseLiabilityInput {
+  leasePayments: number[];
+  discountRate: number;
+  paymentTiming?: 'beginning' | 'end';
+}
+import { sumRound2 } from '../utils/decimal.js';
 import { buildCashFlowStatement } from './cashFlow.js';
 import { buildEquityChangesStatement } from './equityChanges.js';
 import { buildNotesAndPolicies } from './notesPolicies.js';
 import type { CashFlowStatement, EquityChangesStatement, NotesAndPolicies } from '../types/financial.js';
 import type { Pool } from 'pg';
 import type { IntegrityContractFact } from '../types/integrity.js';
-import { runIntegrityGate } from './integrity_gate_service.js';
+import { assertIntegrityGateOrThrow, runIntegrityGate } from './integrity_gate_service.js';
 import { recordOverride } from './audit_ledger_service.js';
 
 export interface StatementGeneratorOptions {
@@ -91,10 +99,10 @@ export async function generateStatements(
   }
 
   if (contractsToCheck && contractsToCheck.length > 0) {
-    const totalDebits = classified.reduce((s, e) => s + (e.debit ?? 0), 0);
-    const totalCredits = classified.reduce((s, e) => s + (e.credit ?? 0), 0);
+    const totalDebits = sumRound2(classified.map((e) => e.debit ?? 0));
+    const totalCredits = sumRound2(classified.map((e) => e.credit ?? 0));
     const balanceSheet = buildBalanceSheet(classified);
-    runIntegrityGate({
+    assertIntegrityGateOrThrow({
       trialBalance: { totalDebits, totalCredits },
       balanceSheet: {
         totalAssets: balanceSheet.totalAssets,
@@ -133,53 +141,15 @@ export async function generateStatements(
     standardMetadata.depreciationMethod = 'straight-line';
   }
 
-  if (requiresLeaseLiabilityCalculation(standard) && options.lease) {
-    // IFRS 16 or ASC 842: trigger lease liability / ROU calculation
-    const leaseResult = computeLeaseLiability(options.lease);
-    standardMetadata.leaseLiability = leaseResult.leaseLiability;
-    standardMetadata.rightOfUseAsset = leaseResult.rightOfUseAsset;
-    const isUSGaap = standard === 'US_GAAP';
-    standardMetadata.citation = isUSGaap ? 'ASC 842-20-30-1' : 'IFRS 16.26–.27';
-
-    const rouLine: FinancialStatementLine = isUSGaap
-      ? {
-          label: 'Right-of-use asset',
-          amount: leaseResult.rightOfUseAsset,
-          codificationRef: { framework: 'FASB', citation: 'ASC 842-20-30-1', description: 'Right-of-use asset at commencement' },
-        }
-      : {
-          label: 'Right-of-use asset',
-          amount: leaseResult.rightOfUseAsset,
-          codificationRef: { framework: 'IASB', citation: 'IFRS 16.26', description: 'Right-of-use asset at commencement' },
-        };
-    const leaseLiaLine: FinancialStatementLine = isUSGaap
-      ? {
-          label: 'Lease liability',
-          amount: leaseResult.leaseLiability,
-          codificationRef: { framework: 'FASB', citation: 'ASC 842-20-30-1', description: 'Lease liability at commencement' },
-        }
-      : {
-          label: 'Lease liability',
-          amount: leaseResult.leaseLiability,
-          codificationRef: { framework: 'IASB', citation: 'IFRS 16.26', description: 'Lease liability at commencement' },
-        };
-
-    balanceSheet = {
-      ...balanceSheet,
-      assets: [...balanceSheet.assets, rouLine],
-      liabilities: [...balanceSheet.liabilities, leaseLiaLine],
-      totalAssets: balanceSheet.totalAssets + leaseResult.rightOfUseAsset,
-      totalLiabilities: balanceSheet.totalLiabilities + leaseResult.leaseLiability,
-      balances: Math.abs(
-        balanceSheet.totalAssets + leaseResult.rightOfUseAsset -
-        (balanceSheet.totalLiabilities + leaseResult.leaseLiability + balanceSheet.totalEquity)
-      ) < 0.02,
-    };
-  }
+  // QUARANTINED — leaseLiabilityCalc not in MVP (CPA close only). Lease option ignored.
+  // if (requiresLeaseLiabilityCalculation(standard) && options.lease) {
+  //   const leaseResult = computeLeaseLiability(options.lease);
+  //   ... (ROU/lease liability not computed in MVP)
+  // }
 
   // Accounting Kill Switch: (A) Sum(Debits)==Sum(Credits), (B) Assets==L+E. Throw if illegal for CPA.
-  const totalDebits = classified.reduce((s, e) => s + (e.debit ?? 0), 0);
-  const totalCredits = classified.reduce((s, e) => s + (e.credit ?? 0), 0);
+  const totalDebits = sumRound2(classified.map((e) => e.debit ?? 0));
+  const totalCredits = sumRound2(classified.map((e) => e.credit ?? 0));
   validateTrialBalanceAndBalanceSheet(
     { entries: classified, totalDebits, totalCredits },
     balanceSheet

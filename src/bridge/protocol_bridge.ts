@@ -8,7 +8,7 @@ import { z } from 'zod';
 import type { Pool } from 'pg';
 import type { CloseRole } from '../types/close_and_controls.js';
 import { assertPeriodNotLocked, lockPeriod, PeriodLockedError } from '../services/period_lock_service.js';
-import { saveUnadjustedFromUpload } from '../services/trial_balance_store_service.js';
+import { saveUnadjustedFromUpload, saveUnadjustedFromSync } from '../services/trial_balance_store_service.js';
 import {
   createDraftJE,
   proposeJE,
@@ -18,13 +18,20 @@ import {
   JournalEntryError,
 } from '../services/journal_entry_service.js';
 import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
-import { recordMaterialEvent } from '../services/audit_ledger_service.js';
+import { recordMaterialEvent } from '../services/audit_service.js';
+import { addJEAsAdjustments, addAccrualsAsAdjustments, getAdjustment } from '../services/close_adjustments_service.js';
+import { updateCloseAdjustmentStatus } from '../services/close_adjustment_update_service.js';
+import type { JournalEntrySuggestion } from '../types/close_and_controls.js';
+import type { AccrualSuggestion } from '../types/accrual_deferral.js';
+import { ProvenanceValidationError } from '../services/close_adjustments_service.js';
 import { canPerform } from '../services/segregation_service.js';
 import { parseTrialBalance } from '../services/trialBalanceParser.js';
+import { computeLineId } from '../utils/line_id.js';
 import { getRoundingTolerance } from '../services/rules_registry.js';
-import { absGt } from '../utils/decimal.js';
+import { absGt, sumRound2 } from '../utils/decimal.js';
 import * as persistence from '../services/persistence_service.js';
 import type { TrialBalanceEntry } from '../types/financial.js';
+import { assertNoAiMutationContext } from '../lib/ai_boundary.js';
 
 // ---------------------------------------------------------------------------
 // Bridge context
@@ -32,6 +39,8 @@ import type { TrialBalanceEntry } from '../types/financial.js';
 
 export interface BridgeContext {
   pool: Pool;
+  /** AI-scoped pool for insertCallLog; when set, postJE uses it for runJustifier. */
+  aiPool?: Pool;
   tenantId: string;
   actor: string;
   actorRole?: CloseRole;
@@ -53,19 +62,30 @@ const saveTrialBalanceSchema = z.object({
   periodLabel: z.string().min(1),
   entries: z.array(trialBalanceEntrySchema).min(1),
   fileName: z.string().optional(),
+  /** When 'synced', uses saveUnadjustedFromSync; requires connectionId. */
+  source: z.enum(['uploaded', 'synced']).optional().default('uploaded'),
+  connectionId: z.string().optional(),
+  syncedBy: z.string().optional(),
 });
+
+const amountProvenanceSchema = z.union([
+  z.object({ kind: z.literal('ledger_exact'), sourceTbRowId: z.string().optional(), sourceLedgerLineId: z.string().optional() }),
+  z.object({ kind: z.literal('engine_calculation'), ruleId: z.string(), ruleVersion: z.string(), inputs: z.record(z.unknown()).optional() }),
+  z.object({ kind: z.literal('human_entered'), enteredBy: z.string(), enteredAt: z.string().optional() }),
+]);
 
 const jeLineSchema = z.object({
   accountRef: z.string().min(1),
   debit: z.number().min(0).optional(),
   credit: z.number().min(0).optional(),
   description: z.string().optional(),
+  amountProvenance: amountProvenanceSchema.optional(),
 });
 
 const createDraftJESchema = z.object({
   commandType: z.literal('CreateDraftJE'),
   closeSessionId: z.string().uuid(),
-  memo: z.string().optional(),
+  memo: z.string().min(1, 'Memo is required'),
   source: z.enum(['manual', 'suggestion', 'recon', 'accrual']),
   createdBy: z.string().optional(),
   lines: z.array(jeLineSchema).min(1),
@@ -108,6 +128,56 @@ const lockPeriodSchema = z.object({
   reason: z.string().optional(),
 });
 
+const debitCreditLineSchema = z.object({
+  account: z.string().min(1),
+  amount: z.number(),
+  amountProvenance: amountProvenanceSchema.optional(),
+});
+
+const journalEntrySuggestionSchema = z.object({
+  id: z.string().min(1),
+  date: z.string().min(1),
+  description: z.string().min(1),
+  debits: z.array(debitCreditLineSchema).optional().default([]),
+  credits: z.array(debitCreditLineSchema).optional().default([]),
+  source: z.enum(['gap', 'reconciliation', 'manual']),
+  sourceDetail: z.string().optional(),
+  confidence: z.number().optional(),
+});
+
+const accrualSuggestionSchema = z.object({
+  id: z.string().min(1),
+  type: z.enum(['accrual', 'deferral']),
+  description: z.string().min(1),
+  debitAccount: z.string().min(1),
+  creditAccount: z.string().min(1),
+  amount: z.number(),
+  periodEnd: z.string().min(1),
+  source: z.enum(['open_ar', 'open_ap', 'payroll', 'manual', 'agentic']),
+  sourceDetail: z.string().optional(),
+  confidence: z.number().optional(),
+});
+
+const createCloseAdjustmentsFromJESchema = z.object({
+  commandType: z.literal('CreateCloseAdjustmentsFromJE'),
+  periodLabel: z.string().min(1),
+  suggestions: z.array(journalEntrySuggestionSchema).min(1),
+});
+
+const createCloseAdjustmentsFromAccrualsSchema = z.object({
+  commandType: z.literal('CreateCloseAdjustmentsFromAccruals'),
+  periodLabel: z.string().min(1),
+  suggestions: z.array(accrualSuggestionSchema).min(1),
+});
+
+const updateCloseAdjustmentSchema = z.object({
+  commandType: z.literal('UpdateCloseAdjustment'),
+  adjustmentId: z.string().min(1),
+  status: z.enum(['pending', 'approved', 'rejected', 'posted']),
+  approvedBy: z.string().optional(),
+  connectionId: z.string().optional(),
+});
+
 export const bridgeCommandSchema = z.discriminatedUnion('commandType', [
   saveTrialBalanceSchema,
   createDraftJESchema,
@@ -116,6 +186,9 @@ export const bridgeCommandSchema = z.discriminatedUnion('commandType', [
   postJESchema,
   applyHitlAdjustmentSchema,
   lockPeriodSchema,
+  createCloseAdjustmentsFromJESchema,
+  createCloseAdjustmentsFromAccrualsSchema,
+  updateCloseAdjustmentSchema,
 ]);
 
 export type BridgeCommand = z.infer<typeof bridgeCommandSchema>;
@@ -132,7 +205,10 @@ export type BridgeResult =
   | { ok: true; commandType: 'PostJE'; journalEntry: { id: string; status: string }; aiWarnings?: Array<{ ai_status: string; reason: string; pillar: string }> }
   | { ok: true; commandType: 'ApplyHitlAdjustmentToTrialBalance'; periodLabel: string; stagedId: string }
   | { ok: true; commandType: 'LockPeriod'; periodLabel: string; lockedAt: string }
-  | { ok: false; error: string; code: string };
+  | { ok: true; commandType: 'CreateCloseAdjustmentsFromJE'; added: import('../types/close_and_controls.js').CloseAdjustment[] }
+  | { ok: true; commandType: 'CreateCloseAdjustmentsFromAccruals'; added: import('../types/close_and_controls.js').CloseAdjustment[] }
+  | { ok: true; commandType: 'UpdateCloseAdjustment'; updated: import('../types/close_and_controls.js').CloseAdjustment }
+  | { ok: false; error: string; code: string; statusCode?: number; periodLabel?: string; approvalRequestId?: string; errors?: string[] };
 
 // ---------------------------------------------------------------------------
 // Audit: record every mutation with command type + actor
@@ -173,11 +249,13 @@ export class BridgeError extends Error {
 /**
  * Execute a single bridge command. Validates with Zod, enforces invariants,
  * calls services, records audit. Returns deterministic result or error.
+ * In prod/staging: asserts not invoked from AI context (AI is advisory-only).
  */
 export async function executeBridgeCommand(
   ctx: BridgeContext,
   command: unknown
 ): Promise<BridgeResult> {
+  assertNoAiMutationContext();
   const parsed = bridgeCommandSchema.safeParse(command);
   if (!parsed.success) {
     const msg = parsed.error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');
@@ -190,14 +268,21 @@ export async function executeBridgeCommand(
     switch (cmd.commandType) {
       case 'SaveTrialBalance': {
         await assertPeriodNotLocked(cmd.periodLabel, ctx.tenantId, ctx.pool);
-        const entries: TrialBalanceEntry[] = cmd.entries.map((e) => ({
-          accountName: e.accountName,
-          debit: e.debit ?? 0,
-          credit: e.credit ?? 0,
-          accountCode: e.accountCode,
-        }));
-        const totalDebits = entries.reduce((s, e) => s + e.debit, 0);
-        const totalCredits = entries.reduce((s, e) => s + e.credit, 0);
+        const entries: TrialBalanceEntry[] = cmd.entries.map((e) => {
+          const accountName = e.accountName ?? '';
+          const debit = e.debit ?? 0;
+          const credit = e.credit ?? 0;
+          const accountCode = e.accountCode;
+          return {
+            accountName,
+            debit,
+            credit,
+            accountCode,
+            lineId: computeLineId({ accountName, debit, credit, accountCode }),
+          };
+        });
+        const totalDebits = sumRound2(entries.map((e) => e.debit));
+        const totalCredits = sumRound2(entries.map((e) => e.credit));
         const tolerance = getRoundingTolerance();
         if (absGt(totalDebits, totalCredits, tolerance)) {
           return {
@@ -206,18 +291,39 @@ export async function executeBridgeCommand(
             code: 'VALIDATION',
           };
         }
-        await saveUnadjustedFromUpload(
-          ctx.tenantId,
-          cmd.periodLabel,
-          entries,
-          { uploadedBy: ctx.actor, fileName: cmd.fileName },
-          ctx.pool
-        );
+        const source = cmd.source ?? 'uploaded';
+        if (source === 'synced') {
+          const connectionId = cmd.connectionId ?? '';
+          if (!connectionId.trim()) {
+            return {
+              ok: false,
+              error: 'connectionId required when source is synced.',
+              code: 'VALIDATION',
+            };
+          }
+          await saveUnadjustedFromSync(
+            ctx.tenantId,
+            cmd.periodLabel,
+            entries,
+            { connectionId, syncedBy: cmd.syncedBy ?? ctx.actor },
+            ctx.pool
+          );
+        } else {
+          await saveUnadjustedFromUpload(
+            ctx.tenantId,
+            cmd.periodLabel,
+            entries,
+            { uploadedBy: ctx.actor, fileName: cmd.fileName },
+            ctx.pool
+          );
+        }
         await recordBridgeMutation(ctx, 'SaveTrialBalance', {
           periodLabel: cmd.periodLabel,
           entryCount: entries.length,
           totalDebits,
           totalCredits,
+          source,
+          ...(source === 'synced' && { connectionId: cmd.connectionId }),
         });
         return { ok: true, commandType: 'SaveTrialBalance', periodLabel: cmd.periodLabel };
       }
@@ -240,6 +346,7 @@ export async function executeBridgeCommand(
             debit: l.debit ?? 0,
             credit: l.credit ?? 0,
             description: l.description,
+            amountProvenance: l.amountProvenance,
           })),
         });
         await recordBridgeMutation(ctx, 'CreateDraftJE', {
@@ -290,7 +397,7 @@ export async function executeBridgeCommand(
         if (periodLabel) {
           await assertPeriodNotLocked(periodLabel, ctx.tenantId, ctx.pool);
         }
-        const result = await postJE(ctx.pool, ctx.tenantId, cmd.journalEntryId);
+        const result = await postJE(ctx.pool, ctx.tenantId, cmd.journalEntryId, ctx.aiPool);
         await recordBridgeMutation(ctx, 'PostJE', {
           periodLabel: periodLabel ?? undefined,
           journalEntryId: cmd.journalEntryId,
@@ -327,14 +434,20 @@ export async function executeBridgeCommand(
           credit: r.credit ?? 0,
         }));
         const base = parseTrialBalance(normalizedRows);
-        const adjustmentEntries: TrialBalanceEntry[] = cmd.adjustment.map((a) => ({
-          accountName: a.accountName,
-          debit: a.debit ?? 0,
-          credit: a.credit ?? 0,
-        }));
+        const adjustmentEntries: TrialBalanceEntry[] = cmd.adjustment.map((a) => {
+          const accountName = a.accountName ?? '';
+          const debit = a.debit ?? 0;
+          const credit = a.credit ?? 0;
+          return {
+            accountName,
+            debit,
+            credit,
+            lineId: computeLineId({ accountName, debit, credit }),
+          };
+        });
         const combined = [...base.entries, ...adjustmentEntries];
-        const totalDebits = combined.reduce((s, e) => s + (e.debit ?? 0), 0);
-        const totalCredits = combined.reduce((s, e) => s + (e.credit ?? 0), 0);
+        const totalDebits = sumRound2(combined.map((e) => e.debit ?? 0));
+        const totalCredits = sumRound2(combined.map((e) => e.credit ?? 0));
         const tolerance = getRoundingTolerance();
         if (absGt(totalDebits, totalCredits, tolerance)) {
           return {
@@ -364,6 +477,65 @@ export async function executeBridgeCommand(
           commandType: 'ApplyHitlAdjustmentToTrialBalance',
           periodLabel: cmd.periodLabel,
           stagedId: cmd.stagedId,
+        };
+      }
+
+      case 'CreateCloseAdjustmentsFromJE': {
+        await assertPeriodNotLocked(cmd.periodLabel, ctx.tenantId, ctx.pool);
+        const suggestions = cmd.suggestions as JournalEntrySuggestion[];
+        const added = await addJEAsAdjustments(cmd.periodLabel, suggestions, ctx.tenantId, ctx.pool);
+        await recordBridgeMutation(ctx, 'CreateCloseAdjustmentsFromJE', {
+          periodLabel: cmd.periodLabel,
+          adjustmentCount: added.length,
+          adjustmentIds: added.map((a) => a.id),
+        });
+        return { ok: true, commandType: 'CreateCloseAdjustmentsFromJE', added };
+      }
+
+      case 'CreateCloseAdjustmentsFromAccruals': {
+        await assertPeriodNotLocked(cmd.periodLabel, ctx.tenantId, ctx.pool);
+        const suggestions = cmd.suggestions as AccrualSuggestion[];
+        const added = await addAccrualsAsAdjustments(cmd.periodLabel, suggestions, ctx.tenantId, ctx.pool);
+        await recordBridgeMutation(ctx, 'CreateCloseAdjustmentsFromAccruals', {
+          periodLabel: cmd.periodLabel,
+          adjustmentCount: added.length,
+          adjustmentIds: added.map((a) => a.id),
+        });
+        return { ok: true, commandType: 'CreateCloseAdjustmentsFromAccruals', added };
+      }
+
+      case 'UpdateCloseAdjustment': {
+        const existing = await getAdjustment(ctx.pool, cmd.adjustmentId, ctx.tenantId);
+        if (!existing) {
+          return { ok: false, error: 'Adjustment not found', code: 'VALIDATION', statusCode: 404 };
+        }
+        await assertPeriodNotLocked(existing.periodLabel, ctx.tenantId, ctx.pool);
+        const result = await updateCloseAdjustmentStatus({
+          id: cmd.adjustmentId,
+          status: cmd.status as import('../types/close_and_controls.js').CloseAdjustmentStatus,
+          approvedBy: cmd.approvedBy,
+          connectionId: cmd.connectionId,
+          tenantId: ctx.tenantId,
+          pool: ctx.pool,
+          actorRole: ctx.actorRole ?? 'preparer',
+          actorUserId: ctx.actor,
+        });
+        if ('updated' in result) {
+          await recordBridgeMutation(ctx, 'UpdateCloseAdjustment', {
+            periodLabel: existing.periodLabel,
+            adjustmentId: cmd.adjustmentId,
+            status: cmd.status,
+          });
+          return { ok: true, commandType: 'UpdateCloseAdjustment', updated: result.updated };
+        }
+        return {
+          ok: false,
+          error: result.error,
+          code: result.statusCode === 403 && result.periodLabel ? 'PERIOD_LOCKED' : 'VALIDATION',
+          statusCode: result.statusCode,
+          periodLabel: result.periodLabel,
+          approvalRequestId: result.approvalRequestId,
+          errors: result.errors,
         };
       }
 
@@ -398,10 +570,20 @@ export async function executeBridgeCommand(
         ok: false,
         error: `Period is locked: ${err.periodLabel}`,
         code: 'PERIOD_LOCKED',
+        periodLabel: err.periodLabel,
       };
     }
     if (err instanceof JournalEntryError) {
       return { ok: false, error: err.message, code: err.code };
+    }
+    if (err instanceof ProvenanceValidationError) {
+      return {
+        ok: false,
+        error: err.message,
+        code: 'VALIDATION',
+        statusCode: 400,
+        errors: err.errors,
+      };
     }
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, error: message, code: 'SERVICE' };

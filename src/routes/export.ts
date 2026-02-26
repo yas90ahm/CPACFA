@@ -12,17 +12,24 @@ import {
   type AgentExportContext,
 } from '../services/export_service.js';
 import { createPdfFromStructuredPayload } from '../services/pdf_export.js';
-import { checkExportGate, TAMPERING_ATTEMPT_DETECTED } from '../services/export_gate_service.js';
+import { checkExportGate, TAMPERING_ATTEMPT_DETECTED, RESOLUTION_MISMATCH } from '../services/export_gate_service.js';
 import { detectIntegrityConflicts } from '../services/integrity_conflict_service.js';
-import { appendAuditLog } from '../services/audit_log_service.js';
-import { recordMaterialEvent } from '../services/audit_ledger_service.js';
-import { createIssueFromIntegrityFailure } from '../services/issue_item_service.js';
+import { recordMaterialEvent, recordLegacyCertifiedSourceUsed, recordAuditLogAction } from '../services/audit_service.js';
+import { createIssueFromIntegrityFailure } from '../services/issue_service.js';
 import { finalIntegrityCheck } from '../services/integrity_check.js';
 import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
 import { ENABLE_INTEGRATED_SUPERVISOR } from '../lib/capability_flags.js';
 import { ALLOW_IMBALANCED_DRAFT_EXPORT, isProduction } from '../lib/env.js';
+import { effectiveAllowLegacyCertifiedSource } from '../lib/runtime_mode.js';
+import { log } from '../lib/logger.js';
 import { getStorage } from '../storage/index.js';
+import { send500 } from '../lib/errorHandler.js';
 import type { AuthRequest } from '../auth/middleware.js';
+import {
+  BinderExportCode,
+  BinderExportMessage,
+  BinderExportRemediation,
+} from '../constants/binder_export_codes.js';
 import type { ExportMode } from '../services/pdf_export.js';
 
 const router = Router();
@@ -68,20 +75,23 @@ function hasAgentContext(body: Record<string, unknown>): body is Record<string, 
 }
 
 /** In production, certification bypass flag is IGNORED and never honored. If present, log tampering_attempt. */
-function auditBypassFlagIfPresent(req: Request, resource: string, tenantId: string | undefined, pool: ReturnType<typeof getTenantPool>): void {
+async function auditBypassFlagIfPresent(
+  req: Request,
+  resource: string,
+  tenantId: string | undefined,
+  pool: ReturnType<typeof getTenantPool>
+): Promise<void> {
   if (!isProduction()) return;
   const body = (req.body as Record<string, unknown>) ?? {};
   const present = 'exportBypassCertification' in body || 'exportBypassCertification' in (req.query ?? {});
-  if (present) {
-    appendAuditLog(
-      {
-        action: 'tampering_attempt',
-        resource,
-        detail: 'exportBypassCertification sent; ignored in production. Certified export requires session.status === certified.',
-        actor: (req as AuthRequest).userId ?? 'anonymous',
-      },
-      tenantId && pool ? { pool, tenantId } : undefined
-    );
+  if (present && pool && tenantId) {
+    await recordAuditLogAction(pool, tenantId, {
+      action: 'tampering_attempt',
+      resource,
+      detail:
+        'exportBypassCertification sent; ignored in production. Certified export requires session.status === certified.',
+      actor: (req as AuthRequest).userId ?? 'anonymous',
+    });
   }
 }
 
@@ -96,7 +106,7 @@ router.post('/pdf', async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    auditBypassFlagIfPresent(req, 'export:pdf', tenantId, pool);
+    await auditBypassFlagIfPresent(req, 'export:pdf', tenantId, pool);
 
     let qualitativeEvidenceMissing = false;
     const bodyForMode = req.body as Record<string, unknown> & { exportMode?: string; closeSessionId?: string; periodLabel?: string };
@@ -106,8 +116,10 @@ router.post('/pdf', async (req: Request, res: Response) => {
       const bodyGate = req.body as Record<string, unknown> & { periodLabel?: string };
       if ('roundingGapExceedsMateriality' in bodyGate || 'aggregateRoundingExceedsMateriality' in bodyGate) {
         res.status(403).json({
-          error: 'Tampering attempt detected',
+          allowed: false,
+          alert: TAMPERING_ATTEMPT_DETECTED,
           code: TAMPERING_ATTEMPT_DETECTED,
+          error: 'Tampering attempt detected',
           message: 'Materiality flags cannot be supplied by client.',
         });
         return;
@@ -142,11 +154,11 @@ router.post('/pdf', async (req: Request, res: Response) => {
           });
           return;
         }
-        if (session.status !== 'certified') {
+        if ((session.status !== 'certified' && session.status !== 'locked')) {
           res.status(403).json({
             error: 'Close not certified',
             code: 'CLOSE_NOT_CERTIFIED',
-            message: 'Certified export requires session.status === \'certified\'. Use exportMode=draft for pre-certification export.',
+            message: 'Certified export requires session status certified or locked. Use exportMode=draft for pre-certification export.',
           });
           return;
         }
@@ -170,9 +182,21 @@ router.post('/pdf', async (req: Request, res: Response) => {
           periodLabel: periodLabel || undefined,
         });
         if (!gateResult.allowed) {
+          if (gateResult.alert === RESOLUTION_MISMATCH && gateResult.details) {
+            res.status(422).json({
+              allowed: false,
+              alert: RESOLUTION_MISMATCH,
+              code: 'RESOLUTION_MISMATCH',
+              message: gateResult.message ?? 'Ledger resolution mismatch: export blocked.',
+              details: gateResult.details,
+            });
+            return;
+          }
           res.status(403).json({
-            error: gateResult.alert ?? 'Export blocked',
+            allowed: false,
+            alert: gateResult.alert ?? 'CRITICAL_TAMPER_ALERT',
             code: gateResult.alert,
+            error: gateResult.alert ?? 'Export blocked',
             message: gateResult.message ?? 'Financial export blocked.',
           });
           return;
@@ -183,22 +207,58 @@ router.post('/pdf', async (req: Request, res: Response) => {
 
     const body = req.body as Record<string, unknown> & { pdf_type?: string; agent_context?: AgentExportContext };
     const pdfType = (body?.pdf_type ?? 'detailed') as string;
-    const financial_statements = (body.financial_statements as Record<string, unknown>) ?? {};
+    type CleanLedgerRow = { account_code?: string; account_name: string; debit: number; credit: number; account_type?: string };
+    let financial_statements: Record<string, unknown> = (body.financial_statements as Record<string, unknown>) ?? {};
+    let clean_ledger_raw: CleanLedgerRow[] = (body.clean_ledger as CleanLedgerRow[]) ?? [];
+    let certifiedExportResult: Awaited<ReturnType<typeof import('../services/audit_export_service.js').getCertifiedStatementsForBinder>> = null;
+    if (exportMode === 'certified') {
+      const closeSessionIdExport = (bodyForMode.closeSessionId ?? (req.query.closeSessionId as string) ?? '') as string;
+      if (closeSessionIdExport && tenantId && pool) {
+        const { getCertifiedStatementsForBinder } = await import('../services/audit_export_service.js');
+        const { statementsToExportPayload } = await import('../services/certified_statements_service.js');
+        const allowLegacy = effectiveAllowLegacyCertifiedSource(req);
+        const result = await getCertifiedStatementsForBinder(pool, tenantId, closeSessionIdExport, { allowLegacyCertifiedSource: allowLegacy });
+        if (result) {
+          certifiedExportResult = result;
+          const payload = statementsToExportPayload(result.statements);
+          financial_statements = payload.financial_statements;
+          clean_ledger_raw = payload.clean_ledger;
+        } else if (!allowLegacy) {
+          const payload: {
+            error: string;
+            code: string;
+            message: string;
+            remediation?: string;
+            allowLegacyCertifiedSourceEffective?: boolean;
+            attemptedSource?: string;
+          } = {
+            error: 'Unprocessable Entity',
+            code: BinderExportCode.NO_CERTIFIED_SOURCE,
+            message: BinderExportMessage[BinderExportCode.NO_CERTIFIED_SOURCE],
+            allowLegacyCertifiedSourceEffective: allowLegacy,
+            attemptedSource: 'certified_snapshot',
+          };
+          if (BinderExportRemediation[BinderExportCode.NO_CERTIFIED_SOURCE]) {
+            payload.remediation = BinderExportRemediation[BinderExportCode.NO_CERTIFIED_SOURCE];
+          }
+          return res.status(422).json(payload);
+        }
+      }
+    }
 
     const conflictInput = extractIntegrityConflictInput(financial_statements);
     if (conflictInput) {
       const { conflicts, hasFatal } = detectIntegrityConflicts(conflictInput);
       if (hasFatal) {
         const authReq = req as AuthRequest;
-        appendAuditLog(
-          {
+        if (tenantId && pool) {
+          await recordAuditLogAction(pool, tenantId, {
             action: 'BLOCKED_EXPORT',
             resource: 'export:pdf',
             detail: JSON.stringify({ reason: 'CPA vs CFA conflict', conflicts }),
             actor: authReq.userId ?? 'anonymous',
-          },
-          tenantId && pool ? { pool, tenantId } : undefined
-        );
+          });
+        }
         const closeSessionId = (req.body as Record<string, unknown>).closeSessionId ?? (req.query as Record<string, unknown>).closeSessionId;
         if (tenantId && pool && typeof closeSessionId === 'string' && closeSessionId) {
           try {
@@ -225,7 +285,6 @@ router.post('/pdf', async (req: Request, res: Response) => {
       }
     }
 
-    const clean_ledger_raw = (body.clean_ledger as Array<{ account_code?: string; account_name: string; debit: number; credit: number; account_type?: string }>) ?? [];
     const bs = (financial_statements.balance_sheet ?? financial_statements.balanceSheet) as Record<string, unknown> | undefined;
     const totalAssets = bs != null ? Number(bs.total_assets ?? bs.totalAssets ?? 0) : 0;
     const totalLiabilities = bs != null ? Number(bs.total_liabilities ?? bs.totalLiabilities ?? 0) : 0;
@@ -250,8 +309,8 @@ router.post('/pdf', async (req: Request, res: Response) => {
       if (exportMode === 'certified') {
         return res.status(422).json({
           error: 'Unprocessable Entity',
-          code: 'FINAL_INTEGRITY_CHECK_FAILED',
-          message: finalCheck.error ?? 'Export blocked: imbalance or unclassified Suspense accounts.',
+          code: BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED,
+          message: finalCheck.error ?? BinderExportMessage[BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED],
           checks: finalCheck.checks,
           suspenseAccounts: finalCheck.suspenseAccounts,
           plugSuspicious: finalCheck.plugSuspicious,
@@ -262,8 +321,8 @@ router.post('/pdf', async (req: Request, res: Response) => {
       } else {
         return res.status(422).json({
           error: 'Unprocessable Entity',
-          code: 'FINAL_INTEGRITY_CHECK_FAILED',
-          message: finalCheck.error ?? 'Export blocked: imbalance or unclassified Suspense accounts.',
+          code: BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED,
+          message: finalCheck.error ?? BinderExportMessage[BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED],
           checks: finalCheck.checks,
           suspenseAccounts: finalCheck.suspenseAccounts,
           plugSuspicious: finalCheck.plugSuspicious,
@@ -276,7 +335,6 @@ router.post('/pdf', async (req: Request, res: Response) => {
       const cover = (body.cover as Record<string, string>) ?? {};
       const audit_trail = (body.audit_trail as Array<{ timestamp_utc: string; event_type: string; reasoning: string; citations: string; outcome: string }>) ?? [];
       const audit_trail_rules_cited = (body.audit_trail_rules_cited as string[]) ?? [];
-      const clean_ledger_raw = (body.clean_ledger as Array<{ account_code?: string; account_name: string; debit: number; credit: number; account_type?: string }>) ?? [];
       const binderSummary = {
         entityName: cover.entity_name,
         periodStart: (body.periodStart as string) ?? '',
@@ -330,9 +388,9 @@ router.post('/pdf', async (req: Request, res: Response) => {
         if (closeSessionIdForDraft) {
           const { getSession } = await import('../services/close_session_service.js');
           const session = await getSession(pool, tenantId, closeSessionIdForDraft);
-          (pdfPayload as { draftWorkflowState?: string }).draftWorkflowState = session?.status ?? 'draft';
+          (pdfPayload as { draftWorkflowState?: string }).draftWorkflowState = session?.status ?? 'open';
         } else {
-          (pdfPayload as { draftWorkflowState?: string }).draftWorkflowState = 'draft';
+          (pdfPayload as { draftWorkflowState?: string }).draftWorkflowState = 'open';
         }
       }
       const buf = await createPdfFromStructuredPayload(pdfPayload);
@@ -351,6 +409,20 @@ router.post('/pdf', async (req: Request, res: Response) => {
         const key = `${tenantId}/exports/pdf/${periodLabel || 'na'}/${ts}.pdf`;
         await getStorage().putObject(key, Buffer.from(buf), { contentType: 'application/pdf' });
         res.setHeader('X-Export-File-Ref', key);
+      }
+      if (exportMode === 'certified' && certifiedExportResult) {
+        res.setHeader('X-Certified-Source', certifiedExportResult.source);
+        if (certifiedExportResult.source === 'legacy') res.setHeader('X-Legacy-Certified-Source', 'true');
+        if (certifiedExportResult.certifiedSnapshotId) res.setHeader('X-Certified-Snapshot-Id', certifiedExportResult.certifiedSnapshotId);
+        if (certifiedExportResult.snapshotHash) res.setHeader('X-Certified-Snapshot-Hash', certifiedExportResult.snapshotHash);
+        if (certifiedExportResult.snapshotHashVersion != null) res.setHeader('X-Certified-Snapshot-Hash-Version', String(certifiedExportResult.snapshotHashVersion));
+        if (certifiedExportResult.source === 'legacy' && tenantId && pool) {
+          const closeSessionIdExport = (bodyForMode.closeSessionId ?? (req.query.closeSessionId as string) ?? '') as string;
+          const bodyG = req.body as Record<string, unknown> & { periodLabel?: string };
+          const periodLabel = (bodyG.periodLabel ?? (req.query.periodLabel as string) ?? '') as string;
+          log('warn', 'Legacy certified source used', { tenantId, closeSessionId: closeSessionIdExport });
+          await recordLegacyCertifiedSourceUsed(pool, { tenantId, closeSessionId: closeSessionIdExport, periodLabel: periodLabel || undefined, createdBy: (req as { userId?: string }).userId });
+        }
       }
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
@@ -394,12 +466,25 @@ router.post('/pdf', async (req: Request, res: Response) => {
         : pdfType === 'summary'
           ? 'Draft_Financials_NOT_CERTIFIED_summary.pdf'
           : 'Draft_Financials_NOT_CERTIFIED.pdf';
+    if (exportMode === 'certified' && certifiedExportResult) {
+      res.setHeader('X-Certified-Source', certifiedExportResult.source);
+      if (certifiedExportResult.source === 'legacy') res.setHeader('X-Legacy-Certified-Source', 'true');
+      if (certifiedExportResult.certifiedSnapshotId) res.setHeader('X-Certified-Snapshot-Id', certifiedExportResult.certifiedSnapshotId);
+      if (certifiedExportResult.snapshotHash) res.setHeader('X-Certified-Snapshot-Hash', certifiedExportResult.snapshotHash);
+      if (certifiedExportResult.snapshotHashVersion != null) res.setHeader('X-Certified-Snapshot-Hash-Version', String(certifiedExportResult.snapshotHashVersion));
+      if (certifiedExportResult.source === 'legacy' && tenantId && pool) {
+        const bodyG = req.body as Record<string, unknown> & { closeSessionId?: string; periodLabel?: string };
+        const closeSessionIdExport = (bodyG.closeSessionId ?? (req.query.closeSessionId as string) ?? '') as string;
+        const periodLabel = (bodyG.periodLabel ?? (req.query.periodLabel as string) ?? '') as string;
+        log('warn', 'Legacy certified source used', { tenantId, closeSessionId: closeSessionIdExport });
+        await recordLegacyCertifiedSourceUsed(pool, { tenantId, closeSessionId: closeSessionIdExport, periodLabel: periodLabel || undefined, createdBy: (req as { userId?: string }).userId });
+      }
+    }
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
     res.send(buf);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'PDF export failed';
-    res.status(500).json({ error: 'Export error', message });
+    send500(res, err, 'PDF export failed');
   }
 });
 
@@ -412,7 +497,7 @@ router.post('/csv', async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    auditBypassFlagIfPresent(req, 'export:csv', tenantId, pool);
+    await auditBypassFlagIfPresent(req, 'export:csv', tenantId, pool);
 
     const bodyCsv = req.body as Record<string, unknown> & { exportMode?: string; closeSessionId?: string; periodLabel?: string };
     const exportModeCsv: ExportMode = (bodyCsv.exportMode ?? (req.query.exportMode as string) ?? 'draft') === 'certified' ? 'certified' : 'draft';
@@ -421,8 +506,10 @@ router.post('/csv', async (req: Request, res: Response) => {
       const bodyGate = req.body as Record<string, unknown> & { periodLabel?: string };
       if ('roundingGapExceedsMateriality' in bodyGate || 'aggregateRoundingExceedsMateriality' in bodyGate) {
         res.status(403).json({
-          error: 'Tampering attempt detected',
+          allowed: false,
+          alert: TAMPERING_ATTEMPT_DETECTED,
           code: TAMPERING_ATTEMPT_DETECTED,
+          error: 'Tampering attempt detected',
           message: 'Materiality flags cannot be supplied by client.',
         });
         return;
@@ -455,11 +542,11 @@ router.post('/csv', async (req: Request, res: Response) => {
           });
           return;
         }
-        if (session.status !== 'certified') {
+        if ((session.status !== 'certified' && session.status !== 'locked')) {
           res.status(403).json({
             error: 'Close not certified',
             code: 'CLOSE_NOT_CERTIFIED',
-            message: 'Certified CSV export requires session.status === \'certified\'. Use exportMode=draft for pre-certification export.',
+            message: 'Certified CSV export requires session status certified or locked. Use exportMode=draft for pre-certification export.',
           });
           return;
         }
@@ -471,9 +558,21 @@ router.post('/csv', async (req: Request, res: Response) => {
           periodLabel: periodLabel || undefined,
         });
         if (!gateResult.allowed) {
+          if (gateResult.alert === RESOLUTION_MISMATCH && gateResult.details) {
+            res.status(422).json({
+              allowed: false,
+              alert: RESOLUTION_MISMATCH,
+              code: 'RESOLUTION_MISMATCH',
+              message: gateResult.message ?? 'Ledger resolution mismatch: export blocked.',
+              details: gateResult.details,
+            });
+            return;
+          }
           res.status(403).json({
-            error: gateResult.alert ?? 'Export blocked',
+            allowed: false,
+            alert: gateResult.alert ?? 'CRITICAL_TAMPER_ALERT',
             code: gateResult.alert,
+            error: gateResult.alert ?? 'Export blocked',
             message: gateResult.message ?? 'Financial export blocked.',
           });
           return;
@@ -483,7 +582,39 @@ router.post('/csv', async (req: Request, res: Response) => {
     const body = req.body as {
       clean_ledger?: Array<{ account_code?: string; account_name: string; debit: number; credit: number; account_type?: string; Agent_Confidence_Score?: number }>;
     };
-    const raw = body?.clean_ledger ?? [];
+    const closeSessionIdCsv = (bodyCsv.closeSessionId ?? (req.query.closeSessionId as string) ?? '') as string;
+    let raw: Array<{ account_code?: string; account_name: string; debit: number; credit: number; account_type?: string; Agent_Confidence_Score?: number }> = body?.clean_ledger ?? [];
+    let certifiedCsvResult: Awaited<ReturnType<typeof import('../services/audit_export_service.js').getCertifiedStatementsForBinder>> = null;
+    if (exportModeCsv === 'certified' && closeSessionIdCsv && tenantId && pool) {
+      const { getCertifiedStatementsForBinder } = await import('../services/audit_export_service.js');
+      const { statementsToExportPayload } = await import('../services/certified_statements_service.js');
+      const allowLegacyCsv = effectiveAllowLegacyCertifiedSource(req);
+      const resultCsv = await getCertifiedStatementsForBinder(pool, tenantId, closeSessionIdCsv, { allowLegacyCertifiedSource: allowLegacyCsv });
+      if (resultCsv) {
+        certifiedCsvResult = resultCsv;
+        const payload = statementsToExportPayload(resultCsv.statements);
+        raw = payload.clean_ledger as typeof raw;
+      } else if (!allowLegacyCsv) {
+        const payload: {
+          error: string;
+          code: string;
+          message: string;
+          remediation?: string;
+          allowLegacyCertifiedSourceEffective?: boolean;
+          attemptedSource?: string;
+        } = {
+          error: 'Unprocessable Entity',
+          code: BinderExportCode.NO_CERTIFIED_SOURCE,
+          message: BinderExportMessage[BinderExportCode.NO_CERTIFIED_SOURCE],
+          allowLegacyCertifiedSourceEffective: allowLegacyCsv,
+          attemptedSource: 'certified_snapshot',
+        };
+        if (BinderExportRemediation[BinderExportCode.NO_CERTIFIED_SOURCE]) {
+          payload.remediation = BinderExportRemediation[BinderExportCode.NO_CERTIFIED_SOURCE];
+        }
+        return res.status(422).json(payload);
+      }
+    }
     let totalDebitsCsv = 0;
     let totalCreditsCsv = 0;
     for (const row of raw) {
@@ -502,8 +633,8 @@ router.post('/csv', async (req: Request, res: Response) => {
     if (!finalCheckCsv.passed) {
       return res.status(422).json({
         error: 'Unprocessable Entity',
-        code: 'FINAL_INTEGRITY_CHECK_FAILED',
-        message: finalCheckCsv.error ?? 'Export blocked: imbalance or unclassified Suspense accounts.',
+        code: BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED,
+        message: finalCheckCsv.error ?? BinderExportMessage[BinderExportCode.FINAL_INTEGRITY_CHECK_FAILED],
         checks: finalCheckCsv.checks,
         suspenseAccounts: finalCheckCsv.suspenseAccounts,
         plugSuspicious: finalCheckCsv.plugSuspicious,
@@ -545,12 +676,25 @@ router.post('/csv', async (req: Request, res: Response) => {
       res.setHeader('X-Export-File-Ref', key);
     }
     const csvName = exportModeCsv === 'certified' ? 'Certified_Financials.csv' : 'Draft_Financials_NOT_CERTIFIED.csv';
+    if (exportModeCsv === 'certified' && certifiedCsvResult) {
+      res.setHeader('X-Certified-Source', certifiedCsvResult.source);
+      if (certifiedCsvResult.source === 'legacy') res.setHeader('X-Legacy-Certified-Source', 'true');
+      if (certifiedCsvResult.certifiedSnapshotId) res.setHeader('X-Certified-Snapshot-Id', certifiedCsvResult.certifiedSnapshotId);
+      if (certifiedCsvResult.snapshotHash) res.setHeader('X-Certified-Snapshot-Hash', certifiedCsvResult.snapshotHash);
+      if (certifiedCsvResult.snapshotHashVersion != null) res.setHeader('X-Certified-Snapshot-Hash-Version', String(certifiedCsvResult.snapshotHashVersion));
+      if (certifiedCsvResult.source === 'legacy' && tenantId && pool) {
+        const bodyG = req.body as Record<string, unknown> & { closeSessionId?: string; periodLabel?: string };
+        const closeSessionIdCsv = (bodyG.closeSessionId ?? (req.query.closeSessionId as string) ?? '') as string;
+        const periodLabel = (bodyG.periodLabel ?? (req.query.periodLabel as string) ?? '') as string;
+        log('warn', 'Legacy certified source used', { tenantId, closeSessionId: closeSessionIdCsv });
+        await recordLegacyCertifiedSourceUsed(pool, { tenantId, closeSessionId: closeSessionIdCsv, periodLabel: periodLabel || undefined, createdBy: (req as { userId?: string }).userId });
+      }
+    }
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${csvName}"`);
     res.send(buf);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'CSV export failed';
-    res.status(500).json({ error: 'Export error', message });
+    send500(res, err, 'CSV export failed');
   }
 });
 

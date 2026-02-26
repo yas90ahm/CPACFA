@@ -15,14 +15,34 @@ export interface StatementPackage {
   status: StatementPackageStatus;
   engineVersion?: string;
   ruleVersionsSnapshot?: Record<string, unknown>;
+  /** Cross-statement validation (net income tie, cash tie, RE tie). */
+  validationResults?: ValidationResult[];
 }
+
+export interface ValidationResult {
+  check: string;
+  passed: boolean;
+  message?: string;
+}
+
+export type StatementType = 'balance_sheet' | 'profit_and_loss' | 'cash_flow' | 'equity';
 
 export interface StatementLine {
   packageId: string;
   fsLineId: string;
   amount: number;
-  statement: 'balance_sheet' | 'profit_and_loss';
+  statement: StatementType;
   metadata?: Record<string, unknown>;
+  /** Display order for frontend rendering. */
+  displayOrder?: number;
+  /** Indent level: 0=section, 1=detail. */
+  indentLevel?: number;
+  /** True for subtotal rows (e.g. Total Revenue). */
+  isSubtotal?: boolean;
+  /** True for grand total rows (e.g. Net Income, Total Assets). */
+  isGrandTotal?: boolean;
+  /** Section name for grouping (e.g. "Revenue", "Current Assets"). */
+  sectionName?: string | null;
 }
 
 export interface StatementDiffRecord {

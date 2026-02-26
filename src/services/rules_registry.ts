@@ -9,7 +9,13 @@ import { join } from 'path';
 
 export interface FinancialRules {
   roundingTolerance: number;
-  materiality: { defaultThreshold: number; description?: string };
+  materiality: {
+    defaultThreshold: number;
+    absoluteThreshold?: number;
+    relativeThreshold?: number;
+    roundingToleranceCents?: number;
+    description?: string;
+  };
   equations?: Record<string, { description?: string; toleranceKey?: string }>;
 }
 

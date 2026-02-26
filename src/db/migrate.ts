@@ -11,12 +11,13 @@ import { getControlPool, queryControl, isDbConfigured, runTenantMigrations } fro
 
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 
-/** Control DB migrations only (001, 002, 010, 075). Do not run 003 on control. */
+/** Control DB migrations only (001, 002, 010, 075, 119). Do not run 003 on control. */
 const CONTROL_MIGRATION_FILES = [
   '001_initial.sql',
   '002_control_add_database_url.sql',
   '010_scheduler_lock.sql',
   '075_jobs.sql',
+  '119_user_management_and_portfolio.sql',
 ];
 
 async function getAppliedVersionsControl(): Promise<number[]> {
@@ -55,6 +56,33 @@ export async function runMigrations(): Promise<void> {
     await queryControl('INSERT INTO schema_migrations (version) VALUES ($1)', [version]);
   }
   console.log('Control migrations complete.');
+
+  // When using shared DB (no tenant-specific database_url), run tenant migrations on control pool
+  // so tenant tables exist before first API request (avoids 500 on first /api/settings/entities or /api/close/sessions).
+  const r = await queryControl<{ database_url: string | null }>('SELECT database_url FROM tenants WHERE database_url IS NOT NULL AND database_url != \'\' LIMIT 1');
+  const hasTenantDb = r?.rows?.length > 0;
+  if (!hasTenantDb) {
+    try {
+      console.log('Running tenant migrations on control DB (shared schema)...');
+      await runTenantMigrations(pool);
+      console.log('Tenant migrations complete.');
+    } catch (e) {
+      console.warn('Tenant migrations failed (first request may still run them):', (e as Error).message);
+    }
+  }
+}
+
+/**
+ * Test that a database URL is reachable (runs SELECT 1).
+ * Throws on connection failure.
+ */
+export async function testConnectionForUrl(url: string): Promise<void> {
+  const pool = new pg.Pool({ connectionString: url, max: 1 });
+  try {
+    await pool.query('SELECT 1');
+  } finally {
+    await pool.end();
+  }
 }
 
 /**

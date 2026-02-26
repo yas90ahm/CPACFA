@@ -22,8 +22,7 @@ import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
 import { recordOverride } from '../services/audit_ledger_service.js';
 import { parseTrialBalance } from '../services/trialBalanceParser.js';
 import { getRoundingTolerance } from '../services/rules_registry.js';
-import { absGt } from '../utils/decimal.js';
-import { appendAuditLog } from '../services/audit_log_service.js';
+import { absGt, sumRound2, minus } from '../utils/decimal.js';
 import * as persistence from '../services/persistence_service.js';
 import { executeBridgeCommand } from '../bridge/index.js';
 import type { JournalEntryProposal } from '../types/hitl.js';
@@ -41,8 +40,25 @@ import {
 } from '../services/draft_service.js';
 import { runShadowAudit } from '../ai/ai_orchestrator.js';
 import * as findingsRepo from '../db/repositories/tenant_shadow_audit_findings_repository.js';
+import * as glRepository from '../db/repositories/general_ledger_repository.js';
+import { buildDerivedTrialBalance } from '../services/gl_to_tb_aggregation_service.js';
+import { saveUnadjustedFromGLDerived } from '../services/trial_balance_store_service.js';
+import type { GeneralLedgerLine } from '../types/general_ledger.js';
 
 const router = Router();
+
+/** Trial balance entry shape for toFinancialAccountType (gl_to_tb duplication). */
+function toFinancialAccountType(t?: string): 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE' | undefined {
+  if (!t) return undefined;
+  const map: Record<string, 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE'> = {
+    Asset: 'ASSET',
+    Liability: 'LIABILITY',
+    Equity: 'EQUITY',
+    Revenue: 'REVENUE',
+    Expense: 'EXPENSE',
+  };
+  return map[t];
+}
 
 const OVERRIDE_TYPES: StagingItemType[] = ['policy_change', 'flag_override'];
 
@@ -179,8 +195,8 @@ router.post(
       credit: p.credit ?? 0,
     }));
     const combinedEntries = [...base.entries, ...adjustmentEntries];
-    const totalDebits = combinedEntries.reduce((s, e) => s + (e.debit ?? 0), 0);
-    const totalCredits = combinedEntries.reduce((s, e) => s + (e.credit ?? 0), 0);
+    const totalDebits = sumRound2(combinedEntries.map((e) => e.debit ?? 0));
+    const totalCredits = sumRound2(combinedEntries.map((e) => e.credit ?? 0));
     const tolerance = getRoundingTolerance();
     if (absGt(totalDebits, totalCredits, tolerance)) {
       res.status(422).json({
@@ -188,7 +204,7 @@ router.post(
         message: 'Adjustment still does not balance. Sum(Debits) != Sum(Credits).',
         totalDebits,
         totalCredits,
-        imbalanceAmount: Math.abs(totalDebits - totalCredits),
+        imbalanceAmount: Math.abs(minus(totalDebits, totalCredits)),
       });
       return;
     }
@@ -278,6 +294,147 @@ router.post(
           pillar: 'shadow_auditor',
         },
       }),
+    });
+  })
+);
+
+/** POST /api/hitl/resolve-gl-ingest — Resolve staged imbalanced GL entry; apply corrected lines and save to general_ledger. */
+router.post(
+  '/resolve-gl-ingest',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = req.body as {
+      stagedId: string;
+      resolution: {
+        action: 'apply_correction' | 'skip';
+        correctedLines?: Array<{
+          line_number?: number;
+          account_code: string;
+          debit?: number;
+          credit?: number;
+          description?: string;
+        }>;
+      };
+    };
+    if (!body?.stagedId || !body?.resolution) {
+      res.status(400).json({
+        error: 'Missing required fields',
+        required: ['stagedId', 'resolution'],
+      });
+      return;
+    }
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!pool || !tenantId) {
+      res.status(400).json({ error: 'Tenant context (pool, tenantId) required for resolve-gl-ingest' });
+      return;
+    }
+    const item = await persistence.getStagingItem(pool, tenantId, body.stagedId);
+    if (!item) {
+      res.status(404).json({ error: 'Staging item not found' });
+      return;
+    }
+    if (item.status !== 'pending') {
+      res.status(400).json({
+        error: 'Staging item already resolved',
+        status: item.status,
+      });
+      return;
+    }
+    const payload = item.payload as Record<string, unknown> | undefined;
+    if (payload?.kind !== 'gl_ingest') {
+      res.status(400).json({
+        error: 'Staging item is not a gl_ingest; use /resolve-ingest for trial_balance_ingest or /resolve for approve/reject',
+      });
+      return;
+    }
+    const periodLabel = payload.periodLabel as string | undefined;
+    const entryId = payload.entry_id as string | undefined;
+    const entryDate = payload.entry_date as string | undefined;
+    if (!periodLabel || !entryId) {
+      res.status(400).json({ error: 'Staging payload missing periodLabel or entry_id' });
+      return;
+    }
+    const authReq = req as AuthRequest;
+    const createdBy = authReq.userId ?? authReq.tenantId ?? 'api';
+
+    if (body.resolution.action === 'skip') {
+      await persistence.updateStagingStatus(pool, tenantId, body.stagedId, {
+        status: 'rejected',
+        rejectedReason: 'Entry skipped by controller',
+      });
+      return res.json({
+        success: true,
+        message: 'Entry skipped',
+        stagedId: body.stagedId,
+      });
+    }
+
+    if (body.resolution.action === 'apply_correction') {
+      const correctedLines = body.resolution.correctedLines;
+      if (!correctedLines || !Array.isArray(correctedLines) || correctedLines.length === 0) {
+        res.status(400).json({
+          error: 'correctedLines (non-empty array) required for apply_correction action',
+        });
+        return;
+      }
+      const totalDebits = sumRound2(correctedLines.map((l) => l.debit ?? 0));
+      const totalCredits = sumRound2(correctedLines.map((l) => l.credit ?? 0));
+      const imbalance = Math.abs(minus(totalDebits, totalCredits));
+      if (imbalance > 0.01) {
+        res.status(422).json({
+          error: 'Corrected lines still imbalanced',
+          totalDebits,
+          totalCredits,
+          imbalance,
+          message: 'Sum(Debits) must equal Sum(Credits) within 0.01 tolerance.',
+        });
+        return;
+      }
+      const newLines: GeneralLedgerLine[] = correctedLines.map((line, idx) => ({
+        tenant_id: tenantId,
+        period_label: periodLabel,
+        entry_id: entryId,
+        line_number: line.line_number ?? idx + 1,
+        entry_date: entryDate ?? new Date().toISOString().slice(0, 10),
+        account_code: line.account_code,
+        debit: line.debit ?? 0,
+        credit: line.credit ?? 0,
+        description: line.description,
+        created_by: createdBy,
+      } as GeneralLedgerLine));
+      const existingLines = await glRepository.getGLForPeriod(pool, tenantId, periodLabel);
+      const combinedLines = [...existingLines, ...newLines];
+      await glRepository.upsertGLForPeriod(pool, tenantId, periodLabel, combinedLines, { createdBy });
+      try {
+        const derived = await buildDerivedTrialBalance(pool, tenantId, periodLabel);
+        const tbEntries = derived.entries.map((e) => ({
+          accountCode: e.account_code,
+          accountName: e.account_name,
+          accountType: toFinancialAccountType(e.account_type),
+          debit: e.total_debits ?? e.debit ?? 0,
+          credit: e.total_credits ?? e.credit ?? 0,
+        }));
+        await saveUnadjustedFromGLDerived(tenantId, periodLabel, tbEntries, { derivedBy: createdBy }, pool);
+      } catch (err) {
+        console.error('Failed to re-derive TB after GL correction:', err);
+      }
+      await persistence.updateStagingStatus(pool, tenantId, body.stagedId, {
+        status: 'approved',
+        approvedBy: createdBy,
+      });
+      return res.json({
+        success: true,
+        message: 'Entry corrected and saved to general_ledger.',
+        stagedId: body.stagedId,
+        entry_id: entryId,
+        linesInserted: newLines.length,
+        periodLabel,
+      });
+    }
+
+    res.status(400).json({
+      error: 'Invalid resolution action',
+      validActions: ['apply_correction', 'skip'],
     });
   })
 );

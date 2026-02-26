@@ -151,7 +151,7 @@ const varianceLineSchema = z.object({
   variance: finiteNumber,
   variancePercent: finiteNumber,
   material: z.boolean(),
-  drivers: z.array(z.object({ type: z.string(), description: z.string(), estimatedImpact: optionalFiniteNumber })).optional(),
+  drivers: z.array(z.object({ type: z.enum(['volume', 'price', 'mix', 'timing', 'acquisition_divestiture', 'new_product', 'discontinued', 'other']), description: z.string(), estimatedImpact: optionalFiniteNumber })).optional(),
   category: z.string().optional(),
 }).passthrough();
 

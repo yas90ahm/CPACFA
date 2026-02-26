@@ -59,6 +59,34 @@ export async function saveUnadjustedFromUpload(
   });
 }
 
+/**
+ * Save GL-derived trial balance to period_trial_balance.
+ * Used when GL is uploaded and TB is derived; export gate can then compute materiality.
+ */
+export async function saveUnadjustedFromGLDerived(
+  tenantId: string,
+  periodLabel: string,
+  entries: TrialBalanceEntry[],
+  meta: { derivedBy?: string },
+  pool?: Pool
+): Promise<void> {
+  const now = new Date().toISOString();
+  if (isDbConfigured() && pool) {
+    await repo.upsertUnadjusted(pool, tenantId, periodLabel, entries, {
+      source: 'gl_derived',
+      uploadedBy: meta.derivedBy,
+      uploadedAt: now,
+    });
+    return;
+  }
+  memory.set(key(tenantId, periodLabel), {
+    entries,
+    source: 'gl_derived',
+    at: now,
+    by: meta.derivedBy,
+  });
+}
+
 export async function saveUnadjustedFromSync(
   tenantId: string,
   periodLabel: string,
@@ -94,8 +122,14 @@ export async function getUnadjusted(
   if (isDbConfigured() && pool) {
     const rec = await repo.getUnadjusted(pool, tenantId, periodLabel);
     if (!rec) return null;
-    const at = rec.source === 'uploaded' ? rec.uploadedAt : rec.syncedAt;
-    const by = rec.source === 'uploaded' ? rec.uploadedBy : rec.syncedBy;
+    const at =
+      rec.source === 'uploaded' || rec.source === 'gl_derived'
+        ? rec.uploadedAt
+        : rec.syncedAt;
+    const by =
+      rec.source === 'uploaded' || rec.source === 'gl_derived'
+        ? rec.uploadedBy
+        : rec.syncedBy;
     return {
       entries: rec.entries,
       source: rec.source,

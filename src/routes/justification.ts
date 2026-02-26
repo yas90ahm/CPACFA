@@ -10,6 +10,7 @@ import {
   getJustificationsForPeriod,
 } from '../services/justification_service.js';
 import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
+import { send500 } from '../lib/errorHandler.js';
 
 const router = Router();
 
@@ -33,8 +34,7 @@ router.post('/chat', async (req: Request, res: Response) => {
       formatted: response.formatted,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Justification failed';
-    res.status(500).json({ error: 'Justification error', message });
+    send500(res, err, 'Justification chat failed');
   }
 });
 
@@ -62,8 +62,7 @@ router.get('/audit-defense/summary', async (req: Request, res: Response) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Summary failed';
-    res.status(500).json({ error: 'Summary error', message });
+    send500(res, err, 'Audit defense summary failed');
   }
 });
 
@@ -90,8 +89,7 @@ router.get('/audit-defense/export', async (req: Request, res: Response) => {
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(buffer);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Export failed';
-    res.status(500).json({ error: 'Export error', message });
+    send500(res, err, 'Audit defense export failed');
   }
 });
 
@@ -111,8 +109,7 @@ router.get('/list', async (req: Request, res: Response) => {
       : getJustificationsForPeriod('1970-01-01', '2100-01-01', tenantId ?? undefined, pool ?? undefined));
     res.json({ justifications: list });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'List failed';
-    res.status(500).json({ error: 'List error', message });
+    send500(res, err, 'Justification list failed');
   }
 });
 

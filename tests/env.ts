@@ -27,6 +27,10 @@ if (fs.existsSync(rootEnv)) {
 
 if (process.env.TEST_AUTH_PRODUCTION !== '1') {
   process.env.NODE_ENV = 'test';
+  // Force AI mocks so integration tests never call live LLMs (deterministic, no timeouts).
+  process.env.AI_MOCK = 'true';
+  process.env.AI_MOCK_CLASSIFIER = 'true';
+  process.env.AI_MOCK_ADVISOR = 'true';
 }
 
 // CI: never silently skip — require DATABASE_URL and fail hard if missing

@@ -6,6 +6,7 @@
 import { randomUUID } from 'crypto';
 import type { Pool } from 'pg';
 import type { TrialBalanceEntry } from '../types/financial.js';
+import { sumRound2, minus, round2 } from '../utils/decimal.js';
 import type { IssueItem } from '../types/issue_item.js';
 import type {
   MaterialityMethod,
@@ -24,19 +25,19 @@ const EXPENSE = 'EXPENSE';
 
 /** Derive revenue/expense/debit/credit totals from TB entries. Deterministic. */
 export function deriveTbSummary(entries: TrialBalanceEntry[]): TbSummary {
-  let totalRevenue = 0;
-  let totalExpenses = 0;
-  let totalDebits = 0;
-  let totalCredits = 0;
+  const totalDebits = sumRound2(entries.map((e) => e.debit ?? 0));
+  const totalCredits = sumRound2(entries.map((e) => e.credit ?? 0));
+  const revenueAmounts: number[] = [];
+  const expenseAmounts: number[] = [];
   for (const e of entries) {
     const debit = e.debit ?? 0;
     const credit = e.credit ?? 0;
-    totalDebits += debit;
-    totalCredits += credit;
     const type = e.accountType ?? '';
-    if (type === REVENUE) totalRevenue += Math.max(0, credit - debit);
-    if (type === EXPENSE) totalExpenses += Math.max(0, debit - credit);
+    if (type === REVENUE) revenueAmounts.push(Math.max(0, round2(minus(credit, debit))));
+    if (type === EXPENSE) expenseAmounts.push(Math.max(0, round2(minus(debit, credit))));
   }
+  const totalRevenue = sumRound2(revenueAmounts);
+  const totalExpenses = sumRound2(expenseAmounts);
   return { totalRevenue, totalExpenses, totalDebits, totalCredits };
 }
 
@@ -182,7 +183,7 @@ export async function getOrComputeTriage(
   };
 
   if (opts.persist) {
-    await repo.insertTriageAssessment(pool, {
+    await repo.insertTriageAssessment(pool, tenantId, {
       id: assessment.id,
       closeSessionId,
       riskScore: assessment.riskScore,
@@ -201,5 +202,5 @@ export async function getLatestTriage(
   tenantId: string,
   closeSessionId: string
 ): Promise<TriageAssessment | null> {
-  return repo.getLatestTriageByCloseSessionId(pool, closeSessionId);
+  return repo.getLatestTriageByCloseSessionId(pool, tenantId, closeSessionId);
 }

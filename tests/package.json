@@ -8,7 +8,8 @@
     "test:coverage": "jest --coverage",
     "test:integration": "jest tests/integration",
     "test:smoke": "jest --config jest.smoke.config.json",
-    "test:auth-production": "TEST_AUTH_PRODUCTION=1 NODE_ENV=production jest unit/auth_bypass_production.test.ts --runInBand"
+    "test:auth-production": "TEST_AUTH_PRODUCTION=1 NODE_ENV=production jest unit/auth_bypass_production.test.ts --runInBand",
+    "test:dev-api": "ENABLE_DEV_API=true jest dev_api_isolation --runInBand"
   },
   "jest": {
     "preset": "ts-jest",
@@ -19,20 +20,11 @@
       "^(\\.{1,2}/.*)\\.js$": "$1"
     },
     "transform": {
-      "^.+\\.tsx?$": ["ts-jest", {
-        "useESM": true
-      }]
+      "^.+\\.tsx?$": ["ts-jest", { "useESM": true }]
     },
     "extensionsToTreatAsEsm": [".ts"],
-    "collectCoverageFrom": [
-      "src/**/*.ts",
-      "!src/**/*.d.ts",
-      "!src/**/index.ts"
-    ],
-    "coveragePathIgnorePatterns": [
-      "/node_modules/",
-      "/tests/"
-    ],
+    "collectCoverageFrom": ["src/**/*.ts", "!src/**/*.d.ts", "!src/**/index.ts"],
+    "coveragePathIgnorePatterns": ["/node_modules/", "/tests/"],
     "setupFiles": ["<rootDir>/env.ts"],
     "setupFilesAfterEnv": ["<rootDir>/setup.ts"]
   },

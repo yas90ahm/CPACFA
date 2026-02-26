@@ -7,6 +7,7 @@ import type { Pool } from 'pg';
 import type { TrialBalanceEntry } from '../types/financial.js';
 import { getConstituentMonthLabels } from './close_context.js';
 import { getUnadjusted } from './trial_balance_store_service.js';
+import { plus } from '../utils/decimal.js';
 
 export interface UnadjustedRollupResult {
   entries: TrialBalanceEntry[];
@@ -24,7 +25,7 @@ export async function getUnadjustedOrRollup(
   tenantId: string,
   periodLabel: string,
   pool?: Pool
-): Promise<UnadjustedRollupResult | { entries: TrialBalanceEntry[]; source: 'uploaded' | 'synced'; at?: string; by?: string; connectionId?: string; fileName?: string; constituentPeriods?: never } | null> {
+): Promise<UnadjustedRollupResult | { entries: TrialBalanceEntry[]; source: 'uploaded' | 'synced' | 'gl_derived'; at?: string; by?: string; connectionId?: string; fileName?: string; constituentPeriods?: never } | null> {
   const direct = await getUnadjusted(tenantId, periodLabel, pool);
   if (direct) {
     return {
@@ -70,8 +71,8 @@ function aggregateEntries(entriesArrays: TrialBalanceEntry[][]): TrialBalanceEnt
           accountType: e.accountType,
         });
       } else {
-        existing.debit += e.debit ?? 0;
-        existing.credit += e.credit ?? 0;
+        existing.debit = plus(existing.debit, e.debit ?? 0);
+        existing.credit = plus(existing.credit, e.credit ?? 0);
       }
     }
   }

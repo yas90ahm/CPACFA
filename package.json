@@ -13,7 +13,13 @@
     "db:reset": "cross-env tsx src/db/reset_and_bootstrap.ts",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:verify": "tsx src/db/verify_schema.ts",
-    "db:seed:test": "tsx src/db/seed_test.ts"
+    "db:seed:test": "tsx src/db/seed_test.ts",
+    "example:happy-path": "tsx examples/happy_path_runner.ts",
+    "demo:report": "tsx scripts/generate_demo_report.ts",
+    "keygen": "tsx src/crypto/keygen.ts",
+    "seed:demo": "tsx src/scripts/seed_demo.ts",
+    "test:integration": "tsx scripts/test_gl_certification.ts",
+    "test:integration:dev": "cross-env BASE_URL=http://localhost:3000 tsx scripts/test_gl_certification.ts"
   },
   "engines": {
     "node": ">=18"
@@ -36,6 +42,7 @@
     "zod": "^3.23.8"
   },
   "optionalDependencies": {
+    "@aws-sdk/client-s3": "^3.600.0",
     "@mistralai/mistralai": "^1.2.0",
     "openai": "^4.52.0",
     "pdf-parse": "^1.1.1"

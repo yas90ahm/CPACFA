@@ -16,7 +16,8 @@ import {
   listRequests,
   approveOrReject,
 } from '../services/approval_request_service.js';
-import { generateApprovalSummaryAgentic } from '../services/agentic_approval_summary.js';
+// QUARANTINED — Agentic approval summary not in MVP architecture
+// import { generateApprovalSummaryAgentic } from '../services/agentic_approval_summary.js';
 import { updateAdjustmentStatus } from '../services/close_adjustments_service.js';
 import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
 import { validateBody, validateParams } from '../middleware/validationMiddleware.js';
@@ -78,7 +79,11 @@ router.post('/submit', validateBody(submitApprovalBodySchema), async (req: Reque
     const body = req.body;
     const workflow = await getWorkflowForResourceType(pool, tenantId, body.resourceType);
     if (!workflow) {
-      res.status(404).json({ error: 'No approval workflow for this resource type' });
+      res.status(403).json({
+        error: 'No approval workflow for this resource type',
+        code: 'WORKFLOW_NOT_CONFIGURED',
+        message: 'Approval workflow is not configured for this resource type. Create a workflow first.',
+      });
       return;
     }
     const existing = await getRequestByResource(pool, tenantId, body.resourceType, body.resourceId);
@@ -124,7 +129,7 @@ router.get('/requests/:id', async (req: Request, res: Response) => {
     const tenantId = getTenantId(req) ?? 'default';
     const pool = getTenantPool(req);
     if (!pool) {
-      res.status(404).json({ error: 'Request not found' });
+      res.status(503).json({ error: 'Tenant database required' });
       return;
     }
     const request = await getRequest(pool, req.params.id, tenantId);
@@ -132,16 +137,17 @@ router.get('/requests/:id', async (req: Request, res: Response) => {
       res.status(404).json({ error: 'Request not found' });
       return;
     }
-    const summarize = req.query.summarize === 'true' || req.query.summarize === '1';
-    if (summarize && request.resourceType === 'close_adjustment') {
-      const { getAdjustment } = await import('../services/close_adjustments_service.js');
-      const adj = await getAdjustment(pool, request.resourceId, tenantId);
-      if (adj) {
-        const summary = await generateApprovalSummaryAgentic(adj);
-        res.json({ ...request, summary });
-        return;
-      }
-    }
+    // QUARANTINED — Agentic approval summary not in MVP architecture
+    // const summarize = req.query.summarize === 'true' || req.query.summarize === '1';
+    // if (summarize && request.resourceType === 'close_adjustment') {
+    //   const { getAdjustment } = await import('../services/close_adjustments_service.js');
+    //   const adj = await getAdjustment(pool, request.resourceId, tenantId);
+    //   if (adj) {
+    //     const summary = await generateApprovalSummaryAgentic(adj);
+    //     res.json({ ...request, summary });
+    //     return;
+    //   }
+    // }
     res.json(request);
   } catch (e) {
     send500(res, e, 'Get approval request failed');
@@ -162,15 +168,16 @@ router.get('/requests/:id/summary', async (req: Request, res: Response) => {
       res.status(404).json({ error: 'Request not found' });
       return;
     }
-    if (request.resourceType === 'close_adjustment') {
-      const { getAdjustment } = await import('../services/close_adjustments_service.js');
-      const adj = await getAdjustment(pool, request.resourceId, tenantId);
-      if (adj) {
-        const summary = await generateApprovalSummaryAgentic(adj);
-        res.json({ summary });
-        return;
-      }
-    }
+    // QUARANTINED — Agentic approval summary not in MVP architecture
+    // if (request.resourceType === 'close_adjustment') {
+    //   const { getAdjustment } = await import('../services/close_adjustments_service.js');
+    //   const adj = await getAdjustment(pool, request.resourceId, tenantId);
+    //   if (adj) {
+    //     const summary = await generateApprovalSummaryAgentic(adj);
+    //     res.json({ summary });
+    //     return;
+    //   }
+    // }
     res.json({ summary: `Approval request for ${request.resourceType} ${request.resourceId}.` });
   } catch (e) {
     send500(res, e, 'Approval summary failed');

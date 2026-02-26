@@ -1,0 +1,48 @@
+AccountCode,AccountName,Debit,Credit
+1000,Cash,125000,0
+1010,Petty Cash,500,0
+1100,Accounts Receivable,285000,0
+1110,Allowance for Doubtful Accounts,0,4200
+1120,Contract Assets - Unbilled ARR,67000,0
+1200,Prepaid Expenses,18500,0
+1210,Prepaid Insurance,8400,0
+1220,Prepaid Software Licenses,12000,0
+1300,Sundry Current Assets,3200,0
+1500,Property and Equipment - Net,95000,0
+1600,Intangible Assets - Software,42000,0
+1700,Goodwill,150000,0
+2000,Accounts Payable,0,72000
+2100,Accrued Liabilities,0,38500
+2110,Accrued Compensation,0,125000
+2120,Accrued Professional Fees,0,18000
+2200,Deferred Revenue - Current,0,245000
+2210,Deferred Revenue - Long-term,0,89000
+2300,Current Portion of Long-term Debt,0,25000
+2500,Long-term Debt,0,180000
+2600,Sundry Long-term Liabilities,0,12000
+3000,Common Stock,0,100000
+3100,Additional Paid-in Capital,0,520000
+3200,Retained Earnings (Deficit),546200,0
+3300,Accumulated Other Comprehensive Income,0,2400
+4000,ARR Revenue,0,485000
+4100,Professional Services Revenue,0,72000
+4200,Non-ARR Revenue,0,8300
+5000,COGS - Hosting Infrastructure,45000,0
+5100,COGS - Third-party APIs,18000,0
+5200,COGS - Support and Success,32000,0
+6000,R&D - Salaries and Benefits,125000,0
+6100,R&D - Contractors,28000,0
+6200,R&D - Cloud and Tools,15000,0
+6300,R&D - Depreciation and Amortization,8500,0
+7000,S&M - Salaries and Benefits,98000,0
+7100,S&M - Marketing and Demand Gen,42000,0
+7200,S&M - Sales Commissions,35000,0
+7300,S&M - Travel and Entertainment,12000,0
+8000,G&A - Salaries and Benefits,85000,0
+8100,G&A - Legal and Professional,22000,0
+8200,G&A - Insurance,4500,0
+8300,G&A - Office and Facilities,18000,0
+8400,G&A - Depreciation and Amortization,6200,0
+9000,Interest Expense,4200,0
+9100,Interest and Misc Income - Net,0,1800
+9999,Miscellaneous Expense,47000,0

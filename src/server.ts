@@ -6,6 +6,15 @@
 
 import 'dotenv/config';
 import { assertNoDestructiveInStagingOrProduction } from './db/destructive_guards.js';
+import { applyModeDefaults, getMode, requireAuth as requireAuthFromMode, enableDevApi } from './lib/runtime_mode.js';
+import { runStartupValidation, printStartupBanner } from './startup_validation.js';
+import { seedDemo } from './scripts/seed_demo.js';
+import { assertDeploymentConfigSafe, printDevModeEnforcementWarning } from './lib/deployment_config_guard.js';
+import { assertSigningKeysInStrictMode } from './lib/cert_signing.js';
+
+// Apply MODE-based defaults before any route setup (fail fast if prod/demo misconfigured)
+const _modeConfig = applyModeDefaults();
+assertSigningKeysInStrictMode();
 
 import express from 'express';
 import helmet from 'helmet';
@@ -13,29 +22,39 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { optionalAuth, requireAuth, attachTenantPool, requireTenantContext, type AuthRequest } from './auth/middleware.js';
 import { isDbConfigured, getPool, queryControl } from './db/index.js';
-import { runMigrations } from './db/migrate.js';
 import authRouter from './routes/auth.js';
 import trialBalanceRouter from './routes/trial-balance/index.js';
 import justificationRouter from './routes/justification.js';
 import auditRouter from './routes/audit/index.js';
 import exportRouter from './routes/export.js';
-import financialMemoryRouter from './routes/financial_memory.js';
-import vectorStoreRouter from './routes/vector_store.js';
-import ingestionRouter from './routes/ingestion.js';
+// QUARANTINED — Knowledge base routes not in MVP architecture
+// import financialMemoryRouter from './routes/financial_memory.js';
+// import vectorStoreRouter from './routes/vector_store.js';
+// QUARANTINED — Automated ingestion infrastructure not in MVP architecture
+// import ingestionRouter from './routes/ingestion.js';
 import hitlRouter from './routes/hitl.js';
 import memoryRouter from './routes/memory.js';
 import integrationsRouter from './routes/integrations.js';
-import pipelinesRouter from './routes/pipelines.js';
+// QUARANTINED — Bank pipeline, AP/AR aging, payroll accrual not in MVP architecture
+// import pipelinesRouter from './routes/pipelines.js';
 import closeRouter from './routes/close/index.js';
+import precheckRouter from './routes/precheck.js';
+import configRouter from './routes/config.js';
+import settingsRouter from './routes/settings.js';
+import verificationRouter from './routes/verification/index.js';
 import coaMappingRouter from './routes/coa_mapping.js';
+import coaRouter from './routes/coa.js';
+import glRouter from './routes/gl/index.js';
 import dataQualityRouter from './routes/data_quality.js';
 import approvalsRouter from './routes/approvals.js';
 import accountingIntegrationRouter from './routes/accounting_integration.js';
 import onboardingRouter from './routes/onboarding.js';
 import tenantsRouter from './routes/tenants.js';
+import portfolioRouter from './routes/portfolio.js';
 import cpaRouter from './routes/cpa_index.js';
 import devDiagnosticsRouter from './routes/dev_diagnostics.js';
-import { startIngestionScheduler } from './services/ingestion_scheduler.js';
+// QUARANTINED — Automated ingestion infrastructure not in MVP architecture
+// import { startIngestionScheduler } from './services/ingestion_scheduler.js';
 import { runWorkerLoop } from './services/job_worker.js';
 import { send500 } from './lib/errorHandler.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
@@ -43,7 +62,7 @@ import { requestIdMiddleware } from './middleware/requestId.js';
 assertNoDestructiveInStagingOrProduction();
 
 const app = express();
-const PORT = process.env.PORT ?? 3001;
+const PORT = process.env.PORT ?? 3000;
 
 // Trust proxy when behind reverse proxy (for rate limit IP)
 if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
@@ -52,10 +71,10 @@ app.use(helmet());
 const corsOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)
   : (process.env.CORS_ORIGIN ? [process.env.CORS_ORIGIN] : []);
-// When no CORS env is set, allow local dev (frontend on 3000 calling API on 3001)
+// When no CORS env is set, allow local dev (frontend on 3000 or 3002 calling API on 3001)
 const corsOptions = corsOrigins.length
   ? { origin: corsOrigins }
-  : { origin: ['http://localhost:3000', 'http://127.0.0.1:3000'] };
+  : { origin: ['http://localhost:3000', 'http://localhost:3002', 'http://127.0.0.1:3000', 'http://127.0.0.1:3002'] };
 app.use(cors(corsOptions));
 
 app.use(express.json({ limit: '1mb' }));
@@ -91,14 +110,17 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Require auth for all other /api routes. In production ALWAYS require auth (no bypass).
-const isProduction = process.env.NODE_ENV === 'production';
-const requireAuthByDefault = process.env.REQUIRE_AUTH !== 'false';
-const useRequireAuth = isProduction || requireAuthByDefault;
+// Require auth: from runtime_mode (MODE is single source of truth).
+const useRequireAuth = requireAuthFromMode();
 
-/** For tests: in production, /api must always use requireAuth (bypass impossible). */
+/** For tests: /api must use requireAuth when in deployment mode. */
 export function useRequireAuthForApi(): boolean {
-  return process.env.NODE_ENV === 'production' || process.env.REQUIRE_AUTH !== 'false';
+  return requireAuthFromMode();
+}
+
+/** For tests: /api-dev mounted only when MODE=dev and ENABLE_DEV_API=true. */
+export function isDevApiMounted(): boolean {
+  return getMode() === 'dev' && enableDevApi();
 }
 
 app.use('/api', apiLimiter, (req, res, next) => {
@@ -107,9 +129,9 @@ app.use('/api', apiLimiter, (req, res, next) => {
 app.use('/api', attachTenantPool);
 app.use('/api', requireTenantContext);
 
-// Dev-only diagnostics router: optionalAuth for trial-balance/ingest, supervisor/chat, supervisor/session/:id/trace.
-// Mounted only when NODE_ENV !== 'production'; never available in production.
-if (!isProduction) {
+// Dev-only diagnostics router. Mounted ONLY when MODE=dev AND ENABLE_DEV_API=true.
+const canMountDevApi = getMode() === 'dev' && enableDevApi();
+if (canMountDevApi) {
   app.use('/api-dev', devDiagnosticsRouter);
 }
 
@@ -126,13 +148,15 @@ app.use('/api/audit', auditRouter);
 app.use('/api/export', exportRouter);
 
 // API: Financial Memory (three-tier: Global/Firm/Session, hybrid search, CPA invoice consistency)
-app.use('/api/knowledge-base', financialMemoryRouter);
+// QUARANTINED — Knowledge base routes not in MVP architecture
+// app.use('/api/knowledge-base', financialMemoryRouter);
 
 // API: RAG Vector Store (Intelligent Context — ingestion, precedent, citation with document title + page number)
-app.use('/api/vector-store', vectorStoreRouter);
+// QUARANTINED — Knowledge base routes not in MVP architecture
+// app.use('/api/vector-store', vectorStoreRouter);
 
-// API: Ingestion Agent (auto-detect type, classify bank/tax, route to specialist, data cleaning)
-app.use('/api/ingestion', ingestionRouter);
+// QUARANTINED — Automated ingestion infrastructure not in MVP architecture
+// app.use('/api/ingestion', ingestionRouter);
 
 // API: Semantic Memory (decisions, user corrections, justifications — vectorized; vendor lookup and consistency check)
 app.use('/api/memory', memoryRouter);
@@ -140,14 +164,32 @@ app.use('/api/memory', memoryRouter);
 // API: OAuth integrations (Gmail/Drive)
 app.use('/api/integrations', integrationsRouter);
 
-// API: Pipelines — Bank transaction-level, AP/AR aging, Payroll accrual
-app.use('/api/pipelines', pipelinesRouter);
+// QUARANTINED — Bank pipeline, AP/AR aging, payroll accrual not in MVP architecture
+// app.use('/api/pipelines', pipelinesRouter);
 
 // API: Month-end close — JE suggestions, checklist, period lock, audit log, segregation
 app.use('/api/close', closeRouter);
 
+// API: Pre-certification structural check (board-ready) — stateless, no DB/AI
+app.use('/api/precheck', precheckRouter);
+
+// API: Config — tenant materiality and other overrides
+app.use('/api/config', configRouter);
+
+// API: Settings — entity general settings, entity list
+app.use('/api/settings', settingsRouter);
+
+// API: Auditor verification — read-only snapshot hash verification
+app.use('/api/verification', verificationRouter);
+
 // API: COA Mapping — FS taxonomy lines, mapping rules, apply rules to accounts
 app.use('/api/coa-mapping', coaMappingRouter);
+
+// API: Chart of Accounts — upload CSV, list accounts, get by code
+app.use('/api/coa', coaRouter);
+
+// API: General Ledger — upload CSV, list entries, get by entry_id
+app.use('/api/gl', glRouter);
 
 // API: Data quality — Configurable rules, exceptions, agentic remediation
 app.use('/api/data-quality', dataQualityRouter);
@@ -163,6 +205,9 @@ app.use('/api/onboarding', onboardingRouter);
 
 // API: Tenants — BYOD database_url (PATCH/GET; require auth, same-tenant only)
 app.use('/api/tenants', tenantsRouter);
+
+// API: Portfolio — cross-tenant dashboard (operating_partner / admin)
+app.use('/api/portfolio', portfolioRouter);
 
 // API: HITL staging and webhook
 app.use('/api/hitl', hitlRouter);
@@ -195,17 +240,25 @@ export function ensureProductionHasDatabase(): void {
 }
 
 async function start(): Promise<void> {
-  ensureProductionHasDatabase();
-  if (isDbConfigured()) {
+  assertDeploymentConfigSafe();
+  printDevModeEnforcementWarning();
+  await runStartupValidation();
+  printStartupBanner();
+  if (getMode() === 'demo' && isDbConfigured()) {
     try {
-      await runMigrations();
-    } catch (e) {
-      console.error('Migrations failed:', e);
-      process.exit(1);
+      await seedDemo();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[seed_demo] Failed (server will still start):', msg);
+      console.error('[seed_demo] You can create a session via the UI or retry: npx tsx src/scripts/seed_demo.ts');
     }
   }
   app.listen(PORT, () => {
     console.log(`FinOS Agent API listening on http://localhost:${PORT}`);
+    if (getMode() === 'demo') {
+      console.log(`Demo ready at http://localhost:${PORT}`);
+      console.log('  Login: demo@cloudmetrics.io / DemoPass2026!');
+    }
     console.log('  POST /api/trial-balance/ingest — upload CSV/XLSX Trial Balance');
     console.log('  POST /api/trial-balance/statements — JSON Trial Balance → BS + P&L');
     console.log('  GET  /api/trial-balance/supported — supported formats & codification');
@@ -223,8 +276,10 @@ async function start(): Promise<void> {
     console.log('  POST /api/ingestion/agent — Ingestion Agent: .xlsx/.csv/.pdf/.json → classify & route');
     console.log('  POST /api/pipelines/bank — Bank tx; ap-aging, ar-aging, payroll-accrual, bank-rec, cash-position');
     console.log('  POST /api/close/sessions, /close/sessions/:id/certify — Close sessions; POST /api/close/journal-entries — JE lifecycle');
-    console.log('  GET  /api/hitl/staging — Staging; POST /api/hitl/resolve-ingest — fix imbalanced ingest; POST /api/hitl/webhook — Approve/Reject');
-    console.log('  (Supervisor quarantined: /api-dev/supervisor returns 410 when NODE_ENV !== production)');
+    console.log('  GET  /api/hitl/staging — Staging; POST /api/hitl/resolve-ingest — fix imbalanced TB ingest; POST /api/hitl/resolve-gl-ingest — fix imbalanced GL entry; POST /api/hitl/webhook — Approve/Reject');
+    if (canMountDevApi) {
+      console.log('  /api-dev (ENABLE_DEV_API=true): trial-balance, supervisor 410');
+    }
   });
 }
 
@@ -235,7 +290,8 @@ if (shouldStart) {
     console.error(e);
     process.exit(1);
   });
-  startIngestionScheduler();
+  // QUARANTINED — Automated ingestion infrastructure not in MVP architecture
+  // startIngestionScheduler();
   const workerEnabled = (process.env.JOB_WORKER_ENABLED ?? 'true') === 'true';
   if (workerEnabled && isDbConfigured()) {
     runWorkerLoop({

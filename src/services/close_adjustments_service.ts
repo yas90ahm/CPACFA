@@ -6,6 +6,7 @@
 
 import type { Pool } from 'pg';
 import type { CloseAdjustment, CloseAdjustmentStatus } from '../types/close_and_controls.js';
+import { computeLineId } from '../utils/line_id.js';
 import type { JournalEntrySuggestion } from '../types/close_and_controls.js';
 import type { AccrualSuggestion } from '../types/accrual_deferral.js';
 import { validateJEProvenance } from '../types/amount_provenance.js';
@@ -43,15 +44,21 @@ export async function addJEAsAdjustments(
     const result = validateJEProvenance(s);
     if (!result.valid) throw new ProvenanceValidationError(result.errors);
   }
+  const debitLinesWithIds = (lines: { account: string; amount: number }[]) =>
+    lines.map((l) => ({ ...l, lineId: computeLineId({ accountName: l.account, debit: l.amount, credit: 0 }) }));
+  const creditLinesWithIds = (lines: { account: string; amount: number }[]) =>
+    lines.map((l) => ({ ...l, lineId: computeLineId({ accountName: l.account, debit: 0, credit: l.amount }) }));
   if (isDbConfigured() && tenantId && pool) {
     const added: CloseAdjustment[] = [];
     for (const s of suggestions) {
+      const debits = debitLinesWithIds((s.debits ?? []).map((d) => ({ account: d.account, amount: d.amount })));
+      const credits = creditLinesWithIds((s.credits ?? []).map((c) => ({ account: c.account, amount: c.amount })));
       const adj = await adjRepo.createAdjustment(pool, tenantId, {
         periodLabel,
         source: s.source,
         description: s.description,
-        debits: s.debits ?? [],
-        credits: s.credits ?? [],
+        debits,
+        credits,
         sourceDetail: s.sourceDetail,
         status: 'pending',
       });
@@ -63,13 +70,15 @@ export async function addJEAsAdjustments(
   const added: CloseAdjustment[] = [];
   for (const s of suggestions) {
     const id = nextId();
+    const debits = debitLinesWithIds((s.debits ?? []).map((d) => ({ account: d.account, amount: d.amount })));
+    const credits = creditLinesWithIds((s.credits ?? []).map((c) => ({ account: c.account, amount: c.amount })));
     const adj: CloseAdjustment = {
       id,
       periodLabel,
       source: s.source,
       description: s.description,
-      debits: s.debits ?? [],
-      credits: s.credits ?? [],
+      debits,
+      credits,
       sourceDetail: s.sourceDetail,
       status: 'pending',
       createdAt: now,
@@ -91,15 +100,21 @@ export async function addAccrualsAsAdjustments(
   tenantId?: string,
   pool?: Pool
 ): Promise<CloseAdjustment[]> {
+  const debitLinesWithIds = (lines: { account: string; amount: number }[]) =>
+    lines.map((l) => ({ ...l, lineId: computeLineId({ accountName: l.account, debit: l.amount, credit: 0 }) }));
+  const creditLinesWithIds = (lines: { account: string; amount: number }[]) =>
+    lines.map((l) => ({ ...l, lineId: computeLineId({ accountName: l.account, debit: 0, credit: l.amount }) }));
   if (isDbConfigured() && tenantId && pool) {
     const added: CloseAdjustment[] = [];
     for (const s of suggestions) {
+      const debits = debitLinesWithIds(s.debitAccount ? [{ account: s.debitAccount, amount: s.amount }] : []);
+      const credits = creditLinesWithIds(s.creditAccount ? [{ account: s.creditAccount, amount: s.amount }] : []);
       const adj = await adjRepo.createAdjustment(pool, tenantId, {
         periodLabel,
         source: 'accrual',
         description: s.description,
-        debits: s.debitAccount ? [{ account: s.debitAccount, amount: s.amount }] : [],
-        credits: s.creditAccount ? [{ account: s.creditAccount, amount: s.amount }] : [],
+        debits,
+        credits,
         sourceDetail: s.sourceDetail,
         status: 'pending',
       });
@@ -111,13 +126,15 @@ export async function addAccrualsAsAdjustments(
   const added: CloseAdjustment[] = [];
   for (const s of suggestions) {
     const id = nextId();
+    const debits = debitLinesWithIds(s.debitAccount ? [{ account: s.debitAccount, amount: s.amount }] : []);
+    const credits = creditLinesWithIds(s.creditAccount ? [{ account: s.creditAccount, amount: s.amount }] : []);
     const adj: CloseAdjustment = {
       id,
       periodLabel,
       source: 'accrual',
       description: s.description,
-      debits: s.debitAccount ? [{ account: s.debitAccount, amount: s.amount }] : [],
-      credits: s.creditAccount ? [{ account: s.creditAccount, amount: s.amount }] : [],
+      debits,
+      credits,
       sourceDetail: s.sourceDetail,
       status: 'pending',
       createdAt: now,

@@ -9,10 +9,11 @@ import {
   getStandardName,
   type BridgeStandardKey,
 } from './cpa_bridge_manifest.js';
-import { appendAuditLog } from './audit_log_service.js';
-import type { AuditLogContext } from './audit_log_service.js';
-import { computeLeaseLiability } from './leaseLiabilityCalc.js';
-import { classifyLease } from './lease_service.js';
+import { recordAuditLogAction } from './audit_service.js';
+import type { AuditLogContext } from './segregation_service.js';
+// QUARANTINED — leaseLiabilityCalc and lease_service not in MVP architecture
+// import { computeLeaseLiability } from './leaseLiabilityCalc.js';
+// import { classifyLease } from './lease_service.js';
 import { buildLinearRecognitionSchedule } from './revenue_recognition_service.js';
 import { depreciationScheduleSl, depreciationScheduleDdb } from './fixed_asset_service.js';
 import { computeDeferredTaxesStateless } from './deferred_tax_service.js';
@@ -75,15 +76,14 @@ export async function executeAgentRecommendation(
         ? JSON.stringify(result).slice(0, 500)
         : String(result);
     createBridgeAdjustmentJustification(standard, standardName, params, resultSummary);
-    appendAuditLog(
-      {
+    if (auditContext) {
+      await recordAuditLogAction(auditContext.pool, auditContext.tenantId, {
         action: 'AGENTIC_ADJUSTMENT_EXECUTED',
         resource: `bridge:${standard}`,
         detail: `${standardName} via Deterministic Engine`,
         actor: 'system',
-      },
-      auditContext
-    );
+      });
+    }
     return { ok: true, result };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -104,19 +104,21 @@ async function runDeterministic(
       if (std !== 'asc842' && std !== 'ifrs16') {
         throw new Error('Lease standard must be asc842 or ifrs16');
       }
-      const payments = Array.from({ length: Math.max(1, Math.round(term)) }, () => round2(payment));
-      const periodRate = rate / 12;
-      const pvResult = computeLeaseLiability({
-        leasePayments: payments,
-        discountRate: periodRate,
-        paymentTiming: 'end',
-      });
-      const classification = classifyLease({
-        termMonths: term,
-        pvOfPayments: pvResult.presentValueOfPayments,
-        standard: std,
-      });
-      return { ...pvResult, ...classification };
+      // QUARANTINED — leaseLiabilityCalc not in MVP architecture
+      throw new Error('Lease liability calculation is quarantined. Not available in MVP architecture.');
+      // const payments = Array.from({ length: Math.max(1, Math.round(term)) }, () => round2(payment));
+      // const periodRate = rate / 12;
+      // const pvResult = computeLeaseLiability({
+      //   leasePayments: payments,
+      //   discountRate: periodRate,
+      //   paymentTiming: 'end',
+      // });
+      // const classification = classifyLease({
+      //   termMonths: term,
+      //   pvOfPayments: pvResult.presentValueOfPayments,
+      //   standard: std,
+      // });
+      // return { ...pvResult, ...classification };
     }
     case 'Revenue': {
       const amount = Number(params.amount);

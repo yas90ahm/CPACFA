@@ -11,15 +11,17 @@ import { parseTrialBalance } from '../../services/trialBalanceParser.js';
 import { ingestTrialBalanceFile, type IngestTrialBalanceResult } from '../../services/fileIngestion.js';
 import { buildValidatedStatements, MathematicalIntegrityError } from '../../services/financialStatements.js';
 import { getRoundingTolerance } from '../../services/rules_registry.js';
-import { absGt } from '../../utils/decimal.js';
+import { absGt, absLt, sumRound2, minus } from '../../utils/decimal.js';
 import { generateStatements } from '../../services/statementGenerator.js';
 import { buildCashFlowStatement, buildCashFlowFromTransactions } from '../../services/cashFlow.js';
 import { buildEquityChangesStatement } from '../../services/equityChanges.js';
 import { buildNotesAndPolicies } from '../../services/notesPolicies.js';
 import { inferAccountingStandard } from '../../services/standard_selector.js';
 import { updatePolicyMemory } from '../../memory/index.js';
-import { classifyTransactionsAgentic } from '../../services/transaction_classifier.js';
-import { runPlanExecuteVerifyAgentic } from '../../services/agentic_plan_execute_verify.js';
+// QUARANTINED — transaction_classifier not in MVP architecture
+// import { classifyTransactionsAgentic } from '../../services/transaction_classifier.js';
+// QUARANTINED — Agentic plan-execute-verify not in MVP architecture
+// import { runPlanExecuteVerifyAgentic } from '../../services/agentic_plan_execute_verify.js';
 import { registerStatementGeneration, recordPolicyChange } from '../../services/audit_export_service.js';
 import { createIngestionIntegrityMemo } from '../../services/justification_service.js';
 import { markUploadCompleted, runResultPipeline } from '../../services/result_generator.js';
@@ -27,34 +29,40 @@ import * as persistence from '../../services/persistence_service.js';
 import { createStagingItem, updateStagingPayload } from '../../services/persistence_service.js';
 import { runClassifier, runAdvisor } from '../../ai/ai_orchestrator.js';
 import * as aiProposalsRepo from '../../db/repositories/tenant_ai_proposals_repository.js';
-import { assessAgenticQuality } from '../../services/agentic_quality_assessor.js';
+// QUARANTINED — Agentic quality assessor not in MVP architecture
+// import { assessAgenticQuality } from '../../services/agentic_quality_assessor.js';
 import { shouldEscalateToHuman, submitToStaging } from '../../services/hitl_orchestrator.js';
 import { addTodosFromGaps } from '../../services/reconciliation_todos.js';
-import { inferStandardAgentic } from '../../services/standard_inference_agentic.js';
+// QUARANTINED — standard_inference_agentic not in MVP architecture
+// import { inferStandardAgentic } from '../../services/standard_inference_agentic.js';
 import { runRulesAndPersistExceptions } from '../../services/data_quality_exception_service.js';
 import type { RuleEvaluationContext } from '../../services/data_quality_rule_service.js';
 import type { FinancialStatementsOutput } from '../../types/financial.js';
 import type { RawTrialBalanceRow } from '../../services/trialBalanceParser.js';
 import type { AuthRequest } from '../../auth/middleware.js';
-import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
+import { getTenantId, getTenantPool, getTenantAiPool } from '../../lib/tenant_context.js';
 import { listContracts } from '../../db/repositories/revenue_recognition_repository.js';
 import type { Pool } from 'pg';
 import type { StatementGeneratorOptions } from '../../services/statementGenerator.js';
 import { assertPeriodNotLocked, PeriodLockedError } from '../../services/period_lock_service.js';
-import { appendAuditLog } from '../../services/audit_log_service.js';
-import { createIssueFromIntegrityFailure } from '../../services/issue_item_service.js';
+import { recordAuditLogAction } from '../../services/audit_service.js';
+import { createIssueFromIntegrityFailure } from '../../services/issue_service.js';
 import { createDecisionRecord } from '../../services/decision_record_service.js';
 import { validateBody, requireValidTenantId } from '../../middleware/validationMiddleware.js';
 import { ingestBodySchema, type IngestBody } from '../../schemas/request/trialBalance.js';
 import { getPrecedentForCloseStep, toSimilarPrecedentSummary } from '../../services/precedent_for_close_step.js';
 import { runProfessionalReview } from '../../services/professional_review_service.js';
-import { deriveCovenantAndLiquidityFromIngest } from '../../services/ingest_covenant_liquidity.js';
+// QUARANTINED — ingest_covenant_liquidity not on close pipeline
+// import { deriveCovenantAndLiquidityFromIngest } from '../../services/ingest_covenant_liquidity.js';
 import * as periodFinancialDataState from '../../db/repositories/period_financial_data_state_repository.js';
 import { classifyTrialBalance } from '../../services/accountClassifier.js';
 import { executeBridgeCommand } from '../../bridge/index.js';
 import { getAdjustedTrialBalance } from '../../services/adjusted_trial_balance_service.js';
 import { attachLineProvenance, attachCategories, parseTransactions, normalizeStandard } from './helpers.js';
 import { log } from '../../lib/logger.js';
+import { detectCoaSource, mapAccountTypeToCategory } from '../../services/coa_template_service.js';
+import { isBodyTenantInjectionAllowed } from '../../lib/env.js';
+import { send500 } from '../../lib/errorHandler.js';
 
 const router = Router();
 
@@ -72,12 +80,30 @@ const upload = multer({
   },
 });
 
-/** Set req.tenantId from body when auth did not set it (e.g. Diagnostic HUD bypass). */
+/**
+ * Set req.tenantId from body ONLY when isBodyTenantInjectionAllowed() (dev/diagnostic).
+ * In strict modes (MODE=prod/demo, REQUIRE_AUTH=true, REQUIRE_TENANT_CONTEXT=true),
+ * body tenant injection is disabled; tenant must come from JWT.
+ */
 function injectTenantFromBody(req: Request, _res: Response, next: import('express').NextFunction): void {
   const authReq = req as AuthRequest;
-  if (!authReq.tenantId && req.body && typeof (req.body as { tenantId?: string }).tenantId === 'string') {
+  if (authReq.tenantId) {
+    next();
+    return;
+  }
+  if (!isBodyTenantInjectionAllowed()) {
+    next();
+    return;
+  }
+  if (req.body && typeof (req.body as { tenantId?: string }).tenantId === 'string') {
     const tid = (req.body as { tenantId: string }).tenantId.trim();
-    if (tid) authReq.tenantId = tid;
+    if (tid) {
+      authReq.tenantId = tid;
+      log('warn', 'tenant_injection_from_body', {
+        message: 'Body tenantId used (dev/diagnostic only). Disabled in production.',
+        resource: 'trial-balance/ingest',
+      });
+    }
   }
   next();
 }
@@ -101,19 +127,20 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
 
     const tenantIdIngest = getTenantId(req);
     const poolIngest = getTenantPool(req);
+    const poolAi: Pool = (getTenantAiPool(req) ?? poolIngest)!;
     const hasTenantContext = Boolean(tenantIdIngest && poolIngest);
     const ingestSessionId = hasTenantContext
       ? `ingest-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
       : null;
     if (ingestSessionId && !/^ingest-\d+-[a-z0-9]+$/.test(ingestSessionId)) {
       log('error', 'Invalid sessionId format generated', { ingestSessionId });
-      res.status(500).json({ error: 'Internal error', message: 'Session ID generation failed' });
+      send500(res, new Error('Session ID generation failed'), 'Session ID generation failed');
       return;
     }
 
     let uploadId: string | null = null;
     if (hasTenantContext && ingestSessionId && poolIngest && tenantIdIngest) {
-      const uploadRow = await persistence.createSessionUpload(poolIngest, tenantIdIngest, ingestSessionId, {
+      const uploadRow = await persistence.createSessionUpload(poolAi, tenantIdIngest, ingestSessionId, {
         filename: file.originalname || 'upload.csv',
         contentType: file.mimetype,
         metadata: null,
@@ -155,25 +182,39 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       // Scope: agentic ledger-to-TB numeric extraction quarantined. Branch kept for brace structure; never runs.
     }
 
+    const { source: detectedSource, template } = detectCoaSource(ingestResult.headers ?? []);
+    if (template && detectedSource !== 'generic') {
+      for (const row of rawRows) {
+        const r = row as { accountTypeRaw?: string; accountType?: import('../../types/financial.js').AccountType };
+        if (r.accountTypeRaw) {
+          const cat = mapAccountTypeToCategory(template, r.accountTypeRaw);
+          if (cat) r.accountType = cat;
+        }
+      }
+      log('info', 'coa_template_applied', { source: detectedSource, templateDetected: true });
+    } else {
+      log('info', 'coa_template_applied', { source: detectedSource, templateDetected: false });
+    }
+
     const trialBalance = parseTrialBalance(rawRows);
     const totalDebits =
       trialBalance.totalDebits != null
         ? trialBalance.totalDebits
-        : trialBalance.entries.reduce((s, e) => s + (e.debit ?? 0), 0);
+        : sumRound2(trialBalance.entries.map((e) => e.debit ?? 0));
     const totalCredits =
       trialBalance.totalCredits != null
         ? trialBalance.totalCredits
-        : trialBalance.entries.reduce((s, e) => s + (e.credit ?? 0), 0);
+        : sumRound2(trialBalance.entries.map((e) => e.credit ?? 0));
     const tolerance = getRoundingTolerance();
     if (absGt(totalDebits, totalCredits, tolerance)) {
-      const imbalanceAmount = Math.abs(totalDebits - totalCredits);
+      const imbalanceAmount = Math.abs(minus(totalDebits, totalCredits));
       let stagedId: string | undefined;
       const ingestionTimestamp = new Date().toISOString();
       const sourceHash = createHash('sha256').update(file.buffer).digest('hex');
       const aiWarnings: Array<{ ai_status: string; reason: string; pillar: string }> = [];
       if (poolIngest && tenantIdIngest) {
         const periodLabelStaged = body.periodLabel ?? `ingest-${new Date().toISOString().slice(0, 10)}`;
-        const item = await createStagingItem(poolIngest, tenantIdIngest, {
+        const item = await createStagingItem(poolAi, tenantIdIngest, {
           proposedAction: `Trial balance upload out of balance by ${imbalanceAmount}. Fix via HITL resolve-ingest.`,
           justification: `Debits ${totalDebits} != Credits ${totalCredits}. Raw records staged; no save to main ledger.`,
           type: 'journal_entry',
@@ -199,7 +240,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
           credit: r.credit ?? 0,
         }));
         const classifierResult = await runClassifier({
-          pool: poolIngest,
+          pool: poolAi,
           tenantId: tenantIdIngest,
           periodLabel: periodLabelStaged ?? `ingest-${new Date().toISOString().slice(0, 10)}`,
           sourceLines,
@@ -233,7 +274,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
             : {}),
         }));
         const advisorResult = await runAdvisor({
-          pool: poolIngest,
+          pool: poolAi,
           tenantId: tenantIdIngest,
           periodLabel: periodLabelStaged ?? `ingest-${new Date().toISOString().slice(0, 10)}`,
           sourceLines: classifiedSourceLines,
@@ -247,7 +288,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
           });
         }
         if (advisorResult.proposals.length > 0) {
-          await aiProposalsRepo.saveProposals(poolIngest, {
+          await aiProposalsRepo.saveProposals(poolAi, {
             tenantId: tenantIdIngest,
             periodLabel: periodLabelStaged ?? `ingest-${new Date().toISOString().slice(0, 10)}`,
             stagingId: item.id,
@@ -306,7 +347,9 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       transactions && transactions.length > 0
         ? attachCategories(
             transactions,
-            await classifyTransactionsAgentic(transactions, { entityId: body.entityId })
+            // QUARANTINED — transaction_classifier not in MVP architecture
+            // await classifyTransactionsAgentic(transactions, { entityId: body.entityId })
+            [] // No transaction classification in MVP
           )
         : undefined;
     const explicitStandard = normalizeStandard(body.standard);
@@ -325,17 +368,20 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
         pool: poolIngest ?? undefined,
         tenantId: tenantIdIngest ?? undefined,
       }));
-    const standardInference = !standard
-      ? await inferStandardAgentic({
-          country: body.country,
-          jurisdiction: body.jurisdiction,
-          currency: body.currency,
-          taxId: body.taxId,
-          businessNumber: body.businessNumber,
-        })
-      : null;
+    // QUARANTINED — standard_inference_agentic not in MVP architecture
+    // const standardInference = !standard
+    //   ? await inferStandardAgentic({
+    //       country: body.country,
+    //       jurisdiction: body.jurisdiction,
+    //       currency: body.currency,
+    //       taxId: body.taxId,
+    //       businessNumber: body.businessNumber,
+    //     })
+    //   : null;
+    const standardInference = null;
     if (!standard) {
-      standard = standardInference?.standard ?? 'US_GAAP';
+      // QUARANTINED — standard_inference_agentic not in MVP architecture
+      standard = 'US_GAAP'; // Default to US_GAAP when not provided
     }
     if (body.entityId && poolIngest && tenantIdIngest) {
       await updatePolicyMemory(
@@ -417,14 +463,14 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       }
       try {
         const adjustedEntries = await getAdjustedTrialBalance(tenantIdForSave, body.periodLabel, poolIngest ?? undefined);
-        const totalDebits = adjustedEntries.reduce((s, e) => s + (e.debit ?? 0), 0);
-        const totalCredits = adjustedEntries.reduce((s, e) => s + (e.credit ?? 0), 0);
+        const totalDebits = sumRound2(adjustedEntries.map((e) => e.debit ?? 0));
+        const totalCredits = sumRound2(adjustedEntries.map((e) => e.credit ?? 0));
         trialBalanceForBuild = {
           entries: adjustedEntries,
           totalDebits,
           totalCredits,
-          balances: Math.abs(totalDebits - totalCredits) < 0.01,
-          errors: Math.abs(totalDebits - totalCredits) >= 0.01 ? ['Adjusted trial balance does not balance'] : [],
+          balances: absLt(totalDebits, totalCredits, 0.01),
+          errors: absGt(totalDebits, totalCredits, 0.01) ? ['Adjusted trial balance does not balance'] : [],
         };
       } catch {
         trialBalanceForBuild = trialBalance;
@@ -480,11 +526,23 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
     const equityChanges = fullSet ? buildEquityChangesStatement(balanceSheet, priorBalanceSheetIngest, profitAndLoss) : undefined;
     const notesAndPolicies = fullSet && standard ? buildNotesAndPolicies(standard) : undefined;
 
-    const reasoningChain = await runPlanExecuteVerifyAgentic({
-      trialBalance: trialBalanceForBuild,
-      balanceSheet,
-      profitAndLoss,
-    });
+    // QUARANTINED — Agentic plan-execute-verify not in MVP architecture
+    // const reasoningChain = await runPlanExecuteVerifyAgentic({
+    //   trialBalance: trialBalanceForBuild,
+    //   balanceSheet,
+    //   profitAndLoss,
+    // });
+    const reasoningChain = {
+      plan: 'Deterministic validation',
+      executedAt: new Date().toISOString(),
+      verification: {
+        passed: balanceSheet.balances && trialBalanceForBuild.balances,
+        checks: [
+          balanceSheet.balances ? 'Balance sheet balances' : 'Balance sheet does not balance',
+          trialBalanceForBuild.balances ? 'Trial balance balances' : 'Trial balance does not balance',
+        ],
+      },
+    };
 
     const output: FinancialStatementsOutput = {
       reasoningChain,
@@ -559,13 +617,20 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
         pipelineInputSnapshot: { type: 'statements', output, meta },
       });
     }
-    const agenticAssessment = await assessAgenticQuality({
-      qualityChecks: pipelineResult.qualityChecks ?? [],
-      dataGaps: pipelineResult.dataGaps ?? [],
-      standard: standard,
-    });
+    // QUARANTINED — Agentic quality assessor not in MVP architecture
+    // const agenticAssessment = await assessAgenticQuality({
+    //   qualityChecks: pipelineResult.qualityChecks ?? [],
+    //   dataGaps: pipelineResult.dataGaps ?? [],
+    //   standard: standard,
+    // });
+    const agenticAssessment = {
+      overallSeverity: 'low' as const,
+      summary: 'Deterministic validation only',
+    };
     let hitl = pipelineResult.hitl ?? { escalated: false };
-    if (!hitl.escalated && agenticAssessment?.overallSeverity === 'critical') {
+    // QUARANTINED — Agentic quality assessor not in MVP architecture, so skip escalation check
+    // if (!hitl.escalated && agenticAssessment?.overallSeverity === 'critical') {
+    if (false) {
       const escalate = shouldEscalateToHuman({ isCriticalAccountingPolicyChange: true });
       if (escalate) {
         const item = await Promise.resolve(
@@ -575,7 +640,9 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
               justification: agenticAssessment.summary,
               type: 'other',
             },
-            authReq.tenantId && authReq.tenantPool ? { pool: authReq.tenantPool, tenantId: authReq.tenantId } : undefined
+            authReq.tenantId && authReq.tenantPool
+              ? { pool: (getTenantAiPool(req) ?? authReq.tenantPool)!, tenantId: authReq.tenantId! }
+              : undefined
           )
         );
         hitl = { escalated: true, stagingId: item.id };
@@ -585,6 +652,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
     if (gaps.length > 0) await addTodosFromGaps(gaps, authReq.tenantPool, authReq.tenantId);
 
     const precedentResult = getPrecedentForCloseStep('trial_balance_ingest', {
+      tenantId: authReq.tenantId,
       entityId: body.entityId,
       currentPeriodLabel: body.periodLabel,
       priorPeriodLabel: body.prior_period_label,
@@ -595,13 +663,12 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
     let professionalReviewIngest: import('../../types/professional_review.js').ProfessionalReviewResponse | undefined;
     if (authReq.tenantId && authReq.tenantPool) {
       try {
-        const { covenantResult, liquidityMetrics } = deriveCovenantAndLiquidityFromIngest({
-          balanceSheet: output.balanceSheet,
-          profitAndLoss: output.profitAndLoss,
-          cashFlow: output.cashFlow,
-        });
+        const covenantResult = undefined;
+        const liquidityMetrics = undefined;
         let contractsForReview: import('../../types/professional_review.js').ProfessionalReviewInput['contracts'];
         try {
+          // READ-ONLY: fetches existing revenue contracts as advisory context for professional review.
+          // Does not compute dollar amounts or write to financial tables.
           const { listContracts: listContractsService } = await import('../../services/revenue_recognition_service.js');
           const contracts = await listContractsService(authReq.tenantId, authReq.tenantPool, {});
           contractsForReview = contracts.map((c) => ({
@@ -674,14 +741,24 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
     if (err instanceof PeriodLockedError) {
       const pool = getTenantPool(req);
       const tenantId = getTenantId(req);
-      const auditContext = pool && tenantId ? { pool, tenantId } : undefined;
-      appendAuditLog(
-        { action: 'period_edit_blocked', resource: `period:${err.periodLabel}`, detail: 'Period is locked', actor: (req as AuthRequest).userId ?? 'anonymous' },
-        auditContext
-      );
+      if (pool && tenantId) {
+        await recordAuditLogAction(pool, tenantId, {
+          action: 'period_edit_blocked',
+          resource: `period:${err.periodLabel}`,
+          detail: 'Period is locked',
+          actor: (req as AuthRequest).userId ?? 'anonymous',
+        });
+      }
       return res.status(403).json({ error: 'Period locked', periodLabel: err.periodLabel });
     }
-    if (err instanceof MathematicalIntegrityError) {
+    // Recognize MathematicalIntegrityError even when instanceof fails (e.g. Jest/ESM class identity)
+    const integrityErr: MathematicalIntegrityError | null =
+      err instanceof MathematicalIntegrityError
+        ? err
+        : err && typeof err === 'object' && (err as { name?: string }).name === 'MathematicalIntegrityError'
+          ? (err as MathematicalIntegrityError)
+          : null;
+    if (integrityErr) {
       const tenantId = getTenantId(req);
       const pool = getTenantPool(req);
       const closeSessionId = (req.body as Record<string, unknown>)?.closeSessionId ?? (req.query as Record<string, unknown>).closeSessionId;
@@ -691,10 +768,10 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
             closeSessionId: typeof closeSessionId === 'string' ? closeSessionId : null,
             tenantId,
             decisionType: 'anomaly_flag',
-            subjectRef: { check: err.check, imbalanceAmount: err.imbalanceAmount },
-            inputSnapshot: err.details ?? {},
+            subjectRef: { check: integrityErr.check, imbalanceAmount: integrityErr.imbalanceAmount },
+            inputSnapshot: integrityErr.details ?? {},
             outputSnapshot: { blocked: true, reason: 'MathematicalIntegrityError' },
-            rationaleText: err.message,
+            rationaleText: integrityErr.message,
             engineVersion: 'financialStatements_validator',
           });
         } catch (_) {
@@ -703,27 +780,32 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
         if (typeof closeSessionId === 'string' && closeSessionId) {
           try {
             await createIssueFromIntegrityFailure(
-            { pool, tenantId, closeSessionId, createdBy: (req as AuthRequest).userId },
-            {
-              title: 'Trial balance imbalance (debits ≠ credits or A ≠ L+E)',
-              description: err.message,
-              category: 'posting',
-              severity: 'high',
-              impactPl: err.imbalanceAmount,
-              impactBs: err.check === 'B' ? err.imbalanceAmount : undefined,
-              sourceRef: { check: err.check, imbalanceAmount: err.imbalanceAmount, details: err.details },
-            }
-          );
+              { pool, tenantId, closeSessionId, createdBy: (req as AuthRequest).userId },
+              {
+                title: 'Trial balance imbalance (debits ≠ credits or A ≠ L+E)',
+                description: integrityErr.message,
+                category: 'posting',
+                severity: 'high',
+                sourceRef: {
+                  check: integrityErr.check,
+                  imbalanceAmount: integrityErr.imbalanceAmount,
+                  details: integrityErr.details,
+                  impactPl: integrityErr.imbalanceAmount,
+                  impactBs: integrityErr.check === 'B' ? integrityErr.imbalanceAmount : undefined,
+                },
+              }
+            );
         } catch (_) {
           /* non-fatal */
         }
       }
       return res.status(422).json({
         error: 'MathematicalIntegrityError',
-        message: err.message,
-        check: err.check,
-        imbalanceAmount: err.imbalanceAmount,
-        details: err.details,
+        code: 'FINAL_INTEGRITY_CHECK_FAILED',
+        message: integrityErr.message,
+        check: integrityErr.check,
+        imbalanceAmount: integrityErr.imbalanceAmount,
+        details: integrityErr.details,
       });
     }
     const message = err instanceof Error ? err.message : 'Ingestion failed';

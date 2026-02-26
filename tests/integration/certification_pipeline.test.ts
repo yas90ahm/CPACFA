@@ -30,16 +30,19 @@ import { getUnadjustedMeta } from '../../src/services/trial_balance_store_servic
 import * as justificationsRepo from '../../src/db/repositories/tenant_justifications_repository.js';
 import * as shadowFindingsRepo from '../../src/db/repositories/tenant_shadow_audit_findings_repository.js';
 import * as aiProposalsRepo from '../../src/db/repositories/tenant_ai_proposals_repository.js';
+import { getSession } from '../../src/services/close_session_service.js';
+import { getLedgerSnapshotById } from '../../src/db/repositories/ledger_snapshot_repository.js';
+import { upsertPeriodExportChecks } from '../../src/db/repositories/period_export_checks_repository.js';
 
 const PERIOD_LABEL = '2025-01';
 const PERIOD_START = '2025-01-01';
 const PERIOD_END = '2025-01-31';
 const ENTITY_ID = 'entity-cert-pipeline';
 
-// Imbalanced: debits 1000, credits 400 → imbalance 600 (canonical headers: AccountName, Debit, Credit)
+// Imbalanced: debits 1000, credits 0 → imbalance 1000. Resolve with Retained Earnings so result passes Truth Gate (Assets = L+E).
 const IMBALANCED_TB_CSV = `AccountName,Debit,Credit
 Cash,1000,0
-Revenue,0,400`;
+Revenue,0,0`;
 
 describe('Certification pipeline E2E', () => {
   let authToken: string;
@@ -66,10 +69,7 @@ describe('Certification pipeline E2E', () => {
     async () => {
       if (!isDbConfigured()) return;
 
-    const ingestPath =
-      process.env.NODE_ENV === 'production'
-        ? '/api/trial-balance/ingest'
-        : '/api-dev/trial-balance/ingest';
+    const ingestPath = '/api/trial-balance/ingest';
 
     // 1. Upload imbalanced CSV → staged (Classifier + Advisor run when mock on; fail-open)
     const prevClassifierMock = process.env.AI_MOCK_CLASSIFIER;
@@ -97,7 +97,7 @@ describe('Certification pipeline E2E', () => {
     expect(ingestRes.status).toBe(200);
     expect(ingestRes.body?.status).toBe('staged');
     expect(ingestRes.body?.stagedId).toBeDefined();
-    expect(ingestRes.body?.imbalanceAmount).toBe(600);
+    expect(ingestRes.body?.imbalanceAmount).toBe(1000);
     stagedId = ingestRes.body!.stagedId!;
 
     const pool = await getTenantPool(testTenantId);
@@ -124,12 +124,12 @@ describe('Certification pipeline E2E', () => {
     // Before resolve: no period_trial_balance for this period (optional assertion; may exist from prior run)
     // We proceed to resolve.
 
-    // 2. Resolve ingest via /api/hitl/resolve-ingest (human adjustment)
+    // 2. Resolve ingest via /api/hitl/resolve-ingest (human adjustment). Use Retained Earnings so adjusted TB passes Truth Gate.
     const adjustment = [
       {
-        accountName: 'Suspense / Rounding',
+        accountName: 'Retained Earnings',
         debit: 0,
-        credit: 600,
+        credit: 1000,
         amountProvenance: { kind: 'human_entered' as const, enteredBy: 'test-user' },
       },
     ];
@@ -268,12 +268,21 @@ describe('Certification pipeline E2E', () => {
 
     expect(certifyRes.status).toBe(200);
     expect(certifyRes.body?.status).toBe('certified');
+    expect(certifyRes.body?.certifiedSnapshotId).toBeDefined();
+    expect(certifyRes.body?.snapshotHash).toBeDefined();
+    expect(certifyRes.body?.snapshotHashVersion).toBeDefined();
+
+    // Satisfy export gate: period_export_checks must exist (materiality from DB)
+    await upsertPeriodExportChecks(pool, testTenantId, PERIOD_LABEL, {
+      roundingGapExceedsMateriality: false,
+      aggregateRoundingExceedsMateriality: false,
+    });
 
     // 8. Run export gates (checkExportGate + finalIntegrityCheck) via POST /api/export/pdf
     const balancedLedger = [
       { account_name: 'Cash', debit: 1000, credit: 0 },
-      { account_name: 'Revenue', debit: 0, credit: 400 },
-      { account_name: 'Suspense / Rounding', debit: 0, credit: 600 },
+      { account_name: 'Revenue', debit: 0, credit: 0 },
+      { account_name: 'Retained Earnings', debit: 0, credit: 1000 },
     ];
     const exportPdfRes = await request(app)
       .post('/api/export/pdf')
@@ -290,8 +299,8 @@ describe('Certification pipeline E2E', () => {
             total_equity: 1000,
           },
           profit_and_loss: {
-            total_revenue: 400,
-            net_income: 400,
+            total_revenue: 0,
+            net_income: 0,
           },
         },
       });
@@ -299,7 +308,14 @@ describe('Certification pipeline E2E', () => {
     expect(exportPdfRes.status).toBe(200);
     expect(exportPdfRes.headers['content-type']).toMatch(/pdf|octet-stream/);
 
-    // 9. Export PDF binder and assert binder includes chain verification (binder requires closeSessionId + certified)
+    // 8b. Contract: certification creates a ledger snapshot and stores it on the close session.
+    const sessionAfterCert = await getSession(pool, testTenantId, closeSessionId);
+    expect(sessionAfterCert?.certifiedSnapshotId).toBeDefined();
+    const snapshot = await getLedgerSnapshotById(pool, testTenantId, sessionAfterCert!.certifiedSnapshotId!);
+    expect(snapshot).toBeDefined();
+    expect(snapshot?.closeSessionId).toBe(closeSessionId);
+
+    // 9. Contract: binder succeeds (200) without manual snapshot; uses certified_snapshot (fast path).
     const binderJsonRes = await request(app)
       .get(
         `/api/audit/binder?periodStart=${PERIOD_START}&periodEnd=${PERIOD_END}&entityName=TestEntity&closeSessionId=${closeSessionId}`
@@ -308,6 +324,10 @@ describe('Certification pipeline E2E', () => {
       .set('x-tenant-id', testTenantId);
 
     expect(binderJsonRes.status).toBe(200);
+    expect(binderJsonRes.headers['x-certified-source']).toBe('certified_snapshot');
+    expect(binderJsonRes.headers['x-certified-snapshot-id']).toBeDefined();
+    expect(binderJsonRes.headers['x-certified-snapshot-hash']).toBeDefined();
+    expect(binderJsonRes.headers['x-certified-snapshot-hash-version']).toBeDefined();
     const binder = binderJsonRes.body;
     expect(binder?.chainVerification).toBeDefined();
     expect(binder.chainVerification.valid).toBe(true);
@@ -322,6 +342,10 @@ describe('Certification pipeline E2E', () => {
       .set('x-tenant-id', testTenantId);
 
     expect(binderPdfRes.status).toBe(200);
+    expect(binderPdfRes.headers['x-certified-source']).toBe('certified_snapshot');
+    expect(binderPdfRes.headers['x-certified-snapshot-id']).toBeDefined();
+    expect(binderPdfRes.headers['x-certified-snapshot-hash']).toBeDefined();
+    expect(binderPdfRes.headers['x-certified-snapshot-hash-version']).toBeDefined();
     expect(binderPdfRes.headers['content-type']).toMatch(/pdf|octet-stream/);
     expect(Buffer.isBuffer(binderPdfRes.body) || typeof binderPdfRes.body === 'object').toBe(true);
 

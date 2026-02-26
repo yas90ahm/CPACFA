@@ -1,4 +1,11 @@
 /**
+ * STATUS: UNWIRED — This service compiles but is not imported by any active route.
+ * It exists as potential future functionality.
+ * Last verified: 2026-02-25
+ * To activate: Create a route file that imports this service and register it in server.ts
+ */
+
+/**
  * Fixed asset service — CRUD, depreciation run (straight-line, declining balance), summary.
  * Pure schedule functions (depreciationScheduleSl, depreciationScheduleDdb) ported from backend/accounting_engine.py for API parity.
  */
@@ -7,6 +14,7 @@ import type { Pool } from 'pg';
 import * as repo from '../db/repositories/fixed_asset_repository.js';
 import type { FixedAssetRow, DepreciationMethod, DepreciationRunRow, DepreciationRunDetailRow } from '../db/repositories/fixed_asset_repository.js';
 import { minus as decMinus, round2 } from '../utils/decimal.js';
+import { NotImplementedError } from '../errors.js';
 
 export type { FixedAssetRow, DepreciationRunRow, DepreciationRunDetailRow, DepreciationMethod };
 
@@ -92,7 +100,12 @@ function computePeriodDepreciation(
     return round2(periodDep);
   }
 
-  // units_of_production: stub, no usage input
+  if (asset.method === 'units_of_production') {
+    throw new NotImplementedError(
+      'units_of_production depreciation',
+      'Units-of-production depreciation requires usage data per period. Use straight_line or declining_balance, or add usage input support.'
+    );
+  }
   return 0;
 }
 
@@ -214,7 +227,7 @@ export function depreciationScheduleSl(
 
 /**
  * Double-declining balance depreciation schedule (pure function). API parity with backend/accounting_engine.depreciation_schedule_ddb.
- * ASC 360-10-35. Switch to SL when SL > DDB not implemented for simplicity.
+ * ASC 360-10-35. FUTURE: Switch to SL when SL > DDB (hybrid DDB→SL) not implemented.
  */
 export function depreciationScheduleDdb(
   cost: number,
@@ -312,7 +325,7 @@ export async function getDepreciationSummary(
   const runs = await repo.listDepreciationRuns(pool, tenantId, periodLabel);
   if (runs.length === 0) return null;
   const run = runs[0]!;
-  const detailRows = await repo.listDepreciationRunDetails(pool, run.id);
+  const detailRows = await repo.listDepreciationRunDetails(pool, tenantId, run.id);
   const assets = await repo.listFixedAssets(pool, tenantId);
   const assetMap = new Map(assets.map((a) => [a.id, a]));
 
@@ -383,8 +396,9 @@ export async function listDepreciationRuns(
 }
 
 export async function listDepreciationRunDetails(
+  tenantId: string,
   pool: Pool,
   runId: string
 ): Promise<repo.DepreciationRunDetailRow[]> {
-  return repo.listDepreciationRunDetails(pool, runId);
+  return repo.listDepreciationRunDetails(pool, tenantId, runId);
 }

@@ -4,6 +4,57 @@ Backend-only deterministic close and certification engine. Trial balance in → 
 
 ---
 
+## Quick Start — Demo in 5 Minutes
+
+### Option 1: Docker (recommended)
+
+```bash
+git clone https://github.com/yas90ahm/CPACFA.git
+cd CPACFA
+docker-compose -f docker-compose.yml -f docker-compose.demo.yml up --build
+# Open http://localhost:3000
+# Login: demo@cloudmetrics.io / DemoPass2026!
+```
+
+### Option 2: Local Development
+
+```bash
+git clone https://github.com/yas90ahm/CPACFA.git
+cd CPACFA
+npm install
+cp .env.example .env
+# Edit .env: set DATABASE_URL to your Postgres instance
+npm run db:migrate
+npm run keygen          # generates Ed25519 keypair, prints to stdout
+# Copy the keys into .env as CERT_SIGNING_PRIVATE_KEY and CERT_SIGNING_PUBLIC_KEY
+npm run seed:demo       # seeds demo tenant and sample data
+npm run dev             # starts server on port 3000
+```
+
+### Running Tests
+
+```bash
+cd tests
+cp .env.example .env    # configure DATABASE_URL
+npm test                # runs all unit + integration tests
+```
+
+### Required Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| DATABASE_URL | Yes | — | PostgreSQL connection string |
+| JWT_SECRET | Yes | — | Secret for JWT signing |
+| PORT | No | 3000 | Server port |
+| APP_MODE | No | development | development, demo, production |
+| CERT_SIGNING_PRIVATE_KEY | Prod only | auto-generated in dev | Ed25519 private key (hex) |
+| CERT_SIGNING_PUBLIC_KEY | Prod only | auto-generated in dev | Ed25519 public key (hex) |
+| STORAGE_ADAPTER | No | local | Evidence storage: local or s3 |
+| EVIDENCE_S3_BUCKET | If s3 | — | S3 bucket for evidence |
+| EVIDENCE_S3_REGION | If s3 | — | S3 region |
+
+---
+
 ## Key capabilities
 
 - Ingest trial balance (CSV/XLSX); balanced TB saved to period ledger; imbalanced TB staged for HITL.
@@ -129,7 +180,7 @@ Only key mounted routes; not an exhaustive list.
 | `POST /api/export/pdf`, `POST /api/export/csv` | Export (draft vs certified by body/query; certified requires session + gates). |
 | `GET /api/audit/binder`, `GET /api/audit/binder/export/pdf`, `.../csv` | Audit binder (certified-only; requireCertifiedSession + gates). |
 
-Other mounted prefixes: `/api/justification`, `/api/audit` (reconciliation, todos, GAAP consistency, etc.), `/api/close/*` (sessions, issues, adjustments, checklist, etc.), `/api/coa-mapping`, `/api/onboarding`, `/api/tenants`, `/api/knowledge-base`, `/api/vector-store`, `/api/ingestion`, `/api/memory`, `/api/integrations`, `/api/pipelines`, `/api/data-quality`, `/api/approvals`, `/api/accounting-integration`. Dev-only: `/api-dev` when `NODE_ENV !== 'production'`.
+Other mounted prefixes: `/api/justification`, `/api/audit` (reconciliation, todos, GAAP consistency, etc.), `/api/close/*` (sessions, issues, adjustments, checklist, etc.), `/api/coa-mapping`, `/api/onboarding`, `/api/tenants`, `/api/knowledge-base`, `/api/vector-store`, `/api/ingestion`, `/api/memory`, `/api/integrations`, `/api/pipelines`, `/api/data-quality`, `/api/approvals`, `/api/accounting-integration`. Dev-only: `/api-dev` only when `ENABLE_DEV_API=true` and `NODE_ENV !== 'production'` and `DEMO_MODE !== 'true'` (never in DEMO or production).
 
 ---
 

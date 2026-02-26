@@ -1,0 +1,33 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://cpacfa:cpacfa@postgres:5432/cpacfa
+      JWT_SECRET: dev-secret-change-in-prod
+      MODE: demo
+      NODE_ENV: development
+      PORT: "3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: cpacfa
+      POSTGRES_PASSWORD: cpacfa
+      POSTGRES_DB: cpacfa
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cpacfa -d cpacfa"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

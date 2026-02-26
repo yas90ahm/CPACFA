@@ -52,3 +52,24 @@ export function log(level: 'info' | 'warn' | 'error', message: string, meta?: Re
     write(process.stderr, level, message, meta);
   }
 }
+
+/** Fields for critical-route structured log (single line JSON per request). */
+export interface CriticalRouteLogPayload {
+  ts: string;
+  level: 'info';
+  requestId: string;
+  tenantId?: string;
+  closeSessionId?: string;
+  route: string;
+  outcome: string;
+  code?: string;
+  durationMs: number;
+}
+
+/**
+ * Log one structured JSON line for a critical endpoint. Low-noise; use only for observability-critical routes.
+ */
+export function logCriticalRoute(payload: CriticalRouteLogPayload): void {
+  const line = JSON.stringify(payload) + '\n';
+  process.stdout.write(line);
+}

@@ -16,6 +16,8 @@ export type AccountType =
 
 /** Single trial balance line (must participate in double-entry) */
 export interface TrialBalanceEntry {
+  /** Stable identifier assigned at parse/ingest (UUID); durable for audit trail and snapshot. */
+  lineId?: string;
   accountCode?: string;
   accountName: string;
   debit: number;
@@ -57,6 +59,8 @@ export interface BalanceSheet {
   totalAssets: number;
   totalLiabilities: number;
   totalEquity: number;
+  /** Accumulated Other Comprehensive Income (ASC 220). Included in totalEquity when present. */
+  oci?: { items: FinancialStatementLine[]; total: number };
   /** Verification: Assets = Liabilities + Equity */
   balances: boolean;
   codificationRef: CodificationRef;
@@ -70,6 +74,8 @@ export interface ProfitAndLoss {
   totalRevenue: number;
   totalExpenses: number;
   netIncome: number;
+  /** Discontinued operations (ASC 205-20). When present, netIncome is from continuing operations only. */
+  discontinuedOperations?: { items: FinancialStatementLine[]; total: number };
   codificationRef: CodificationRef;
 }
 
@@ -77,6 +83,8 @@ export interface FinancialStatementLine {
   accountCode?: string;
   label: string;
   amount: number;
+  /** Stable line ID (UUID) from TB parse for audit trail and binder */
+  lineId?: string;
   /** FS taxonomy line id/code when built from COA mapping */
   fsLineId?: string;
   fsLineCode?: string;
@@ -156,6 +164,8 @@ export interface CashFlowStatement {
 export interface EquityChangesStatement {
   openingEquity?: number;
   changes: Array<{ label: string; amount: number }>;
+  /** Other Comprehensive Income component of equity changes (ASC 220). */
+  ociChanges?: Array<{ label: string; amount: number }>;
   closingEquity?: number;
   estimated?: boolean;
   note?: string;

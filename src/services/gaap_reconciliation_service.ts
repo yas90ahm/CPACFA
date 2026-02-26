@@ -1,6 +1,7 @@
 /**
  * GAAP-to-IFRS reconciliation bridge for consolidation (Scenario C).
- * Stub: pass-through with optional future LIFO/FIFO, lease accounting differences.
+ * Implemented: pass-through with LIFO inventory detection (US_GAAP→IFRS) and suggested adjustment.
+ * FUTURE: Lease accounting differences, additional conversion rules.
  * Consolidation can call reconcileEntityBalances before translateToReportingCurrency.
  */
 

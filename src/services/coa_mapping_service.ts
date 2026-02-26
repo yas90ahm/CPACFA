@@ -16,7 +16,7 @@ import type {
 import { classifyAccount } from './accountClassifier.js';
 import * as taxonomyRepo from '../db/repositories/fs_taxonomy_repository.js';
 import * as rulesRepo from '../db/repositories/coa_mapping_rules_repository.js';
-import { recordMaterialEvent } from './audit_ledger_service.js';
+import { recordMaterialEvent } from './audit_service.js';
 
 /** Default fs_line_id by account type (seeded in 068). */
 const DEFAULT_FS_LINE_BY_TYPE: Record<AccountType, string> = {
@@ -165,5 +165,22 @@ export async function upsertCoaRules(
     eventType: 'mapping_rule_update',
     deterministicFlagSnapshot: { entityId, version, ruleCount: rules.length, ruleIds },
   });
+  // Fire MAPPING_CHANGED cascade so unmapped_account issues can auto-resolve
+  const { executeCascade, CascadeTriggerType } = await import('./cascade_engine.js');
+  const { listCloseSessions } = await import('../db/repositories/close_session_repository.js');
+  const sessions = await listCloseSessions(pool, tenantId, entityId);
+  const affectedAccounts = rules.map((r) => r.sourceAccountNamePattern);
+  for (const s of sessions) {
+    if (['open', 'in_progress', 'under_review'].includes(s.status ?? '')) {
+      await executeCascade(pool, tenantId, {
+        type: CascadeTriggerType.MAPPING_CHANGED,
+        period_id: s.id,
+        entity_id: entityId,
+        triggered_by: 'upsertCoaRules',
+        affected_accounts: affectedAccounts,
+        details: { version, ruleIds },
+      });
+    }
+  }
   return { version, ruleIds };
 }

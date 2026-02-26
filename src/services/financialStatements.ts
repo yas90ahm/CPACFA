@@ -19,25 +19,42 @@ import type {
   AccountType,
 } from '../types/financial.js';
 import { BALANCE_SHEET, COMPREHENSIVE_INCOME } from '../constants/codification.js';
-import { round2, sumRound2, absLt, absGt } from '../utils/decimal.js';
+import { from, round2, minus, plus, sumRound2 } from '../utils/decimal.js';
 import { classifyTrialBalanceDeterministic } from './accountClassifier.js';
-import { getRoundingTolerance } from './rules_registry.js';
 import { MathematicalIntegrityError } from '../errors.js';
-import { detectSuspiciousPlugs, type SuspiciousPlugResult } from './integrity_gate_service.js';
+import {
+  assertIntegrityGateOrThrow,
+  detectSuspiciousPlugs,
+  runIntegrityGate,
+  type SuspiciousPlugResult,
+} from './integrity_gate_service.js';
 
 /** Re-export for backward compatibility. Primary gatekeeper: totalDebits !== totalCredits → MUST throw this (422). */
 export { MathematicalIntegrityError };
 
 /** Credit-positive fs line ids (positive = credit); others are debit-positive. */
-const CREDIT_POSITIVE_FS_LINES = new Set(['fs_liability', 'fs_equity', 'fs_revenue']);
+const CREDIT_POSITIVE_FS_LINES = new Set([
+  'fs_liability', 'fs_equity', 'fs_revenue',
+  'fs_oci', 'fs_oci_unrealized_gains', 'fs_oci_fx_translation', 'fs_oci_hedge',
+  'fs_discontinued_ops', 'fs_discontinued_disposal',
+]);
+
+/** FS line IDs that route to OCI (Accumulated Other Comprehensive Income). */
+const OCI_FS_LINES = new Set([
+  'fs_oci', 'fs_oci_unrealized_gains', 'fs_oci_fx_translation', 'fs_oci_pension', 'fs_oci_hedge',
+]);
+
+/** FS line IDs that route to Discontinued Operations on the P&L. */
+const DISCONTINUED_FS_LINES = new Set(['fs_discontinued_ops', 'fs_discontinued_disposal']);
 
 /** Net amount for an account (debit − credit). Assets/Expenses: positive = debit. Liabilities/Equity/Revenue: positive = credit. Uses decimal round for display. */
 function netAmount(entry: TrialBalanceEntry): number {
-  const net = entry.debit - entry.credit;
+  const net = minus(entry.debit, entry.credit);
+  const u = entry.accountType != null ? String(entry.accountType).toUpperCase() : '';
   const creditPositive =
     entry.fsLineId != null
       ? CREDIT_POSITIVE_FS_LINES.has(entry.fsLineId)
-      : entry.accountType === 'LIABILITY' || entry.accountType === 'EQUITY' || entry.accountType === 'REVENUE';
+      : u === 'LIABILITY' || u === 'EQUITY' || u === 'REVENUE';
   const signed = creditPositive ? -net : net;
   return round2(signed);
 }
@@ -48,6 +65,7 @@ function toLine(entry: TrialBalanceEntry): FinancialStatementLine {
     accountCode: entry.accountCode,
     label: entry.accountName,
     amount,
+    lineId: entry.lineId,
     fsLineId: entry.fsLineId,
     fsLineCode: entry.fsLineCode,
     codificationRef: entry.codificationRef,
@@ -67,20 +85,41 @@ function sumLines(lines: FinancialStatementLine[]): number {
 
 const DEFAULT_MATERIALITY = 0.01;
 
-/** When fsLineId is set, bucket by taxonomy line id (BS defaults: fs_asset, fs_liability, fs_equity). */
-function bucketBsByFsLine(entries: TrialBalanceEntry[]): { assets: TrialBalanceEntry[]; liabilities: TrialBalanceEntry[]; equity: TrialBalanceEntry[] } {
+/** Bucket entries by fsLineId (data-driven) with accountType fallback. Supports OCI and Discontinued Ops. */
+function bucketBsByFsLine(entries: TrialBalanceEntry[]): {
+  assets: TrialBalanceEntry[];
+  liabilities: TrialBalanceEntry[];
+  equity: TrialBalanceEntry[];
+  revenue: TrialBalanceEntry[];
+  expenses: TrialBalanceEntry[];
+  oci: TrialBalanceEntry[];
+  discontinued: TrialBalanceEntry[];
+} {
   const assets: TrialBalanceEntry[] = [];
   const liabilities: TrialBalanceEntry[] = [];
   const equity: TrialBalanceEntry[] = [];
+  const revenue: TrialBalanceEntry[] = [];
+  const expenses: TrialBalanceEntry[] = [];
+  const oci: TrialBalanceEntry[] = [];
+  const discontinued: TrialBalanceEntry[] = [];
+  const isType = (t?: string, expected?: string) => t != null && expected != null && String(t).toUpperCase() === expected;
   for (const e of entries) {
-    if (e.fsLineId === 'fs_asset') assets.push(e);
+    // Data-driven routing by fsLineId
+    if (e.fsLineId && OCI_FS_LINES.has(e.fsLineId)) oci.push(e);
+    else if (e.fsLineId && DISCONTINUED_FS_LINES.has(e.fsLineId)) discontinued.push(e);
+    else if (e.fsLineId === 'fs_asset') assets.push(e);
     else if (e.fsLineId === 'fs_liability') liabilities.push(e);
     else if (e.fsLineId === 'fs_equity') equity.push(e);
-    else if (e.accountType === 'ASSET') assets.push(e);
-    else if (e.accountType === 'LIABILITY') liabilities.push(e);
-    else if (e.accountType === 'EQUITY') equity.push(e);
+    else if (e.fsLineId === 'fs_revenue') revenue.push(e);
+    else if (e.fsLineId === 'fs_expense') expenses.push(e);
+    // Fallback by accountType
+    else if (isType(e.accountType, 'ASSET')) assets.push(e);
+    else if (isType(e.accountType, 'LIABILITY')) liabilities.push(e);
+    else if (isType(e.accountType, 'EQUITY')) equity.push(e);
+    else if (isType(e.accountType, 'REVENUE')) revenue.push(e);
+    else if (isType(e.accountType, 'EXPENSE')) expenses.push(e);
   }
-  return { assets, liabilities, equity };
+  return { assets, liabilities, equity, revenue, expenses, oci, discontinued };
 }
 
 /**
@@ -93,18 +132,34 @@ export function buildBalanceSheet(
   options?: { materiality?: number }
 ): BalanceSheet {
   const materiality = options?.materiality ?? DEFAULT_MATERIALITY;
-  const { assets: assetEntries, liabilities: liabilityEntries, equity: equityEntries } = bucketBsByFsLine(entries);
+  const { assets: assetEntries, liabilities: liabilityEntries, equity: equityEntries, revenue: revenueEntries, expenses: expenseEntries, oci: ociEntries } =
+    bucketBsByFsLine(entries);
 
   const assets = assetEntries.map(toLine);
   const liabilities = liabilityEntries.map(toLine);
   const equity = equityEntries.map(toLine);
+  const revenueLines = revenueEntries.map(toLine);
+  const expenseLines = expenseEntries.map(toLine);
+  const ociLines = ociEntries.map(toLine);
 
   const totalAssets = sumLines(assets);
   const totalLiabilities = sumLines(liabilities);
-  const totalEquity = sumLines(equity);
-  const liabilitiesPlusEquity = sumRound2([totalLiabilities, totalEquity]);
-  const balances = absLt(totalAssets, liabilitiesPlusEquity, materiality);
-  /* decimal sums already applied via sumLines (sumRound2) */
+  // Equity for BS equation: Equity accounts + Net Income (Revenue - Expense) + OCI per ASC 210/220
+  const equityOnly = sumLines(equity);
+  const totalRevenue = sumLines(revenueLines);
+  const totalExpenses = sumLines(expenseLines);
+  const totalOci = sumLines(ociLines);
+  const totalEquity = round2(plus(plus(equityOnly, minus(totalRevenue, totalExpenses)), totalOci));
+
+  const totalDebits = sumRound2(entries.map((e) => e.debit ?? 0));
+  const totalCredits = sumRound2(entries.map((e) => e.credit ?? 0));
+
+  const gateResult = runIntegrityGate({
+    trialBalance: { totalDebits, totalCredits },
+    balanceSheet: { totalAssets, totalLiabilities, totalEquity },
+    tolerance: materiality,
+  });
+  const balances = gateResult.checks?.balanceSheetBalances ?? false;
 
   return {
     assets,
@@ -113,22 +168,27 @@ export function buildBalanceSheet(
     totalAssets,
     totalLiabilities,
     totalEquity,
+    ...(ociLines.length > 0 ? { oci: { items: ociLines, total: totalOci } } : {}),
     balances,
     codificationRef: BALANCE_SHEET,
   };
 }
 
-/** When fsLineId is set, bucket PL by taxonomy (fs_revenue, fs_expense); otherwise by accountType. */
-function bucketPlByFsLine(entries: TrialBalanceEntry[]): { revenue: TrialBalanceEntry[]; expenses: TrialBalanceEntry[] } {
+/** Bucket PL by taxonomy. Supports discontinued operations (ASC 205-20). */
+function bucketPlByFsLine(entries: TrialBalanceEntry[]): { revenue: TrialBalanceEntry[]; expenses: TrialBalanceEntry[]; discontinued: TrialBalanceEntry[] } {
   const revenue: TrialBalanceEntry[] = [];
   const expenses: TrialBalanceEntry[] = [];
+  const discontinued: TrialBalanceEntry[] = [];
+  const rev = (t?: string) => t != null && String(t).toUpperCase() === 'REVENUE';
+  const exp = (t?: string) => t != null && String(t).toUpperCase() === 'EXPENSE';
   for (const e of entries) {
-    if (e.fsLineId === 'fs_revenue') revenue.push(e);
+    if (e.fsLineId && DISCONTINUED_FS_LINES.has(e.fsLineId)) discontinued.push(e);
+    else if (e.fsLineId === 'fs_revenue') revenue.push(e);
     else if (e.fsLineId === 'fs_expense') expenses.push(e);
-    else if (e.accountType === 'REVENUE') revenue.push(e);
-    else if (e.accountType === 'EXPENSE') expenses.push(e);
+    else if (rev(e.accountType)) revenue.push(e);
+    else if (exp(e.accountType)) expenses.push(e);
   }
-  return { revenue: revenue, expenses: expenses };
+  return { revenue, expenses, discontinued };
 }
 
 /**
@@ -140,14 +200,16 @@ export function buildProfitAndLoss(
   entries: TrialBalanceEntry[],
   options?: { materiality?: number }
 ): ProfitAndLoss {
-  const { revenue: revenueEntries, expenses: expenseEntries } = bucketPlByFsLine(entries);
+  const { revenue: revenueEntries, expenses: expenseEntries, discontinued: discontinuedEntries } = bucketPlByFsLine(entries);
 
   const revenue = revenueEntries.map(toLine);
   const expenses = expenseEntries.map(toLine);
+  const discontinuedLines = discontinuedEntries.map(toLine);
 
   const totalRevenue = sumLines(revenue);
   const totalExpenses = sumLines(expenses);
-  const netIncome = round2(totalRevenue - totalExpenses);
+  const netIncome = round2(minus(totalRevenue, totalExpenses));
+  const totalDiscontinued = sumLines(discontinuedLines);
 
   return {
     revenue,
@@ -155,6 +217,7 @@ export function buildProfitAndLoss(
     totalRevenue,
     totalExpenses,
     netIncome,
+    ...(discontinuedLines.length > 0 ? { discontinuedOperations: { items: discontinuedLines, total: totalDiscontinued } } : {}),
     codificationRef: COMPREHENSIVE_INCOME,
   };
 }
@@ -176,19 +239,9 @@ export function buildFinancialStatements(
   return { balanceSheet, profitAndLoss, classifiedEntries: classified };
 }
 
-/** Sum debits and credits from entries (for Kill Switch check A). */
-function getTrialBalanceTotals(entries: TrialBalanceEntry[]): { totalDebits: number; totalCredits: number } {
-  let totalDebits = 0;
-  let totalCredits = 0;
-  for (const e of entries) {
-    totalDebits += e.debit ?? 0;
-    totalCredits += e.credit ?? 0;
-  }
-  return { totalDebits, totalCredits };
-}
-
 /**
  * Validate already-built trial balance and balance sheet (Kill Switch).
+ * Delegates to runIntegrityGate via assertIntegrityGateOrThrow.
  * Throws MathematicalIntegrityError if (A) Sum(Debits) != Sum(Credits) or (B) Assets != L+E.
  * Use when returning stored statements (e.g. audit binder) to ensure we never serve illegal data.
  */
@@ -197,31 +250,25 @@ export function validateTrialBalanceAndBalanceSheet(
   balanceSheet: BalanceSheet,
   tolerance?: number
 ): void {
-  const tol = tolerance ?? getRoundingTolerance();
   const entries = trialBalance.entries ?? [];
   const totalDebits =
     'totalDebits' in trialBalance && typeof trialBalance.totalDebits === 'number'
       ? trialBalance.totalDebits
-      : entries.reduce((s, e) => s + (e.debit ?? 0), 0);
+      : sumRound2(entries.map((e) => e.debit ?? 0));
   const totalCredits =
     'totalCredits' in trialBalance && typeof trialBalance.totalCredits === 'number'
       ? trialBalance.totalCredits
-      : entries.reduce((s, e) => s + (e.credit ?? 0), 0);
+      : sumRound2(entries.map((e) => e.credit ?? 0));
 
-  if (absGt(totalDebits, totalCredits, tol)) {
-    const imbalanceAmount = round2(Math.abs(totalDebits - totalCredits));
-    throw new MathematicalIntegrityError('A', imbalanceAmount, { totalDebits, totalCredits });
-  }
-
-  const rhs = sumRound2([balanceSheet.totalLiabilities, balanceSheet.totalEquity]);
-  if (absGt(balanceSheet.totalAssets, rhs, tol)) {
-    const imbalanceAmount = round2(Math.abs(balanceSheet.totalAssets - rhs));
-    throw new MathematicalIntegrityError('B', imbalanceAmount, {
+  assertIntegrityGateOrThrow({
+    trialBalance: { totalDebits, totalCredits },
+    balanceSheet: {
       totalAssets: balanceSheet.totalAssets,
       totalLiabilities: balanceSheet.totalLiabilities,
       totalEquity: balanceSheet.totalEquity,
-    });
-  }
+    },
+    tolerance,
+  });
 }
 
 /** Risk level for validated statements; 'balanced_but_high_risk' when suspicious plug accounts detected. */
@@ -239,6 +286,7 @@ export interface BuildValidatedStatementsResult {
 
 /**
  * Unified validated builder: (A) Sum(Debits)==Sum(Credits), (B) Total Assets==Total Liabilities+Total Equity.
+ * Delegates to runIntegrityGate (assertIntegrityGateOrThrow) — single source of truth for integrity checks.
  * If either check fails, throws MathematicalIntegrityError and returns no data. Use for all API paths that return financials.
  * When plug accounts (Miscellaneous, Suspense, Other) absorb >= 90% of net activity, flags report as 'Balanced but High Risk'
  * and returns plugAlert for mandatory audit alert in tenant_hitl_staging.
@@ -247,32 +295,28 @@ export function buildValidatedStatements(
   trialBalanceResult: TrialBalanceResult,
   options?: { preClassifiedEntries?: TrialBalanceEntry[]; materiality?: number; tolerance?: number }
 ): BuildValidatedStatementsResult {
-  const tol = options?.tolerance ?? getRoundingTolerance();
   const entries = trialBalanceResult.entries ?? [];
   const totalDebits =
     trialBalanceResult.totalDebits != null
       ? trialBalanceResult.totalDebits
-      : entries.reduce((s, e) => s + (e.debit ?? 0), 0);
+      : sumRound2(entries.map((e) => e.debit ?? 0));
   const totalCredits =
     trialBalanceResult.totalCredits != null
       ? trialBalanceResult.totalCredits
-      : entries.reduce((s, e) => s + (e.credit ?? 0), 0);
-
-  if (absGt(totalDebits, totalCredits, tol)) {
-    const imbalanceAmount = round2(Math.abs(totalDebits - totalCredits));
-    throw new MathematicalIntegrityError('A', imbalanceAmount, { totalDebits, totalCredits });
-  }
+      : sumRound2(entries.map((e) => e.credit ?? 0));
 
   const result = buildFinancialStatements(trialBalanceResult, options);
-  const rhs = sumRound2([result.balanceSheet.totalLiabilities, result.balanceSheet.totalEquity]);
-  if (absGt(result.balanceSheet.totalAssets, rhs, tol)) {
-    const imbalanceAmount = round2(Math.abs(result.balanceSheet.totalAssets - rhs));
-    throw new MathematicalIntegrityError('B', imbalanceAmount, {
+
+  // totalEquity from buildBalanceSheet already includes Net Income (Revenue - Expense)
+  assertIntegrityGateOrThrow({
+    trialBalance: { totalDebits, totalCredits },
+    balanceSheet: {
       totalAssets: result.balanceSheet.totalAssets,
       totalLiabilities: result.balanceSheet.totalLiabilities,
       totalEquity: result.balanceSheet.totalEquity,
-    });
-  }
+    },
+    tolerance: options?.tolerance,
+  });
 
   const classifiedEntries = result.classifiedEntries ?? entries;
   const plugResult = detectSuspiciousPlugs(

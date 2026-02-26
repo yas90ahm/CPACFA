@@ -1,9 +1,14 @@
 /**
  * Parser utilities — standardize column names for messy CSV/XLSX (ported from backend/parser/column_cleaner.py).
+ * All amount parsing uses Decimal.js via utils/decimal.ts.
+ */
+
+import { round2, from } from '../../utils/decimal.js';
+
+/**
  * Maps variants like "Balance", "Amt", "Dr", "Cr" to canonical: Date, Vendor, Amount, Description, AccountName, AccountCode, Debit, Credit.
  * Handles "pathetic" bank/export formats for trial balance and transaction lists.
  */
-
 export const CANONICAL_DATE = 'Date';
 export const CANONICAL_VENDOR = 'Vendor';
 export const CANONICAL_PRICE = 'Price';
@@ -11,6 +16,7 @@ export const CANONICAL_AMOUNT = 'Amount';
 export const CANONICAL_DESCRIPTION = 'Description';
 export const CANONICAL_ACCOUNT_NAME = 'AccountName';
 export const CANONICAL_ACCOUNT_CODE = 'AccountCode';
+export const CANONICAL_ACCOUNT_TYPE = 'AccountType';
 export const CANONICAL_DEBIT = 'Debit';
 export const CANONICAL_CREDIT = 'Credit';
 
@@ -41,6 +47,9 @@ const ACCOUNT_CODE_VARIANTS = [
   'accountcode', 'account_code', 'account code', 'code', 'gl_code',
   'ledger_code', 'account_number', 'acct_no',
 ];
+const ACCOUNT_TYPE_VARIANTS = [
+  'accounttype', 'account_type', 'account type', 'type', 'accttype', 'acct_type',
+];
 const DEBIT_VARIANTS = ['debit', 'debits', 'dr', 'debit_amount', 'debit_balance'];
 const CREDIT_VARIANTS = ['credit', 'credits', 'cr', 'credit_amount', 'credit_balance'];
 
@@ -49,6 +58,7 @@ const CANONICAL_MAP: Record<string, readonly string[]> = {
   [CANONICAL_DATE]: DATE_VARIANTS,
   [CANONICAL_ACCOUNT_NAME]: ACCOUNT_NAME_VARIANTS,
   [CANONICAL_ACCOUNT_CODE]: ACCOUNT_CODE_VARIANTS,
+  [CANONICAL_ACCOUNT_TYPE]: ACCOUNT_TYPE_VARIANTS,
   [CANONICAL_DEBIT]: DEBIT_VARIANTS,
   [CANONICAL_CREDIT]: CREDIT_VARIANTS,
   [CANONICAL_VENDOR]: VENDOR_VARIANTS,
@@ -148,13 +158,21 @@ export function inferFormat(cleanedRows: StandardizedRow[]): 'trial_balance' | '
   return 'mixed';
 }
 
-/** Parse numeric value from cell (commas, parentheses for negative). */
+/** Parse numeric value from cell (commas, parentheses for negative). Uses Decimal.js. */
 export function parseAmount(value: unknown): number {
-  if (typeof value === 'number' && !Number.isNaN(value)) return value;
+  if (typeof value === 'number' && Number.isFinite(value) && !Number.isNaN(value)) return round2(value);
   const s = String(value ?? '').trim().replace(/,/g, '');
   if (s === '' || s === '-') return 0;
-  if (s.startsWith('(') && s.endsWith(')')) return -parseFloat(s.slice(1, -1)) || 0;
-  return parseFloat(s) || 0;
+  try {
+    if (s.startsWith('(') && s.endsWith(')')) {
+      const inner = from(s.slice(1, -1)).negated();
+      return round2(inner.isFinite() ? inner.toNumber() : 0);
+    }
+    const d = from(s);
+    return round2(d.isFinite() ? d.toNumber() : 0);
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -176,32 +194,36 @@ export function hasCanonicalDebitCredit(standardizedRows: StandardizedRow[]): bo
  */
 export function standardizedRowsToTrialBalanceRows(
   rows: StandardizedRow[]
-): Array<{ accountName: string; accountCode?: string; debit: number; credit: number }> {
-  const out: Array<{ accountName: string; accountCode?: string; debit: number; credit: number }> = [];
+): Array<{ accountName: string; accountCode?: string; accountTypeRaw?: string; debit: number; credit: number }> {
+  const out: Array<{ accountName: string; accountCode?: string; accountTypeRaw?: string; debit: number; credit: number }> = [];
   const hasDebit = rows.length > 0 && (CANONICAL_DEBIT in (rows[0] ?? {}));
   const hasCredit = rows.length > 0 && (CANONICAL_CREDIT in (rows[0] ?? {}));
   const hasAmount = rows.length > 0 && (CANONICAL_AMOUNT in (rows[0] ?? {}) || CANONICAL_PRICE in (rows[0] ?? {}));
   const nameKey = rows.length > 0 && CANONICAL_ACCOUNT_NAME in (rows[0] ?? {}) ? CANONICAL_ACCOUNT_NAME : 'AccountName';
   const codeKey = rows.length > 0 && CANONICAL_ACCOUNT_CODE in (rows[0] ?? {}) ? CANONICAL_ACCOUNT_CODE : undefined;
+  const typeKey = rows.length > 0 && CANONICAL_ACCOUNT_TYPE in (rows[0] ?? {}) ? CANONICAL_ACCOUNT_TYPE : undefined;
 
   for (const row of rows) {
     const accountName = String(row[nameKey] ?? row['AccountName'] ?? row[CANONICAL_DESCRIPTION] ?? '').trim();
     if (!accountName) continue;
 
     const accountCode = codeKey ? String(row[codeKey] ?? '').trim() || undefined : undefined;
+    const accountTypeRaw = typeKey ? String(row[typeKey] ?? '').trim() || undefined : undefined;
     let debit = 0;
     let credit = 0;
 
     if (hasDebit && hasCredit) {
-      debit = parseAmount(row[CANONICAL_DEBIT]);
-      credit = parseAmount(row[CANONICAL_CREDIT]);
+      const rawDebit = parseAmount(row[CANONICAL_DEBIT]);
+      const rawCredit = parseAmount(row[CANONICAL_CREDIT]);
+      debit = rawDebit >= 0 ? rawDebit : Math.abs(rawDebit);
+      credit = rawCredit >= 0 ? rawCredit : Math.abs(rawCredit);
     } else if (hasAmount) {
       const amt = parseAmount(row[CANONICAL_AMOUNT] ?? row[CANONICAL_PRICE]);
       if (amt >= 0) debit = amt;
       else credit = Math.abs(amt);
     }
 
-    out.push({ accountName, accountCode, debit, credit });
+    out.push({ accountName, accountCode, ...(accountTypeRaw ? { accountTypeRaw } : {}), debit, credit });
   }
   return out;
 }

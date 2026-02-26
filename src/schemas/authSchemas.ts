@@ -18,7 +18,7 @@ export const loginSchema = z.object({
 // Register
 // ============================================================================
 
-export const allowedRolesSchema = z.enum(['accountant', 'preparer', 'reviewer', 'approver']);
+export const allowedRolesSchema = z.enum(['accountant', 'preparer', 'reviewer', 'approver', 'admin', 'operating_partner']);
 
 const passwordComplexity = z
   .string()
@@ -29,6 +29,7 @@ const passwordComplexity = z
   );
 
 export const registerSchema = z.object({
+  tenantId: z.string().min(1).optional(),
   tenantName: z.string().min(1, 'Tenant name required').optional(),
   name: z.string().optional(),
   email: z.string().email('Invalid email format'),

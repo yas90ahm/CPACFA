@@ -35,3 +35,8 @@ Thumbs.db
 # Logs / debug
 *.log
 npm-debug.log*
+
+# Generated investigation / audit reports (keep locally, do not commit)
+*_ENDPOINT_REPORT.md
+*_REPORT.md
+STATE_OF_THE_APP.md

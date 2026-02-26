@@ -8,19 +8,25 @@ import { Router } from 'express';
 import trialBalanceRouter from './trial-balance/index.js';
 import closeRouter from './close/index.js';
 import auditRouter from './audit/index.js';
-import financialMemoryRouter from './financial_memory.js';
-import vectorStoreRouter from './vector_store.js';
-import pipelinesRouter from './pipelines.js';
-import justificationRouter from './justification.js';
+// QUARANTINED — Knowledge base routes not in MVP architecture
+// import financialMemoryRouter from './financial_memory.js';
+// import vectorStoreRouter from './vector_store.js';
+// QUARANTINED — Bank pipeline, AP/AR aging, payroll accrual not in MVP architecture
+// import pipelinesRouter from './pipelines.js';
+// QUARANTINED — Justification/RAG chat not in MVP architecture
+// import justificationRouter from './justification.js';
 
 const cpaRouter = Router();
 
 cpaRouter.use('/trial-balance', trialBalanceRouter);
 cpaRouter.use('/close', closeRouter);
 cpaRouter.use('/audit', auditRouter);
-cpaRouter.use('/knowledge-base', financialMemoryRouter);
-cpaRouter.use('/vector-store', vectorStoreRouter);
-cpaRouter.use('/pipelines', pipelinesRouter);
-cpaRouter.use('/justification', justificationRouter);
+// QUARANTINED — Knowledge base routes not in MVP architecture
+// cpaRouter.use('/knowledge-base', financialMemoryRouter);
+// cpaRouter.use('/vector-store', vectorStoreRouter);
+// QUARANTINED — Bank pipeline, AP/AR aging, payroll accrual not in MVP architecture
+// cpaRouter.use('/pipelines', pipelinesRouter);
+// QUARANTINED — Justification/RAG chat not in MVP architecture
+// cpaRouter.use('/justification', justificationRouter);
 
 export default cpaRouter;

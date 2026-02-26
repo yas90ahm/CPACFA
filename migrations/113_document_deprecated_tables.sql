@@ -1,0 +1,28 @@
+-- Migration: document_deprecated_tables.sql
+-- 
+-- The following tables are deprecated and will be dropped in a future release.
+-- They are kept temporarily for data preservation and rollback safety.
+--
+-- tenant_issue_items — Replaced by tenant_close_issues (Prompt 9)
+--   Migration: 066_tenant_issue_items.sql
+--   Replacement: tenant_close_issues (Migration 099)
+--   Status: Data migration completed in 100_migrate_issues_to_close_issues.sql
+--
+-- tenant_recon_tables (legacy) — Replaced by tenant_period_reconciliations (Prompt 5)
+--   Migration: 071_tenant_recon_tables.sql
+--   Replacement: tenant_period_reconciliations (Migration 102)
+--   Status: Legacy reconciliation tables; new system uses period_reconciliations
+--
+-- tenant_hitl_staging — NOT deprecated; still actively used for HITL staging
+--   Migration: 062_tenant_hitl_staging_and_supervisor_sessions.sql
+--   Status: Active system for human-in-the-loop staging items
+--
+-- DO NOT DROP IN THIS MIGRATION.
+-- Schedule drop after confirming:
+-- 1. No service reads from these tables (except tenant_hitl_staging which is active)
+-- 2. No migration references them
+-- 3. Data has been verified migrated
+--
+-- When ready to drop, create a new migration:
+-- DROP TABLE IF EXISTS tenant_issue_items;
+-- DROP TABLE IF EXISTS tenant_recon_tables; -- (verify exact table names from migration 071)

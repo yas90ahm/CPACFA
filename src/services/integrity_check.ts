@@ -11,6 +11,7 @@ import {
   type IntegrityGateResult,
   type SuspiciousPlugResult,
 } from './integrity_gate_service.js';
+import { sumRound2 } from '../utils/decimal.js';
 
 export interface FinalIntegrityCheckInput {
   trialBalance: IntegrityGateInput['trialBalance'];
@@ -54,10 +55,8 @@ export function finalIntegrityCheck(input: FinalIntegrityCheckInput): FinalInteg
     let totalDebits_ = totalDebits;
     let totalCredits_ = totalCredits;
     if (totalDebits_ === 0 && totalCredits_ === 0) {
-      for (const e of entries) {
-        totalDebits_ += e.debit ?? 0;
-        totalCredits_ += e.credit ?? 0;
-      }
+      totalDebits_ = sumRound2(entries.map((e) => e.debit ?? 0));
+      totalCredits_ = sumRound2(entries.map((e) => e.credit ?? 0));
     }
     const plugResult: SuspiciousPlugResult = detectSuspiciousPlugs(
       entries.map((e) => ({ accountName: e.accountName, debit: e.debit, credit: e.credit })),

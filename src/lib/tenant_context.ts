@@ -14,3 +14,9 @@ export function getTenantId(req: Request): string | undefined {
 export function getTenantPool(req: Request): Pool | undefined {
   return (req as AuthRequest).tenantPool;
 }
+
+/** AI-scoped pool for AI writes (ai_call_log, tenant_ai_proposals, HITL staging). Falls back to tenantPool when no separation. */
+export function getTenantAiPool(req: Request): Pool | undefined {
+  const authReq = req as AuthRequest;
+  return authReq.tenantAiPool ?? authReq.tenantPool;
+}

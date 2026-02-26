@@ -7,7 +7,7 @@ import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { getOrCreatePeriodClose, setPeriodCloseStatus, setReviewerSignOff } from '../../services/period_close_service.js';
 import { buildCloseReadiness } from '../../services/close_readiness_service.js';
 import { buildCloseStatus } from '../../services/close_status_service.js';
-import { appendAuditLog } from '../../services/audit_log_service.js';
+import { recordAuditLogAction } from '../../services/audit_service.js';
 import { send500 } from '../../lib/errorHandler.js';
 import type { AuthRequest } from '../../auth/middleware.js';
 
@@ -30,11 +30,14 @@ router.post('/sign-off', async (req: Request, res: Response) => {
       body.closedBy,
       pool ?? undefined
     );
-    const auditContext = pool && tenantId ? { pool, tenantId } : undefined;
-    appendAuditLog(
-      { action: 'period_close_sign_off', resource: `period:${body.periodLabel}`, actor: body.closedBy ?? (req as AuthRequest).userId ?? 'anonymous', detail: body.status },
-      auditContext
-    );
+    if (pool && tenantId) {
+      await recordAuditLogAction(pool, tenantId, {
+        action: 'period_close_sign_off',
+        resource: `period:${body.periodLabel}`,
+        actor: body.closedBy ?? (req as AuthRequest).userId ?? 'anonymous',
+        detail: body.status,
+      });
+    }
     res.json(record);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
@@ -56,11 +59,14 @@ router.post('/reviewer-sign-off', async (req: Request, res: Response) => {
       res.status(404).json({ error: 'Period close record not found' });
       return;
     }
-    const auditContext = pool && tenantId ? { pool, tenantId } : undefined;
-    appendAuditLog(
-      { action: 'period_close_reviewer_sign_off', resource: `period:${body.periodLabel}`, actor: body.reviewedBy, detail: 'reviewer signed off' },
-      auditContext
-    );
+    if (pool && tenantId) {
+      await recordAuditLogAction(pool, tenantId, {
+        action: 'period_close_reviewer_sign_off',
+        resource: `period:${body.periodLabel}`,
+        actor: body.reviewedBy,
+        detail: 'reviewer signed off',
+      });
+    }
     res.json(record);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
@@ -81,8 +87,7 @@ router.get('/readiness', async (req: Request, res: Response) => {
     const readiness = await buildCloseReadiness(tenantId, periodLabel, pool ?? undefined, { includeNarrative });
     res.json(readiness);
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'Close readiness failed', message });
+    send500(res, e, 'Close readiness failed');
   }
 });
 
@@ -106,8 +111,7 @@ router.get('/status', async (req: Request, res: Response) => {
     const status = await buildCloseStatus(tenantId, periodLabel, pool ?? undefined);
     res.json(status);
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'Close status failed', message });
+    send500(res, e, 'Close status failed');
   }
 });
 

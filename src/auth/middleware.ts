@@ -5,13 +5,16 @@
 import type { Pool } from 'pg';
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken } from './index.js';
-import { isDbConfigured, getTenantPoolWithMigrations } from '../db/index.js';
+import { isDbConfigured, getTenantPoolWithMigrations, getTenantAiPoolWithMigrations, isAiBoundaryDbRolesEnabled } from '../db/index.js';
+import { requireTenantContext as configRequireTenantContext } from '../lib/runtime_mode.js';
 
 export interface AuthRequest extends Request {
   userId?: string;
   tenantId?: string;
   role?: string;
   tenantPool?: Pool;
+  /** AI-scoped pool (ai_writer) when AI_BOUNDARY_DB_ROLES=true; else same as tenantPool. */
+  tenantAiPool?: Pool;
 }
 
 export function requireAuth(req: AuthRequest, res: Response, next: NextFunction): void {
@@ -29,6 +32,13 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
   req.userId = payload.userId;
   req.tenantId = payload.tenantId;
   req.role = payload.role;
+  if (isDbConfigured() && payload.userId) {
+    import('../services/team_service.js').then(({ updateLastActive }) =>
+      import('../db/index.js').then(({ getControlPool }) => {
+        updateLastActive(getControlPool(), payload.userId!).catch(() => {});
+      })
+    );
+  }
   next();
 }
 
@@ -42,31 +52,40 @@ export function optionalAuth(req: AuthRequest, _res: Response, next: NextFunctio
       req.userId = payload.userId;
       req.tenantId = payload.tenantId;
       req.role = payload.role;
+      if (isDbConfigured() && payload.userId) {
+        import('../services/team_service.js').then(({ updateLastActive }) =>
+          import('../db/index.js').then(({ getControlPool }) => {
+            updateLastActive(getControlPool(), payload.userId!).catch(() => {});
+          })
+        );
+      }
     }
   }
   next();
 }
 
-/** Attach tenant DB pool for BYOD (run after optionalAuth). */
+/** Attach tenant DB pool for BYOD (run after optionalAuth). Also attaches tenantAiPool when AI_BOUNDARY_DB_ROLES. */
 export function attachTenantPool(req: AuthRequest, res: Response, next: NextFunction): void {
   if (!isDbConfigured() || !req.tenantId) {
     next();
     return;
   }
-  getTenantPoolWithMigrations(req.tenantId)
-    .then((pool) => {
+  const loadCore = getTenantPoolWithMigrations(req.tenantId);
+  const loadAi = isAiBoundaryDbRolesEnabled()
+    ? getTenantAiPoolWithMigrations(req.tenantId)
+    : loadCore;
+  Promise.all([loadCore, loadAi])
+    .then(([pool, aiPool]) => {
       req.tenantPool = pool;
+      req.tenantAiPool = aiPool;
       next();
     })
     .catch(next);
 }
 
-const strictTenantContext =
-  process.env.NODE_ENV === 'production' || process.env.REQUIRE_TENANT_CONTEXT === 'true';
-
-/** In production (or when REQUIRE_TENANT_CONTEXT=true), require tenantId and tenantPool so in-memory fallbacks are not used. */
+/** In prod/staging/demo (or when REQUIRE_TENANT_CONTEXT=true in dev), require tenantId and tenantPool so in-memory fallbacks are not used. */
 export function requireTenantContext(req: AuthRequest, res: Response, next: NextFunction): void {
-  if (!strictTenantContext) {
+  if (!configRequireTenantContext()) {
     next();
     return;
   }

@@ -39,6 +39,7 @@ function rowToItem(row: Row): CloseChecklistItem {
 
 export async function insertChecklistItem(
   pool: Pool,
+  tenantId: string,
   id: string,
   closeSessionId: string,
   input: {
@@ -54,27 +55,39 @@ export async function insertChecklistItem(
      VALUES ($1, $2, $3, $4, $5, $6, $7, $7)`,
     [id, closeSessionId, input.code, input.name, input.status ?? 'pending', input.required ?? true, now]
   );
-  const r = await pool.query<Row>(`SELECT ${COLS} FROM close_checklist_items WHERE id = $1`, [id]);
-  return rowToItem(r.rows[0]);
+  const row = await getChecklistItemById(pool, tenantId, id);
+  if (!row) throw new Error('Failed to fetch checklist item after insert');
+  return row;
 }
 
-export async function getChecklistItemById(pool: Pool, id: string): Promise<CloseChecklistItem | null> {
-  const r = await pool.query<Row>(`SELECT ${COLS} FROM close_checklist_items WHERE id = $1`, [id]);
+export async function getChecklistItemById(pool: Pool, tenantId: string, id: string): Promise<CloseChecklistItem | null> {
+  const r = await pool.query<Row>(
+    `SELECT cci.id, cci.close_session_id, cci.code, cci.name, cci.status, cci.required, cci.completed_by, cci.completed_at, cci.notes, cci.created_at, cci.updated_at
+     FROM close_checklist_items cci
+     JOIN close_sessions cs ON cci.close_session_id = cs.id
+     WHERE cs.tenant_id = $1 AND cci.id = $2`,
+    [tenantId, id]
+  );
   const row = r.rows[0];
   if (!row) return null;
   return rowToItem(row);
 }
 
-export async function listChecklistItemsBySessionId(pool: Pool, closeSessionId: string): Promise<CloseChecklistItem[]> {
+export async function listChecklistItemsBySessionId(pool: Pool, tenantId: string, closeSessionId: string): Promise<CloseChecklistItem[]> {
   const r = await pool.query<Row>(
-    `SELECT ${COLS} FROM close_checklist_items WHERE close_session_id = $1 ORDER BY code`,
-    [closeSessionId]
+    `SELECT cci.id, cci.close_session_id, cci.code, cci.name, cci.status, cci.required, cci.completed_by, cci.completed_at, cci.notes, cci.created_at, cci.updated_at
+     FROM close_checklist_items cci
+     JOIN close_sessions cs ON cci.close_session_id = cs.id
+     WHERE cs.tenant_id = $1 AND cci.close_session_id = $2
+     ORDER BY cci.code`,
+    [tenantId, closeSessionId]
   );
   return r.rows.map(rowToItem);
 }
 
 export async function updateChecklistItemStatus(
   pool: Pool,
+  tenantId: string,
   id: string,
   status: CloseChecklistItemStatus,
   patch?: { completedBy?: string; completedAt?: string; notes?: string }
@@ -83,19 +96,26 @@ export async function updateChecklistItemStatus(
   const completedBy = patch?.completedBy ?? null;
   const completedAt = patch?.completedAt ?? now;
   const notes = patch?.notes ?? null;
-  await pool.query(
-    `UPDATE close_checklist_items SET status = $2, updated_at = $3,
-       completed_by = COALESCE($4, completed_by), completed_at = CASE WHEN $2 IN ('completed', 'skipped') THEN COALESCE($5::timestamptz, $3) ELSE completed_at END, notes = COALESCE($6, notes)
-     WHERE id = $1`,
-    [id, status, now, completedBy, completedAt, notes]
+  const result = await pool.query(
+    `UPDATE close_checklist_items cci
+     SET status = $2, updated_at = $3,
+         completed_by = COALESCE($4, completed_by), completed_at = CASE WHEN $2 IN ('completed', 'skipped') THEN COALESCE($5::timestamptz, $3) ELSE completed_at END, notes = COALESCE($6, notes)
+     FROM close_sessions cs
+     WHERE cci.close_session_id = cs.id AND cs.tenant_id = $7 AND cci.id = $1`,
+    [id, status, now, completedBy, completedAt, notes, tenantId]
   );
-  return getChecklistItemById(pool, id);
+  if ((result.rowCount ?? 0) === 0) return null;
+  return getChecklistItemById(pool, tenantId, id);
 }
 
-export async function hasChecklistForSession(pool: Pool, closeSessionId: string): Promise<boolean> {
+export async function hasChecklistForSession(pool: Pool, tenantId: string, closeSessionId: string): Promise<boolean> {
   const r = await pool.query<{ id: string }>(
-    `SELECT id FROM close_checklist_items WHERE close_session_id = $1 LIMIT 1`,
-    [closeSessionId]
+    `SELECT cci.id
+     FROM close_checklist_items cci
+     JOIN close_sessions cs ON cci.close_session_id = cs.id
+     WHERE cs.tenant_id = $1 AND cci.close_session_id = $2
+     LIMIT 1`,
+    [tenantId, closeSessionId]
   );
   return (r.rowCount ?? 0) > 0;
 }

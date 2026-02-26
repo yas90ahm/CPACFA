@@ -26,7 +26,7 @@ router.post('/can-perform', (req: Request, res: Response) => {
   }
 });
 
-router.post('/perform-action', (req: Request, res: Response) => {
+router.post('/perform-action', async (req: Request, res: Response) => {
   try {
     const body = req.body as {
       action: ControlledAction;
@@ -43,7 +43,7 @@ router.post('/perform-action', (req: Request, res: Response) => {
     const pool = getTenantPool(req);
     const tenantId = getTenantId(req) ?? 'default';
     const context = pool && tenantId ? { pool, tenantId } : undefined;
-    const { allowed, auditEntry } = performControlledAction(
+    const { allowed, auditEntry } = await performControlledAction(
       actor,
       actorRole,
       body.action,

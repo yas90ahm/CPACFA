@@ -4,7 +4,8 @@
  */
 
 import { z } from 'zod';
-import { computeLiquidityMetrics } from '../../services/analysis_agent.js';
+// QUARANTINED — analysis_agent not in MVP architecture
+// import { computeLiquidityMetrics } from '../../services/analysis_agent.js';
 import type { ToolDefinition, ToolResult } from './types.js';
 
 export const computeRatiosSchema = z.object({
@@ -52,15 +53,27 @@ export function runComputeRatios(input: ComputeRatiosInput): ToolResult<{
     const ap = parsed.accountsPayable ?? 0;
     const revenue = parsed.totalRevenue || 1;
 
-    const liquidityInputs = {
-      currentAssets,
-      inventory,
-      currentLiabilities,
-      revenue,
-      accountsReceivable: ar,
-      accountsPayable: ap,
+    // QUARANTINED — analysis_agent not in MVP architecture
+    // const liquidityInputs = {
+    //   currentAssets,
+    //   inventory,
+    //   currentLiabilities,
+    //   revenue,
+    //   accountsReceivable: ar,
+    //   accountsPayable: ap,
+    // };
+    // const metrics = computeLiquidityMetrics(liquidityInputs);
+    // Simplified liquidity metrics calculation
+    const currentRatio = currentLiabilities !== 0 ? currentAssets / currentLiabilities : 0;
+    const quickRatio = currentLiabilities !== 0 ? (currentAssets - inventory) / currentLiabilities : 0;
+    const metrics = {
+      currentRatio,
+      quickRatio,
+      cashConversionCycleDays: undefined,
+      daysSalesOutstanding: ar > 0 && revenue > 0 ? (ar / revenue) * 365 : undefined,
+      daysInventoryOutstanding: inventory > 0 && revenue > 0 ? (inventory / revenue) * 365 : undefined,
+      daysPayablesOutstanding: ap > 0 && revenue > 0 ? (ap / revenue) * 365 : undefined,
     };
-    const metrics = computeLiquidityMetrics(liquidityInputs);
 
     const debtToEquity =
       parsed.totalEquity !== 0 ? parsed.totalLiabilities / parsed.totalEquity : 0;

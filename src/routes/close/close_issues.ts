@@ -1,37 +1,30 @@
 /**
  * Issue (Exception) routes: CRUD + filtering.
  * Mounted at /api/close/issues.
+ * Single issue store: tenant_close_issues via issue_service.
  */
 
 import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { send500 } from '../../lib/errorHandler.js';
-import {
-  createIssue,
-  getIssue,
-  listIssues,
-  resolveIssue,
-  assignIssue,
-  updateIssueStatus,
-  IssueItemError,
-} from '../../services/issue_item_service.js';
-import type { IssueCategory, IssueSeverity, IssueStatus } from '../../types/issue_item.js';
+import type { CreateIssueForSessionInput } from '../../services/issue_service.js';
+import * as issueService from '../../services/issue_service.js';
+import * as issueDetection from '../../services/issue_detection_service.js';
 
 const router = Router();
 
-const CATEGORIES: IssueCategory[] = [
+const CATEGORIES = [
   'intake', 'classification', 'reconciliation', 'posting', 'policy', 'presentation', 'export_blocker',
-];
-const SEVERITIES: IssueSeverity[] = ['low', 'med', 'high', 'critical'];
-const STATUSES: IssueStatus[] = ['open', 'in_progress', 'needs_info', 'needs_approval', 'resolved', 'wont_fix'];
+] as const;
+const SEVERITIES = ['low', 'med', 'high', 'critical'] as const;
 
 function handleIssueError(res: Response, err: unknown, fallbackLabel: string): void {
-  if (err instanceof IssueItemError) {
+  if (err instanceof issueService.IssueServiceError) {
     if (err.code === 'NOT_FOUND') {
       res.status(404).json({ error: err.message });
       return;
     }
-    if (err.code === 'VALIDATION' || err.code === 'INVALID_STATUS') {
+    if (err.code === 'VALIDATION' || err.code === 'INVALID_STATUS' || err.code === 'CANNOT_WAIVE') {
       res.status(400).json({ error: err.message });
       return;
     }
@@ -39,15 +32,15 @@ function handleIssueError(res: Response, err: unknown, fallbackLabel: string): v
   send500(res, err, fallbackLabel);
 }
 
-function parseBodyCreate(req: Request): { ok: true; input: Parameters<typeof createIssue>[1] } | { ok: false; error: string } {
+function parseBodyCreate(req: Request): { ok: true; input: CreateIssueForSessionInput } | { ok: false; error: string } {
   const b = req.body as Record<string, unknown>;
   const closeSessionId = b?.closeSessionId as string | undefined;
   const title = b?.title as string | undefined;
   const category = b?.category as string | undefined;
   const severity = b?.severity as string | undefined;
   if (!closeSessionId || !title) return { ok: false, error: 'closeSessionId and title are required' };
-  if (!CATEGORIES.includes(category as IssueCategory)) return { ok: false, error: `category must be one of: ${CATEGORIES.join(', ')}` };
-  if (!SEVERITIES.includes(severity as IssueSeverity)) return { ok: false, error: `severity must be one of: ${SEVERITIES.join(', ')}` };
+  if (!CATEGORIES.includes(category as (typeof CATEGORIES)[number])) return { ok: false, error: `category must be one of: ${CATEGORIES.join(', ')}` };
+  if (!SEVERITIES.includes(severity as (typeof SEVERITIES)[number])) return { ok: false, error: `severity must be one of: ${SEVERITIES.join(', ')}` };
   const tenantId = getTenantId(req);
   if (!tenantId) return { ok: false, error: 'Tenant context required' };
   return {
@@ -55,22 +48,12 @@ function parseBodyCreate(req: Request): { ok: true; input: Parameters<typeof cre
     input: {
       closeSessionId,
       tenantId,
-      category: category as IssueCategory,
-      severity: (severity as IssueSeverity) ?? 'med',
+      category: category as string,
+      severity: (severity as string) ?? 'med',
       title,
       description: b?.description as string | undefined,
-      impactPl: b?.impactPl as number | undefined,
-      impactBs: b?.impactBs as number | undefined,
-      impactCash: b?.impactCash as number | undefined,
-      currency: b?.currency as string | undefined,
-      materialityEstimate: b?.materialityEstimate as number | undefined,
-      materialityThresholdUsed: b?.materialityThresholdUsed as number | undefined,
-      confidenceScore: b?.confidenceScore as number | undefined,
       sourceRef: b?.sourceRef as Record<string, unknown> | undefined,
-      assignedTo: b?.assignedTo as string | undefined,
-      dueDate: b?.dueDate as string | undefined,
       createdBy: (req as { userId?: string }).userId as string | undefined,
-      status: STATUSES.includes(b?.status as IssueStatus) ? (b.status as IssueStatus) : undefined,
     },
   };
 }
@@ -89,35 +72,58 @@ router.post('/issues', async (req: Request, res: Response) => {
       res.status(400).json({ error: parsed.error });
       return;
     }
-    const issue = await createIssue(pool, parsed.input);
+    const issue = await issueService.createIssueForSession(pool, parsed.input);
     res.status(201).json(issue);
   } catch (e) {
     handleIssueError(res, e, 'Create issue failed');
   }
 });
 
-/** GET /api/close/issues/:id — get issue */
-router.get('/issues/:id', async (req: Request, res: Response) => {
+// Unified issue routes (must be before /issues/:id so /issues/summary and /issues/detect match)
+/** GET /api/close/issues/summary — issue counts by severity/status for period */
+router.get('/issues/summary', async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    if (!tenantId || !pool) {
-      res.status(400).json({ error: 'Tenant context required' });
+    const periodId = (req.query as { period_id?: string }).period_id;
+    if (!tenantId || !pool || !periodId) {
+      res.status(400).json({ error: 'Tenant context and period_id required' });
       return;
     }
-    const id = req.params.id ?? '';
-    const issue = await getIssue(pool, tenantId, id);
-    if (!issue) {
-      res.status(404).json({ error: 'Issue not found' });
-      return;
-    }
-    res.json(issue);
+    const summary = await issueService.getIssueSummaryForPeriod(pool, periodId, tenantId);
+    res.json(summary);
   } catch (e) {
-    send500(res, e, 'Get issue failed');
+    send500(res, e, 'Get issue summary failed');
   }
 });
 
-/** GET /api/close/issues — list issues with filters */
+/** POST /api/close/issues/detect — run detection sweep for period */
+router.post('/issues/detect', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    const periodId = (req.query as { period_id?: string }).period_id;
+    if (!tenantId || !pool || !periodId) {
+      res.status(400).json({ error: 'Tenant context and period_id required' });
+      return;
+    }
+    const ctx: issueDetection.DetectionContext = { pool, tenantId, periodId };
+    const unmapped = await issueDetection.detectUnmappedAccounts(ctx);
+    const bs = await issueDetection.detectBalanceSheetImbalance(ctx);
+    const pendingTemplates = await issueDetection.detectPendingAjeTemplates(ctx);
+    const unexplainedVariances = await issueDetection.detectUnexplainedVariances(ctx);
+    res.json({
+      unmapped: unmapped.length,
+      balanceSheetImbalance: bs.length,
+      pendingTemplates: pendingTemplates.length,
+      unexplainedVariances: unexplainedVariances.length,
+    });
+  } catch (e) {
+    send500(res, e, 'Detect issues failed');
+  }
+});
+
+/** GET /api/close/issues — list issues (period_id or closeSessionId required) */
 router.get('/issues', async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
@@ -127,30 +133,22 @@ router.get('/issues', async (req: Request, res: Response) => {
       return;
     }
     const q = req.query as Record<string, string | undefined>;
-    const closeSessionId = q.closeSessionId;
-    const category = q.category as IssueCategory | undefined;
-    const severity = q.severity as IssueSeverity | undefined;
-    const status = q.status as IssueStatus | undefined;
-    const assignedTo = q.assignedTo;
-    if (category && !CATEGORIES.includes(category)) {
-      res.status(400).json({ error: `category must be one of: ${CATEGORIES.join(', ')}` });
+    const periodId = q.period_id ?? q.closeSessionId;
+    if (!periodId) {
+      res.status(400).json({ error: 'period_id or closeSessionId query required' });
       return;
     }
-    if (severity && !SEVERITIES.includes(severity)) {
-      res.status(400).json({ error: `severity must be one of: ${SEVERITIES.join(', ')}` });
-      return;
-    }
-    if (status && !STATUSES.includes(status)) {
-      res.status(400).json({ error: `status must be one of: ${STATUSES.join(', ')}` });
-      return;
-    }
-    const issues = await listIssues(pool, {
+    const status = q.status as import('../../types/close_issue.js').CloseIssueStatus | undefined;
+    const severity = q.severity;
+    const category = q.category;
+    const issueType = q.issueType;
+    const issues = await issueService.listIssues(pool, {
       tenantId,
-      closeSessionId,
-      category,
-      severity,
+      periodId,
       status,
-      assignedTo,
+      severity,
+      category,
+      issueType,
     });
     res.json({ issues });
   } catch (e) {
@@ -158,7 +156,29 @@ router.get('/issues', async (req: Request, res: Response) => {
   }
 });
 
-/** PATCH /api/close/issues/:id/status — update status (open, in_progress, needs_info, needs_approval, resolved, wont_fix) */
+/** GET /api/close/issues/:id — get issue with history */
+router.get('/issues/:id', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const id = req.params.id ?? '';
+    const issue = await issueService.getIssue(pool, tenantId, id);
+    if (!issue) {
+      res.status(404).json({ error: 'Issue not found' });
+      return;
+    }
+    const history = await issueService.getIssueHistory(pool, id);
+    res.json({ ...issue, history });
+  } catch (e) {
+    send500(res, e, 'Get issue failed');
+  }
+});
+
+/** PATCH /api/close/issues/:id/status — update status (in_progress → startProgress; resolved|wont_fix → resolve with description) */
 router.patch('/issues/:id/status', async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
@@ -168,22 +188,29 @@ router.patch('/issues/:id/status', async (req: Request, res: Response) => {
       return;
     }
     const id = req.params.id ?? '';
-    const body = req.body as { status?: string };
+    const body = req.body as { status?: string; resolutionDescription?: string };
     if (!body?.status) {
       res.status(400).json({ error: 'status is required' });
       return;
     }
+    const userId = (req as { userId?: string }).userId ?? 'api';
     if (body.status === 'resolved' || body.status === 'wont_fix') {
-      const issue = await resolveIssue(pool, tenantId, id, body.status, (req as { userId?: string }).userId);
+      const issue = await issueService.resolveIssue(pool, tenantId, id, {
+        resolutionType: 'acknowledged_with_justification',
+        resolutionDescription: body.resolutionDescription?.trim() || (body.status === 'wont_fix' ? 'Waived via status update' : 'Resolved via status update'),
+        resolvedBy: userId,
+      });
       res.json(issue);
       return;
     }
-    if (!STATUSES.includes(body.status as IssueStatus)) {
-      res.status(400).json({ error: `status must be one of: ${STATUSES.join(', ')}` });
+    if (body.status === 'in_progress') {
+      const issue = await issueService.startProgress(pool, tenantId, id, userId);
+      res.json(issue);
       return;
     }
-    const issue = await updateIssueStatus(pool, tenantId, id, body.status as IssueStatus, (req as { userId?: string }).userId);
-    res.json(issue);
+    res.status(400).json({
+      error: `status must be one of: in_progress, resolved, wont_fix. For assign use PATCH /issues/:id/assign.`,
+    });
   } catch (e) {
     handleIssueError(res, e, 'Update issue status failed');
   }
@@ -199,18 +226,165 @@ router.patch('/issues/:id/assign', async (req: Request, res: Response) => {
       return;
     }
     const id = req.params.id ?? '';
-    const body = req.body as { assignedTo?: string | null; dueDate?: string | null };
-    const issue = await assignIssue(
-      pool,
-      tenantId,
-      id,
-      body.assignedTo ?? null,
-      body.dueDate ?? undefined,
-      (req as { userId?: string }).userId
-    );
+    const body = req.body as { assignedTo?: string | null };
+    const assignedTo = body.assignedTo ?? null;
+    if (assignedTo == null || String(assignedTo).trim() === '') {
+      res.status(400).json({ error: 'assignedTo required' });
+      return;
+    }
+    const assignedBy = (req as { userId?: string }).userId ?? 'api';
+    const issue = await issueService.assignIssue(pool, tenantId, id, String(assignedTo).trim(), assignedBy);
     res.json(issue);
   } catch (e) {
     handleIssueError(res, e, 'Assign issue failed');
+  }
+});
+
+// --- Unified issue actions (tenant_close_issues) ---
+
+/** POST /api/close/issues/:id/assign — assign unified issue to user */
+router.post('/issues/:id/assign', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const id = req.params.id ?? '';
+    const body = req.body as { assignedTo?: string };
+    if (!body?.assignedTo?.trim()) {
+      res.status(400).json({ error: 'assignedTo required' });
+      return;
+    }
+    const assignedBy = (req as { userId?: string }).userId ?? 'api';
+    const issue = await issueService.assignIssue(pool, tenantId, id, body.assignedTo.trim(), assignedBy);
+    res.json(issue);
+  } catch (e) {
+    handleIssueError(res, e, 'Assign issue failed');
+  }
+});
+
+/** POST /api/close/issues/:id/start — mark issue in progress (unified) */
+router.post('/issues/:id/start', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const id = req.params.id ?? '';
+    const userId = (req as { userId?: string }).userId ?? 'api';
+    const issue = await issueService.startProgress(pool, tenantId, id, userId);
+    res.json(issue);
+  } catch (e) {
+    handleIssueError(res, e, 'Start issue failed');
+  }
+});
+
+/** POST /api/close/issues/:id/resolve — resolve with type + description (unified) */
+router.post('/issues/:id/resolve', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const id = req.params.id ?? '';
+    const body = req.body as {
+      resolutionType?: string;
+      resolutionDescription?: string;
+      resolutionAjeId?: string | null;
+      resolutionReconId?: string | null;
+    };
+    if (!body?.resolutionType || !body?.resolutionDescription) {
+      res.status(400).json({ error: 'resolutionType and resolutionDescription required' });
+      return;
+    }
+    const userId = (req as { userId?: string }).userId ?? 'api';
+    const issue = await issueService.resolveIssue(pool, tenantId, id, {
+      resolutionType: body.resolutionType as import('../../types/close_issue.js').ResolutionType,
+      resolutionDescription: body.resolutionDescription,
+      resolvedBy: userId,
+      resolutionAjeId: body.resolutionAjeId ?? null,
+      resolutionReconId: body.resolutionReconId ?? null,
+    });
+    res.json(issue);
+  } catch (e) {
+    handleIssueError(res, e, 'Resolve issue failed');
+  }
+});
+
+/** POST /api/close/issues/:id/verify — manually verify (unified) */
+router.post('/issues/:id/verify', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const id = req.params.id ?? '';
+    const body = (req.body as { method?: string }) ?? {};
+    const userId = (req as { userId?: string }).userId ?? 'api';
+    const issue = await issueService.verifyIssue(
+      pool,
+      tenantId,
+      id,
+      userId,
+      (body.method === 'manual_review' ? 'manual_review' : 'automatic_recheck') as 'manual_review' | 'automatic_recheck'
+    );
+    res.json(issue);
+  } catch (e) {
+    handleIssueError(res, e, 'Verify issue failed');
+  }
+});
+
+/** POST /api/close/issues/:id/waive — waive with justification (warning/info only, unified) */
+router.post('/issues/:id/waive', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const id = req.params.id ?? '';
+    const body = req.body as { justification?: string };
+    if (!body?.justification?.trim()) {
+      res.status(400).json({ error: 'justification required' });
+      return;
+    }
+    const userId = (req as { userId?: string }).userId ?? 'api';
+    const issue = await issueService.waiveIssue(pool, tenantId, id, body.justification.trim(), userId);
+    res.json(issue);
+  } catch (e) {
+    handleIssueError(res, e, 'Waive issue failed');
+  }
+});
+
+/** POST /api/close/issues/:id/reopen — reopen with reason (unified) */
+router.post('/issues/:id/reopen', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const id = req.params.id ?? '';
+    const body = req.body as { reason?: string };
+    if (!body?.reason?.trim()) {
+      res.status(400).json({ error: 'reason required' });
+      return;
+    }
+    const userId = (req as { userId?: string }).userId ?? 'api';
+    const issue = await issueService.reopenIssue(pool, tenantId, id, body.reason.trim(), userId);
+    res.json(issue);
+  } catch (e) {
+    handleIssueError(res, e, 'Reopen issue failed');
   }
 });
 

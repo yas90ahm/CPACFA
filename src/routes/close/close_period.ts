@@ -105,10 +105,7 @@ router.get('/period-lock', async (req: Request, res: Response) => {
     const locksList = await listLockedPeriods(tenantId, pool);
     res.json({ locks: locksList });
   } catch (e) {
-    res.status(500).json({
-      error: 'List locks failed',
-      message: e instanceof Error ? e.message : String(e),
-    });
+    send500(res, e, 'List locks failed');
   }
 });
 
@@ -172,10 +169,7 @@ router.post('/calendar', async (req: Request, res: Response) => {
     const entry = await getPeriodEntry(body.periodLabel, tenantId ?? undefined, pool);
     res.json(entry);
   } catch (e) {
-    res.status(500).json({
-      error: 'Set close due date failed',
-      message: e instanceof Error ? e.message : String(e),
-    });
+    send500(res, e, 'Set close due date failed');
   }
 });
 

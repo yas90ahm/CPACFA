@@ -8,7 +8,7 @@ import { getAdjustedTrialBalance } from '../../services/adjusted_trial_balance_s
 import { buildClosingEntrySuggestion } from '../../services/closing_entries_service.js';
 import { addJEAsAdjustments } from '../../services/close_adjustments_service.js';
 import { assertPeriodNotLocked, PeriodLockedError } from '../../services/period_lock_service.js';
-import { appendAuditLog } from '../../services/audit_log_service.js';
+import { recordAuditLogAction } from '../../services/audit_service.js';
 import { send500 } from '../../lib/errorHandler.js';
 import type { AuthRequest } from '../../auth/middleware.js';
 
@@ -36,7 +36,7 @@ router.get('/closing-entries', async (req: Request, res: Response) => {
       res.status(404).json({ error: 'No trial balance for period', message });
       return;
     }
-    res.status(500).json({ error: 'Closing entries failed', message });
+    send500(res, e, 'Closing entries failed');
   }
 });
 
@@ -63,15 +63,16 @@ router.post('/closing-entries/add', async (req: Request, res: Response) => {
       const pool = getTenantPool(req);
       const tenantId = getTenantId(req);
       if (pool && tenantId) {
-        appendAuditLog(
-          { action: 'period_edit_blocked', resource: `period:${e.periodLabel}`, detail: 'Period is locked', actor: (req as AuthRequest).userId ?? 'anonymous' },
-          { pool, tenantId }
-        );
+        await recordAuditLogAction(pool, tenantId, {
+          action: 'period_edit_blocked',
+          resource: `period:${e.periodLabel}`,
+          detail: 'Period is locked',
+          actor: (req as AuthRequest).userId ?? 'anonymous',
+        });
       }
       return res.status(403).json({ error: 'Period locked', periodLabel: e.periodLabel });
     }
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'Add closing entry failed', message });
+    send500(res, e, 'Add closing entry failed');
   }
 });
 

@@ -32,7 +32,8 @@ export const leaseLiabilityDefinition: ToolDefinition<LeaseLiabilityInput> = {
   parameters: leaseLiabilitySchema as import('zod').z.ZodType<LeaseLiabilityInput>,
 };
 
-import { computeLeaseLiability } from '../../services/leaseLiabilityCalc.js';
+// QUARANTINED — leaseLiabilityCalc not in MVP architecture
+// import { computeLeaseLiability } from '../../services/leaseLiabilityCalc.js';
 
 /**
  * Run the lease liability calculation (IFRS 16). Returns lease liability and ROU asset at commencement.
@@ -45,22 +46,26 @@ export function runLeaseLiability(input: LeaseLiabilityInput): ToolResult<{
   discountRate: number;
   citation: string;
 }> {
-  try {
-    const parsed = leaseLiabilitySchema.parse(input);
-    const result = computeLeaseLiability({
-      leasePayments: parsed.leasePayments,
-      discountRate: parsed.discountRate,
-      paymentTiming: parsed.paymentTiming,
-    });
-    return {
-      success: true,
-      data: {
-        ...result,
-        citation: 'IFRS 16.26–.27 Lease liability and right-of-use asset at commencement',
-      },
-    };
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    return { success: false, error: message };
-  }
+  // QUARANTINED — leaseLiabilityCalc not in MVP architecture
+  return {
+    success: false,
+    error: 'Lease liability calculation is quarantined. Not available in MVP architecture.',
+  };
+  // try {
+  //   const parsed = leaseLiabilitySchema.parse(input);
+  //   const result = computeLeaseLiability({
+  //     leasePayments: parsed.leasePayments,
+  //     discountRate: parsed.discountRate,
+  //     paymentTiming: parsed.paymentTiming,
+  //   });
+  //   return {
+  //     success: true,
+  //     data: {
+  //       ...result,
+  //       citation: 'IFRS 16.26–.27 Lease liability and right-of-use asset at commencement',
+  //     };
+  //   } catch (e) {
+  //     const message = e instanceof Error ? e.message : String(e);
+  //     return { success: false, error: message };
+  //   }
 }

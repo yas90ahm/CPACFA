@@ -5,9 +5,10 @@
 import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { getMateriality, setMateriality } from '../../services/materiality_service.js';
-import { suggestMaterialityAgentic } from '../../services/agentic_materiality_suggestion.js';
+// QUARANTINED — Agentic suggestions not in MVP architecture
+// import { suggestMaterialityAgentic } from '../../services/agentic_materiality_suggestion.js';
 import { listDisclosureChecklist, updateDisclosureStep, getDisclosureItem } from '../../services/disclosure_checklist_service.js';
-import { suggestDisclosuresAgentic, generateDisclosureReviewSummaryAgentic, suggestEvidenceForDisclosureItemAgentic } from '../../services/agentic_disclosure_suggestions.js';
+// import { suggestDisclosuresAgentic, generateDisclosureReviewSummaryAgentic, suggestEvidenceForDisclosureItemAgentic } from '../../services/agentic_disclosure_suggestions.js';
 import type { MaterialitySettings } from '../../types/close_and_controls.js';
 import { disclosureSuggestEvidenceSchema, disclosureReviewSummarySchema } from '../../schemas/closeSchemas.js';
 import { validateBody } from '../../middleware/validateRequest.js';
@@ -38,25 +39,26 @@ router.patch('/materiality', (req: Request, res: Response) => {
   }
 });
 
-router.post('/materiality/suggest', async (req: Request, res: Response) => {
-  try {
-    const body = req.body as { netIncome?: number; revenue?: number; totalAssets?: number; summary?: string };
-    const suggestion = await suggestMaterialityAgentic(body ?? {});
-    res.json(suggestion ?? {});
-  } catch (e) {
-    send500(res, e, 'Materiality suggestion failed');
-  }
-});
+// QUARANTINED — Agentic suggestions not in MVP architecture
+// router.post('/materiality/suggest', async (req: Request, res: Response) => {
+//   try {
+//     const body = req.body as { netIncome?: number; revenue?: number; totalAssets?: number; summary?: string };
+//     const suggestion = await suggestMaterialityAgentic(body ?? {});
+//     res.json(suggestion ?? {});
+//   } catch (e) {
+//     send500(res, e, 'Materiality suggestion failed');
+//   }
+// });
 
-router.post('/disclosure-checklist/suggest', async (req: Request, res: Response) => {
-  try {
-    const body = req.body as { notesAndSummary?: string };
-    const suggestions = await suggestDisclosuresAgentic(body?.notesAndSummary ?? '');
-    res.json({ suggestions });
-  } catch (e) {
-    send500(res, e, 'Disclosure suggestion failed');
-  }
-});
+// router.post('/disclosure-checklist/suggest', async (req: Request, res: Response) => {
+//   try {
+//     const body = req.body as { notesAndSummary?: string };
+//     const suggestions = await suggestDisclosuresAgentic(body?.notesAndSummary ?? '');
+//     res.json({ suggestions });
+//   } catch (e) {
+//     send500(res, e, 'Disclosure suggestion failed');
+//   }
+// });
 
 router.get('/disclosure-checklist', async (req: Request, res: Response) => {
   try {
@@ -71,43 +73,44 @@ router.get('/disclosure-checklist', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/disclosure-checklist/review-summary', validateBody(disclosureReviewSummarySchema), async (req: Request, res: Response) => {
-  try {
-    const body = req.body as { periodLabel: string };
-    const tenantId = getTenantId(req);
-    const pool = getTenantPool(req);
-    const items = await listDisclosureChecklist(body.periodLabel, undefined, tenantId ?? undefined, pool);
-    const summary = await generateDisclosureReviewSummaryAgentic(items);
-    res.json({ summary });
-  } catch (e) {
-    send500(res, e, 'Disclosure review summary failed');
-  }
-});
+// QUARANTINED — Agentic suggestions not in MVP architecture
+// router.post('/disclosure-checklist/review-summary', validateBody(disclosureReviewSummarySchema), async (req: Request, res: Response) => {
+//   try {
+//     const body = req.body as { periodLabel: string };
+//     const tenantId = getTenantId(req);
+//     const pool = getTenantPool(req);
+//     const items = await listDisclosureChecklist(body.periodLabel, undefined, tenantId ?? undefined, pool);
+//     const summary = await generateDisclosureReviewSummaryAgentic(items);
+//     res.json({ summary });
+//   } catch (e) {
+//     send500(res, e, 'Disclosure review summary failed');
+//   }
+// });
 
-router.post('/disclosure-checklist/:id/suggest-evidence', validateBody(disclosureSuggestEvidenceSchema), async (req: Request, res: Response) => {
-  try {
-    const id = req.params.id ?? '';
-    const body = req.body as { periodLabel: string; notesExcerpt?: string };
-    if (!id) {
-      res.status(400).json({ error: 'Missing disclosure item id' });
-      return;
-    }
-    const tenantId = getTenantId(req);
-    const pool = getTenantPool(req);
-    const item = await getDisclosureItem(id, body.periodLabel, tenantId ?? undefined, pool);
-    if (!item) {
-      res.status(404).json({ error: 'Disclosure item not found' });
-      return;
-    }
-    const suggestion = await suggestEvidenceForDisclosureItemAgentic(
-      { topic: item.topic, standard: item.standard, description: item.description },
-      body.notesExcerpt
-    );
-    res.json({ suggestion });
-  } catch (e) {
-    send500(res, e, 'Suggest evidence failed');
-  }
-});
+// router.post('/disclosure-checklist/:id/suggest-evidence', validateBody(disclosureSuggestEvidenceSchema), async (req: Request, res: Response) => {
+//   try {
+//     const id = req.params.id ?? '';
+//     const body = req.body as { periodLabel: string; notesExcerpt?: string };
+//     if (!id) {
+//       res.status(400).json({ error: 'Missing disclosure item id' });
+//       return;
+//     }
+//     const tenantId = getTenantId(req);
+//     const pool = getTenantPool(req);
+//     const item = await getDisclosureItem(id, body.periodLabel, tenantId ?? undefined, pool);
+//     if (!item) {
+//       res.status(404).json({ error: 'Disclosure item not found' });
+//       return;
+//     }
+//     const suggestion = await suggestEvidenceForDisclosureItemAgentic(
+//       { topic: item.topic, standard: item.standard, description: item.description },
+//       body.notesExcerpt
+//     );
+//     res.json({ suggestion });
+//   } catch (e) {
+//     send500(res, e, 'Suggest evidence failed');
+//   }
+// });
 
 router.patch('/disclosure-checklist/:id', async (req: Request, res: Response) => {
   try {

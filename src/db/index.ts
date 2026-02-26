@@ -1,6 +1,10 @@
 /**
  * Postgres: control pool (identity) and per-tenant pools (BYOD).
  * DATABASE_URL = control DB. Tenant DB URLs stored in tenants.database_url.
+ *
+ * AI boundary: when AI_BOUNDARY_DB_ROLES=true (demo/staging/prod), two pools per tenant:
+ * - core pool (core_writer): DML on core.*, INSERT on audit.*, DML on ai.* for HITL
+ * - ai pool (ai_writer): INSERT/SELECT/UPDATE on ai.* ONLY; cannot write core.*
  */
 
 import pg from 'pg';
@@ -15,13 +19,40 @@ let controlPool: pg.Pool | null = null;
 const tenantPoolsByUrl = new Map<string, pg.Pool>();
 const tenantPoolLru: string[] = [];
 
+/** AI pool cache: key = AI connection URL. */
+const tenantAiPoolsByUrl = new Map<string, pg.Pool>();
+const tenantAiPoolLru: string[] = [];
+
+/** True when DB role separation is enforced (demo/staging/prod). */
+export function isAiBoundaryDbRolesEnabled(): boolean {
+  return process.env.AI_BOUNDARY_DB_ROLES === 'true';
+}
+
+/** Build AI connection URL from base URL using AI_DB_USER / AI_DB_PASSWORD. BYOD: same host/db, different user. */
+function buildAiConnectionUrl(baseUrl: string): string {
+  const aiUser = process.env.AI_DB_USER?.trim();
+  const aiPassword = process.env.AI_DB_PASSWORD?.trim();
+  if (!aiUser) return baseUrl;
+  try {
+    const u = new URL(baseUrl);
+    u.username = aiUser;
+    u.password = aiPassword ?? '';
+    return u.toString();
+  } catch {
+    return baseUrl;
+  }
+}
+
 export function getControlPool(): pg.Pool {
   if (!controlPool) {
     const url = process.env.DATABASE_URL;
-    if (!url) {
-      throw new Error('DATABASE_URL is not set');
-    }
+    if (!url) throw new Error('DATABASE_URL is not set');
     controlPool = new Pool({ connectionString: url, max: 20 });
+    controlPool.on('connect', (client) => {
+      client.query(`SET search_path = ${CORE_SEARCH_PATH}`).catch(() =>
+        client.query('SET search_path = public').catch(() => {})
+      );
+    });
   }
   return controlPool;
 }
@@ -61,22 +92,56 @@ function evictOldestTenantPool(): void {
   }
 }
 
+const CORE_SEARCH_PATH = 'core, ai, audit, public';
+const AI_SEARCH_PATH = 'ai, public';
+
 function getOrCreateTenantPool(url: string): pg.Pool {
   let pool = tenantPoolsByUrl.get(url);
   if (pool) {
     const i = tenantPoolLru.indexOf(url);
-    if (i >= 0) {
-      tenantPoolLru.splice(i, 1);
-    }
+    if (i >= 0) tenantPoolLru.splice(i, 1);
     tenantPoolLru.push(url);
     return pool;
   }
-  if (tenantPoolsByUrl.size >= MAX_TENANT_POOLS) {
-    evictOldestTenantPool();
-  }
+  if (tenantPoolsByUrl.size >= MAX_TENANT_POOLS) evictOldestTenantPool();
   pool = new Pool({ connectionString: url, max: 10 });
+  pool.on('connect', (client) => {
+    client.query(`SET search_path = ${CORE_SEARCH_PATH}`).catch(() =>
+      client.query('SET search_path = public').catch(() => {})
+    );
+  });
   tenantPoolsByUrl.set(url, pool);
   tenantPoolLru.push(url);
+  return pool;
+}
+
+function evictOldestTenantAiPool(): void {
+  if (tenantAiPoolLru.length === 0) return;
+  const url = tenantAiPoolLru.shift();
+  if (url) {
+    const pool = tenantAiPoolsByUrl.get(url);
+    tenantAiPoolsByUrl.delete(url);
+    pool?.end().catch(() => {});
+  }
+}
+
+function getOrCreateTenantAiPool(url: string): pg.Pool {
+  let pool = tenantAiPoolsByUrl.get(url);
+  if (pool) {
+    const i = tenantAiPoolLru.indexOf(url);
+    if (i >= 0) tenantAiPoolLru.splice(i, 1);
+    tenantAiPoolLru.push(url);
+    return pool;
+  }
+  if (tenantAiPoolsByUrl.size >= MAX_TENANT_POOLS) evictOldestTenantAiPool();
+  pool = new Pool({ connectionString: url, max: 5 });
+  pool.on('connect', (client) => {
+    client.query(`SET search_path = ${AI_SEARCH_PATH}`).catch(() =>
+      client.query('SET search_path = public').catch(() => {})
+    );
+  });
+  tenantAiPoolsByUrl.set(url, pool);
+  tenantAiPoolLru.push(url);
   return pool;
 }
 
@@ -175,6 +240,46 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 80, file: '080_ai_call_log.sql' },
   { version: 81, file: '081_shadow_audit_ai_metadata.sql' },
   { version: 82, file: '082_tenant_ai_proposals.sql' },
+  { version: 83, file: '083_ledger_snapshots.sql' },
+  { version: 84, file: '084_journal_entry_lines_amount_provenance.sql' },
+  { version: 85, file: '085_close_sessions_certified_snapshot_id.sql' },
+  { version: 86, file: '086_tenant_evidence_anchoring.sql' },
+  { version: 87, file: '087_evidence_links_assertion.sql' },
+  { version: 88, file: '088_tenant_evidence_policy.sql' },
+  { version: 89, file: '089_certification_artifacts.sql' },
+  { version: 90, file: '090_evidence_storage_path.sql' },
+  { version: 91, file: '091_append_only_triggers.sql' },
+  { version: 92, file: '092_tenant_financial_config.sql' },
+  { version: 93, file: '093_ai_boundary_schemas.sql' },
+  { version: 94, file: '094_tenant_chart_of_accounts.sql' },
+  { version: 95, file: '095_general_ledger.sql' },
+  { version: 96, file: '096_period_trial_balance_gl_derived_source.sql' },
+  { version: 97, file: '097_gl_performance_indexes.sql' },
+  { version: 98, file: '098_close_session_state_machine.sql' },
+  { version: 99, file: '099_tenant_close_issues.sql' },
+  { version: 100, file: '100_migrate_issues_to_close_issues.sql' },
+  { version: 101, file: '101_tenant_recon_requirements.sql' },
+  { version: 102, file: '102_tenant_period_reconciliations.sql' },
+  { version: 103, file: '103_close_session_statements_stale.sql' },
+  { version: 104, file: '104_audit_ledger_before_after_state.sql' },
+  { version: 105, file: '105_je_immutability_trigger.sql' },
+  { version: 106, file: '106_prevent_posted_je_lines_modification.sql' },
+  { version: 107, file: '107_je_memo_required.sql' },
+  { version: 108, file: '108_normal_balance_accounts.sql' },
+  { version: 109, file: '109_coa_mapping_history.sql' },
+  { version: 110, file: '110_statement_package_cash_flow_equity.sql' },
+  { version: 111, file: '111_tenant_aje_templates.sql' },
+  { version: 112, file: '112_tenant_variance_analysis.sql' },
+  { version: 113, file: '113_document_deprecated_tables.sql' },
+  { version: 114, file: '114_statement_lines_hierarchy.sql' },
+  { version: 115, file: '115_je_rejection_metadata.sql' },
+  { version: 116, file: '116_aje_template_skip_reason.sql' },
+  { version: 117, file: '117_variance_ai_draft_explanation.sql' },
+  { version: 118, file: '118_tenant_entity_settings.sql' },
+  { version: 120, file: '120_certification_artifacts_immutability.sql' },
+  { version: 121, file: '121_money_column_precision.sql' },
+  { version: 122, file: '122_gl_account_name.sql' },
+  { version: 123, file: '123_fix_unexplained_variance_sign.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 
@@ -210,6 +315,33 @@ export async function getTenantPoolWithMigrations(tenantId: string): Promise<pg.
   return pool;
 }
 
+/**
+ * Get AI-scoped pool for tenant. Use for AI writes (ai_call_log, tenant_ai_proposals, HITL staging, etc).
+ * When AI_BOUNDARY_DB_ROLES=true: returns pool with ai_writer role (cannot write core.*).
+ * Otherwise: returns same pool as getTenantPool (no separation, dev/test).
+ */
+export async function getTenantAiPool(tenantId: string): Promise<pg.Pool> {
+  const corePool = await getTenantPool(tenantId);
+  if (!isAiBoundaryDbRolesEnabled()) return corePool;
+  const control = getControlPool();
+  const r = await control.query<{ database_url: string | null }>(
+    'SELECT database_url FROM tenants WHERE id = $1',
+    [tenantId]
+  );
+  const tenantDbUrl = r.rows[0]?.database_url ?? null;
+  const baseUrl = tenantDbUrl?.trim() || (process.env.DATABASE_URL ?? '');
+  const effectiveAiUrl = tenantDbUrl?.trim()
+    ? buildAiConnectionUrl(tenantDbUrl)
+    : (process.env.DATABASE_AI_URL?.trim() || buildAiConnectionUrl(baseUrl));
+  return getOrCreateTenantAiPool(effectiveAiUrl);
+}
+
+/** Get AI pool with migrations applied (ensures schema 093 has run). */
+export async function getTenantAiPoolWithMigrations(tenantId: string): Promise<pg.Pool> {
+  await getTenantPoolWithMigrations(tenantId);
+  return getTenantAiPool(tenantId);
+}
+
 export async function closePool(): Promise<void> {
   if (controlPool) {
     await controlPool.end();
@@ -220,4 +352,9 @@ export async function closePool(): Promise<void> {
   }
   tenantPoolsByUrl.clear();
   tenantPoolLru.length = 0;
+  for (const pool of tenantAiPoolsByUrl.values()) {
+    await pool.end().catch(() => {});
+  }
+  tenantAiPoolsByUrl.clear();
+  tenantAiPoolLru.length = 0;
 }

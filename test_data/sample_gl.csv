@@ -1,0 +1,15 @@
+entry_id,date,account_code,debit,credit,description
+JE-001,2024-03-01,1000,50000,0,Initial capital investment
+JE-001,2024-03-01,3000,0,50000,Initial capital investment
+JE-002,2024-03-05,1100,10000,0,Sale to Customer A
+JE-002,2024-03-05,4000,0,10000,Sale to Customer A
+JE-003,2024-03-10,5000,6000,0,Cost of goods sold
+JE-003,2024-03-10,1000,0,6000,Cost of goods sold
+JE-004,2024-03-15,5100,2000,0,March rent payment
+JE-004,2024-03-15,1000,0,2000,March rent payment
+JE-005,2024-03-20,5200,3000,0,Salary expense
+JE-005,2024-03-20,1000,0,3000,Salary expense
+JE-006,2024-03-25,2000,0,5000,Vendor invoice
+JE-006,2024-03-25,1500,5000,0,Equipment purchase
+JE-007,2024-03-28,1000,8000,0,Customer payment received
+JE-007,2024-03-28,1100,0,8000,Customer payment received

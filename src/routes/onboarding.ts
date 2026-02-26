@@ -23,6 +23,7 @@ import {
   suggestCoAMappingBodySchema,
   firstCloseGuideBodySchema,
 } from '../schemas/onboardingSchemas.js';
+import { send500 } from '../lib/errorHandler.js';
 
 const router = Router();
 
@@ -71,8 +72,7 @@ router.post('/suggest-coa-mapping', validateBody(suggestCoAMappingBodySchema), a
     const result = await suggestCoAMappingAgentic(accounts.map((a: { code?: unknown; name?: unknown }) => ({ code: String(a.code), name: String(a.name) })));
     res.json(result);
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'Suggest CoA mapping failed', message });
+    send500(res, e, 'Suggest CoA mapping failed');
   }
 });
 
@@ -84,8 +84,7 @@ router.get('/first-close-guide', async (req: Request, res: Response) => {
     const result = await getFirstCloseGuideAgentic({ entityName, fiscalYearEnd });
     res.json(result);
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'First close guide failed', message });
+    send500(res, e, 'First close guide failed');
   }
 });
 router.post('/first-close-guide', validateBody(firstCloseGuideBodySchema), async (req: Request, res: Response) => {
@@ -94,8 +93,7 @@ router.post('/first-close-guide', validateBody(firstCloseGuideBodySchema), async
     const result = await getFirstCloseGuideAgentic({ entityName, fiscalYearEnd });
     res.json(result);
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ error: 'First close guide failed', message });
+    send500(res, e, 'First close guide failed');
   }
 });
 

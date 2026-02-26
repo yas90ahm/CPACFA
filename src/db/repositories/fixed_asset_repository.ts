@@ -208,7 +208,14 @@ export async function listDepreciationRuns(pool: Pool, tenantId: string, periodL
   return r.rows.map(rowToRun);
 }
 
-export async function listDepreciationRunDetails(pool: Pool, runId: string): Promise<DepreciationRunDetailRow[]> {
-  const r = await pool.query('SELECT * FROM depreciation_run_details WHERE run_id = $1 ORDER BY fixed_asset_id, period_start', [runId]);
+export async function listDepreciationRunDetails(pool: Pool, tenantId: string, runId: string): Promise<DepreciationRunDetailRow[]> {
+  const r = await pool.query(
+    `SELECT drd.id, drd.run_id, drd.fixed_asset_id, drd.period_start, drd.period_end, drd.depreciation_amount, drd.accumulated_depreciation, drd.created_at
+     FROM depreciation_run_details drd
+     JOIN depreciation_runs dr ON drd.run_id = dr.id
+     WHERE dr.tenant_id = $1 AND drd.run_id = $2
+     ORDER BY drd.fixed_asset_id, drd.period_start`,
+    [tenantId, runId]
+  );
   return r.rows.map(rowToDetail);
 }

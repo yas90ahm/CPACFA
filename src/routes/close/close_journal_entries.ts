@@ -7,13 +7,14 @@
 import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import { randomUUID } from 'crypto';
-import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
+import { getTenantId, getTenantPool, getTenantAiPool } from '../../lib/tenant_context.js';
 import { send500 } from '../../lib/errorHandler.js';
 import { getStorage } from '../../storage/index.js';
 import {
   rejectJE,
   exportJE,
   getJournalEntry,
+  deleteDraftJE,
   getJournalEntryWithLines,
   listJournalEntries,
   listPostableJournalEntries,
@@ -23,13 +24,69 @@ import {
   addJEAttachment,
   JournalEntryError,
 } from '../../services/journal_entry_service.js';
+import {
+  attachEvidenceToJournalEntry,
+  attachEvidenceWithFile,
+  EvidenceAttachmentError,
+} from '../../services/evidence_attachment_service.js';
 import * as jeRepo from '../../db/repositories/journal_entry_repository.js';
+import * as evidenceRepo from '../../db/repositories/evidence_repository.js';
+import { getEvidenceStorageAdapterAsync } from '../../services/evidence_storage_service.js';
 import type { JournalEntrySource } from '../../types/journal_entry.js';
 import { executeBridgeCommand } from '../../bridge/index.js';
 import type { AuthRequest } from '../../auth/middleware.js';
+import { guardSessionWritable } from '../../lib/session_write_guard.js';
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } }); // 20 MB
+
+/** Allowed MIME types for JE attachments (configurable via env; default whitelist). */
+const ATTACHMENT_ALLOWED_MIMES = (
+  process.env.SECURITY_ATTACHMENT_MIME_WHITELIST?.toLowerCase().split(',').map((s) => s.trim()).filter(Boolean)
+) ?? [
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'text/csv',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+];
+
+/** Max file size for JE attachments (20 MB). Configurable via EVIDENCE_ATTACHMENT_MAX_BYTES. */
+const ATTACHMENT_MAX_BYTES =
+  Number(process.env.EVIDENCE_ATTACHMENT_MAX_BYTES) || 20 * 1024 * 1024;
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: ATTACHMENT_MAX_BYTES },
+  fileFilter: (_req, file, cb) => {
+    const mime = (file.mimetype ?? '').toLowerCase();
+    const ext = (file.originalname ?? '').toLowerCase().split('.').pop();
+    const allowedExts = ['pdf', 'png', 'jpg', 'jpeg', 'csv', 'xlsx'];
+    const mimeOk = ATTACHMENT_ALLOWED_MIMES.includes(mime);
+    const extOk = ext && allowedExts.includes(ext);
+    if (mimeOk && extOk) cb(null, true);
+    else cb(new Error('Allowed attachment types: pdf, png, jpg, jpeg, csv, xlsx only.'));
+  },
+});
+
+/** Reject oversized requests before body is read (Content-Length check). */
+function contentLengthLimit(maxBytes: number) {
+  return (req: Request, res: Response, next: import('express').NextFunction): void => {
+    const cl = req.headers['content-length'];
+    if (cl) {
+      const len = parseInt(cl, 10);
+      if (!Number.isNaN(len) && len > maxBytes) {
+        res.status(413).json({
+          error: 'File too large',
+          message: `File too large, maximum ${Math.round(maxBytes / (1024 * 1024))}MB.`,
+        });
+        req.resume();
+        return;
+      }
+    }
+    next();
+  };
+}
 
 /** POST /api/close/journal-entries — create draft JE (via bridge) */
 router.post('/journal-entries', async (req: Request, res: Response) => {
@@ -51,6 +108,7 @@ router.post('/journal-entries', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'closeSessionId, source, and lines (array) required' });
       return;
     }
+    if (!await guardSessionWritable(res, pool, tenantId, body.closeSessionId)) return;
     const result = await executeBridgeCommand(
       {
         pool,
@@ -67,14 +125,15 @@ router.post('/journal-entries', async (req: Request, res: Response) => {
       }
     );
     if (!result.ok) {
-      const status = result.code === 'PERIOD_LOCKED' ? 409 : result.code === 'VALIDATION' ? 400 : 400;
+      const status =
+        result.code === 'PERIOD_LOCKED' ? 409 : result.code === 'VALIDATION' ? 422 : 400;
       res.status(status).json({ error: result.error, code: result.code });
       return;
     }
     if (result.commandType !== 'CreateDraftJE') throw new Error('Unexpected result');
     const je = await getJournalEntry(pool, tenantId, result.journalEntry.id);
     if (!je) {
-      res.status(500).json({ error: 'Journal entry not found after create' });
+      send500(res, new Error('Journal entry not found after create'), 'Journal entry not found after create');
       return;
     }
     res.status(201).json(je);
@@ -168,6 +227,8 @@ router.post('/journal-entries/:id/propose', async (req: Request, res: Response) 
       return;
     }
     const id = req.params.id ?? '';
+    const jeForGuard = await getJournalEntry(pool, tenantId, id);
+    if (jeForGuard && !await guardSessionWritable(res, pool, tenantId, jeForGuard.closeSessionId)) return;
     const result = await executeBridgeCommand(
       { pool, tenantId, actor: (req as AuthRequest).userId ?? 'anonymous' },
       { commandType: 'ProposeJE', journalEntryId: id }
@@ -203,14 +264,13 @@ router.post('/journal-entries/:id/approve', async (req: Request, res: Response) 
       return;
     }
     const id = req.params.id ?? '';
-    const body = req.body as { approvedBy: string };
-    if (!body?.approvedBy) {
-      res.status(400).json({ error: 'approvedBy required' });
-      return;
-    }
+    const jeForGuard = await getJournalEntry(pool, tenantId, id);
+    if (jeForGuard && !await guardSessionWritable(res, pool, tenantId, jeForGuard.closeSessionId)) return;
+    const body = req.body as { approvedBy?: string };
+    const approvedBy = body?.approvedBy || (req as AuthRequest).userId || 'anonymous';
     const result = await executeBridgeCommand(
       { pool, tenantId, actor: (req as AuthRequest).userId ?? 'anonymous' },
-      { commandType: 'ApproveJE', journalEntryId: id, approvedBy: body.approvedBy }
+      { commandType: 'ApproveJE', journalEntryId: id, approvedBy }
     );
     if (!result.ok) {
       const status = result.code === 'VALIDATION' ? 403 : 400;
@@ -227,14 +287,14 @@ router.post('/journal-entries/:id/approve', async (req: Request, res: Response) 
   } catch (e) {
     if (e instanceof JournalEntryError) {
       const status = e.code === 'NOT_FOUND' ? 404 : e.code === 'SEGREGATION' ? 403 : 400;
-      res.status(status).json({ error: e.message });
+      res.status(status).json({ error: e.message, code: e.code });
       return;
     }
     send500(res, e, 'Approve JE failed');
   }
 });
 
-/** POST /api/close/journal-entries/:id/reject */
+/** POST /api/close/journal-entries/:id/reject — body: { reason } (min 10 chars) */
 router.post('/journal-entries/:id/reject', async (req: Request, res: Response) => {
   try {
     const pool = getTenantPool(req);
@@ -244,11 +304,20 @@ router.post('/journal-entries/:id/reject', async (req: Request, res: Response) =
       return;
     }
     const id = req.params.id ?? '';
-    const je = await rejectJE(pool, tenantId, id);
+    const jeForGuard = await getJournalEntry(pool, tenantId, id);
+    if (jeForGuard && !await guardSessionWritable(res, pool, tenantId, jeForGuard.closeSessionId)) return;
+    const body = req.body as { reason?: string };
+    const reason = body?.reason?.trim() ?? '';
+    if (reason.length < 10) {
+      res.status(400).json({ error: 'Rejection reason is required (minimum 10 characters)' });
+      return;
+    }
+    const userId = (req as AuthRequest).userId ?? 'anonymous';
+    const je = await rejectJE(pool, tenantId, id, reason, userId);
     res.json(je);
   } catch (e) {
     if (e instanceof JournalEntryError) {
-      res.status(e.code === 'NOT_FOUND' ? 404 : 400).json({ error: e.message });
+      res.status(e.code === 'NOT_FOUND' ? 404 : e.code === 'VALIDATION' ? 400 : 400).json({ error: e.message });
       return;
     }
     send500(res, e, 'Reject JE failed');
@@ -265,8 +334,10 @@ router.post('/journal-entries/:id/post', async (req: Request, res: Response) => 
       return;
     }
     const id = req.params.id ?? '';
+    const jeForGuard = await getJournalEntry(pool, tenantId, id);
+    if (jeForGuard && !await guardSessionWritable(res, pool, tenantId, jeForGuard.closeSessionId)) return;
     const result = await executeBridgeCommand(
-      { pool, tenantId, actor: (req as AuthRequest).userId ?? 'anonymous' },
+      { pool, tenantId, actor: (req as AuthRequest).userId ?? 'anonymous', aiPool: getTenantAiPool(req) },
       { commandType: 'PostJE', journalEntryId: id }
     );
     if (!result.ok) {
@@ -294,7 +365,31 @@ router.post('/journal-entries/:id/post', async (req: Request, res: Response) => 
     const message = e instanceof Error ? e.message : String(e);
     const stack = e instanceof Error ? e.stack : undefined;
     log('error', 'Post JE failed', { message, stack });
-    res.status(500).json({ error: 'Post JE failed', code: 'SERVICE' });
+    send500(res, new Error('Post JE failed'), 'Post JE failed');
+  }
+});
+
+/** DELETE /api/close/journal-entries/:id — only draft or rejected */
+router.delete('/journal-entries/:id', async (req: Request, res: Response) => {
+  try {
+    const pool = getTenantPool(req);
+    const tenantId = getTenantId(req);
+    if (!pool || !tenantId) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const id = req.params.id ?? '';
+    const jeForGuard = await getJournalEntry(pool, tenantId, id);
+    if (jeForGuard && !await guardSessionWritable(res, pool, tenantId, jeForGuard.closeSessionId)) return;
+    const userId = (req as AuthRequest).userId ?? 'anonymous';
+    const result = await deleteDraftJE(pool, tenantId, id, userId);
+    res.json(result);
+  } catch (e) {
+    if (e instanceof JournalEntryError) {
+      res.status(e.code === 'NOT_FOUND' ? 404 : e.code === 'INVALID_STATUS' ? 403 : 400).json({ error: e.message });
+      return;
+    }
+    send500(res, e, 'Delete journal entry failed');
   }
 });
 
@@ -386,8 +481,77 @@ router.post('/journal-entries/validate-materiality', async (req: Request, res: R
   }
 });
 
-/** POST /api/close/journal-entries/:id/attachments — add attachment (multipart file or body.fileRef) */
-router.post('/journal-entries/:id/attachments', upload.single('file'), async (req: Request, res: Response) => {
+/** POST /api/close/journal-entries/:id/evidence/upload — attach evidence with file upload (multipart) */
+router.post(
+  '/journal-entries/:id/evidence/upload',
+  contentLengthLimit(ATTACHMENT_MAX_BYTES),
+  (req: Request, res: Response, next: import('express').NextFunction) => {
+    upload.single('file')(req, res, (err: unknown) => {
+      if (err) {
+        const code = (err as { code?: string })?.code;
+        const message = err instanceof Error ? err.message : String(err);
+        if (code === 'LIMIT_FILE_SIZE') {
+          res.status(413).json({
+            error: 'File too large',
+            message: `File too large, maximum ${Math.round(ATTACHMENT_MAX_BYTES / (1024 * 1024))}MB.`,
+          });
+          return;
+        }
+        if (message.includes('Allowed attachment types')) {
+          res.status(400).json({ error: message });
+          return;
+        }
+        next(err);
+        return;
+      }
+      next();
+    });
+  },
+  async (req: Request, res: Response) => {
+    try {
+      const pool = getTenantPool(req);
+      const tenantId = getTenantId(req);
+      if (!pool || !tenantId) {
+        res.status(400).json({ error: 'Tenant context required' });
+        return;
+      }
+      const id = req.params.id ?? '';
+      const file = (req as Request & { file?: { buffer: Buffer; originalname?: string; mimetype?: string } }).file;
+      if (!file?.buffer) {
+        res.status(400).json({ error: 'file (multipart) required' });
+        return;
+      }
+      const body = req.body as { assertionType?: string; role?: string; requiredness?: 'optional' | 'required'; label?: string };
+      const validAssertionTypes = ['invoice_support', 'bank_support', 'reconciliation', 'approval', 'contract_support', 'calc_support', 'other'];
+      const assertionType = body?.assertionType ?? 'other';
+      if (!validAssertionTypes.includes(assertionType)) {
+        res.status(400).json({ error: 'assertionType must be one of: ' + validAssertionTypes.join(', ') });
+        return;
+      }
+      const attachedBy = (req as AuthRequest).userId ?? 'anonymous';
+      const result = await attachEvidenceWithFile(pool, tenantId, id, {
+        buffer: file.buffer,
+        mimeType: file.mimetype,
+        originalFilename: file.originalname,
+        assertionType: assertionType as import('../../types/evidence.js').AssertionType,
+        role: body?.role ?? 'support',
+        requiredness: body?.requiredness ?? 'optional',
+        attachedBy,
+      });
+      res.status(201).json(result);
+    } catch (e) {
+      if (e instanceof EvidenceAttachmentError) {
+        const status = e.code === 'NOT_FOUND' ? 404 : e.code === 'PERIOD_LOCKED' ? 409 : 400;
+        res.status(status).json({ error: e.message, code: e.code });
+        return;
+      }
+      send500(res, e, 'Evidence upload failed');
+    }
+  }
+);
+
+/** POST /api/close/journal-entries/:id/evidence — attach evidence (proof + reference metadata only; no file storage) */
+router.post('/journal-entries/:id/evidence', async (req: Request, res: Response) => {
   try {
     const pool = getTenantPool(req);
     const tenantId = getTenantId(req);
@@ -396,31 +560,162 @@ router.post('/journal-entries/:id/attachments', upload.single('file'), async (re
       return;
     }
     const id = req.params.id ?? '';
-    let fileRef: string;
-    const file = (req as Request & { file?: { buffer: Buffer; originalname?: string; mimetype?: string } }).file;
-    if (file?.buffer) {
-      const ext = (file.originalname && /\.\w+$/.test(file.originalname))
-        ? file.originalname.replace(/^.*\./, '')
-        : 'bin';
-      const key = `${tenantId}/attachments/je/${id}/${randomUUID()}.${ext}`;
-      await getStorage().putObject(key, file.buffer, { contentType: file.mimetype });
-      fileRef = key;
-    } else {
-      const body = req.body as { fileRef?: string };
-      if (!body?.fileRef) {
-        res.status(400).json({ error: 'file (multipart) or fileRef required' });
-        return;
-      }
-      fileRef = body.fileRef;
-    }
-    const attachment = await addJEAttachment(pool, tenantId, id, fileRef);
-    res.status(201).json(attachment);
-  } catch (e) {
-    if (e instanceof JournalEntryError) {
-      res.status(e.code === 'NOT_FOUND' ? 404 : 400).json({ error: e.message });
+    const body = req.body as {
+      hashSha256?: string;
+      sizeBytes?: number;
+      assertionType?: string;
+      mimeType?: string;
+      externalUri?: string;
+      externalProvider?: string;
+      label?: string;
+      role?: string;
+      requiredness?: 'optional' | 'required';
+      attachedBy?: string;
+      claimedAmount?: string;
+      claimedCurrency?: string;
+      claimedPeriod?: string;
+      note?: string;
+    };
+    if (!body?.hashSha256 || body?.sizeBytes == null) {
+      res.status(400).json({ error: 'hashSha256 and sizeBytes required' });
       return;
     }
-    send500(res, e, 'Add JE attachment failed');
+    const validAssertionTypes = ['invoice_support', 'bank_support', 'reconciliation', 'approval', 'contract_support', 'calc_support', 'other'];
+    if (!body?.assertionType || !validAssertionTypes.includes(body.assertionType)) {
+      res.status(400).json({ error: 'assertionType required; must be one of: ' + validAssertionTypes.join(', ') });
+      return;
+    }
+    const attachedBy = body.attachedBy ?? (req as AuthRequest).userId ?? 'anonymous';
+    const result = await attachEvidenceToJournalEntry(pool, tenantId, id, {
+      hashSha256: body.hashSha256,
+      sizeBytes: Number(body.sizeBytes),
+      assertionType: body.assertionType as import('../../types/evidence.js').AssertionType,
+      mimeType: body.mimeType,
+      externalUri: body.externalUri,
+      externalProvider: body.externalProvider,
+      label: body.label,
+      role: body.role ?? 'support',
+      requiredness: body.requiredness ?? 'optional',
+      attachedBy,
+      claimedAmount: body.claimedAmount,
+      claimedCurrency: body.claimedCurrency,
+      claimedPeriod: body.claimedPeriod,
+      note: body.note,
+    });
+    res.status(201).json(result);
+  } catch (e) {
+    if (e instanceof EvidenceAttachmentError) {
+      const status = e.code === 'NOT_FOUND' ? 404 : e.code === 'PERIOD_LOCKED' ? 409 : 400;
+      res.status(status).json({ error: e.message, code: e.code });
+      return;
+    }
+    send500(res, e, 'Attach evidence failed');
+  }
+});
+
+/** POST /api/close/journal-entries/:id/attachments — add attachment (multipart file or body.fileRef) */
+router.post(
+  '/journal-entries/:id/attachments',
+  contentLengthLimit(ATTACHMENT_MAX_BYTES),
+  (req: Request, res: Response, next: import('express').NextFunction) => {
+    upload.single('file')(req, res, (err: unknown) => {
+      if (err) {
+        const code = (err as { code?: string })?.code;
+        const message = err instanceof Error ? err.message : String(err);
+        if (code === 'LIMIT_FILE_SIZE') {
+          res.status(413).json({
+            error: 'File too large',
+            message: `File too large, maximum ${Math.round(ATTACHMENT_MAX_BYTES / (1024 * 1024))}MB.`,
+          });
+          return;
+        }
+        if (message.includes('Allowed attachment types')) {
+          res.status(400).json({ error: message });
+          return;
+        }
+        next(err);
+        return;
+      }
+      next();
+    });
+  },
+  async (req: Request, res: Response) => {
+    try {
+      const pool = getTenantPool(req);
+      const tenantId = getTenantId(req);
+      if (!pool || !tenantId) {
+        res.status(400).json({ error: 'Tenant context required' });
+        return;
+      }
+      const id = req.params.id ?? '';
+      let fileRef: string;
+      const file = (req as Request & { file?: { buffer: Buffer; originalname?: string; mimetype?: string } }).file;
+      if (file?.buffer) {
+        const ext = (file.originalname && /\.\w+$/.test(file.originalname))
+          ? file.originalname.replace(/^.*\./, '')
+          : 'bin';
+        const key = `${tenantId}/attachments/je/${id}/${randomUUID()}.${ext}`;
+        await getStorage().putObject(key, file.buffer, { contentType: file.mimetype });
+        fileRef = key;
+      } else {
+        const body = req.body as { fileRef?: string };
+        if (!body?.fileRef) {
+          res.status(400).json({ error: 'file (multipart) or fileRef required' });
+          return;
+        }
+        fileRef = body.fileRef;
+      }
+      const attachment = await addJEAttachment(pool, tenantId, id, fileRef);
+      res.status(201).json(attachment);
+    } catch (e) {
+      if (e instanceof JournalEntryError) {
+        res.status(e.code === 'NOT_FOUND' ? 404 : 400).json({ error: e.message });
+        return;
+      }
+      send500(res, e, 'Add JE attachment failed');
+    }
+  }
+);
+
+/** GET /api/close/journal-entries/:jeId/evidence/:evidenceId/download — stream evidence file from storage */
+router.get('/journal-entries/:jeId/evidence/:evidenceId/download', async (req: Request, res: Response) => {
+  try {
+    const pool = getTenantPool(req);
+    const tenantId = getTenantId(req);
+    if (!pool || !tenantId) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const jeId = req.params.jeId ?? '';
+    const evidenceId = req.params.evidenceId ?? '';
+    const evidence = await evidenceRepo.getEvidenceById(pool, tenantId, evidenceId);
+    if (!evidence) {
+      res.status(404).json({ error: 'Evidence not found' });
+      return;
+    }
+    const linked = await evidenceRepo.isEvidenceLinkedToJournalEntry(pool, tenantId, evidenceId, jeId);
+    if (!linked) {
+      res.status(404).json({ error: 'Evidence not found for this journal entry' });
+      return;
+    }
+    if (!evidence.storagePath) {
+      res.status(404).json({ error: 'Evidence file not stored (metadata-only)' });
+      return;
+    }
+    const adapter = await getEvidenceStorageAdapterAsync();
+    const result = await adapter.retrieve(tenantId, evidenceId);
+    if (!result) {
+      res.status(404).json({ error: 'Evidence file not found in storage' });
+      return;
+    }
+    const contentType = result.metadata.mimeType ?? 'application/octet-stream';
+    const filename = evidence.originalFilename ?? result.metadata.originalFilename ?? `evidence-${evidenceId}`;
+    const safeFilename = filename.replace(/[^\w.-]/g, '_');
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
+    res.send(result.buffer);
+  } catch (e) {
+    send500(res, e, 'Download evidence failed');
   }
 });
 
@@ -435,7 +730,7 @@ router.get('/journal-entries/:jeId/attachments/:attachmentId/download', async (r
     }
     const jeId = req.params.jeId ?? '';
     const attachmentId = req.params.attachmentId ?? '';
-    const attachment = await jeRepo.getJEAttachmentById(pool, attachmentId);
+    const attachment = await jeRepo.getJEAttachmentById(pool, tenantId, attachmentId);
     if (!attachment || attachment.jeId !== jeId) {
       res.status(404).json({ error: 'Attachment not found' });
       return;

@@ -4,7 +4,8 @@
 
 import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
-import { appendAuditLog, queryAuditLog, purgeRetention } from '../../services/audit_log_service.js';
+import { recordAuditLogAction } from '../../services/audit_service.js';
+import { queryAuditLog, purgeRetention } from '../../services/audit_log_service.js';
 import { getCloseRoleFromReq } from '../../lib/closeRole.js';
 import { canPerform } from '../../services/segregation_service.js';
 import { send500 } from '../../lib/errorHandler.js';
@@ -12,7 +13,7 @@ import type { AuthRequest } from '../../auth/middleware.js';
 
 const router = Router();
 
-router.post('/audit-log', (req: Request, res: Response) => {
+router.post('/audit-log', async (req: Request, res: Response) => {
   try {
     const body = req.body as { actor: string; action: string; resource?: string; detail?: string; payload?: Record<string, unknown> };
     if (!body?.actor || !body?.action) {
@@ -21,11 +22,24 @@ router.post('/audit-log', (req: Request, res: Response) => {
     }
     const pool = getTenantPool(req);
     const tenantId = getTenantId(req) ?? 'default';
-    const context = pool && tenantId ? { pool, tenantId } : undefined;
-    const entry = appendAuditLog(
-      { actor: body.actor, action: body.action, resource: body.resource, detail: body.detail, payload: body.payload },
-      context
-    );
+    if (pool && tenantId) {
+      await recordAuditLogAction(pool, tenantId, {
+        actor: body.actor,
+        action: body.action,
+        resource: body.resource,
+        detail: body.detail,
+        payload: body.payload,
+      });
+    }
+    const entry = {
+      id: 'audit-ledger',
+      timestamp: new Date().toISOString(),
+      actor: body.actor,
+      action: body.action,
+      resource: body.resource,
+      detail: body.detail,
+      payload: body.payload,
+    };
     res.json(entry);
   } catch (e) {
     send500(res, e, 'Audit log append failed');
@@ -62,10 +76,11 @@ router.post('/audit-log/retention-purge', async (req: Request, res: Response) =>
     }
     const context = { pool, tenantId };
     const { deleted } = await purgeRetention(context);
-    appendAuditLog(
-      { action: 'audit_log_retention_purge', actor: (req as AuthRequest).userId ?? 'unknown', detail: `deleted=${deleted}` },
-      context
-    );
+    await recordAuditLogAction(pool, tenantId, {
+      action: 'audit_log_retention_purge',
+      actor: (req as AuthRequest).userId ?? 'unknown',
+      detail: `deleted=${deleted}`,
+    });
     res.json({ deleted });
   } catch (e) {
     send500(res, e, 'Audit log retention purge failed');

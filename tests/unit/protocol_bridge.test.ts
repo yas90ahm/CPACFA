@@ -178,4 +178,27 @@ describe('Protocol Bridge — valid SaveTrialBalance (mocked)', () => {
     }
     expect(saveSpy).not.toHaveBeenCalled();
   });
+
+  it('returns VALIDATION for source=synced when trial balance does not balance (sync path integrity)', async () => {
+    jest.spyOn(periodLock, 'assertPeriodNotLocked').mockResolvedValue(undefined);
+    const saveSyncSpy = jest.spyOn(trialBalanceStore, 'saveUnadjustedFromSync').mockResolvedValue(undefined);
+
+    const result = await executeBridgeCommand(ctx, {
+      commandType: 'SaveTrialBalance',
+      periodLabel: '2025-01',
+      entries: [
+        { accountName: 'Cash', debit: 1000, credit: 0 },
+        { accountName: 'Revenue', debit: 0, credit: 500 },
+      ],
+      source: 'synced',
+      connectionId: 'conn-test-1',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe('VALIDATION');
+      expect(result.error).toMatch(/balance|Debits|Credits/);
+    }
+    expect(saveSyncSpy).not.toHaveBeenCalled();
+  });
 });

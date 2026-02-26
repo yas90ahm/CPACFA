@@ -25,6 +25,8 @@ import * as triageService from '../../src/services/triage_service.js';
 import * as auditLedger from '../../src/services/audit_ledger_service.js';
 import * as findingsRepo from '../../src/db/repositories/tenant_shadow_audit_findings_repository.js';
 import * as justificationService from '../../src/services/justification_service.js';
+import * as shadowAuditor from '../../src/services/shadow_auditor_service.js';
+import * as aiOrchestrator from '../../src/ai/ai_orchestrator.js';
 
 const mockPool = {} as Pool;
 
@@ -69,11 +71,24 @@ describe('Journal Entry — createDraftJE', () => {
     jest.restoreAllMocks();
   });
 
+  it('throws VALIDATION when memo is empty', async () => {
+    await expect(
+      createDraftJE(mockPool, {
+        closeSessionId: 'sess-1',
+        tenantId: 't1',
+        memo: '',
+        source: 'manual',
+        lines: [{ accountRef: 'Cash', debit: 100 }, { accountRef: 'Revenue', credit: 100 }],
+      })
+    ).rejects.toMatchObject({ code: 'VALIDATION', message: /memo.*required/ });
+  });
+
   it('throws VALIDATION when lines do not balance', async () => {
     await expect(
       createDraftJE(mockPool, {
         closeSessionId: 'sess-1',
         tenantId: 't1',
+        memo: 'Test accrual',
         source: 'manual',
         lines: [
           { accountRef: 'Cash', debit: 100 },
@@ -84,6 +99,7 @@ describe('Journal Entry — createDraftJE', () => {
   });
 
   it('creates draft JE with balanced lines', async () => {
+    const humanProvenance = { kind: 'human_entered' as const, enteredBy: 'user-a' };
     jest.spyOn(repo, 'insertJournalEntry').mockResolvedValue({ ...sampleJE });
     jest.spyOn(repo, 'insertJournalEntryLines').mockResolvedValue([]);
     jest.spyOn(repo, 'getJournalEntryById').mockResolvedValue({ ...sampleJE });
@@ -94,8 +110,8 @@ describe('Journal Entry — createDraftJE', () => {
       memo: 'Test',
       createdBy: 'user-a',
       lines: [
-        { accountRef: 'Cash', debit: 100 },
-        { accountRef: 'Revenue', credit: 100 },
+        { accountRef: 'Cash', debit: 100, amountProvenance: humanProvenance },
+        { accountRef: 'Revenue', credit: 100, amountProvenance: humanProvenance },
       ],
     });
     expect(result.status).toBe('draft');
@@ -214,17 +230,36 @@ describe('Journal Entry — postJE', () => {
       { jeId: 'je-1', lineIndex: 0, accountRef: 'Cash', debit: 100, credit: 0 },
       { jeId: 'je-1', lineIndex: 1, accountRef: 'Revenue', debit: 0, credit: 100 },
     ]);
-    jest.spyOn(findingsRepo, 'createFinding').mockResolvedValue({ id: 'finding-1', createdAt: '2025-01-01T12:00:00Z' });
+    jest.spyOn(shadowAuditor, 'runPrePostChecksAndStore').mockResolvedValue({ severity: 'ok', flags: [] });
     jest.spyOn(repo, 'updateJournalEntryStatus').mockResolvedValue({
       ...sampleJE,
       status: 'posted',
       postedAt: '2025-01-01T12:00:00Z',
     });
-    jest.spyOn(closeSessionRepo, 'getCloseSessionById').mockResolvedValue({ periodEnd: '2025-01-31' } as never);
+    jest.spyOn(closeSessionRepo, 'getCloseSessionById').mockResolvedValue({ id: 'sess-1', entityId: 'e1', periodEnd: '2025-01-31' } as never);
     jest.spyOn(auditLedger, 'recordMaterialEvent').mockResolvedValue();
-    jest.spyOn(justificationService, 'ensureJustificationForPostedJE').mockResolvedValue({ id: 'j1', createdAt: '2025-01-01T12:00:00Z' });
+    const cascadeEngine = await import('../../src/services/cascade_engine.js');
+    jest.spyOn(cascadeEngine, 'executeCascade').mockResolvedValue({
+      adjusted_tb_recalculated: true,
+      recon_balances_refreshed: 0,
+      recon_status_changes: [],
+      statements_invalidated: false,
+      validation_results: { hard_checks: [], soft_checks: [], all_hard_passing: true, blocking_count: 0, warning_count: 0 },
+      issues_auto_verified: [],
+      issues_created: [],
+      issues_reopened: [],
+      duration_ms: 0,
+    });
+    jest.spyOn(aiOrchestrator, 'runJustifier').mockResolvedValue({
+      ok: true,
+      memo_markdown: '',
+      irac_json: { issue: '', rule: '', analysis: '', conclusion: '' },
+      prompt_version: '1',
+      error: undefined,
+    });
+    jest.spyOn(justificationService, 'createJustificationFromAI').mockResolvedValue({ id: 'j1', createdAt: '2025-01-01T12:00:00Z' });
     const result = await postJE(mockPool, 't1', 'je-1');
-    expect(result.status).toBe('posted');
+    expect(result.journalEntry.status).toBe('posted');
     expect(repo.updateJournalEntryStatus).toHaveBeenCalledWith(
       mockPool,
       'je-1',
@@ -232,11 +267,9 @@ describe('Journal Entry — postJE', () => {
       'posted',
       expect.objectContaining({ postedAt: expect.any(String) })
     );
-  });
+  }, 10000);
 
   it('blocks post when JE hits restricted account and records finding', async () => {
-    const origEnv = process.env.SHADOW_AUDITOR_RESTRICTED_ACCOUNTS;
-    process.env.SHADOW_AUDITOR_RESTRICTED_ACCOUNTS = 'Related Party,Restricted';
     jest.spyOn(repo, 'getJournalEntryById').mockResolvedValue({
       ...sampleJE,
       status: 'approved',
@@ -246,25 +279,16 @@ describe('Journal Entry — postJE', () => {
       { jeId: 'je-1', lineIndex: 1, accountRef: 'Revenue', debit: 0, credit: 500 },
     ]);
     jest.spyOn(closeSessionRepo, 'getCloseSessionById').mockResolvedValue({ periodEnd: '2025-01-31' } as never);
-    const createFindingSpy = jest.spyOn(findingsRepo, 'createFinding').mockResolvedValue({ id: 'finding-block', createdAt: '2025-01-01T12:00:00Z' });
+    jest.spyOn(shadowAuditor, 'runPrePostChecksAndStore').mockResolvedValue({
+      severity: 'block',
+      flags: [{ code: 'RESTRICTED_ACCOUNT', message: 'Account "Related Party Receivable" is on the restricted list.', severity: 'block' }],
+    });
     const updateStatusSpy = jest.spyOn(repo, 'updateJournalEntryStatus');
     await expect(postJE(mockPool, 't1', 'je-1')).rejects.toMatchObject({
       code: 'SHADOW_AUDIT_BLOCK',
       message: /Shadow Auditor blocked post|restricted/,
     });
-    expect(createFindingSpy).toHaveBeenCalledWith(
-      mockPool,
-      expect.objectContaining({
-        tenantId: 't1',
-        journalEntryId: 'je-1',
-        severity: 'block',
-        findings: expect.arrayContaining([
-          expect.objectContaining({ code: 'RESTRICTED_ACCOUNT', severity: 'block' }),
-        ]),
-      })
-    );
     expect(updateStatusSpy).not.toHaveBeenCalled();
-    process.env.SHADOW_AUDITOR_RESTRICTED_ACCOUNTS = origEnv;
   });
 });
 

@@ -1,58 +1,73 @@
 import type { Config } from 'tailwindcss';
 
 const config: Config = {
-  darkMode: ['class'],
+  darkMode: 'class',
   content: [
-    './pages/**/*.{js,ts,jsx,tsx,mdx}',
-    './components/**/*.{js,ts,jsx,tsx,mdx}',
     './app/**/*.{js,ts,jsx,tsx,mdx}',
+    './components/**/*.{js,ts,jsx,tsx,mdx}',
+    './lib/**/*.{js,ts,jsx,tsx,mdx}',
   ],
   theme: {
     extend: {
       fontFamily: {
-        sans: ['var(--font-sans)', 'Inter', 'system-ui', 'sans-serif'],
-        mono: ['var(--font-mono)', 'JetBrains Mono', 'ui-monospace', 'monospace'],
+        sans: ['var(--font-sans)', 'DM Sans', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-mono)', 'JetBrains Mono', 'monospace'],
+        display: ['var(--font-display)', 'Instrument Serif', 'Georgia', 'serif'],
       },
       colors: {
-        border: 'hsl(var(--border))',
-        input: 'hsl(var(--input))',
-        ring: 'hsl(var(--ring))',
-        background: 'hsl(var(--background))',
-        foreground: 'hsl(var(--foreground))',
-        primary: {
-          DEFAULT: 'hsl(var(--primary))',
-          foreground: 'hsl(var(--primary-foreground))',
-        },
-        secondary: {
-          DEFAULT: 'hsl(var(--secondary))',
-          foreground: 'hsl(var(--secondary-foreground))',
-        },
-        muted: {
-          DEFAULT: 'hsl(var(--muted))',
-          foreground: 'hsl(var(--muted-foreground))',
+        primary: '#0C0E13',
+        background: '#0C0E13',
+        surface: '#13151C',
+        elevated: '#181B24',
+        hover: '#1E2130',
+        input: '#0F1119',
+        border: {
+          DEFAULT: '#252836',
+          light: '#1E2130',
+          focus: '#4A6CF7',
         },
         accent: {
-          DEFAULT: 'hsl(var(--accent))',
-          foreground: 'hsl(var(--accent-foreground))',
+          DEFAULT: '#4A6CF7',
+          dim: 'rgba(74,108,247,0.12)',
         },
-        destructive: 'hsl(var(--destructive))',
-        card: {
-          DEFAULT: 'hsl(var(--card))',
-          foreground: 'hsl(var(--card-foreground))',
+        status: {
+          green: '#34D399',
+          'green-dim': 'rgba(52,211,153,0.12)',
+          amber: '#FBBF24',
+          'amber-dim': 'rgba(251,191,36,0.12)',
+          red: '#F87171',
+          'red-dim': 'rgba(248,113,113,0.12)',
+          blue: '#60A5FA',
+          'blue-dim': 'rgba(96,165,250,0.12)',
         },
-        'audit-green': 'hsl(var(--audit-green))',
-        'risk-red': 'hsl(var(--risk-red))',
+        ai: {
+          purple: '#A78BFA',
+          'purple-dim': 'rgba(167,139,250,0.06)',
+          'purple-border': 'rgba(167,139,250,0.20)',
+        },
+        equity: {
+          DEFAULT: '#A78BFA',
+          dim: 'rgba(167,139,250,0.12)',
+        },
+      },
+      textColor: {
+        primary: '#E8EAF0',
+        'text-primary': '#E8EAF0',
+        secondary: '#8B90A0',
+        'text-secondary': '#8B90A0',
+        tertiary: '#5A5F73',
+        'text-tertiary': '#5A5F73',
+        muted: '#3D4155',
+        'text-muted': '#3D4155',
       },
       borderRadius: {
-        lg: '6px',
-        md: '6px',
-        sm: '4px',
+        card: '8px',
+        input: '6px',
       },
-      boxShadow: {
-        'calm-sm': '0 1px 2px 0 rgb(0 0 0 / 0.04)',
-        calm: '0 2px 4px -1px rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.03)',
-        'calm-md': '0 4px 6px -2px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.03)',
-        card: '0 2px 4px -1px rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.03)',
+      spacing: {
+        'sidebar': '240px',
+        'sidebar-collapsed': '56px',
+        'topbar': '56px',
       },
     },
   },

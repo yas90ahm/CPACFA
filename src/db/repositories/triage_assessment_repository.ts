@@ -29,6 +29,7 @@ function rowToAssessment(row: TriageAssessmentRow): TriageAssessment {
 
 export async function insertTriageAssessment(
   pool: Pool,
+  tenantId: string,
   input: {
     id: string;
     closeSessionId: string;
@@ -50,21 +51,40 @@ export async function insertTriageAssessment(
       JSON.stringify(input.summaryJson),
     ]
   );
+  const row = await getById(pool, tenantId, input.id);
+  if (!row) throw new Error('Failed to fetch triage assessment after insert');
+  return row;
+}
+
+export async function getById(
+  pool: Pool,
+  tenantId: string,
+  id: string
+): Promise<TriageAssessment | null> {
   const r = await pool.query<TriageAssessmentRow>(
-    'SELECT id, close_session_id, risk_score, materiality_threshold, basis_used, summary_json, created_at FROM triage_assessments WHERE id = $1',
-    [input.id]
+    `SELECT ta.id, ta.close_session_id, ta.risk_score, ta.materiality_threshold, ta.basis_used, ta.summary_json, ta.created_at
+     FROM triage_assessments ta
+     JOIN close_sessions cs ON ta.close_session_id = cs.id
+     WHERE cs.tenant_id = $1 AND ta.id = $2`,
+    [tenantId, id]
   );
-  return rowToAssessment(r.rows[0]);
+  const row = r.rows[0];
+  if (!row) return null;
+  return rowToAssessment(row);
 }
 
 export async function getLatestTriageByCloseSessionId(
   pool: Pool,
+  tenantId: string,
   closeSessionId: string
 ): Promise<TriageAssessment | null> {
   const r = await pool.query<TriageAssessmentRow>(
-    `SELECT id, close_session_id, risk_score, materiality_threshold, basis_used, summary_json, created_at
-     FROM triage_assessments WHERE close_session_id = $1 ORDER BY created_at DESC LIMIT 1`,
-    [closeSessionId]
+    `SELECT ta.id, ta.close_session_id, ta.risk_score, ta.materiality_threshold, ta.basis_used, ta.summary_json, ta.created_at
+     FROM triage_assessments ta
+     JOIN close_sessions cs ON ta.close_session_id = cs.id
+     WHERE cs.tenant_id = $1 AND ta.close_session_id = $2
+     ORDER BY ta.created_at DESC LIMIT 1`,
+    [tenantId, closeSessionId]
   );
   const row = r.rows[0];
   if (!row) return null;

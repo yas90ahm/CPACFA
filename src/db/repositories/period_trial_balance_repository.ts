@@ -6,7 +6,7 @@
 import type { Pool } from 'pg';
 import type { TrialBalanceEntry } from '../../types/financial.js';
 
-export type PeriodTrialBalanceSource = 'uploaded' | 'synced';
+export type PeriodTrialBalanceSource = 'uploaded' | 'synced' | 'gl_derived';
 
 export interface PeriodTrialBalanceMeta {
   source: PeriodTrialBalanceSource;
@@ -73,8 +73,8 @@ export async function upsertUnadjusted(
 ): Promise<PeriodTrialBalanceRecord> {
   const now = new Date().toISOString();
   const source = meta.source;
-  const uploadedAt = source === 'uploaded' ? now : null;
-  const uploadedBy = source === 'uploaded' ? meta.uploadedBy ?? null : null;
+  const uploadedAt = source === 'uploaded' || source === 'gl_derived' ? now : null;
+  const uploadedBy = source === 'uploaded' || source === 'gl_derived' ? meta.uploadedBy ?? null : null;
   const syncedAt = source === 'synced' ? now : null;
   const syncedBy = source === 'synced' ? meta.syncedBy ?? null : null;
   const fileName = meta.fileName ?? null;
@@ -176,8 +176,14 @@ export async function getUnadjustedMeta(
   const row = r.rows[0];
   if (!row) return null;
   const source = row.source as PeriodTrialBalanceSource;
-  const at = source === 'uploaded' ? row.uploaded_at : row.synced_at;
-  const by = source === 'uploaded' ? row.uploaded_by : row.synced_by;
+  const at =
+    source === 'uploaded' || source === 'gl_derived'
+      ? row.uploaded_at
+      : row.synced_at;
+  const by =
+    source === 'uploaded' || source === 'gl_derived'
+      ? row.uploaded_by
+      : row.synced_by;
   return {
     source,
     at: at ?? undefined,

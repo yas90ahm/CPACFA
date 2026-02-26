@@ -53,6 +53,23 @@ function binderToHtml(binder: AuditBinder): string {
     parts.push(`<p>... and ${binder.justifications.length - 10} more justifications.</p>`);
   }
 
+  if (binder.generalLedger && binder.generalLedger.length > 0) {
+    parts.push('<h2>General Ledger (Appendix)</h2>');
+    parts.push(`<p>${binder.generalLedger.length} journal entries; ${binder.generalLedger.reduce((s, e) => s + (e.lines?.length ?? 0), 0)} lines.</p>`);
+    for (const entry of binder.generalLedger.slice(0, 50)) {
+      parts.push(`<h3>${entry.entry_id} (${entry.entry_date})</h3>`);
+      if (entry.description) parts.push(`<p>${entry.description}</p>`);
+      parts.push('<table border="1" cellpadding="4" style="border-collapse: collapse;"><tr><th>Line</th><th>Account</th><th>Debit</th><th>Credit</th><th>Description</th></tr>');
+      for (const line of entry.lines ?? []) {
+        parts.push(`<tr><td>${line.line_number}</td><td>${line.account_code}</td><td>${line.debit ?? 0}</td><td>${line.credit ?? 0}</td><td>${(line.description ?? '').replace(/</g, '&lt;')}</td></tr>`);
+      }
+      parts.push('</table>');
+    }
+    if (binder.generalLedger.length > 50) {
+      parts.push(`<p>... and ${binder.generalLedger.length - 50} more entries (see JSON binder for full detail).</p>`);
+    }
+  }
+
   if (binder.chainVerification) {
     parts.push('<h2>Audit Ledger Chain Verification (Appendix)</h2>');
     parts.push('<p>Third parties can verify audit ledger integrity using the following artifact.</p>');
@@ -103,7 +120,7 @@ export async function exportDraftPackageToPdf(binder: AuditBinder): Promise<Buff
  * Flatten binder line links to CSV rows: statementType, label, amount, sourceDocumentUrl, reasoningMonologueUrl.
  */
 function binderToCsvRows(binder: AuditBinder): string[][] {
-  const headers = ['statementType', 'label', 'amount', 'sourceDocumentUrl', 'sourceDocumentName', 'reasoningMonologueUrl'];
+  const headers = ['statementType', 'label', 'amount', 'lineId', 'sourceDocumentUrl', 'sourceDocumentName', 'reasoningMonologueUrl'];
   const rows: string[][] = [headers];
 
   const pushLinks = (statementType: string, links: (LineAuditLink | CashFlowOrEquityLineLink)[]) => {
@@ -112,6 +129,7 @@ function binderToCsvRows(binder: AuditBinder): string[][] {
         statementType,
         l.label,
         String(l.amount),
+        (l as LineAuditLink).lineId ?? '',
         l.sourceDocumentUrl ?? '',
         (l as LineAuditLink).sourceDocumentName ?? '',
         l.reasoningMonologueUrl ?? '',
@@ -124,11 +142,39 @@ function binderToCsvRows(binder: AuditBinder): string[][] {
   if (binder.cashFlowBundle) pushLinks('cash_flow', binder.cashFlowBundle.lineLinks);
   if (binder.equityChangesBundle) pushLinks('equity_changes', binder.equityChangesBundle.lineLinks);
 
+  if (binder.generalLedger?.length) {
+    rows.push([]);
+    rows.push(['general_ledger', 'entry_id', 'line_number', 'entry_date', 'account_code', 'debit', 'credit', 'description']);
+    for (const entry of binder.generalLedger) {
+      for (const line of entry.lines ?? []) {
+        rows.push([
+          'general_ledger',
+          entry.entry_id,
+          String(line.line_number ?? 0),
+          entry.entry_date ?? '',
+          line.account_code ?? '',
+          String(line.debit ?? 0),
+          String(line.credit ?? 0),
+          (line.description ?? '').replace(/"/g, '""'),
+        ]);
+      }
+    }
+  }
+
   if (binder.cleanLedger?.length) {
     rows.push([]);
-    rows.push(['account_code', 'account_name', 'debit', 'credit', 'account_type']);
+    rows.push(['line_id', 'account_code', 'account_name', 'debit', 'credit', 'account_type', 'amount_provenance']);
     for (const r of binder.cleanLedger) {
-      rows.push([r.account_code ?? '', r.account_name ?? '', String(r.debit ?? 0), String(r.credit ?? 0), r.account_type ?? '']);
+      const prov = r.amount_provenance != null ? JSON.stringify(r.amount_provenance) : '';
+      rows.push([
+        r.line_id ?? '',
+        r.account_code ?? '',
+        r.account_name ?? '',
+        String(r.debit ?? 0),
+        String(r.credit ?? 0),
+        r.account_type ?? '',
+        prov,
+      ]);
     }
   }
   return rows;

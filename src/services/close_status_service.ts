@@ -8,10 +8,12 @@ import type { CloseChecklistStep, CloseStage } from '../types/close_and_controls
 import { getPeriodCloseRecord } from './period_close_service.js';
 import { isPeriodLocked, getPeriodLock } from './period_lock_service.js';
 import { getChecklist } from './checklist_store_service.js';
-import { buildReconciliationTieOut } from './reconciliation_tie_out_service.js';
+// QUARANTINED — Summary/reporting service not in MVP architecture
+// import { buildReconciliationTieOut } from './reconciliation_tie_out_service.js';
 import { buildCloseReadiness } from './close_readiness_service.js';
 import { getMateriality, materialityThresholdFromSettings } from './materiality_service.js';
 import { getUnadjustedMeta } from './trial_balance_store_service.js';
+import type { PeriodTrialBalanceSource } from '../db/repositories/period_trial_balance_repository.js';
 import { listAdjustments } from './close_adjustments_service.js';
 
 export interface CloseStatusChecklist {
@@ -57,7 +59,7 @@ export interface CloseStatus {
   signOff: CloseStatusSignOff;
   materialityRef?: MaterialityRef;
   hasUnadjustedTB: boolean;
-  tbSource: 'uploaded' | 'synced' | null;
+  tbSource: PeriodTrialBalanceSource | null;
   tbAt?: string;
   adjustmentCount: number;
   postedCount: number;
@@ -88,12 +90,14 @@ export async function buildCloseStatus(
   periodLabel: string,
   pool: Pool | undefined
 ): Promise<CloseStatus> {
-  const [periodClose, locked, lockRecord, steps, tieOut, readiness, tbMeta, adjustments] = await Promise.all([
+  // QUARANTINED — reconciliation_tie_out_service is summary/reporting, not close execution
+  // const tieOut = await buildReconciliationTieOut(tenantId, periodLabel, pool);
+  const [periodClose, locked, lockRecord, steps, readiness, tbMeta, adjustments] = await Promise.all([
     getPeriodCloseRecord(tenantId, periodLabel, pool),
     isPeriodLocked(periodLabel, tenantId, pool),
     getPeriodLock(periodLabel, tenantId, pool),
     getChecklist(periodLabel, undefined, tenantId, pool),
-    buildReconciliationTieOut(tenantId, periodLabel, pool),
+    // buildReconciliationTieOut(tenantId, periodLabel, pool), // QUARANTINED
     buildCloseReadiness(tenantId, periodLabel, pool, { includeNarrative: false }),
     getUnadjustedMeta(tenantId, periodLabel, pool),
     listAdjustments({ periodLabel }, tenantId, pool),
@@ -130,13 +134,9 @@ export async function buildCloseStatus(
       incompleteSteps,
     },
     recTieOut: {
-      tied: tieOut.tied,
-      openCount: tieOut.openOrPending.length,
-      openResolutions: tieOut.openOrPending.map((r) => ({
-        id: r.id,
-        reconciliationType: r.reconciliationType,
-        status: r.status,
-      })),
+      tied: readiness.recsTied, // Use readiness check instead of tie-out summary
+      openCount: 0, // Recon completeness is checked by recon_completeness_gate
+      openResolutions: [],
     },
     readiness: {
       ready: readiness.ready,

@@ -11,7 +11,8 @@ import { isDbConfigured } from '../db/index.js';
 import * as controlRepo from '../db/repositories/close_control_repository.js';
 import type { ControlEvidenceRow } from '../db/repositories/close_control_repository.js';
 import * as assertionRepo from '../db/repositories/control_assertion_repository.js';
-import { suggestAssertionsAgentic } from './agentic_suggest_assertions.js';
+// QUARANTINED — Agentic suggestions not in MVP architecture
+// import { suggestAssertionsAgentic } from './agentic_suggest_assertions.js';
 
 const store = createInMemoryStore<CloseControl>({ idPrefix: 'ctrl', timestamps: false });
 
@@ -146,5 +147,7 @@ export async function suggestAssertionsForControl(
 ): Promise<string[]> {
   const control = await getControl(controlId, tenantId, pool);
   if (!control) return [];
-  return suggestAssertionsAgentic(control);
+  // QUARANTINED — Agentic suggestions not in MVP architecture
+  return [];
+  // return suggestAssertionsAgentic(control);
 }

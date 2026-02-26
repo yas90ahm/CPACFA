@@ -14,7 +14,7 @@ import { getRequestByResource } from './approval_request_service.js';
 import { canPerform, type ControlledAction } from './segregation_service.js';
 import { listConnections } from './accounting_integration_service.js';
 import { pushAdjustmentToGL } from './push_close_to_gl_service.js';
-import { appendAuditLog } from './audit_log_service.js';
+import { recordAuditLogAction } from './audit_service.js';
 import { createJustification } from './justification_service.js';
 
 export interface UpdateCloseAdjustmentStatusParams {
@@ -56,15 +56,12 @@ export async function updateCloseAdjustmentStatus(
     await assertPeriodNotLocked(existing.periodLabel, tenantId, pool);
   } catch (e) {
     if (e instanceof PeriodLockedError) {
-      appendAuditLog(
-        {
-          action: 'period_edit_blocked',
-          resource: `period:${e.periodLabel}`,
-          detail: 'Period is locked',
-          actor: actorUserId ?? 'anonymous',
-        },
-        { pool, tenantId }
-      );
+      await recordAuditLogAction(pool, tenantId, {
+        action: 'period_edit_blocked',
+        resource: `period:${e.periodLabel}`,
+        detail: 'Period is locked',
+        actor: actorUserId ?? 'anonymous',
+      });
       return { error: 'Period locked', statusCode: 403, periodLabel: e.periodLabel };
     }
     throw e;
@@ -116,14 +113,11 @@ export async function updateCloseAdjustmentStatus(
         postedExternalId: existing.postedExternalId,
       });
       if (updated) {
-        appendAuditLog(
-          {
-            action: 'close_adjustment_post',
-            resource: `adjustment:${id}`,
-            actor: approvedBy ?? actorUserId ?? 'anonymous',
-          },
-          { pool, tenantId }
-        );
+        await recordAuditLogAction(pool, tenantId, {
+          action: 'close_adjustment_post',
+          resource: `adjustment:${id}`,
+          actor: approvedBy ?? actorUserId ?? 'anonymous',
+        });
         return { updated };
       }
       return { error: 'Adjustment not found', statusCode: 404 };
@@ -149,14 +143,11 @@ export async function updateCloseAdjustmentStatus(
     if (!updated) {
       return { error: 'Adjustment not found', statusCode: 404 };
     }
-    appendAuditLog(
-      {
-        action: 'close_adjustment_post',
-        resource: `adjustment:${id}`,
-        actor: approvedBy ?? actorUserId ?? 'anonymous',
-      },
-      { pool, tenantId }
-    );
+    await recordAuditLogAction(pool, tenantId, {
+      action: 'close_adjustment_post',
+      resource: `adjustment:${id}`,
+      actor: approvedBy ?? actorUserId ?? 'anonymous',
+    });
     await createJustification({
       tenantId,
       pool,

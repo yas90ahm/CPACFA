@@ -1,15 +1,29 @@
 /**
  * Environment config: NODE_ENV=production disallows in-memory stores to prevent silent data loss.
- * Use for HITL, trial balance, audit log, and any service that falls back to memory when DB/storage is missing.
+ * Trust-critical flags (auth, tenant injection, bypass) come from getCurrentSecurityProfile().
  */
+
+import { getCurrentSecurityProfile } from '../security/security_profile.js';
 
 /** True when NODE_ENV is production. */
 export const isProduction = (): boolean =>
   process.env.NODE_ENV === 'production';
 
-/** Policy B: when true, draft export allows imbalanced ledger and adds IMBALANCED watermark. Default false (Policy A: require balance). */
+/**
+ * True only when body tenant injection is allowed (dev/diagnostic mode).
+ * Delegates to SecurityProfile.tenantInjectionAllowed.
+ */
+export function isBodyTenantInjectionAllowed(): boolean {
+  return getCurrentSecurityProfile().tenantInjectionAllowed;
+}
+
+/** Draft export allows imbalanced ledger. From profile. */
 export const ALLOW_IMBALANCED_DRAFT_EXPORT = (): boolean =>
-  process.env.ALLOW_IMBALANCED_DRAFT_EXPORT === 'true';
+  getCurrentSecurityProfile().allowImbalancedDraftExport;
+
+/** Legacy certified source. From profile. */
+export const ALLOW_LEGACY_CERTIFIED_SOURCE = (): boolean =>
+  getCurrentSecurityProfile().allowLegacyCertifiedSource;
 
 /**
  * When in production, throw if the caller would use an in-memory path (e.g. missing pool/tenantId or storage).

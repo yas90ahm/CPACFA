@@ -18,6 +18,10 @@ export interface LineAuditLink {
   label: string;
   accountCode?: string;
   amount: number;
+  /** Stable line ID (UUID) from TB parse for material line traceability */
+  lineId?: string;
+  /** Amount provenance for audit trail (ledger_exact | engine_calculation | human_entered) */
+  amountProvenance?: import('./amount_provenance.js').AmountProvenance;
   /** URL or path to source document (PDF/CSV) */
   sourceDocumentUrl: string;
   /** Human-readable source document name */
@@ -71,11 +75,15 @@ export interface EquityChangesBundle {
 
 /** Clean Ledger row for CSV export (CPA-verified trial balance) */
 export interface CleanLedgerRow {
+  /** Stable line ID (UUID) from TB parse for durable audit trail */
+  line_id?: string;
   account_code?: string;
   account_name: string;
   debit: number;
   credit: number;
   account_type?: string;
+  /** Amount provenance when row is from JE/adjustment (ledger_exact | engine_calculation | human_entered) */
+  amount_provenance?: import('./amount_provenance.js').AmountProvenance;
 }
 
 /** Chain verification summary for third-party cryptographic verification of audit ledger. */
@@ -111,6 +119,8 @@ export interface AuditBinder {
   chainVerification?: ChainVerificationSummary;
   /** Trust boundary: ingest source metadata (source_type, source_hash, ingestion_timestamp) for staged data in period */
   ingestMetadata?: Array<{ source_type: string; source_hash: string; ingestion_timestamp: string }>;
+  /** General ledger entries (v4+ snapshots). Included when TB is derived from GL. */
+  generalLedger?: import('./ledger_snapshot.js').GeneralLedgerSnapshotEntry[];
 }
 
 /** Single accounting policy change during the fiscal year (GAAP consistency) */

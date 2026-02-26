@@ -37,7 +37,7 @@ describe('Advisor proposals (draft only)', () => {
     const prevMock = process.env.AI_MOCK_ADVISOR;
     process.env.AI_MOCK_ADVISOR = 'true';
     const ingestPath =
-      process.env.NODE_ENV === 'production' ? '/api/trial-balance/ingest' : '/api-dev/trial-balance/ingest';
+      '/api/trial-balance/ingest';
     const tmpCsv = path.join(os.tmpdir(), `advisor-ingest-${Date.now()}.csv`);
     fs.writeFileSync(tmpCsv, IMBALANCED_CSV, 'utf8');
     let stagedId: string | undefined;

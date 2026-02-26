@@ -7,8 +7,9 @@ import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { loadCloseContext, requirePriorPeriodForComparison, isPriorPeriodBeforeCurrent } from '../../services/close_context.js';
 import { getPrecedentForCloseStep, toSimilarPrecedentSummary } from '../../services/precedent_for_close_step.js';
 import { getMateriality, materialityThresholdFromSettings } from '../../services/materiality_service.js';
-import { buildPriorPeriodComparison } from '../../services/agentic_prior_period_comparison.js';
-import { explainPriorPeriodComparisonAgentic } from '../../services/agentic_prior_period_comparison.js';
+// QUARANTINED — Agentic prior period comparison not in MVP architecture
+// import { buildPriorPeriodComparison } from '../../services/agentic_prior_period_comparison.js';
+// import { explainPriorPeriodComparisonAgentic } from '../../services/agentic_prior_period_comparison.js';
 import type { PriorPeriodComparisonInput, PriorPeriodComparisonResult } from '../../types/audit_evidence.js';
 import { validateBody } from '../../middleware/validationMiddleware.js';
 import { priorPeriodComparisonBodySchema, priorPeriodExplainBodySchema } from '../../schemas/auditSchemas.js';
@@ -47,11 +48,14 @@ router.post('/prior-period-comparison', validateBody(priorPeriodComparisonBodySc
     }
     const settings = getMateriality(tenantId, body.currentPeriodLabel);
     const th = materialityThresholdFromSettings(settings);
-    const result = buildPriorPeriodComparison(body, {
-      materialThresholdPercent: th.percent,
-      materialThresholdAmount: th.amount,
-    });
+    // QUARANTINED — Agentic prior period comparison not in MVP architecture
+    // const result = buildPriorPeriodComparison(body, {
+    //   materialThresholdPercent: th.percent,
+    //   materialThresholdAmount: th.amount,
+    // });
+    const result = { variances: [], summary: 'Prior period comparison quarantined' };
     const precedentResult = getPrecedentForCloseStep('prior_period_comparison', {
+      tenantId: getTenantId(req),
       entityId: body.entityId,
       currentPeriodLabel: body.currentPeriodLabel,
       priorPeriodLabel: body.priorPeriodLabel,
@@ -67,14 +71,15 @@ router.post('/prior-period-comparison', validateBody(priorPeriodComparisonBodySc
   }
 });
 
-/** POST /api/audit/prior-period-comparison/explain */
-router.post('/prior-period-comparison/explain', validateBody(priorPeriodExplainBodySchema), async (req: Request, res: Response) => {
-  try {
-    const narrative = await explainPriorPeriodComparisonAgentic(req.body);
-    res.json({ narrative });
-  } catch (err) {
-    handleAuditError(res, err, 'Explain error');
-  }
-});
+// QUARANTINED — Agentic prior period comparison not in MVP architecture
+// /** POST /api/audit/prior-period-comparison/explain */
+// router.post('/prior-period-comparison/explain', validateBody(priorPeriodExplainBodySchema), async (req: Request, res: Response) => {
+//   try {
+//     const narrative = await explainPriorPeriodComparisonAgentic(req.body);
+//     res.json({ narrative });
+//   } catch (err) {
+//     handleAuditError(res, err, 'Explain error');
+//   }
+// });
 
 export default router;

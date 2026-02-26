@@ -14,7 +14,8 @@ import type {
   RAGResult,
   StoredJustification,
 } from '../types/justification.js';
-import { getDefaultRAGStore } from './rag_handbook.js';
+// QUARANTINED — rag_handbook not in MVP architecture
+// import { getDefaultRAGStore } from './rag_handbook.js';
 import { isDbConfigured } from '../db/index.js';
 import { disallowMemoryStoreInProduction } from '../lib/env.js';
 import * as justificationsRepo from '../db/repositories/tenant_justifications_repository.js';
@@ -32,6 +33,8 @@ export interface CreateJustificationFromAIParams {
   prompt_version: string;
   model?: string;
   inputs_hash: string;
+  /** When 'draft', justification requires human review before association with the JE. */
+  status?: 'draft' | 'approved';
 }
 
 // --- In-memory store (fallback when no DB/tenant; production disallows) ---
@@ -155,7 +158,9 @@ export async function justifyWithRAG(
   question: string,
   options?: JustifyOptions
 ): Promise<JustificationResponse> {
-  const store = options?.ragStore ?? getDefaultRAGStore();
+  // QUARANTINED — rag_handbook not in MVP architecture
+  // const store = options?.ragStore ?? getDefaultRAGStore();
+  const store = options?.ragStore ?? { query: async (q: string) => ({ chunks: [], query: q }) };
   const rag: RAGResult = await store.query(question, {
     topK: 3,
     framework: options?.framework,

@@ -11,6 +11,7 @@ import type {
   JournalEntryStatus,
   JournalEntrySource,
 } from '../../types/journal_entry.js';
+import type { AmountProvenance } from '../../types/amount_provenance.js';
 
 interface JournalEntryRow {
   id: string;
@@ -23,6 +24,9 @@ interface JournalEntryRow {
   approved_by: string | null;
   posted_at: string | null;
   reversal_date: string | null;
+  rejection_reason: string | null;
+  rejected_by: string | null;
+  rejected_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -34,6 +38,7 @@ interface JournalEntryLineRow {
   debit: string;
   credit: string;
   description: string | null;
+  amount_provenance: unknown;
 }
 
 function rowToJE(row: JournalEntryRow): JournalEntry {
@@ -48,6 +53,9 @@ function rowToJE(row: JournalEntryRow): JournalEntry {
     approvedBy: row.approved_by ?? undefined,
     postedAt: row.posted_at ?? undefined,
     reversalDate: row.reversal_date ?? undefined,
+    rejectionReason: row.rejection_reason ?? undefined,
+    rejectedBy: row.rejected_by ?? undefined,
+    rejectedAt: row.rejected_at ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -58,14 +66,18 @@ function rowToLine(row: JournalEntryLineRow): JournalEntryLine {
     jeId: row.je_id,
     lineIndex: row.line_index,
     accountRef: row.account_ref,
-    debit: Number(row.debit),
-    credit: Number(row.credit),
+    debit: Number(row.debit ?? '0'),
+    credit: Number(row.credit ?? '0'),
     description: row.description ?? undefined,
+    amountProvenance:
+      row.amount_provenance != null && typeof row.amount_provenance === 'object'
+        ? (row.amount_provenance as AmountProvenance)
+        : undefined,
   };
 }
 
-const JE_COLS = `id, close_session_id, tenant_id, status, memo, source, created_by, approved_by, posted_at, reversal_date, created_at, updated_at`;
-const LINE_COLS = `je_id, line_index, account_ref, debit, credit, description`;
+const JE_COLS = `id, close_session_id, tenant_id, status, memo, source, created_by, approved_by, posted_at, reversal_date, rejection_reason, rejected_by, rejected_at, created_at, updated_at`;
+const LINE_COLS = `je_id, line_index, account_ref, debit, credit, description, amount_provenance`;
 
 export async function insertJournalEntry(
   pool: Pool,
@@ -94,7 +106,10 @@ export async function insertJournalEntry(
       now,
     ]
   );
-  const r = await pool.query<JournalEntryRow>(`SELECT ${JE_COLS} FROM journal_entries WHERE id = $1`, [id]);
+  const r = await pool.query<JournalEntryRow>(
+    `SELECT ${JE_COLS} FROM journal_entries WHERE id = $1 AND tenant_id = $2`,
+    [id, input.tenantId]
+  );
   return rowToJE(r.rows[0]);
 }
 
@@ -144,6 +159,10 @@ export async function updateJournalEntryStatus(
     approvedBy?: string;
     postedAt?: string;
     reversalDate?: string | null;
+    /** For status 'rejected': rejection reason, rejected_by, rejected_at. */
+    rejectedBy?: string;
+    rejectedAt?: string;
+    rejectionReason?: string;
   }
 ): Promise<JournalEntry | null> {
   const now = new Date().toISOString();
@@ -151,32 +170,69 @@ export async function updateJournalEntryStatus(
   const postedAt = patch?.postedAt ?? null;
   const reversalDate = patch?.reversalDate !== undefined ? patch.reversalDate : undefined;
   const setReversal = reversalDate !== undefined;
-  await pool.query(
-    `UPDATE journal_entries SET status = $3, updated_at = $4,
-       approved_by = COALESCE($5, approved_by), posted_at = COALESCE($6, posted_at),
-       reversal_date = CASE WHEN $8 THEN $7::date ELSE reversal_date END
-     WHERE id = $1 AND tenant_id = $2`,
-    [id, tenantId, status, now, approvedBy, postedAt, reversalDate ?? null, setReversal]
-  );
+  const rejectedBy = patch?.rejectedBy ?? null;
+  const rejectedAt = patch?.rejectedAt ?? now;
+  const rejectionReason = patch?.rejectionReason ?? null;
+  if (status === 'rejected' && rejectionReason) {
+    await pool.query(
+      `UPDATE journal_entries SET status = $3, updated_at = $4,
+         rejection_reason = $5, rejected_by = $6, rejected_at = $7
+       WHERE id = $1 AND tenant_id = $2`,
+      [id, tenantId, status, now, rejectionReason, rejectedBy, rejectedAt]
+    );
+  } else {
+    await pool.query(
+      `UPDATE journal_entries SET status = $3, updated_at = $4,
+         approved_by = COALESCE($5, approved_by), posted_at = COALESCE($6, posted_at),
+         reversal_date = CASE WHEN $8 THEN $7::date ELSE reversal_date END
+       WHERE id = $1 AND tenant_id = $2`,
+      [id, tenantId, status, now, approvedBy, postedAt, reversalDate ?? null, setReversal]
+    );
+  }
   return getJournalEntryById(pool, id, tenantId);
+}
+
+/** Delete evidence links and then the journal entry. Caller must enforce status (draft/rejected only). */
+export async function deleteJournalEntry(pool: Pool, id: string, tenantId: string): Promise<void> {
+  await pool.query(
+    `DELETE FROM evidence_links WHERE tenant_id = $1 AND object_type = 'journal_entry' AND object_id = $2`,
+    [tenantId, id]
+  );
+  await pool.query(`DELETE FROM journal_entries WHERE id = $1 AND tenant_id = $2`, [id, tenantId]);
 }
 
 export async function insertJournalEntryLines(
   pool: Pool,
   jeId: string,
-  lines: { accountRef: string; debit?: number; credit?: number; description?: string }[]
+  lines: {
+    accountRef: string;
+    debit?: number;
+    credit?: number;
+    description?: string;
+    amountProvenance?: AmountProvenance;
+  }[]
 ): Promise<JournalEntryLine[]> {
   const result: JournalEntryLine[] = [];
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     const debit = l.debit ?? 0;
     const credit = l.credit ?? 0;
+    const amountProvenanceJson =
+      l.amountProvenance != null ? JSON.stringify(l.amountProvenance) : null;
     await pool.query(
-      `INSERT INTO journal_entry_lines (je_id, line_index, account_ref, debit, credit, description)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [jeId, i, l.accountRef, debit, credit, l.description ?? null]
+      `INSERT INTO journal_entry_lines (je_id, line_index, account_ref, debit, credit, description, amount_provenance)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+      [jeId, i, l.accountRef, debit, credit, l.description ?? null, amountProvenanceJson]
     );
-    result.push({ jeId, lineIndex: i, accountRef: l.accountRef, debit, credit, description: l.description });
+    result.push({
+      jeId,
+      lineIndex: i,
+      accountRef: l.accountRef,
+      debit,
+      credit,
+      description: l.description,
+      amountProvenance: l.amountProvenance,
+    });
   }
   return result;
 }
@@ -193,24 +249,31 @@ export async function insertJEAttachment(
   pool: Pool,
   id: string,
   jeId: string,
-  fileRef: string
+  fileRef: string,
+  tenantId: string
 ): Promise<JournalEntryAttachment> {
   await pool.query(
     `INSERT INTO je_attachments (id, je_id, file_ref) VALUES ($1, $2, $3)`,
     [id, jeId, fileRef]
   );
   const r = await pool.query<{ id: string; je_id: string; file_ref: string; uploaded_at: string }>(
-    `SELECT id, je_id, file_ref, uploaded_at FROM je_attachments WHERE id = $1`,
-    [id]
+    `SELECT a.id, a.je_id, a.file_ref, a.uploaded_at
+     FROM je_attachments a
+     JOIN journal_entries je ON a.je_id = je.id
+     WHERE je.tenant_id = $1 AND a.id = $2`,
+    [tenantId, id]
   );
   const row = r.rows[0];
   return { id: row.id, jeId: row.je_id, fileRef: row.file_ref, uploadedAt: row.uploaded_at };
 }
 
-export async function getJEAttachmentById(pool: Pool, attachmentId: string): Promise<JournalEntryAttachment | null> {
+export async function getJEAttachmentById(pool: Pool, tenantId: string, attachmentId: string): Promise<JournalEntryAttachment | null> {
   const r = await pool.query<{ id: string; je_id: string; file_ref: string; uploaded_at: string }>(
-    `SELECT id, je_id, file_ref, uploaded_at FROM je_attachments WHERE id = $1`,
-    [attachmentId]
+    `SELECT a.id, a.je_id, a.file_ref, a.uploaded_at
+     FROM je_attachments a
+     JOIN journal_entries je ON a.je_id = je.id
+     WHERE je.tenant_id = $1 AND a.id = $2`,
+    [tenantId, attachmentId]
   );
   const row = r.rows[0];
   if (!row) return null;

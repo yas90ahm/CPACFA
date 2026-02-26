@@ -18,7 +18,8 @@ import {
   patchException,
   getSummary,
 } from '../services/data_quality_exception_service.js';
-import { suggestRemediationAgentic } from '../services/agentic_remediation_suggestion.js';
+// QUARANTINED — Agentic remediation suggestions not in MVP architecture
+// import { suggestRemediationAgentic } from '../services/agentic_remediation_suggestion.js';
 import type { DataQualityRule, DataQualityScope } from '../types/data_quality.js';
 import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
 
@@ -89,13 +90,14 @@ router.get('/exceptions', async (req: Request, res: Response) => {
       status,
       limit,
     });
-    const suggest = req.query.suggest === 'true' || req.query.suggest === '1';
-    if (suggest && list.length > 0) {
-      const first = list[0];
-      const suggestion = await suggestRemediationAgentic(first);
-      res.json({ exceptions: list, suggestionForFirst: suggestion });
-      return;
-    }
+    // QUARANTINED — Agentic remediation suggestions not in MVP architecture
+    // const suggest = req.query.suggest === 'true' || req.query.suggest === '1';
+    // if (suggest && list.length > 0) {
+    //   const first = list[0];
+    //   const suggestion = await suggestRemediationAgentic(first);
+    //   res.json({ exceptions: list, suggestionForFirst: suggestion });
+    //   return;
+    // }
     res.json({ exceptions: list });
   } catch (e) {
     send500(res, e, 'List data quality exceptions failed');
@@ -116,12 +118,13 @@ router.get('/exceptions/:id', async (req: Request, res: Response) => {
       res.status(404).json({ error: 'Exception not found' });
       return;
     }
-    const suggest = req.query.suggest === 'true' || req.query.suggest === '1';
-    if (suggest) {
-      const suggestion = await suggestRemediationAgentic(ex);
-      res.json({ ...ex, suggestion });
-      return;
-    }
+    // QUARANTINED — Agentic remediation suggestions not in MVP architecture
+    // const suggest = req.query.suggest === 'true' || req.query.suggest === '1';
+    // if (suggest) {
+    //   const suggestion = await suggestRemediationAgentic(ex);
+    //   res.json({ ...ex, suggestion });
+    //   return;
+    // }
     res.json(ex);
   } catch (e) {
     send500(res, e, 'Get data quality exception failed');
@@ -207,25 +210,26 @@ router.get('/summary', async (req: Request, res: Response) => {
   }
 });
 
-/** POST /api/data-quality/exceptions/:id/suggest-remediation — Agentic remediation suggestion */
-router.post('/exceptions/:id/suggest-remediation', async (req: Request, res: Response) => {
-  try {
-    const tenantId = getTenantId(req) ?? 'default';
-    const pool = getTenantPool(req);
-    if (!pool) {
-      res.status(503).json({ error: 'Tenant database required' });
-      return;
-    }
-    const ex = await getExceptionById(pool, req.params.id, tenantId);
-    if (!ex) {
-      res.status(404).json({ error: 'Exception not found' });
-      return;
-    }
-    const suggestion = await suggestRemediationAgentic(ex);
-    res.json({ suggestion });
-  } catch (e) {
-    send500(res, e, 'Suggest remediation failed');
-  }
-});
+// QUARANTINED — Agentic remediation suggestions not in MVP architecture
+// /** POST /api/data-quality/exceptions/:id/suggest-remediation — Agentic remediation suggestion */
+// router.post('/exceptions/:id/suggest-remediation', async (req: Request, res: Response) => {
+//   try {
+//     const tenantId = getTenantId(req) ?? 'default';
+//     const pool = getTenantPool(req);
+//     if (!pool) {
+//       res.status(503).json({ error: 'Tenant database required' });
+//       return;
+//     }
+//     const ex = await getExceptionById(pool, req.params.id, tenantId);
+//     if (!ex) {
+//       res.status(404).json({ error: 'Exception not found' });
+//       return;
+//     }
+//     const suggestion = await suggestRemediationAgentic(ex);
+//     res.json({ suggestion });
+//   } catch (e) {
+//     send500(res, e, 'Suggest remediation failed');
+//   }
+// });
 
 export default router;
