@@ -16,6 +16,20 @@ services:
       - evidence_data:/app/data/evidence
       - storage_data:/app/storage
 
+  slm:
+    build:
+      context: ./slm
+      dockerfile: Dockerfile
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
   db:
     image: postgres:16-alpine
     ports:

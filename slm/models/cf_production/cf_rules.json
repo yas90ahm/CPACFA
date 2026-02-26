@@ -1,0 +1,156 @@
+{
+  "version": "1.0",
+  "description": "Post-processing rules for CF classification. Applied BEFORE model. Case-insensitive substring match. First match wins.",
+  "rules": [
+    {
+      "pattern": "dividend",
+      "classification": "Financing",
+      "category": "equity_return",
+      "notes": "Dividend payments to shareholders are always Financing"
+    },
+    {
+      "pattern": "distribution",
+      "classification": "Financing",
+      "category": "equity_return",
+      "notes": "Distributions to owners/members/partners are Financing"
+    },
+    {
+      "pattern": "owner draw",
+      "classification": "Financing",
+      "category": "equity_return",
+      "notes": "Owner draws from S-corp or LLC are Financing"
+    },
+    {
+      "pattern": "member draw",
+      "classification": "Financing",
+      "category": "equity_return",
+      "notes": "LLC member draws are Financing"
+    },
+    {
+      "pattern": "loan payment",
+      "classification": "Financing",
+      "category": "debt_repayment",
+      "notes": "Principal portion of loan payments is Financing"
+    },
+    {
+      "pattern": "loan repayment",
+      "classification": "Financing",
+      "category": "debt_repayment",
+      "notes": "Loan repayments are Financing"
+    },
+    {
+      "pattern": "debt repayment",
+      "classification": "Financing",
+      "category": "debt_repayment",
+      "notes": "Debt repayments are Financing"
+    },
+    {
+      "pattern": "line of credit payment",
+      "classification": "Financing",
+      "category": "debt_repayment",
+      "notes": "Line of credit paydowns are Financing"
+    },
+    {
+      "pattern": "stock repurchase",
+      "classification": "Financing",
+      "category": "equity_repurchase",
+      "notes": "Share buybacks are Financing"
+    },
+    {
+      "pattern": "share buyback",
+      "classification": "Financing",
+      "category": "equity_repurchase",
+      "notes": "Share buybacks are Financing"
+    },
+    {
+      "pattern": "capital contribution",
+      "classification": "Financing",
+      "category": "equity_issuance",
+      "notes": "Capital contributions from owners are Financing"
+    },
+    {
+      "pattern": "stock option exercise",
+      "classification": "Financing",
+      "category": "equity_issuance",
+      "notes": "Proceeds from stock option exercises are Financing"
+    },
+    {
+      "pattern": "option exercise",
+      "classification": "Financing",
+      "category": "equity_issuance",
+      "notes": "Option exercise proceeds are Financing"
+    },
+    {
+      "pattern": "hosting",
+      "classification": "Operating",
+      "category": "cost_of_revenue",
+      "notes": "Cloud hosting costs are operating expenses"
+    },
+    {
+      "pattern": "payroll",
+      "classification": "Operating",
+      "category": "operating_expense",
+      "notes": "Payroll costs are operating expenses"
+    },
+    {
+      "pattern": "salaries",
+      "classification": "Operating",
+      "category": "operating_expense",
+      "notes": "Salary expenses are operating"
+    },
+    {
+      "pattern": "salary",
+      "classification": "Operating",
+      "category": "operating_expense",
+      "notes": "Salary expenses are operating"
+    },
+    {
+      "pattern": "rent expense",
+      "classification": "Operating",
+      "category": "operating_expense",
+      "notes": "Rent expense is operating"
+    },
+    {
+      "pattern": "utilities",
+      "classification": "Operating",
+      "category": "operating_expense",
+      "notes": "Utility costs are operating expenses"
+    },
+    {
+      "pattern": "insurance expense",
+      "classification": "Operating",
+      "category": "operating_expense",
+      "notes": "Insurance expense is operating"
+    },
+    {
+      "pattern": "subscription",
+      "classification": "Operating",
+      "category": "operating_expense",
+      "notes": "Subscription costs/revenue are operating"
+    },
+    {
+      "pattern": "purchase of equipment",
+      "classification": "Investing",
+      "category": "ppe_acquisition",
+      "notes": "Equipment purchases are capital expenditures — Investing"
+    },
+    {
+      "pattern": "security deposit",
+      "classification": "Investing",
+      "category": "deposit",
+      "notes": "Security deposits are long-term assets — Investing"
+    },
+    {
+      "pattern": "capital expenditure",
+      "classification": "Investing",
+      "category": "capex",
+      "notes": "Capital expenditures are Investing by definition"
+    },
+    {
+      "pattern": "capex",
+      "classification": "Investing",
+      "category": "capex",
+      "notes": "CapEx is Investing by definition"
+    }
+  ]
+}

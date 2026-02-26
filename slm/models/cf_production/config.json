@@ -1,0 +1,58 @@
+{
+  "model_type": "distilbert-base-uncased",
+  "model_path": "models/cf_production/model",
+  "rules_path": "models/cf_production/cf_rules.json",
+  "architecture": "hybrid: DistilBERT classifier + rule-based overrides",
+  "num_labels": 3,
+  "label_map": {
+    "Operating": 0,
+    "Investing": 1,
+    "Financing": 2
+  },
+  "high_confidence_threshold": 0.8,
+  "medium_confidence_threshold": 0.5,
+  "max_length": 64,
+  "training": {
+    "seed": 123,
+    "learning_rate": 2e-05,
+    "epochs_run": 9,
+    "max_epochs": 10,
+    "batch_size": 16,
+    "warmup_ratio": 0.1,
+    "weight_decay": 0.01,
+    "early_stopping_patience": 3,
+    "best_val_loss": 0.27,
+    "train_size": 1548,
+    "val_size": 190,
+    "test_size": 170
+  },
+  "results": {
+    "model_only_accuracy": 0.9294,
+    "hybrid_accuracy": 0.9294,
+    "macro_f1": 0.9305,
+    "gated_effective_accuracy": 0.9294,
+    "rules_count": 25,
+    "test_pairs_matched_by_rules": 3
+  },
+  "seed_sweep": [
+    {
+      "seed": 42,
+      "val_acc": 0.9211,
+      "test_acc": 0.9118
+    },
+    {
+      "seed": 123,
+      "val_acc": 0.9263,
+      "test_acc": 0.9294
+    },
+    {
+      "seed": 456,
+      "val_acc": 0.9368,
+      "test_acc": 0.9235
+    }
+  ],
+  "data_sources": [
+    "SEC EDGAR XBRL Company Facts API, 523 companies",
+    "Private company CPA-reviewed pairs (QuickBooks/Xero style)"
+  ]
+}

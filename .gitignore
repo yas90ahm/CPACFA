@@ -26,6 +26,10 @@ __pycache__/
 venv/
 env/
 
+# SLM model binaries (large files, managed outside git)
+slm/models/cf_production/model/
+slm/models/coa_production/index.faiss
+
 # IDE / OS
 .idea/
 .vscode/

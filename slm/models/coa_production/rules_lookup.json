@@ -1,0 +1,123 @@
+{
+  "accounts_payable": [
+    "Accounts Payable and Accrued Liabilities",
+    "Accounts Payable and Accrued Liabilities, Current",
+    "Accounts Payable, Current",
+    "Accounts Payable, Other, Current",
+    "Accounts Payable, Related Parties, Current (Deprecated 2023)",
+    "Accounts Payable, Trade, Current"
+  ],
+  "aoci": [
+    "AOCI, Debt Securities, Available-for-Sale, Adjustment, after Tax",
+    "Accumulated Other Comprehensive (Income) Loss, Defined Benefit Plan, after Tax",
+    "Accumulated Other Comprehensive Income (Loss), Cumulative Changes in Net Gain (Loss) from Cash Flow Hedges, Effect Net of Tax",
+    "Accumulated Other Comprehensive Income (Loss), Foreign Currency Translation Adjustment, Net of Tax",
+    "Accumulated Other Comprehensive Income (Loss), Net of Tax"
+  ],
+  "cf_capex": [
+    "Capital Expenditures Incurred but Not yet Paid",
+    "Payments to Acquire Other Productive Assets",
+    "Payments to Acquire Productive Assets",
+    "Payments to Acquire Property, Plant, and Equipment",
+    "Proceeds from Sale of Property, Plant, and Equipment",
+    "Property, Plant and Equipment, Additions"
+  ],
+  "cf_depreciation_amortization": [
+    "Amortization",
+    "Amortization of Debt Discount (Premium)",
+    "Amortization of Debt Issuance Costs",
+    "Amortization of Debt Issuance Costs and Discounts",
+    "Finance Lease, Right-of-Use Asset, Amortization"
+  ],
+  "cost_of_revenue": [
+    "Cost of Goods and Service, Excluding Depreciation, Depletion, and Amortization",
+    "Cost of Goods and Services Sold",
+    "Cost of Revenue"
+  ],
+  "current_portion_lt_debt": [
+    "Long-Term Debt and Lease Obligation, Current",
+    "Long-Term Debt, Current Maturities",
+    "Long-Term Debt, Maturity, Year One"
+  ],
+  "depreciation_amortization_is": [
+    "Amortization of Intangible Assets",
+    "Depreciation",
+    "Depreciation, Amortization and Accretion, Net",
+    "Depreciation, Depletion and Amortization",
+    "Depreciation, Depletion and Amortization, Nonproduction",
+    "Depreciation, Nonproduction"
+  ],
+  "goodwill": [
+    "Goodwill",
+    "Goodwill, Foreign Currency Translation Gain (Loss)",
+    "Goodwill, Gross",
+    "Goodwill, Impaired, Accumulated Impairment Loss",
+    "Goodwill, Measurement Period Adjustment",
+    "Goodwill, Other Increase (Decrease)",
+    "Goodwill, Transfers",
+    "Goodwill, Translation and Measurement Period Adjustments",
+    "Goodwill, Written off Related to Sale of Business Unit"
+  ],
+  "gross_profit": [
+    "Gross Profit"
+  ],
+  "interest_income": [
+    "Interest Income, Operating",
+    "Interest Income, Other",
+    "Interest and Dividend Income, Operating",
+    "Interest and Other Income",
+    "Investment Income, Interest",
+    "Investment Income, Interest and Dividend"
+  ],
+  "operating_income": [
+    "Operating Income (Loss)"
+  ],
+  "prepaid_expenses": [
+    "Prepaid Expense",
+    "Prepaid Expense and Other Assets",
+    "Prepaid Expense and Other Assets, Current",
+    "Prepaid Expense, Current",
+    "Prepaid Expense, Noncurrent"
+  ],
+  "research_and_development": [
+    "Research and Development Expense",
+    "Research and Development Expense (Excluding Acquired in Process Cost)",
+    "Research and Development in Process (Deprecated 2023)"
+  ],
+  "retained_earnings": [
+    "Retained Earnings (Accumulated Deficit)",
+    "Retained Earnings, Undistributed Earnings from Equity Method Investees"
+  ],
+  "revenue": [
+    "Revenue Not from Contract with Customer",
+    "Revenue from Contract with Customer, Excluding Assessed Tax",
+    "Revenue from Contract with Customer, Including Assessed Tax",
+    "Revenue from Related Parties (Deprecated 2023)",
+    "Revenue, Remaining Performance Obligation, Amount",
+    "Revenues"
+  ],
+  "selling_general_administrative": [
+    "Advertising Expense",
+    "General and Administrative Expense",
+    "Marketing and Advertising Expense",
+    "Selling and Marketing Expense",
+    "Selling, General and Administrative Expense"
+  ],
+  "short_term_debt": [
+    "Commercial Paper",
+    "Debt, Current",
+    "Line of Credit Facility, Current Borrowing Capacity",
+    "Line of Credit Facility, Fair Value of Amount Outstanding",
+    "Line of Credit Facility, Maximum Borrowing Capacity",
+    "Line of Credit Facility, Remaining Borrowing Capacity",
+    "Long-Term Line of Credit",
+    "Short-Term Debt"
+  ],
+  "treasury_stock": [
+    "Treasury Stock, Common, Value",
+    "Treasury Stock, Retired, Cost Method, Amount",
+    "Treasury Stock, Value",
+    "Treasury Stock, Value, Acquired, Cost Method",
+    "Treasury Stock, Value, Acquired, Par Value Method"
+  ]
+}
