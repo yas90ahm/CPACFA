@@ -59,6 +59,8 @@ export interface BalanceSheet {
   totalAssets: number;
   totalLiabilities: number;
   totalEquity: number;
+  /** Accumulated Other Comprehensive Income (ASC 220). Included in totalEquity when present. */
+  oci?: { items: FinancialStatementLine[]; total: number };
   /** Verification: Assets = Liabilities + Equity */
   balances: boolean;
   codificationRef: CodificationRef;
@@ -72,6 +74,8 @@ export interface ProfitAndLoss {
   totalRevenue: number;
   totalExpenses: number;
   netIncome: number;
+  /** Discontinued operations (ASC 205-20). When present, netIncome is from continuing operations only. */
+  discontinuedOperations?: { items: FinancialStatementLine[]; total: number };
   codificationRef: CodificationRef;
 }
 
@@ -160,6 +164,8 @@ export interface CashFlowStatement {
 export interface EquityChangesStatement {
   openingEquity?: number;
   changes: Array<{ label: string; amount: number }>;
+  /** Other Comprehensive Income component of equity changes (ASC 220). */
+  ociChanges?: Array<{ label: string; amount: number }>;
   closingEquity?: number;
   estimated?: boolean;
   note?: string;

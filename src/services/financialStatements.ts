@@ -33,7 +33,19 @@ import {
 export { MathematicalIntegrityError };
 
 /** Credit-positive fs line ids (positive = credit); others are debit-positive. */
-const CREDIT_POSITIVE_FS_LINES = new Set(['fs_liability', 'fs_equity', 'fs_revenue']);
+const CREDIT_POSITIVE_FS_LINES = new Set([
+  'fs_liability', 'fs_equity', 'fs_revenue',
+  'fs_oci', 'fs_oci_unrealized_gains', 'fs_oci_fx_translation', 'fs_oci_hedge',
+  'fs_discontinued_ops', 'fs_discontinued_disposal',
+]);
+
+/** FS line IDs that route to OCI (Accumulated Other Comprehensive Income). */
+const OCI_FS_LINES = new Set([
+  'fs_oci', 'fs_oci_unrealized_gains', 'fs_oci_fx_translation', 'fs_oci_pension', 'fs_oci_hedge',
+]);
+
+/** FS line IDs that route to Discontinued Operations on the P&L. */
+const DISCONTINUED_FS_LINES = new Set(['fs_discontinued_ops', 'fs_discontinued_disposal']);
 
 /** Net amount for an account (debit − credit). Assets/Expenses: positive = debit. Liabilities/Equity/Revenue: positive = credit. Uses decimal round for display. */
 function netAmount(entry: TrialBalanceEntry): number {
@@ -73,33 +85,41 @@ function sumLines(lines: FinancialStatementLine[]): number {
 
 const DEFAULT_MATERIALITY = 0.01;
 
-/** When fsLineId is set, bucket by taxonomy line id (BS defaults: fs_asset, fs_liability, fs_equity). */
+/** Bucket entries by fsLineId (data-driven) with accountType fallback. Supports OCI and Discontinued Ops. */
 function bucketBsByFsLine(entries: TrialBalanceEntry[]): {
   assets: TrialBalanceEntry[];
   liabilities: TrialBalanceEntry[];
   equity: TrialBalanceEntry[];
   revenue: TrialBalanceEntry[];
   expenses: TrialBalanceEntry[];
+  oci: TrialBalanceEntry[];
+  discontinued: TrialBalanceEntry[];
 } {
   const assets: TrialBalanceEntry[] = [];
   const liabilities: TrialBalanceEntry[] = [];
   const equity: TrialBalanceEntry[] = [];
   const revenue: TrialBalanceEntry[] = [];
   const expenses: TrialBalanceEntry[] = [];
+  const oci: TrialBalanceEntry[] = [];
+  const discontinued: TrialBalanceEntry[] = [];
   const isType = (t?: string, expected?: string) => t != null && expected != null && String(t).toUpperCase() === expected;
   for (const e of entries) {
-    if (e.fsLineId === 'fs_asset') assets.push(e);
+    // Data-driven routing by fsLineId
+    if (e.fsLineId && OCI_FS_LINES.has(e.fsLineId)) oci.push(e);
+    else if (e.fsLineId && DISCONTINUED_FS_LINES.has(e.fsLineId)) discontinued.push(e);
+    else if (e.fsLineId === 'fs_asset') assets.push(e);
     else if (e.fsLineId === 'fs_liability') liabilities.push(e);
     else if (e.fsLineId === 'fs_equity') equity.push(e);
     else if (e.fsLineId === 'fs_revenue') revenue.push(e);
     else if (e.fsLineId === 'fs_expense') expenses.push(e);
+    // Fallback by accountType
     else if (isType(e.accountType, 'ASSET')) assets.push(e);
     else if (isType(e.accountType, 'LIABILITY')) liabilities.push(e);
     else if (isType(e.accountType, 'EQUITY')) equity.push(e);
     else if (isType(e.accountType, 'REVENUE')) revenue.push(e);
     else if (isType(e.accountType, 'EXPENSE')) expenses.push(e);
   }
-  return { assets, liabilities, equity, revenue, expenses };
+  return { assets, liabilities, equity, revenue, expenses, oci, discontinued };
 }
 
 /**
@@ -112,7 +132,7 @@ export function buildBalanceSheet(
   options?: { materiality?: number }
 ): BalanceSheet {
   const materiality = options?.materiality ?? DEFAULT_MATERIALITY;
-  const { assets: assetEntries, liabilities: liabilityEntries, equity: equityEntries, revenue: revenueEntries, expenses: expenseEntries } =
+  const { assets: assetEntries, liabilities: liabilityEntries, equity: equityEntries, revenue: revenueEntries, expenses: expenseEntries, oci: ociEntries } =
     bucketBsByFsLine(entries);
 
   const assets = assetEntries.map(toLine);
@@ -120,14 +140,16 @@ export function buildBalanceSheet(
   const equity = equityEntries.map(toLine);
   const revenueLines = revenueEntries.map(toLine);
   const expenseLines = expenseEntries.map(toLine);
+  const ociLines = ociEntries.map(toLine);
 
   const totalAssets = sumLines(assets);
   const totalLiabilities = sumLines(liabilities);
-  // Equity for BS equation: Equity accounts + Net Income (Revenue - Expense) per ASC 210
+  // Equity for BS equation: Equity accounts + Net Income (Revenue - Expense) + OCI per ASC 210/220
   const equityOnly = sumLines(equity);
   const totalRevenue = sumLines(revenueLines);
   const totalExpenses = sumLines(expenseLines);
-  const totalEquity = round2(plus(equityOnly, minus(totalRevenue, totalExpenses)));
+  const totalOci = sumLines(ociLines);
+  const totalEquity = round2(plus(plus(equityOnly, minus(totalRevenue, totalExpenses)), totalOci));
 
   const totalDebits = sumRound2(entries.map((e) => e.debit ?? 0));
   const totalCredits = sumRound2(entries.map((e) => e.credit ?? 0));
@@ -146,24 +168,27 @@ export function buildBalanceSheet(
     totalAssets,
     totalLiabilities,
     totalEquity,
+    ...(ociLines.length > 0 ? { oci: { items: ociLines, total: totalOci } } : {}),
     balances,
     codificationRef: BALANCE_SHEET,
   };
 }
 
-/** When fsLineId is set, bucket PL by taxonomy (fs_revenue, fs_expense); otherwise by accountType. */
-function bucketPlByFsLine(entries: TrialBalanceEntry[]): { revenue: TrialBalanceEntry[]; expenses: TrialBalanceEntry[] } {
+/** Bucket PL by taxonomy. Supports discontinued operations (ASC 205-20). */
+function bucketPlByFsLine(entries: TrialBalanceEntry[]): { revenue: TrialBalanceEntry[]; expenses: TrialBalanceEntry[]; discontinued: TrialBalanceEntry[] } {
   const revenue: TrialBalanceEntry[] = [];
   const expenses: TrialBalanceEntry[] = [];
+  const discontinued: TrialBalanceEntry[] = [];
   const rev = (t?: string) => t != null && String(t).toUpperCase() === 'REVENUE';
   const exp = (t?: string) => t != null && String(t).toUpperCase() === 'EXPENSE';
   for (const e of entries) {
-    if (e.fsLineId === 'fs_revenue') revenue.push(e);
+    if (e.fsLineId && DISCONTINUED_FS_LINES.has(e.fsLineId)) discontinued.push(e);
+    else if (e.fsLineId === 'fs_revenue') revenue.push(e);
     else if (e.fsLineId === 'fs_expense') expenses.push(e);
     else if (rev(e.accountType)) revenue.push(e);
     else if (exp(e.accountType)) expenses.push(e);
   }
-  return { revenue: revenue, expenses: expenses };
+  return { revenue, expenses, discontinued };
 }
 
 /**
@@ -175,14 +200,16 @@ export function buildProfitAndLoss(
   entries: TrialBalanceEntry[],
   options?: { materiality?: number }
 ): ProfitAndLoss {
-  const { revenue: revenueEntries, expenses: expenseEntries } = bucketPlByFsLine(entries);
+  const { revenue: revenueEntries, expenses: expenseEntries, discontinued: discontinuedEntries } = bucketPlByFsLine(entries);
 
   const revenue = revenueEntries.map(toLine);
   const expenses = expenseEntries.map(toLine);
+  const discontinuedLines = discontinuedEntries.map(toLine);
 
   const totalRevenue = sumLines(revenue);
   const totalExpenses = sumLines(expenses);
   const netIncome = round2(minus(totalRevenue, totalExpenses));
+  const totalDiscontinued = sumLines(discontinuedLines);
 
   return {
     revenue,
@@ -190,6 +217,7 @@ export function buildProfitAndLoss(
     totalRevenue,
     totalExpenses,
     netIncome,
+    ...(discontinuedLines.length > 0 ? { discontinuedOperations: { items: discontinuedLines, total: totalDiscontinued } } : {}),
     codificationRef: COMPREHENSIVE_INCOME,
   };
 }

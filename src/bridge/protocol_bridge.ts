@@ -28,7 +28,7 @@ import { canPerform } from '../services/segregation_service.js';
 import { parseTrialBalance } from '../services/trialBalanceParser.js';
 import { computeLineId } from '../utils/line_id.js';
 import { getRoundingTolerance } from '../services/rules_registry.js';
-import { absGt } from '../utils/decimal.js';
+import { absGt, sumRound2 } from '../utils/decimal.js';
 import * as persistence from '../services/persistence_service.js';
 import type { TrialBalanceEntry } from '../types/financial.js';
 import { assertNoAiMutationContext } from '../lib/ai_boundary.js';
@@ -281,8 +281,8 @@ export async function executeBridgeCommand(
             lineId: computeLineId({ accountName, debit, credit, accountCode }),
           };
         });
-        const totalDebits = entries.reduce((s, e) => s + e.debit, 0);
-        const totalCredits = entries.reduce((s, e) => s + e.credit, 0);
+        const totalDebits = sumRound2(entries.map((e) => e.debit));
+        const totalCredits = sumRound2(entries.map((e) => e.credit));
         const tolerance = getRoundingTolerance();
         if (absGt(totalDebits, totalCredits, tolerance)) {
           return {
@@ -446,8 +446,8 @@ export async function executeBridgeCommand(
           };
         });
         const combined = [...base.entries, ...adjustmentEntries];
-        const totalDebits = combined.reduce((s, e) => s + (e.debit ?? 0), 0);
-        const totalCredits = combined.reduce((s, e) => s + (e.credit ?? 0), 0);
+        const totalDebits = sumRound2(combined.map((e) => e.debit ?? 0));
+        const totalCredits = sumRound2(combined.map((e) => e.credit ?? 0));
         const tolerance = getRoundingTolerance();
         if (absGt(totalDebits, totalCredits, tolerance)) {
           return {

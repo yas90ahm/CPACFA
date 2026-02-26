@@ -16,7 +16,7 @@ export interface CashTransaction {
   category?: CashFlowCategory;
 }
 
-export type CashFlowCategory = 'operating' | 'investing' | 'financing';
+export type CashFlowCategory = 'operating' | 'investing' | 'financing' | 'not_applicable';
 
 /**
  * Indirect method cash flow per ASC 230 (Statement of Cash Flows) / IAS 7.
@@ -114,7 +114,9 @@ export function buildCashFlowFromTransactions(
   const financing: CashFlowStatement['financing'] = [];
   let missingCategory = 0;
 
+  let skippedNA = 0;
   for (const tx of transactions) {
+    if (tx.category === 'not_applicable') { skippedNA += 1; continue; }
     const category = tx.category ?? 'operating';
     if (!tx.category) missingCategory += 1;
     const line = { label: tx.description ?? 'Transaction', amount: tx.amount };
@@ -133,8 +135,8 @@ export function buildCashFlowFromTransactions(
     netChangeInCash,
     estimated: false,
     note:
-      missingCategory > 0
-        ? `Derived from transaction-level cash activity. ${missingCategory} transaction(s) were not classified and defaulted to Operating.`
+      (missingCategory > 0 || skippedNA > 0)
+        ? `Derived from transaction-level cash activity.${missingCategory > 0 ? ` ${missingCategory} transaction(s) were not classified and defaulted to Operating.` : ''}${skippedNA > 0 ? ` ${skippedNA} transaction(s) classified as not_applicable were excluded.` : ''}`
         : 'Derived from transaction-level cash activity.',
   };
 }

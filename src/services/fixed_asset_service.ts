@@ -1,4 +1,11 @@
 /**
+ * STATUS: UNWIRED — This service compiles but is not imported by any active route.
+ * It exists as potential future functionality.
+ * Last verified: 2026-02-25
+ * To activate: Create a route file that imports this service and register it in server.ts
+ */
+
+/**
  * Fixed asset service — CRUD, depreciation run (straight-line, declining balance), summary.
  * Pure schedule functions (depreciationScheduleSl, depreciationScheduleDdb) ported from backend/accounting_engine.py for API parity.
  */

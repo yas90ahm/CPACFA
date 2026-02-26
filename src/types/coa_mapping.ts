@@ -2,7 +2,8 @@
  * COA Mapping Rules and FS Line Taxonomy for statement-line mapping.
  */
 
-export type StatementType = 'PL' | 'BS' | 'CF';
+export type StatementType = 'PL' | 'BS' | 'CF' | 'OCI';
+export type CashFlowClass = 'operating' | 'investing' | 'financing' | 'not_applicable';
 export type NormalBalance = 'debit' | 'credit';
 
 export interface FsTaxonomyLine {
@@ -26,6 +27,7 @@ export interface CoaMappingRule {
   sourceAccountNumberPattern?: string;
   mappedFsLineId: string;
   confidenceDefault: number;
+  cashFlowClass?: CashFlowClass | null;
   createdAt: string;
 }
 

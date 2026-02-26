@@ -20,6 +20,7 @@ interface VarianceRow {
   material_threshold_pct: string;
   explanation: string | null;
   ai_draft_explanation: string | null;
+  explanation_source: string | null;
   approved_at: string | null;
   approved_by: string | null;
   created_at: string;
@@ -41,6 +42,7 @@ function rowToVariance(row: VarianceRow): VarianceRecord {
     materialThresholdPct: Number(row.material_threshold_pct),
     explanation: row.explanation ?? undefined,
     aiDraftExplanation: row.ai_draft_explanation ?? undefined,
+    explanationSource: (row.explanation_source as VarianceRecord['explanationSource']) ?? undefined,
     approvedAt: row.approved_at ?? undefined,
     approvedBy: row.approved_by ?? undefined,
     createdAt: row.created_at,
@@ -85,7 +87,7 @@ export async function upsertVariance(
   const r = await pool.query<VarianceRow>(
     `SELECT id, tenant_id, close_session_id, period_label, fs_line_id, statement, label,
             current_amount, prior_amount, change_amount, change_percentage, material_threshold_pct,
-            explanation, ai_draft_explanation, approved_at, approved_by, created_at
+            explanation, ai_draft_explanation, explanation_source, approved_at, approved_by, created_at
      FROM tenant_variance_analysis WHERE tenant_id = $1 AND close_session_id = $2 AND fs_line_id = $3 AND statement = $4`,
     [input.tenantId, input.closeSessionId, input.fsLineId, input.statement]
   );
@@ -101,7 +103,7 @@ export async function listVariancesForSession(
   const r = await pool.query<VarianceRow>(
     `SELECT id, tenant_id, close_session_id, period_label, fs_line_id, statement, label,
             current_amount, prior_amount, change_amount, change_percentage, material_threshold_pct,
-            explanation, ai_draft_explanation, approved_at, approved_by, created_at
+            explanation, ai_draft_explanation, explanation_source, approved_at, approved_by, created_at
      FROM tenant_variance_analysis WHERE tenant_id = $1 AND close_session_id = $2 ORDER BY statement, fs_line_id`,
     [tenantId, closeSessionId]
   );
@@ -112,16 +114,17 @@ export async function updateExplanation(
   pool: Pool,
   tenantId: string,
   id: string,
-  explanation: string
+  explanation: string,
+  explanationSource?: 'manual' | 'ai_draft' | 'ai_edited'
 ): Promise<VarianceRecord | null> {
   await pool.query(
-    `UPDATE tenant_variance_analysis SET explanation = $1 WHERE id = $2 AND tenant_id = $3`,
-    [explanation, id, tenantId]
+    `UPDATE tenant_variance_analysis SET explanation = $1, explanation_source = $2 WHERE id = $3 AND tenant_id = $4`,
+    [explanation, explanationSource ?? null, id, tenantId]
   );
   const r = await pool.query<VarianceRow>(
     `SELECT id, tenant_id, close_session_id, period_label, fs_line_id, statement, label,
             current_amount, prior_amount, change_amount, change_percentage, material_threshold_pct,
-            explanation, ai_draft_explanation, approved_at, approved_by, created_at
+            explanation, ai_draft_explanation, explanation_source, approved_at, approved_by, created_at
      FROM tenant_variance_analysis WHERE id = $1 AND tenant_id = $2`,
     [id, tenantId]
   );
@@ -136,7 +139,7 @@ export async function getVarianceById(
   const r = await pool.query<VarianceRow>(
     `SELECT id, tenant_id, close_session_id, period_label, fs_line_id, statement, label,
             current_amount, prior_amount, change_amount, change_percentage, material_threshold_pct,
-            explanation, ai_draft_explanation, approved_at, approved_by, created_at
+            explanation, ai_draft_explanation, explanation_source, approved_at, approved_by, created_at
      FROM tenant_variance_analysis WHERE id = $1 AND tenant_id = $2`,
     [id, tenantId]
   );
@@ -169,7 +172,7 @@ export async function approveVariance(
   const r = await pool.query<VarianceRow>(
     `SELECT id, tenant_id, close_session_id, period_label, fs_line_id, statement, label,
             current_amount, prior_amount, change_amount, change_percentage, material_threshold_pct,
-            explanation, approved_at, approved_by, created_at
+            explanation, ai_draft_explanation, explanation_source, approved_at, approved_by, created_at
      FROM tenant_variance_analysis WHERE id = $1 AND tenant_id = $2`,
     [id, tenantId]
   );

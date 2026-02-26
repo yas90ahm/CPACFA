@@ -17,6 +17,7 @@ import { updatePolicyMemory } from '../../memory/index.js';
 // QUARANTINED — Agentic plan-execute-verify not in MVP architecture
 // import { runPlanExecuteVerifyAgentic } from '../../services/agentic_plan_execute_verify.js';
 import { registerStatementGeneration } from '../../services/audit_export_service.js';
+import { sumRound2, absLt, absGt as absGtDec } from '../../utils/decimal.js';
 import { markUploadCompleted, runResultPipeline } from '../../services/result_generator.js';
 import * as persistence from '../../services/persistence_service.js';
 // QUARANTINED — Agentic quality assessor not in MVP architecture
@@ -458,14 +459,14 @@ router.get(
       const tenantId = getTenantId(req) ?? 'default';
       const pool = getTenantPool(req);
       const adjustedEntries = await getAdjustedTrialBalance(tenantId, periodLabel, pool ?? undefined);
-      const totalDebits = adjustedEntries.reduce((s, e) => s + (e.debit ?? 0), 0);
-      const totalCredits = adjustedEntries.reduce((s, e) => s + (e.credit ?? 0), 0);
+      const totalDebits = sumRound2(adjustedEntries.map((e) => e.debit ?? 0));
+      const totalCredits = sumRound2(adjustedEntries.map((e) => e.credit ?? 0));
       const trialBalanceForBuild: import('../../types/financial.js').TrialBalanceResult = {
         entries: adjustedEntries,
         totalDebits,
         totalCredits,
-        balances: Math.abs(totalDebits - totalCredits) < 0.01,
-        errors: Math.abs(totalDebits - totalCredits) >= 0.01 ? ['Adjusted trial balance does not balance'] : [],
+        balances: absLt(totalDebits, totalCredits, 0.01),
+        errors: absGtDec(totalDebits, totalCredits, 0.01) ? ['Adjusted trial balance does not balance'] : [],
       };
       const standard = (req.query.standard as string) || 'US_GAAP';
       const fullSet = (req.query.fullSet as string | undefined) !== 'false' && req.query.fullSet !== undefined;

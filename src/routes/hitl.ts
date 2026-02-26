@@ -22,7 +22,7 @@ import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
 import { recordOverride } from '../services/audit_ledger_service.js';
 import { parseTrialBalance } from '../services/trialBalanceParser.js';
 import { getRoundingTolerance } from '../services/rules_registry.js';
-import { absGt } from '../utils/decimal.js';
+import { absGt, sumRound2, minus } from '../utils/decimal.js';
 import * as persistence from '../services/persistence_service.js';
 import { executeBridgeCommand } from '../bridge/index.js';
 import type { JournalEntryProposal } from '../types/hitl.js';
@@ -195,8 +195,8 @@ router.post(
       credit: p.credit ?? 0,
     }));
     const combinedEntries = [...base.entries, ...adjustmentEntries];
-    const totalDebits = combinedEntries.reduce((s, e) => s + (e.debit ?? 0), 0);
-    const totalCredits = combinedEntries.reduce((s, e) => s + (e.credit ?? 0), 0);
+    const totalDebits = sumRound2(combinedEntries.map((e) => e.debit ?? 0));
+    const totalCredits = sumRound2(combinedEntries.map((e) => e.credit ?? 0));
     const tolerance = getRoundingTolerance();
     if (absGt(totalDebits, totalCredits, tolerance)) {
       res.status(422).json({
@@ -204,7 +204,7 @@ router.post(
         message: 'Adjustment still does not balance. Sum(Debits) != Sum(Credits).',
         totalDebits,
         totalCredits,
-        imbalanceAmount: Math.abs(totalDebits - totalCredits),
+        imbalanceAmount: Math.abs(minus(totalDebits, totalCredits)),
       });
       return;
     }
@@ -377,9 +377,9 @@ router.post(
         });
         return;
       }
-      const totalDebits = correctedLines.reduce((s, l) => s + (l.debit ?? 0), 0);
-      const totalCredits = correctedLines.reduce((s, l) => s + (l.credit ?? 0), 0);
-      const imbalance = Math.abs(totalDebits - totalCredits);
+      const totalDebits = sumRound2(correctedLines.map((l) => l.debit ?? 0));
+      const totalCredits = sumRound2(correctedLines.map((l) => l.credit ?? 0));
+      const imbalance = Math.abs(minus(totalDebits, totalCredits));
       if (imbalance > 0.01) {
         res.status(422).json({
           error: 'Corrected lines still imbalanced',

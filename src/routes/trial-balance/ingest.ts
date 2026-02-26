@@ -11,7 +11,7 @@ import { parseTrialBalance } from '../../services/trialBalanceParser.js';
 import { ingestTrialBalanceFile, type IngestTrialBalanceResult } from '../../services/fileIngestion.js';
 import { buildValidatedStatements, MathematicalIntegrityError } from '../../services/financialStatements.js';
 import { getRoundingTolerance } from '../../services/rules_registry.js';
-import { absGt } from '../../utils/decimal.js';
+import { absGt, absLt, sumRound2, minus } from '../../utils/decimal.js';
 import { generateStatements } from '../../services/statementGenerator.js';
 import { buildCashFlowStatement, buildCashFlowFromTransactions } from '../../services/cashFlow.js';
 import { buildEquityChangesStatement } from '../../services/equityChanges.js';
@@ -200,14 +200,14 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
     const totalDebits =
       trialBalance.totalDebits != null
         ? trialBalance.totalDebits
-        : trialBalance.entries.reduce((s, e) => s + (e.debit ?? 0), 0);
+        : sumRound2(trialBalance.entries.map((e) => e.debit ?? 0));
     const totalCredits =
       trialBalance.totalCredits != null
         ? trialBalance.totalCredits
-        : trialBalance.entries.reduce((s, e) => s + (e.credit ?? 0), 0);
+        : sumRound2(trialBalance.entries.map((e) => e.credit ?? 0));
     const tolerance = getRoundingTolerance();
     if (absGt(totalDebits, totalCredits, tolerance)) {
-      const imbalanceAmount = Math.abs(totalDebits - totalCredits);
+      const imbalanceAmount = Math.abs(minus(totalDebits, totalCredits));
       let stagedId: string | undefined;
       const ingestionTimestamp = new Date().toISOString();
       const sourceHash = createHash('sha256').update(file.buffer).digest('hex');
@@ -463,14 +463,14 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       }
       try {
         const adjustedEntries = await getAdjustedTrialBalance(tenantIdForSave, body.periodLabel, poolIngest ?? undefined);
-        const totalDebits = adjustedEntries.reduce((s, e) => s + (e.debit ?? 0), 0);
-        const totalCredits = adjustedEntries.reduce((s, e) => s + (e.credit ?? 0), 0);
+        const totalDebits = sumRound2(adjustedEntries.map((e) => e.debit ?? 0));
+        const totalCredits = sumRound2(adjustedEntries.map((e) => e.credit ?? 0));
         trialBalanceForBuild = {
           entries: adjustedEntries,
           totalDebits,
           totalCredits,
-          balances: Math.abs(totalDebits - totalCredits) < 0.01,
-          errors: Math.abs(totalDebits - totalCredits) >= 0.01 ? ['Adjusted trial balance does not balance'] : [],
+          balances: absLt(totalDebits, totalCredits, 0.01),
+          errors: absGt(totalDebits, totalCredits, 0.01) ? ['Adjusted trial balance does not balance'] : [],
         };
       } catch {
         trialBalanceForBuild = trialBalance;
@@ -667,6 +667,8 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
         const liquidityMetrics = undefined;
         let contractsForReview: import('../../types/professional_review.js').ProfessionalReviewInput['contracts'];
         try {
+          // READ-ONLY: fetches existing revenue contracts as advisory context for professional review.
+          // Does not compute dollar amounts or write to financial tables.
           const { listContracts: listContractsService } = await import('../../services/revenue_recognition_service.js');
           const contracts = await listContractsService(authReq.tenantId, authReq.tenantPool, {});
           contractsForReview = contracts.map((c) => ({

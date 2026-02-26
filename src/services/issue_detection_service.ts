@@ -9,6 +9,7 @@
 import type { Pool } from 'pg';
 import type { CloseIssue, IssueType, CloseIssueSeverity, CloseIssueCategory } from '../types/close_issue.js';
 import { createIssue, listIssues, autoVerifyIssue } from './issue_service.js';
+import { sumRound2 } from '../utils/decimal.js';
 import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
 
 export interface DetectionContext {
@@ -141,8 +142,8 @@ export async function detectBalanceSheetImbalance(ctx: DetectionContext): Promis
     const { getTrialBalanceForCertification } = await import('./adjusted_trial_balance_service.js');
     const tb = await getTrialBalanceForCertification(ctx.pool, ctx.tenantId, periodLabel, ctx.periodId);
     const entries = tb.trialBalance ?? [];
-    const totalDebits = entries.reduce((s, e) => s + (e.debit ?? 0), 0);
-    const totalCredits = entries.reduce((s, e) => s + (e.credit ?? 0), 0);
+    const totalDebits = sumRound2(entries.map((e) => e.debit ?? 0));
+    const totalCredits = sumRound2(entries.map((e) => e.credit ?? 0));
     const trialBalanceResult = {
       entries: entries.map((e) => ({
         accountName: (e as { accountName?: string }).accountName ?? '',

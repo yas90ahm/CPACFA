@@ -22,6 +22,7 @@ export interface LeaseLiabilityInput {
   discountRate: number;
   paymentTiming?: 'beginning' | 'end';
 }
+import { sumRound2 } from '../utils/decimal.js';
 import { buildCashFlowStatement } from './cashFlow.js';
 import { buildEquityChangesStatement } from './equityChanges.js';
 import { buildNotesAndPolicies } from './notesPolicies.js';
@@ -98,8 +99,8 @@ export async function generateStatements(
   }
 
   if (contractsToCheck && contractsToCheck.length > 0) {
-    const totalDebits = classified.reduce((s, e) => s + (e.debit ?? 0), 0);
-    const totalCredits = classified.reduce((s, e) => s + (e.credit ?? 0), 0);
+    const totalDebits = sumRound2(classified.map((e) => e.debit ?? 0));
+    const totalCredits = sumRound2(classified.map((e) => e.credit ?? 0));
     const balanceSheet = buildBalanceSheet(classified);
     assertIntegrityGateOrThrow({
       trialBalance: { totalDebits, totalCredits },
@@ -147,8 +148,8 @@ export async function generateStatements(
   // }
 
   // Accounting Kill Switch: (A) Sum(Debits)==Sum(Credits), (B) Assets==L+E. Throw if illegal for CPA.
-  const totalDebits = classified.reduce((s, e) => s + (e.debit ?? 0), 0);
-  const totalCredits = classified.reduce((s, e) => s + (e.credit ?? 0), 0);
+  const totalDebits = sumRound2(classified.map((e) => e.debit ?? 0));
+  const totalCredits = sumRound2(classified.map((e) => e.credit ?? 0));
   validateTrialBalanceAndBalanceSheet(
     { entries: classified, totalDebits, totalCredits },
     balanceSheet

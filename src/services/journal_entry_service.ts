@@ -5,6 +5,7 @@
 
 import { randomUUID } from 'crypto';
 import type { Pool } from 'pg';
+import { sumRound2, from as decimalFrom } from '../utils/decimal.js';
 import type {
   JournalEntry,
   JournalEntryLine,
@@ -176,9 +177,8 @@ export interface PostJEResult {
 }
 
 /** Post an approved JE (approved → posted). Shadow Auditor runs first; blocks on severity=block. */
-/** Sum of debits (or credits) for materiality comparison. Uses Decimal.js. */
 function computeJETotalAmount(lines: { debit: number; credit: number }[]): number {
-  return lines.reduce((s, l) => s + (l.debit ?? 0), 0);
+  return sumRound2(lines.map((l) => l.debit ?? 0));
 }
 
 export async function postJE(pool: Pool, tenantId: string, id: string, aiPool?: Pool): Promise<PostJEResult> {
@@ -194,15 +194,14 @@ export async function postJE(pool: Pool, tenantId: string, id: string, aiPool?: 
 
   const { getEvidencePolicy } = await import('../db/repositories/evidence_policy_repository.js');
   const { listEvidenceForObject } = await import('../db/repositories/evidence_repository.js');
-  const { from } = await import('../utils/decimal.js');
   const policy = await getEvidencePolicy(pool, tenantId);
   const thresholdNum = policy?.materialityThreshold != null && policy.materialityThreshold !== ''
     ? Number(policy.materialityThreshold)
     : 0;
   if (thresholdNum > 0) {
     const totalAmount = computeJETotalAmount(lines);
-    const totalDecimal = from(totalAmount);
-    const thresholdDecimal = from(thresholdNum);
+    const totalDecimal = decimalFrom(totalAmount);
+    const thresholdDecimal = decimalFrom(thresholdNum);
     if (totalDecimal.gte(thresholdDecimal)) {
       const attachments = await listEvidenceForObject(pool, tenantId, 'journal_entry', id);
       if (attachments.length === 0) {
@@ -312,21 +311,17 @@ export async function exportJE(pool: Pool, tenantId: string, id: string): Promis
   return updated!;
 }
 
-/** Validate that debits equal credits. */
+/** Validate that debits equal credits (exact to the penny via Decimal.js). */
 export function validateBalanced(
   lines: { accountRef: string; debit?: number; credit?: number }[]
 ): ValidationResult {
-  let totalDebit = 0;
-  let totalCredit = 0;
-  for (const l of lines) {
-    totalDebit += l.debit ?? 0;
-    totalCredit += l.credit ?? 0;
-  }
-  const diff = Math.abs(totalDebit - totalCredit);
-  if (diff > 0.001) {
+  const totalDebit = sumRound2(lines.map((l) => l.debit ?? 0));
+  const totalCredit = sumRound2(lines.map((l) => l.credit ?? 0));
+  const diff = decimalFrom(totalDebit).minus(totalCredit).abs();
+  if (!diff.isZero()) {
     return {
       valid: false,
-      errors: [`Total debits (${totalDebit}) do not equal total credits (${totalCredit}); difference: ${diff}`],
+      errors: [`Total debits (${totalDebit}) do not equal total credits (${totalCredit}); difference: ${diff.toNumber()}`],
     };
   }
   return { valid: true, errors: [] };

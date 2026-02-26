@@ -29,6 +29,8 @@ import closeReconRequirementsRouter from './close_recon_requirements.js';
 import closePeriodReconciliationsRouter from './close_period_reconciliations.js';
 import closeAjeTemplatesRouter from './close_aje_templates.js';
 import closeVarianceAnalysisRouter from './close_variance_analysis.js';
+import closeIntercompanyRouter from './close_intercompany.js';
+import closeReportPackRouter from './close_report_pack.js';
 
 const router = Router();
 router.use(closeJeAccrualsRouter);
@@ -56,5 +58,7 @@ router.use(closeClosingEntriesRouter);
 router.use(closeAuditLogRouter);
 router.use(closeSegregationRouter);
 router.use(closeTaskAssignRouter);
+router.use(closeIntercompanyRouter);
+router.use(closeReportPackRouter);
 
 export default router;

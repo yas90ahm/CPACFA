@@ -26,7 +26,13 @@ export type AuditLedgerEventType =
   | 'close_session_locked'
   | 'bridge_command'
   | 'evidence_link'
-  | 'legacy_certified_source_used';
+  | 'legacy_certified_source_used'
+  | 'ai_mapping_suggestion_accepted'
+  | 'ai_mapping_suggestion_rejected'
+  | 'ai_mapping_suggestion_edited'
+  | 'ai_variance_draft_accepted'
+  | 'ai_variance_draft_rejected'
+  | 'ai_variance_draft_edited';
 
 /** Payload for appending one ledger entry (append-only). */
 export interface AuditLedgerEntryInput {

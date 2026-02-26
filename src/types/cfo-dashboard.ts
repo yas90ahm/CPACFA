@@ -118,7 +118,7 @@ export interface ActualLine {
 
 /** Driver attribution for a variance (volume vs price / mix) */
 export interface VarianceDriver {
-  type: 'volume' | 'price' | 'mix' | 'timing' | 'other';
+  type: 'volume' | 'price' | 'mix' | 'timing' | 'acquisition_divestiture' | 'new_product' | 'discontinued' | 'other';
   description: string;
   estimatedImpact?: number; // $ contribution to variance
 }

@@ -7,6 +7,7 @@ import { randomUUID } from 'crypto';
 import type { Pool } from 'pg';
 import type { VarianceRecord, ComputeVariancesInput } from '../types/variance_analysis.js';
 import * as repo from '../db/repositories/variance_analysis_repository.js';
+import { appendEntry } from '../db/repositories/audit_ledger_repository.js';
 
 export interface VarianceCompletenessResult {
   passes: boolean;
@@ -48,14 +49,47 @@ export async function computeVariances(
   return results;
 }
 
-/** Add or update human-entered explanation. */
+/** Add or update human-entered explanation with AI audit trail. */
 export async function explainVariance(
   pool: Pool,
   tenantId: string,
   varianceId: string,
-  explanation: string
+  explanation: string,
+  explanationSource?: 'manual' | 'ai_draft' | 'ai_edited'
 ): Promise<VarianceRecord | null> {
-  return repo.updateExplanation(pool, tenantId, varianceId, explanation);
+  const before = await repo.getVarianceById(pool, tenantId, varianceId);
+  if (!before) return null;
+
+  const result = await repo.updateExplanation(pool, tenantId, varianceId, explanation, explanationSource);
+
+  // Write audit ledger event for AI-related explanation sources
+  if (explanationSource && explanationSource !== 'manual') {
+    const eventType = explanationSource === 'ai_draft'
+      ? 'ai_variance_draft_accepted' as const
+      : 'ai_variance_draft_edited' as const;
+    try {
+      await appendEntry(pool, {
+        tenantId,
+        eventType,
+        deterministicFlagSnapshot: {
+          varianceId,
+          fsLineId: before.fsLineId,
+          statement: before.statement,
+          changeAmount: before.changeAmount,
+          changePercentage: before.changePercentage,
+        },
+        userPromptRationale: explanationSource === 'ai_draft'
+          ? 'AI draft accepted as-is'
+          : 'AI draft edited by human before submission',
+        beforeState: { aiDraftExplanation: before.aiDraftExplanation ?? null },
+        afterState: { explanation, explanationSource },
+      });
+    } catch (_) {
+      /* non-fatal: audit event write failed */
+    }
+  }
+
+  return result;
 }
 
 /** Approve a variance (mark as reviewed). */

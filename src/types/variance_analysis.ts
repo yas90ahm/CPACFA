@@ -18,6 +18,8 @@ export interface VarianceRecord {
   explanation?: string;
   /** AI-generated draft explanation (advisory; human edits and submits final). */
   aiDraftExplanation?: string;
+  /** How the explanation was created: manual, ai_draft (accepted as-is), ai_edited (AI draft modified by human). */
+  explanationSource?: 'manual' | 'ai_draft' | 'ai_edited';
   approvedAt?: string;
   approvedBy?: string;
   createdAt: string;

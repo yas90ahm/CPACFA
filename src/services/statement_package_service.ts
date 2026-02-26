@@ -187,6 +187,22 @@ function flattenToLines(
       accountCode: item.accountCode,
     });
   });
+  // Balance Sheet: OCI (sub-section of equity, ASC 220)
+  if (balanceSheet.oci && balanceSheet.oci.items.length > 0) {
+    balanceSheet.oci.items.forEach((item, i) => {
+      pushLine(`bs_oci_${i}`, item.amount, 'balance_sheet', {
+        label: item.label,
+        section: 'Accumulated Other Comprehensive Income',
+        accountCode: item.accountCode,
+      });
+    });
+    pushLine('bs_total_oci', balanceSheet.oci.total, 'balance_sheet', {
+      label: 'Total Accumulated OCI',
+      section: 'Accumulated Other Comprehensive Income',
+      indentLevel: 0,
+      isSubtotal: true,
+    });
+  }
   pushLine('bs_total_equity', balanceSheet.totalEquity, 'balance_sheet', {
     label: 'TOTAL LIABILITIES & EQUITY',
     section: 'Equity',
@@ -224,13 +240,31 @@ function flattenToLines(
     isSubtotal: true,
   });
 
-  // P&L: Net Income (grand total)
+  // P&L: Net Income (grand total for continuing operations)
   pushLine('pl_net_income', profitAndLoss.netIncome, 'profit_and_loss', {
     label: 'Net Income',
     section: 'Net Income',
     indentLevel: 0,
     isGrandTotal: true,
   });
+
+  // P&L: Discontinued Operations (ASC 205-20)
+  if ('discontinuedOperations' in profitAndLoss && (profitAndLoss as any).discontinuedOperations) {
+    const discOps = (profitAndLoss as any).discontinuedOperations as { items: Array<{ label: string; amount: number; accountCode?: string }>; total: number };
+    discOps.items.forEach((item: { label: string; amount: number; accountCode?: string }, i: number) => {
+      pushLine(`pl_discontinued_${i}`, item.amount, 'profit_and_loss', {
+        label: item.label,
+        section: 'Discontinued Operations',
+        accountCode: item.accountCode,
+      });
+    });
+    pushLine('pl_total_discontinued', discOps.total, 'profit_and_loss', {
+      label: 'Total Discontinued Operations',
+      section: 'Discontinued Operations',
+      indentLevel: 0,
+      isSubtotal: true,
+    });
+  }
 
   // Cash Flow
   if (cashFlowStatement) {
@@ -258,6 +292,11 @@ function flattenToLines(
     equityStatement.changes.forEach((item, i) => {
       pushLine(`eq_change_${i}`, item.amount, 'equity', { label: item.label, section: 'changes' });
     });
+    if (equityStatement.ociChanges && equityStatement.ociChanges.length > 0) {
+      equityStatement.ociChanges.forEach((item, i) => {
+        pushLine(`eq_oci_${i}`, item.amount, 'equity', { label: item.label, section: 'other_comprehensive_income' });
+      });
+    }
     if (equityStatement.closingEquity != null) {
       pushLine('eq_closing', equityStatement.closingEquity, 'equity', { label: 'Closing equity', section: 'closing' });
     }
@@ -282,13 +321,13 @@ export async function generateStatements(
   }
   const periodLabel = periodLabelFromSession(session);
   const entries = await getAdjustedTrialBalance(tenantId, periodLabel, pool, closeSessionId);
-  const totalDebits = entries.reduce((s, e) => s + (e.debit ?? 0), 0);
-  const totalCredits = entries.reduce((s, e) => s + (e.credit ?? 0), 0);
+  const totalDebits = sumRound2(entries.map((e) => e.debit ?? 0));
+  const totalCredits = sumRound2(entries.map((e) => e.credit ?? 0));
   const trialBalance: TrialBalanceResult = {
     entries,
     totalDebits,
     totalCredits,
-    balances: Math.abs(totalDebits - totalCredits) < 0.01,
+    balances: decimalFrom(totalDebits).minus(totalCredits).abs().lessThanOrEqualTo(TOLERANCE),
     errors: [],
   };
   const result = buildValidatedStatements(trialBalance);
@@ -348,15 +387,30 @@ export async function generateStatements(
   if (priorSession) {
     const priorPkgs = await repo.listStatementPackagesByCloseSessionId(pool, tenantId, priorSession.id, 1);
     const priorPkg = priorPkgs[0];
+    let priorLinesInput: Array<{ fsLineId: string; amount: number; statement: string; label?: string }> | null = null;
     if (priorPkg) {
       const priorLines = await repo.listStatementLinesByPackageId(pool, priorPkg.id);
-      const currentLines = lines.map((l) => ({
+      priorLinesInput = priorLines.map((l) => ({
         fsLineId: l.fsLineId,
         amount: l.amount,
         statement: l.statement,
         label: (l.metadata as { label?: string })?.label,
       }));
-      const priorLinesInput = priorLines.map((l) => ({
+    } else if (priorTB) {
+      // No statement package for prior period — build lines from adjusted TB
+      const priorResult = buildValidatedStatements(priorTB);
+      const priorCF = buildCashFlowStatement(priorTB, priorResult.profitAndLoss);
+      const priorEq = buildEquityChangesStatement(priorResult.balanceSheet, undefined, priorResult.profitAndLoss);
+      const priorFlatLines = flattenToLines('__prior_derived__', priorResult.balanceSheet, priorResult.profitAndLoss, priorCF, priorEq);
+      priorLinesInput = priorFlatLines.map((l) => ({
+        fsLineId: l.fsLineId,
+        amount: l.amount,
+        statement: l.statement,
+        label: (l.metadata as { label?: string })?.label,
+      }));
+    }
+    if (priorLinesInput) {
+      const currentLines = lines.map((l) => ({
         fsLineId: l.fsLineId,
         amount: l.amount,
         statement: l.statement,

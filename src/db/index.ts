@@ -279,6 +279,7 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 120, file: '120_certification_artifacts_immutability.sql' },
   { version: 121, file: '121_money_column_precision.sql' },
   { version: 122, file: '122_gl_account_name.sql' },
+  { version: 123, file: '123_fix_unexplained_variance_sign.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 

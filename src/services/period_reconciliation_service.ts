@@ -165,9 +165,17 @@ export async function refreshGLBalances(
     );
     if (updatedRecon) {
       updated++;
+      // Check if unexplained variance (after reconciling items) exceeds tolerance.
+      // isWithinTolerance checks raw variance (gl-supp) which ignores items;
+      // unexplainedVariance = (gl-supp) + items, so use that for revert decision.
+      const absUnexplained = updatedRecon.unexplainedVariance != null
+        ? Math.abs(Number(updatedRecon.unexplainedVariance))
+        : null;
+      const tolerance = Number(updatedRecon.toleranceAmount) || 0;
+      const overTolerance = absUnexplained != null && absUnexplained > tolerance;
       if (
         (recon.status === 'completed' || recon.status === 'approved') &&
-        updatedRecon.isWithinTolerance === false &&
+        overTolerance &&
         updatedRecon.supportingBalance != null
       ) {
         await reconRepo.updateReconStatus(pool, tenantId, recon.reconId, 'in_progress');

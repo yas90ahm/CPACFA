@@ -54,6 +54,7 @@ import {
 import { getSessionTrialBalance } from '../../services/session_trial_balance_service.js';
 import * as auditLedgerRepo from '../../db/repositories/audit_ledger_repository.js';
 import { normalizeMoney } from '../../utils/decimal.js';
+import { guardSessionWritable } from '../../lib/session_write_guard.js';
 
 const router = Router();
 
@@ -589,6 +590,7 @@ router.post('/sessions/:id/checklist/initialize', async (req: Request, res: Resp
       res.status(404).json({ error: 'Close session not found' });
       return;
     }
+    if (!await guardSessionWritable(res, pool, tenantId, id)) return;
     const { items, created } = await initializeChecklistTemplate(pool, tenantId, id);
     res.status(created ? 201 : 200).json({ items });
   } catch (e) {
@@ -785,6 +787,7 @@ router.post('/sessions/:id/statement-packages/generate', async (req: Request, re
       return;
     }
     const id = req.params.id ?? '';
+    if (!await guardSessionWritable(res, pool, tenantId, id)) return;
     const body = req.body as { generatedBy?: string; status?: 'draft' | 'final'; ruleVersionsSnapshot?: Record<string, unknown> };
     const pkg = await generateStatementPackage(pool, tenantId, id, {
       generatedBy: body?.generatedBy,

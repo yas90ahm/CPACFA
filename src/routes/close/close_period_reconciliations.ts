@@ -30,6 +30,7 @@ import {
   listEvidenceForReconciliation,
   EvidenceAttachmentError,
 } from '../../services/evidence_attachment_service.js';
+import { guardSessionWritable } from '../../lib/session_write_guard.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }); // 10 MB
@@ -103,6 +104,7 @@ router.post('/sessions/:periodId/reconciliations/initialize', async (req: Reques
       const session = await getCloseSessionById(pool, tenantId, periodId);
       entityId = session?.entityId ?? 'default';
     }
+    if (!await guardSessionWritable(res, pool, tenantId, periodId)) return;
     const created = await initializeReconciliations(
       pool,
       tenantId,
@@ -125,17 +127,21 @@ router.post('/sessions/:periodId/reconciliations/:reconId/supporting-balance', a
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
     const reconId = req.params.reconId ?? '';
-    const body = req.body as { amount?: number | string; source?: string };
-    if (!tenantId || !pool || !reconId || body?.amount == null) {
+    const body = req.body as { amount?: number | string; supportingBalance?: number | string; source?: string; supportingSource?: string };
+    const amount = body?.amount ?? body?.supportingBalance;
+    const source = body?.source ?? body?.supportingSource;
+    const periodId = req.params.periodId ?? '';
+    if (!tenantId || !pool || !reconId || amount == null) {
       res.status(400).json({ error: 'Tenant context, reconId, and amount required' });
       return;
     }
+    if (!await guardSessionWritable(res, pool, tenantId, periodId)) return;
     const updated = await setSupportingBalance(
       pool,
       tenantId,
       reconId,
-      body.amount,
-      body.source ?? null,
+      amount,
+      source ?? null,
       getUserId(req)
     );
     res.json(updated);
@@ -160,10 +166,12 @@ router.post('/sessions/:periodId/reconciliations/:reconId/items', async (req: Re
       item_type?: ReconItemType;
       needs_aje?: boolean;
     };
+    const periodId = req.params.periodId ?? '';
     if (!tenantId || !pool || !reconId || !body?.description || body?.amount == null) {
       res.status(400).json({ error: 'Tenant context, reconId, description, and amount required' });
       return;
     }
+    if (!await guardSessionWritable(res, pool, tenantId, periodId)) return;
     const item = await addReconcilingItem(
       pool,
       tenantId,
@@ -193,10 +201,12 @@ router.post('/sessions/:periodId/reconciliations/:reconId/items/:itemId/create-a
     const pool = getTenantPool(req);
     const itemId = req.params.itemId ?? '';
     const body = req.body as { expense_account_ref?: string };
+    const periodId = req.params.periodId ?? '';
     if (!tenantId || !pool || !itemId || !body?.expense_account_ref) {
       res.status(400).json({ error: 'Tenant context, itemId, and expense_account_ref required' });
       return;
     }
+    if (!await guardSessionWritable(res, pool, tenantId, periodId)) return;
     const result = await createAJEFromReconItem(
       pool,
       tenantId,
@@ -220,10 +230,12 @@ router.delete('/sessions/:periodId/reconciliations/:reconId/items/:itemId', asyn
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
     const itemId = req.params.itemId ?? '';
+    const periodId = req.params.periodId ?? '';
     if (!tenantId || !pool || !itemId) {
       res.status(400).json({ error: 'Tenant context and itemId required' });
       return;
     }
+    if (!await guardSessionWritable(res, pool, tenantId, periodId)) return;
     await removeReconcilingItem(pool, tenantId, itemId, getUserId(req));
     res.status(204).send();
   } catch (e) {
@@ -253,6 +265,8 @@ router.post(
         res.status(400).json({ error: 'File upload required' });
         return;
       }
+      const periodId = req.params.periodId ?? '';
+      if (!await guardSessionWritable(res, pool, tenantId, periodId)) return;
       const result = await attachEvidenceToReconciliation(pool, tenantId, reconId, {
         buffer: file.buffer,
         mimeType: file.mimetype,
@@ -295,17 +309,19 @@ router.post('/sessions/:periodId/reconciliations/:reconId/complete', async (req:
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
     const reconId = req.params.reconId ?? '';
-    const body = req.body as { variance_explanation?: string };
+    const periodId = req.params.periodId ?? '';
+    const body = req.body as { variance_explanation?: string; varianceExplanation?: string; preparedBy?: string };
     if (!tenantId || !pool || !reconId) {
       res.status(400).json({ error: 'Tenant context and reconId required' });
       return;
     }
+    if (!await guardSessionWritable(res, pool, tenantId, periodId)) return;
     const updated = await completeReconciliation(
       pool,
       tenantId,
       reconId,
-      getUserId(req),
-      body?.variance_explanation ?? null
+      body?.preparedBy ?? getUserId(req),
+      body?.variance_explanation ?? body?.varianceExplanation ?? null
     );
     res.json(updated);
   } catch (e) {
@@ -325,10 +341,12 @@ router.post('/sessions/:periodId/reconciliations/:reconId/approve', async (req: 
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
     const reconId = req.params.reconId ?? '';
+    const periodId = req.params.periodId ?? '';
     if (!tenantId || !pool || !reconId) {
       res.status(400).json({ error: 'Tenant context and reconId required' });
       return;
     }
+    if (!await guardSessionWritable(res, pool, tenantId, periodId)) return;
     const updated = await approveReconciliation(pool, tenantId, reconId, getUserId(req));
     res.json(updated);
   } catch (e) {
@@ -348,11 +366,13 @@ router.post('/sessions/:periodId/reconciliations/:reconId/reject', async (req: R
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
     const reconId = req.params.reconId ?? '';
+    const periodId = req.params.periodId ?? '';
     const body = req.body as { reason?: string };
     if (!tenantId || !pool || !reconId) {
       res.status(400).json({ error: 'Tenant context and reconId required' });
       return;
     }
+    if (!await guardSessionWritable(res, pool, tenantId, periodId)) return;
     const updated = await rejectReconciliation(
       pool,
       tenantId,

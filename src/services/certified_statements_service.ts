@@ -13,6 +13,8 @@ import type {
 } from '../types/financial.js';
 import type { LedgerSnapshotPayload, LedgerSnapshotEntry } from '../types/ledger_snapshot.js';
 import { buildValidatedStatements } from './financialStatements.js';
+import { buildCashFlowStatement } from './cashFlow.js';
+import { buildEquityChangesStatement } from './equityChanges.js';
 import { finalIntegrityCheck } from './integrity_check.js';
 import { getRoundingTolerance } from './rules_registry.js';
 import { sumRound2, plus, from, absLt } from '../utils/decimal.js';
@@ -113,6 +115,10 @@ export function buildCertifiedStatementsFromSnapshot(payload: LedgerSnapshotPayl
     throw new CertifiedIntegrityError(finalCheck.error ?? 'Integrity check failed.', 'TRIAL_BALANCE_IMBALANCED');
   }
 
+  // Build Cash Flow and Equity statements for cross-statement validation
+  const cashFlow = buildCashFlowStatement(trialBalanceResult, result.profitAndLoss);
+  const equityChanges = buildEquityChangesStatement(result.balanceSheet, undefined, result.profitAndLoss);
+
   const now = new Date().toISOString();
   return {
     trialBalance: {
@@ -124,6 +130,8 @@ export function buildCertifiedStatementsFromSnapshot(payload: LedgerSnapshotPayl
     },
     balanceSheet: result.balanceSheet,
     profitAndLoss: result.profitAndLoss,
+    cashFlow,
+    equityChanges,
     reasoningChain: {
       plan: 'certified_snapshot',
       executedAt: now,

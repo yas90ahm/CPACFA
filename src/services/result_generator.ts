@@ -25,6 +25,7 @@ import { buildEquityChangesStatement } from './equityChanges.js';
 import { buildNotesAndPolicies } from './notesPolicies.js';
 import { inferAccountingStandard } from './standard_selector.js';
 import { evaluateQualityChecks, type QualityCheck } from './quality_checks.js';
+import { sumRound2, minus, div } from '../utils/decimal.js';
 import { shouldEscalateToHuman, submitToStaging } from './hitl_orchestrator.js';
 import { runGapAnalysis, type DataGap } from '../agents/cpa_brain.js';
 import type { PolicyProposal } from './policy_inference_agentic.js';
@@ -295,19 +296,19 @@ export function step2CFA(
   balanceSheet: BalanceSheet,
   profitAndLoss: ProfitAndLoss
 ): FiveKeyRatios {
-  const currentAssets = balanceSheet.assets.reduce((s, l) => s + l.amount, 0);
-  const currentLiabilities = balanceSheet.liabilities.reduce((s, l) => s + l.amount, 0);
+  const currentAssets = sumRound2(balanceSheet.assets.map((l) => l.amount));
+  const currentLiabilities = sumRound2(balanceSheet.liabilities.map((l) => l.amount));
   const totalLiabilities = balanceSheet.totalLiabilities;
   const totalEquity = balanceSheet.totalEquity;
   const inventory = balanceSheet.assets.find((a) => /inventory/i.test(a.label ?? ''))?.amount ?? 0;
   const revenue = profitAndLoss.totalRevenue || 1;
   const netIncome = profitAndLoss.netIncome ?? 0;
 
-  const currentRatio = currentLiabilities !== 0 ? currentAssets / currentLiabilities : 0;
-  const quickRatio = currentLiabilities !== 0 ? (currentAssets - inventory) / currentLiabilities : 0;
-  const debtToEquity = totalEquity !== 0 ? totalLiabilities / totalEquity : 0;
-  const roe = totalEquity !== 0 ? netIncome / totalEquity : 0;
-  const netMargin = revenue !== 0 ? netIncome / revenue : 0;
+  const currentRatio = currentLiabilities !== 0 ? div(currentAssets, currentLiabilities) : 0;
+  const quickRatio = currentLiabilities !== 0 ? div(minus(currentAssets, inventory), currentLiabilities) : 0;
+  const debtToEquity = totalEquity !== 0 ? div(totalLiabilities, totalEquity) : 0;
+  const roe = totalEquity !== 0 ? div(netIncome, totalEquity) : 0;
+  const netMargin = revenue !== 0 ? div(netIncome, revenue) : 0;
 
   return {
     currentRatio,

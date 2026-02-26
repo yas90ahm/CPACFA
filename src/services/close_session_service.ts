@@ -33,7 +33,7 @@ import { checkEvidencePolicyForCertification } from './evidence_policy_service.j
 import { withTransaction } from '../db/transaction.js';
 import { buildCertifiedStatementsFromSnapshot } from './certified_statements_service.js';
 import { runCrossStatementValidationForCertification } from './cross_statement_validation.js';
-import { buildCertificationArtifact } from './certification_artifact_service.js';
+import { buildCertificationArtifact, gatherAiMetadata } from './certification_artifact_service.js';
 import * as certArtifactRepo from '../db/repositories/certification_artifact_repository.js';
 import { verifyChain } from '../db/repositories/audit_ledger_repository.js';
 import { sumRound2 } from '../utils/decimal.js';
@@ -420,6 +420,12 @@ export async function certifyCloseSession(
     const existingArtifact = await certArtifactRepo.existsForCloseSession(client, input.tenantId, input.closeSessionId);
     if (!existingArtifact) {
       const auditChainResult = await verifyChain(client, input.tenantId);
+      let aiMetadata;
+      try {
+        aiMetadata = await gatherAiMetadata(client, input.tenantId, input.closeSessionId);
+      } catch (_) {
+        /* non-fatal: AI metadata gathering failed */
+      }
       const { artifact, artifactHash, signatureB64, publicKeyB64, alg } = buildCertificationArtifact({
         tenantId: input.tenantId,
         closeSessionId: input.closeSessionId,
@@ -437,6 +443,7 @@ export async function certifyCloseSession(
           passes: c.passes,
           message: c.message,
         })),
+        aiMetadata,
       });
       const inserted = await certArtifactRepo.insertCertificationArtifact(client, {
         tenantId: input.tenantId,

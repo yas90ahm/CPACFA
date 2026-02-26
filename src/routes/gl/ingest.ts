@@ -13,6 +13,7 @@ import * as glRepository from '../../db/repositories/general_ledger_repository.j
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { requireValidTenantId } from '../../middleware/validationMiddleware.js';
 import { send500 } from '../../lib/errorHandler.js';
+import { sumRound2 } from '../../utils/decimal.js';
 
 const router = Router();
 
@@ -329,8 +330,8 @@ router.get('/entries/:entryId', requireValidTenantId, async (req: Request, res: 
       return;
     }
 
-    const totalDebits = lines.reduce((sum, l) => sum + (l.debit ?? 0), 0);
-    const totalCredits = lines.reduce((sum, l) => sum + (l.credit ?? 0), 0);
+    const totalDebits = sumRound2(lines.map((l) => l.debit ?? 0));
+    const totalCredits = sumRound2(lines.map((l) => l.credit ?? 0));
 
     res.status(200).json({
       entry: {

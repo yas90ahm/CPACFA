@@ -4,14 +4,14 @@
 
 import { getPolicyMemory, updatePolicyMemory } from './policy_memory.js';
 
-export type CashFlowCategory = 'operating' | 'investing' | 'financing';
+export type CashFlowCategory = 'operating' | 'investing' | 'financing' | 'not_applicable';
 
 export async function getTransactionCategory(entityId: string, description?: string): Promise<CashFlowCategory | undefined> {
   const key = buildKey(description);
   if (!key) return undefined;
   const mem = await getPolicyMemory(entityId);
   const value = mem?.overrides?.[key];
-  if (value === 'operating' || value === 'investing' || value === 'financing') return value;
+  if (value === 'operating' || value === 'investing' || value === 'financing' || value === 'not_applicable') return value;
   return undefined;
 }
 

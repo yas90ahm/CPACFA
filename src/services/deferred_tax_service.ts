@@ -1,4 +1,11 @@
 /**
+ * STATUS: UNWIRED — This service compiles but is not imported by any active route.
+ * It exists as potential future functionality.
+ * Last verified: 2026-02-25
+ * To activate: Create a route file that imports this service and register it in server.ts
+ */
+
+/**
  * Deferred tax service — temporary differences, DTA/DTL, valuation allowance, rate changes (IAS 12 / ASC 740).
  * computeDeferredTaxesStateless ported from backend/tax/tax_provisioning.compute_deferred_taxes for API parity.
  */

@@ -8,6 +8,7 @@ import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { send500 } from '../../lib/errorHandler.js';
 import * as varianceService from '../../services/variance_analysis_service.js';
 import * as repo from '../../db/repositories/variance_analysis_repository.js';
+import { guardSessionWritable } from '../../lib/session_write_guard.js';
 
 const router = Router();
 
@@ -60,12 +61,14 @@ router.post('/variances/:id/explain', async (req: Request, res: Response) => {
       return;
     }
     const id = req.params.id;
-    const body = req.body as { explanation: string };
+    const body = req.body as { explanation: string; explanation_source?: 'manual' | 'ai_draft' | 'ai_edited' };
     if (typeof body.explanation !== 'string') {
       res.status(400).json({ error: 'explanation string required' });
       return;
     }
-    const variance = await varianceService.explainVariance(pool, tenantId, id, body.explanation);
+    const v = await repo.getVarianceById(pool, tenantId, id);
+    if (v && !await guardSessionWritable(res, pool, tenantId, v.closeSessionId)) return;
+    const variance = await varianceService.explainVariance(pool, tenantId, id, body.explanation, body.explanation_source);
     if (!variance) {
       res.status(404).json({ error: 'Variance not found' });
       return;
@@ -88,6 +91,8 @@ router.post('/variances/:id/approve', async (req: Request, res: Response) => {
     const id = req.params.id;
     const body = req.body as { approvedBy?: string };
     const approvedBy = body.approvedBy ?? (req as { user?: { email?: string } }).user?.email ?? 'unknown';
+    const v = await repo.getVarianceById(pool, tenantId, id);
+    if (v && !await guardSessionWritable(res, pool, tenantId, v.closeSessionId)) return;
     const variance = await varianceService.approveVariance(pool, tenantId, id, approvedBy);
     if (!variance) {
       res.status(404).json({ error: 'Variance not found' });

@@ -35,6 +35,7 @@ import { getEvidenceStorageAdapterAsync } from '../../services/evidence_storage_
 import type { JournalEntrySource } from '../../types/journal_entry.js';
 import { executeBridgeCommand } from '../../bridge/index.js';
 import type { AuthRequest } from '../../auth/middleware.js';
+import { guardSessionWritable } from '../../lib/session_write_guard.js';
 
 const router = Router();
 
@@ -107,6 +108,7 @@ router.post('/journal-entries', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'closeSessionId, source, and lines (array) required' });
       return;
     }
+    if (!await guardSessionWritable(res, pool, tenantId, body.closeSessionId)) return;
     const result = await executeBridgeCommand(
       {
         pool,
@@ -225,6 +227,8 @@ router.post('/journal-entries/:id/propose', async (req: Request, res: Response) 
       return;
     }
     const id = req.params.id ?? '';
+    const jeForGuard = await getJournalEntry(pool, tenantId, id);
+    if (jeForGuard && !await guardSessionWritable(res, pool, tenantId, jeForGuard.closeSessionId)) return;
     const result = await executeBridgeCommand(
       { pool, tenantId, actor: (req as AuthRequest).userId ?? 'anonymous' },
       { commandType: 'ProposeJE', journalEntryId: id }
@@ -260,14 +264,13 @@ router.post('/journal-entries/:id/approve', async (req: Request, res: Response) 
       return;
     }
     const id = req.params.id ?? '';
-    const body = req.body as { approvedBy: string };
-    if (!body?.approvedBy) {
-      res.status(400).json({ error: 'approvedBy required' });
-      return;
-    }
+    const jeForGuard = await getJournalEntry(pool, tenantId, id);
+    if (jeForGuard && !await guardSessionWritable(res, pool, tenantId, jeForGuard.closeSessionId)) return;
+    const body = req.body as { approvedBy?: string };
+    const approvedBy = body?.approvedBy || (req as AuthRequest).userId || 'anonymous';
     const result = await executeBridgeCommand(
       { pool, tenantId, actor: (req as AuthRequest).userId ?? 'anonymous' },
-      { commandType: 'ApproveJE', journalEntryId: id, approvedBy: body.approvedBy }
+      { commandType: 'ApproveJE', journalEntryId: id, approvedBy }
     );
     if (!result.ok) {
       const status = result.code === 'VALIDATION' ? 403 : 400;
@@ -301,6 +304,8 @@ router.post('/journal-entries/:id/reject', async (req: Request, res: Response) =
       return;
     }
     const id = req.params.id ?? '';
+    const jeForGuard = await getJournalEntry(pool, tenantId, id);
+    if (jeForGuard && !await guardSessionWritable(res, pool, tenantId, jeForGuard.closeSessionId)) return;
     const body = req.body as { reason?: string };
     const reason = body?.reason?.trim() ?? '';
     if (reason.length < 10) {
@@ -329,6 +334,8 @@ router.post('/journal-entries/:id/post', async (req: Request, res: Response) => 
       return;
     }
     const id = req.params.id ?? '';
+    const jeForGuard = await getJournalEntry(pool, tenantId, id);
+    if (jeForGuard && !await guardSessionWritable(res, pool, tenantId, jeForGuard.closeSessionId)) return;
     const result = await executeBridgeCommand(
       { pool, tenantId, actor: (req as AuthRequest).userId ?? 'anonymous', aiPool: getTenantAiPool(req) },
       { commandType: 'PostJE', journalEntryId: id }
@@ -372,6 +379,8 @@ router.delete('/journal-entries/:id', async (req: Request, res: Response) => {
       return;
     }
     const id = req.params.id ?? '';
+    const jeForGuard = await getJournalEntry(pool, tenantId, id);
+    if (jeForGuard && !await guardSessionWritable(res, pool, tenantId, jeForGuard.closeSessionId)) return;
     const userId = (req as AuthRequest).userId ?? 'anonymous';
     const result = await deleteDraftJE(pool, tenantId, id, userId);
     res.json(result);
