@@ -1,25 +1,49 @@
 node_modules
+.git
 .env
 .env.*
 !.env.example
-.git
 .gitignore
+
+# Build output (rebuilt in container)
+dist
+build
+
+# Non-production directories
+_quarantine
 tests
-*.test.ts
-*.spec.ts
 coverage
 .nyc_output
-dist
-*.md
-!README.md
-analysis
-docs
 examples
 experimental
 frontend
 connectors
 mcp_server
 uat
+analysis
+docs
+data
+
+# IDE / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Documentation (not needed in image)
+*.md
+!README.md
+
+# Python artifacts
 __pycache__
 *.pyc
+*.pyo
 .pytest_cache
+.venv
+venv
+
+# Misc
+*.log
+*.swp
+.claude
+tmp_login.json

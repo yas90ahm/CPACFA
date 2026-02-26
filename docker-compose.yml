@@ -1,33 +1,39 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "${PORT:-3000}:${PORT:-3000}"
+    env_file: .env
     environment:
-      DATABASE_URL: postgres://cpacfa:cpacfa@postgres:5432/cpacfa
-      JWT_SECRET: dev-secret-change-in-prod
-      MODE: demo
-      NODE_ENV: development
-      PORT: "3000"
+      DATABASE_URL: postgresql://sovereign:sovereign_dev@db:5432/sovereign_engine
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - evidence_data:/app/data/evidence
+      - storage_data:/app/storage
 
-  postgres:
+  db:
     image: postgres:16-alpine
     ports:
-      - "5432:5432"
+      - "${PG_PORT:-5432}:5432"
     environment:
-      POSTGRES_USER: cpacfa
-      POSTGRES_PASSWORD: cpacfa
-      POSTGRES_DB: cpacfa
+      POSTGRES_USER: sovereign
+      POSTGRES_PASSWORD: sovereign_dev
+      POSTGRES_DB: sovereign_engine
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cpacfa -d cpacfa"]
+      test: ["CMD-SHELL", "pg_isready -U sovereign -d sovereign_engine"]
       interval: 5s
-      timeout: 5s
+      timeout: 3s
       retries: 5
+    restart: unless-stopped
 
 volumes:
-  postgres_data:
+  pg_data:
+  evidence_data:
+  storage_data:

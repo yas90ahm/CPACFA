@@ -1,39 +1,52 @@
-# Multi-stage build: build then runtime
-FROM node:20-alpine AS build
+# Sovereign CPA Engine — Multi-stage production build
+# Stage 1: Build TypeScript
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
 COPY package.json package-lock.json ./
 RUN npm ci
 
-COPY . .
+COPY tsconfig.json ./
+COPY src/ ./src/
 RUN npm run build
 
-# Runtime stage
-FROM node:20-alpine
+# Prune dev dependencies
+RUN npm prune --production
 
-RUN apk add --no-cache curl
-
-RUN addgroup -g 1001 -S appgroup && adduser -u 1001 -S appuser -G appgroup
+# Stage 2: Production runtime
+FROM node:20-alpine AS production
 
 WORKDIR /app
 
-COPY --from=build /app/package.json /app/package-lock.json ./
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/migrations ./migrations
-COPY --from=build /app/shared ./shared
+# Security: non-root user
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -S appuser -u 1001 -G appgroup
 
-RUN npm ci --omit=dev
+# Runtime dependencies only
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./
 
-# Create storage dir for local adapter (appuser needs write access)
-RUN mkdir -p /app/storage /app/data/evidence && chown -R appuser:appgroup /app/storage /app/data
+# Compiled application
+COPY --from=builder /app/dist ./dist
+
+# Runtime data: migrations, financial rules config
+COPY migrations/ ./migrations/
+COPY shared/ ./shared/
+
+# Docker entrypoint (runs migrations then starts app)
+COPY scripts/docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x docker-entrypoint.sh
+
+# Writable directories for evidence storage and local storage
+RUN mkdir -p /app/data/evidence /app/storage && \
+    chown -R appuser:appgroup /app/data /app/storage
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT:-3000}/health || exit 1
 
 USER appuser
 
-EXPOSE 3000
+EXPOSE ${PORT:-3000}
 
-ENV PORT=3000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -f http://localhost:${PORT}/health || exit 1
-
-CMD ["node", "dist/server.js"]
+CMD ["./docker-entrypoint.sh"]

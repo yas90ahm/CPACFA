@@ -19,7 +19,12 @@
     "keygen": "tsx src/crypto/keygen.ts",
     "seed:demo": "tsx src/scripts/seed_demo.ts",
     "test:integration": "tsx scripts/test_gl_certification.ts",
-    "test:integration:dev": "cross-env BASE_URL=http://localhost:3000 tsx scripts/test_gl_certification.ts"
+    "test:integration:dev": "cross-env BASE_URL=http://localhost:3000 tsx scripts/test_gl_certification.ts",
+    "docker:build": "docker build -t sovereign-cpa-engine .",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f app",
+    "verify": "bash scripts/verify-production-ready.sh"
   },
   "engines": {
     "node": ">=18"
