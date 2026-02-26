@@ -31,6 +31,7 @@ import closeAjeTemplatesRouter from './close_aje_templates.js';
 import closeVarianceAnalysisRouter from './close_variance_analysis.js';
 import closeIntercompanyRouter from './close_intercompany.js';
 import closeReportPackRouter from './close_report_pack.js';
+import closeInvestigationRouter from './close_investigation.js';
 
 const router = Router();
 router.use(closeJeAccrualsRouter);
@@ -60,5 +61,6 @@ router.use(closeSegregationRouter);
 router.use(closeTaskAssignRouter);
 router.use(closeIntercompanyRouter);
 router.use(closeReportPackRouter);
+router.use(closeInvestigationRouter);
 
 export default router;
