@@ -2,14 +2,18 @@
 
 import { useParams } from 'next/navigation';
 import React, { useMemo, useState, useCallback } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCloseSession } from '@/lib/queries/close-session';
 import { useVariances } from '@/lib/queries/variance';
+import { useAuth } from '@/lib/auth';
 import { AISuggestionCard } from '@/components/shared/AISuggestionCard';
 import { MoneyCell } from '@/components/shared/MoneyCell';
+import { apiFetch } from '@/lib/api';
 import { parseMoney } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { VarianceRecord } from '@/lib/types/variance';
-import { Check, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { InvestigationPanel } from '@/components/investigation/InvestigationPanel';
+import { Check, X, ChevronDown, ChevronRight, Search } from 'lucide-react';
 
 const STATEMENT_LABELS: Record<string, string> = {
   income_statement: 'IS',
@@ -45,10 +49,14 @@ export default function VariancePage() {
   const [statementFilter, setStatementFilter] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'changeAbs' | 'lineItem' | 'statement'>('changeAbs');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [localExplanations, setLocalExplanations] = useState<Record<string, string>>({});
   const [localDismissedAi, setLocalDismissedAi] = useState<Record<string, boolean>>({});
-  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
-  const [approvedIds, setApprovedIds] = useState<Set<string>>(new Set());
+  const [explanationSources, setExplanationSources] = useState<Record<string, 'manual' | 'ai_draft' | 'ai_edited'>>({});
+  const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
+  const [approvingIds, setApprovingIds] = useState<Set<string>>(new Set());
+  const [investigatingVariance, setInvestigatingVariance] = useState<VarianceRecord | null>(null);
 
   const filtered = useMemo(() => {
     let list = [...variances];
@@ -81,21 +89,48 @@ export default function VariancePage() {
 
   const handleUseDraft = useCallback((id: string, draft: string) => {
     setLocalExplanations((prev) => ({ ...prev, [id]: draft }));
+    setExplanationSources((prev) => ({ ...prev, [id]: 'ai_draft' }));
   }, []);
 
   const handleDismissDraft = useCallback((id: string) => {
     setLocalDismissedAi((prev) => ({ ...prev, [id]: true }));
   }, []);
 
-  const handleSaveExplanation = useCallback((id: string, text: string) => {
+  const handleSaveExplanation = useCallback(async (id: string, text: string) => {
     if (text.trim().length < 20) return;
-    setSavedIds((prev) => new Set(prev).add(id));
-    setLocalExplanations((prev) => ({ ...prev, [id]: text }));
-  }, []);
+    setSavingIds((prev) => new Set(prev).add(id));
+    // Determine source: if user started from AI draft and edited, it's ai_edited
+    const baseSource = explanationSources[id] ?? 'manual';
+    const source = baseSource === 'ai_draft' ? 'ai_draft' : baseSource === 'ai_edited' ? 'ai_edited' : 'manual';
+    try {
+      await apiFetch(`/api/close/variances/${id}/explain`, {
+        method: 'POST',
+        body: { explanation: text.trim(), explanation_source: source },
+      });
+      queryClient.invalidateQueries({ queryKey: ['variances', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['readiness', sessionId] });
+    } catch {
+      // Error will be visible from variance refetch
+    } finally {
+      setSavingIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
+    }
+  }, [sessionId, queryClient, explanationSources]);
 
-  const handleApprove = useCallback((id: string) => {
-    setApprovedIds((prev) => new Set(prev).add(id));
-  }, []);
+  const handleApprove = useCallback(async (id: string) => {
+    setApprovingIds((prev) => new Set(prev).add(id));
+    try {
+      await apiFetch(`/api/close/variances/${id}/approve`, {
+        method: 'POST',
+        body: {},
+      });
+      queryClient.invalidateQueries({ queryKey: ['variances', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['readiness', sessionId] });
+    } catch {
+      // Error will be visible from variance refetch
+    } finally {
+      setApprovingIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
+    }
+  }, [sessionId, queryClient]);
 
   const entityName = session?.entityName ?? 'Entity';
   const periodLabel = session?.periodLabel ?? 'Period';
@@ -183,8 +218,8 @@ export default function VariancePage() {
               {filtered.map((v) => {
                 const isExpanded = expandedId === v.id;
                 const color = changeColor(v.statementType, v.lineItemName, v.changeAmount, v.changePercent);
-                const displayExplanation = savedIds.has(v.id) ? (localExplanations[v.id] ?? v.explanation) : v.explanation;
-                const displayStatus = approvedIds.has(v.id) ? 'approved' : savedIds.has(v.id) ? 'explained' : v.explanationStatus;
+                const displayExplanation = localExplanations[v.id] ?? v.explanation;
+                const displayStatus = v.explanationStatus;
                 const showAiDraft = v.isMaterial && v.explanationStatus === 'pending' && v.aiDraftExplanation && !localDismissedAi[v.id];
 
                 return (
@@ -226,14 +261,14 @@ export default function VariancePage() {
                       <td className="py-2 px-2 text-center">
                         {!v.isMaterial && '—'}
                         {v.isMaterial && displayStatus === 'approved' && <span className="text-status-green">✓</span>}
-                        {v.isMaterial && (displayStatus === 'explained' || displayStatus === 'pending') && !savedIds.has(v.id) && v.explanationStatus === 'pending' && <span className="text-status-red">✗</span>}
-                        {v.isMaterial && (displayStatus === 'explained' || savedIds.has(v.id)) && displayStatus !== 'approved' && <span className="text-status-green">✓</span>}
+                        {v.isMaterial && displayStatus === 'pending' && <span className="text-status-red">✗</span>}
+                        {v.isMaterial && displayStatus === 'explained' && <span className="text-status-green">✓</span>}
                       </td>
                       <td className="py-2 px-3">
                         {!v.isMaterial && <span className="text-text-muted">N/A</span>}
-                        {v.isMaterial && displayStatus === 'pending' && !savedIds.has(v.id) && <span className="text-status-amber">Pending</span>}
-                        {v.isMaterial && (displayStatus === 'explained' || savedIds.has(v.id)) && !approvedIds.has(v.id) && <span className="text-status-amber">Pending</span>}
-                        {v.isMaterial && (displayStatus === 'approved' || approvedIds.has(v.id)) && <span className="text-status-green">Approved</span>}
+                        {v.isMaterial && displayStatus === 'pending' && <span className="text-status-amber">Pending</span>}
+                        {v.isMaterial && displayStatus === 'explained' && <span className="text-status-amber">Pending Approval</span>}
+                        {v.isMaterial && displayStatus === 'approved' && <span className="text-status-green">Approved</span>}
                       </td>
                     </tr>
                     {isExpanded && v.isMaterial && (
@@ -274,7 +309,7 @@ export default function VariancePage() {
                                   <label className="block text-xs font-medium text-text-secondary mb-1">
                                     Explanation {displayStatus === 'approved' ? '' : '(review and edit before saving)'}
                                   </label>
-                                  {displayStatus === 'approved' || approvedIds.has(v.id) ? (
+                                  {displayStatus === 'approved' ? (
                                     <p className="text-sm text-primary rounded-input border border-border p-3 bg-input">{displayExplanation || '—'}</p>
                                   ) : (
                                     <textarea
@@ -286,25 +321,35 @@ export default function VariancePage() {
                                     />
                                   )}
                                 </div>
-                                {displayStatus !== 'approved' && !approvedIds.has(v.id) && (
+                                {displayStatus !== 'approved' && (
                                   <div className="flex gap-2">
-                                    <button
-                                      type="button"
-                                      className="px-4 py-2 rounded-input bg-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-50"
-                                      onClick={() => handleSaveExplanation(v.id, localExplanations[v.id] ?? displayExplanation ?? '')}
-                                      disabled={((localExplanations[v.id] ?? displayExplanation ?? '').trim().length ?? 0) < 20}
-                                    >
-                                      Save Explanation
-                                    </button>
-                                    {savedIds.has(v.id) && (
+                                    {displayStatus === 'pending' && (
                                       <button
                                         type="button"
-                                        className="px-4 py-2 rounded-input border border-status-green text-status-green text-sm font-medium hover:bg-status-green-dim"
-                                        onClick={() => handleApprove(v.id)}
+                                        className="px-4 py-2 rounded-input bg-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-50"
+                                        onClick={() => handleSaveExplanation(v.id, localExplanations[v.id] ?? displayExplanation ?? '')}
+                                        disabled={((localExplanations[v.id] ?? displayExplanation ?? '').trim().length ?? 0) < 20 || savingIds.has(v.id)}
                                       >
-                                        Approve Explanation
+                                        {savingIds.has(v.id) ? 'Saving...' : 'Save Explanation'}
                                       </button>
                                     )}
+                                    {displayStatus === 'explained' && (
+                                      <button
+                                        type="button"
+                                        className="px-4 py-2 rounded-input border border-status-green text-status-green text-sm font-medium hover:bg-status-green-dim disabled:opacity-50"
+                                        onClick={() => handleApprove(v.id)}
+                                        disabled={approvingIds.has(v.id)}
+                                      >
+                                        {approvingIds.has(v.id) ? 'Approving...' : 'Approve Explanation'}
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      className="px-4 py-2 rounded-input border border-border text-text-secondary text-sm font-medium hover:bg-hover flex items-center gap-1.5"
+                                      onClick={() => setInvestigatingVariance(v)}
+                                    >
+                                      <Search className="w-3.5 h-3.5" /> Investigate
+                                    </button>
                                   </div>
                                 )}
                               </>
@@ -320,6 +365,24 @@ export default function VariancePage() {
           </table>
         </div>
       </div>
+
+      <InvestigationPanel
+        open={!!investigatingVariance}
+        onClose={() => setInvestigatingVariance(null)}
+        sessionId={sessionId}
+        varianceId={investigatingVariance?.id ?? ''}
+        fsLineId={investigatingVariance?.fsLineId ?? ''}
+        lineItemLabel={investigatingVariance?.lineItemName ?? ''}
+        currentPeriodId={sessionId}
+        priorPeriodId={investigatingVariance?.priorPeriodId ?? sessionId}
+        onUseExplanation={(text) => {
+          if (investigatingVariance) {
+            setLocalExplanations((prev) => ({ ...prev, [investigatingVariance.id]: text }));
+            setExplanationSources((prev) => ({ ...prev, [investigatingVariance.id]: 'ai_draft' }));
+            setExpandedId(investigatingVariance.id);
+          }
+        }}
+      />
     </div>
   );
 }

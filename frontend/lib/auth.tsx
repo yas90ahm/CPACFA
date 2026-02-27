@@ -30,13 +30,35 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const API_BASE = typeof window !== 'undefined'
-  ? (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001')
-  : (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001');
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+
+const STORAGE_KEY_TOKEN = 'cpa_auth_token';
+const STORAGE_KEY_USER = 'cpa_auth_user';
+
+function loadFromStorage(): { token: string | null; user: AuthUser | null } {
+  if (typeof window === 'undefined') return { token: null, user: null };
+  try {
+    const t = localStorage.getItem(STORAGE_KEY_TOKEN);
+    const u = localStorage.getItem(STORAGE_KEY_USER);
+    return { token: t, user: u ? JSON.parse(u) : null };
+  } catch {
+    return { token: null, user: null };
+  }
+}
+
+function saveToStorage(token: string | null, user: AuthUser | null) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (token) localStorage.setItem(STORAGE_KEY_TOKEN, token);
+    else localStorage.removeItem(STORAGE_KEY_TOKEN);
+    if (user) localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(user));
+    else localStorage.removeItem(STORAGE_KEY_USER);
+  } catch { /* localStorage may be unavailable */ }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(null);
-  const [user, setUser] = useState<AuthUser | null>(null);
+  const [token, setToken] = useState<string | null>(() => loadFromStorage().token);
+  const [user, setUser] = useState<AuthUser | null>(() => loadFromStorage().user);
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
 
@@ -50,6 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthExpiredHandler(() => {
       setToken(null);
       setUser(null);
+      saveToStorage(null, null);
       router.replace('/login');
     });
   }, [router]);
@@ -79,8 +102,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           tenantId: string;
           role: string;
         };
+        const authUser = { userId, tenantId: tid, role, email };
         setToken(t);
-        setUser({ userId, tenantId: tid, role, email });
+        setUser(authUser);
+        saveToStorage(t, authUser);
         if (role === 'operating_partner') {
           router.push('/portfolio');
         } else if (role === 'admin') {
@@ -100,6 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     setToken(null);
     setUser(null);
+    saveToStorage(null, null);
     router.replace('/login');
   }, [router]);
 

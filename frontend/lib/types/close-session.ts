@@ -8,6 +8,7 @@ export type CloseState =
 export interface CloseSession {
   id: string;
   tenantId: string;
+  entityId: string;
   entityName: string;
   periodLabel: string;
   periodStart: string;

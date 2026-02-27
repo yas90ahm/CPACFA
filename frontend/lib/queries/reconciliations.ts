@@ -4,6 +4,8 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import type { Reconciliation, ReconcilingItem, ReconcilingItemType } from '@/lib/types/reconciliation';
 
+const STALE_TIME = 30_000;
+
 const BACKEND_ITEM_TYPE_TO_FRONT: Record<string, ReconcilingItemType> = {
   outstanding_check: 'Outstanding Check',
   deposit_in_transit: 'Deposit in Transit',
@@ -29,8 +31,9 @@ function toReconciliation(raw: Record<string, unknown>, sessionId: string): Reco
   const gl = parseFloat(String(raw.glBalance ?? 0));
   const sup = raw.supportingBalance != null ? parseFloat(String(raw.supportingBalance)) : null;
   const items = parseFloat(String(raw.reconcilingItemsTotal ?? 0));
-  const variance = sup != null ? gl - sup : 0;
-  const unexplained = sup != null ? variance - items : 0;
+  // Use server-computed values (GENERATED ALWAYS columns) — never compute money in JS
+  const variance = raw.variance != null ? parseFloat(String(raw.variance)) : (sup != null ? gl - sup : 0);
+  const unexplained = raw.unexplainedVariance != null ? parseFloat(String(raw.unexplainedVariance)) : (sup != null ? variance - items : 0);
   return {
     id: (raw.reconId ?? raw.id) as string,
     sessionId,
@@ -66,6 +69,7 @@ export function useReconciliations(sessionId: string | null) {
       return list.map((r) => toReconciliation(r as Record<string, unknown>, sessionId));
     },
     enabled: !!sessionId,
+    staleTime: STALE_TIME,
   });
 }
 
@@ -86,5 +90,6 @@ export function useReconciliation(sessionId: string | null, reconId: string | nu
       }
     },
     enabled: !!sessionId && !!reconId,
+    staleTime: STALE_TIME,
   });
 }

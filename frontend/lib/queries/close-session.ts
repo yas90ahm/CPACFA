@@ -101,7 +101,7 @@ export function useCloseIssues(
 export function useAdvanceSession(sessionId: string | null) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (body?: { certifiedBy?: string }) => {
+    mutationFn: async (body?: { target_state?: string; reason?: string; certifiedBy?: string }) => {
       if (!sessionId) throw new Error('No sessionId');
       return apiFetch(`/api/close/sessions/${sessionId}/advance`, {
         method: 'POST',
@@ -112,6 +112,68 @@ export function useAdvanceSession(sessionId: string | null) {
       if (sessionId) {
         qc.invalidateQueries({ queryKey: ['close-session', sessionId] });
         qc.invalidateQueries({ queryKey: ['readiness', sessionId] });
+        qc.invalidateQueries({ queryKey: ['issues', sessionId] });
+      }
+    },
+  });
+}
+
+export function useCertifySession(sessionId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { confirmation: string }) => {
+      if (!sessionId) throw new Error('No sessionId');
+      return apiFetch<Record<string, unknown>>(`/api/close/sessions/${sessionId}/certify`, {
+        method: 'POST',
+        body,
+      });
+    },
+    onSuccess: () => {
+      if (sessionId) {
+        qc.invalidateQueries({ queryKey: ['close-session', sessionId] });
+        qc.invalidateQueries({ queryKey: ['readiness', sessionId] });
+        qc.invalidateQueries({ queryKey: ['certification', sessionId] });
+        qc.invalidateQueries({ queryKey: ['issues', sessionId] });
+      }
+    },
+  });
+}
+
+export function useLockSession(sessionId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      if (!sessionId) throw new Error('No sessionId');
+      return apiFetch(`/api/close/sessions/${sessionId}/lock`, {
+        method: 'POST',
+        body: {},
+      });
+    },
+    onSuccess: () => {
+      if (sessionId) {
+        qc.invalidateQueries({ queryKey: ['close-session', sessionId] });
+        qc.invalidateQueries({ queryKey: ['readiness', sessionId] });
+        qc.invalidateQueries({ queryKey: ['issues', sessionId] });
+      }
+    },
+  });
+}
+
+export function useReopenSession(sessionId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { reason: string }) => {
+      if (!sessionId) throw new Error('No sessionId');
+      return apiFetch(`/api/close/sessions/${sessionId}/reopen`, {
+        method: 'POST',
+        body,
+      });
+    },
+    onSuccess: () => {
+      if (sessionId) {
+        qc.invalidateQueries({ queryKey: ['close-session', sessionId] });
+        qc.invalidateQueries({ queryKey: ['readiness', sessionId] });
+        qc.invalidateQueries({ queryKey: ['certification', sessionId] });
         qc.invalidateQueries({ queryKey: ['issues', sessionId] });
       }
     },

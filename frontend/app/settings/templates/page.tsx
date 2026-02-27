@@ -48,8 +48,38 @@ export default function TemplatesSettingsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['close-templates'] }),
   });
 
+  const createMutation = useMutation({
+    mutationFn: (body: { name: string; memo: string; lines: TemplateLine[]; frequency: string }) =>
+      apiFetch('/api/close/templates', { method: 'POST', body }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['close-templates'] });
+      setPanelOpen(false);
+      setNewName('');
+      setNewMemo('');
+      setNewFreq('monthly');
+      setNewLines([{ accountRef: '', debit: 0, credit: undefined }, { accountRef: '', debit: undefined, credit: 0 }]);
+    },
+  });
+
   const [panelOpen, setPanelOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [newName, setNewName] = useState('');
+  const [newMemo, setNewMemo] = useState('');
+  const [newFreq, setNewFreq] = useState<'monthly' | 'quarterly' | 'annually'>('monthly');
+  const [newLines, setNewLines] = useState<Array<{ accountRef: string; debit?: number; credit?: number }>>([
+    { accountRef: '', debit: 0, credit: undefined },
+    { accountRef: '', debit: undefined, credit: 0 },
+  ]);
+
+  const handleCreateTemplate = () => {
+    if (!newName.trim() || !newMemo.trim()) return;
+    createMutation.mutate({
+      name: newName.trim(),
+      memo: newMemo.trim(),
+      lines: newLines.filter((l) => l.accountRef.trim()),
+      frequency: newFreq,
+    });
+  };
 
   if (isLoading && templates.length === 0) return <div className="text-text-secondary">Loading templates...</div>;
 
@@ -127,23 +157,32 @@ export default function TemplatesSettingsPage() {
       <SlideOverPanel open={panelOpen} onClose={() => setPanelOpen(false)} title="New Recurring Entry Template" width={560} footer={
         <>
           <button type="button" className="px-4 py-2 rounded-input border border-border text-sm" onClick={() => setPanelOpen(false)}>Cancel</button>
-          <button type="button" className="px-4 py-2 rounded-input bg-accent text-accent-contrast text-sm" onClick={() => setPanelOpen(false)}>Save Template</button>
+          <button
+            type="button"
+            className="px-4 py-2 rounded-input bg-accent text-accent-contrast text-sm disabled:opacity-50"
+            onClick={handleCreateTemplate}
+            disabled={createMutation.isPending || !newName.trim() || !newMemo.trim()}
+          >
+            {createMutation.isPending ? 'Saving...' : 'Save Template'}
+          </button>
         </>
       }>
         <div className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-text-secondary mb-1">Template Name *</label>
-            <input type="text" placeholder="Monthly Depreciation — Equipment" className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm" />
+            <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Monthly Depreciation — Equipment" className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm" />
           </div>
           <div>
-            <label className="block text-xs font-medium text-text-secondary mb-1">Description</label>
-            <textarea rows={3} placeholder="Monthly straight-line depreciation..." className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm resize-none" />
+            <label className="block text-xs font-medium text-text-secondary mb-1">Description / Memo *</label>
+            <textarea rows={3} value={newMemo} onChange={(e) => setNewMemo(e.target.value)} placeholder="Monthly straight-line depreciation..." className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm resize-none" />
           </div>
           <div>
             <label className="block text-xs font-medium text-text-secondary mb-2">Frequency</label>
             <div className="flex gap-4">
-              {['Monthly', 'Quarterly', 'Annual'].map((f) => (
-                <label key={f} className="flex items-center gap-2 text-sm"><input type="radio" name="freq" /> {f}</label>
+              {([['monthly', 'Monthly'], ['quarterly', 'Quarterly'], ['annually', 'Annual']] as const).map(([val, label]) => (
+                <label key={val} className="flex items-center gap-2 text-sm">
+                  <input type="radio" name="freq" checked={newFreq === val} onChange={() => setNewFreq(val as 'monthly' | 'quarterly' | 'annually')} /> {label}
+                </label>
               ))}
             </div>
           </div>
@@ -153,22 +192,35 @@ export default function TemplatesSettingsPage() {
               <div className="grid grid-cols-[1fr_100px_100px] gap-2 text-xs text-text-secondary">
                 <span>Account</span><span>Debit</span><span>Credit</span>
               </div>
-              <div className="grid grid-cols-[1fr_100px_100px] gap-2">
-                <input type="text" placeholder="6400 Depreciation Expense" className="rounded-input border border-border bg-input px-2 py-1.5 text-sm" />
-                <MoneyInput value="0" onChange={() => {}} size="sm" />
-                <MoneyInput value={null} onChange={() => {}} size="sm" />
-              </div>
-              <div className="grid grid-cols-[1fr_100px_100px] gap-2">
-                <input type="text" placeholder="1510 Accum. Depreciation" className="rounded-input border border-border bg-input px-2 py-1.5 text-sm" />
-                <MoneyInput value={null} onChange={() => {}} size="sm" />
-                <MoneyInput value="0" onChange={() => {}} size="sm" />
-              </div>
-              <button type="button" className="text-xs text-accent hover:underline">+ Add Line</button>
+              {newLines.map((line, i) => (
+                <div key={i} className="grid grid-cols-[1fr_100px_100px] gap-2">
+                  <input
+                    type="text"
+                    value={line.accountRef}
+                    onChange={(e) => setNewLines((prev) => prev.map((l, j) => j === i ? { ...l, accountRef: e.target.value } : l))}
+                    placeholder="Account code"
+                    className="rounded-input border border-border bg-input px-2 py-1.5 text-sm"
+                  />
+                  <MoneyInput
+                    value={line.debit != null ? String(line.debit) : null}
+                    onChange={(v) => setNewLines((prev) => prev.map((l, j) => j === i ? { ...l, debit: v ? parseFloat(v.replace(/,/g, '')) : undefined } : l))}
+                    size="sm"
+                  />
+                  <MoneyInput
+                    value={line.credit != null ? String(line.credit) : null}
+                    onChange={(v) => setNewLines((prev) => prev.map((l, j) => j === i ? { ...l, credit: v ? parseFloat(v.replace(/,/g, '')) : undefined } : l))}
+                    size="sm"
+                  />
+                </div>
+              ))}
+              <button
+                type="button"
+                className="text-xs text-accent hover:underline"
+                onClick={() => setNewLines((prev) => [...prev, { accountRef: '', debit: undefined, credit: undefined }])}
+              >
+                + Add Line
+              </button>
             </div>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-text-secondary mb-1">Default Memo</label>
-            <input type="text" placeholder="Pre-fills when template is applied" className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm" />
           </div>
         </div>
       </SlideOverPanel>

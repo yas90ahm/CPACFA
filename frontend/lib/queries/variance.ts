@@ -14,6 +14,7 @@ function toVarianceRecord(r: Record<string, unknown>): VarianceRecord {
 
   return {
     id: (r.id ?? r.varianceId) as string,
+    fsLineId: (r.fsLineId ?? r.fs_line_id ?? '') as string,
     lineItemName: (r.lineItemName ?? r.name ?? r.fsLineId) as string,
     statementType: (r.statementType ?? r.statement ?? 'income_statement') as string,
     priorAmount: String(r.priorAmount ?? r.prior ?? '0'),
@@ -27,6 +28,7 @@ function toVarianceRecord(r: Record<string, unknown>): VarianceRecord {
     approvedBy: (r.approvedBy ?? r.reviewedBy) as string | null,
     approvedAt: (r.approvedAt ?? r.reviewedAt) as string | null,
     aiDraftExplanation: (r.aiDraftExplanation ?? r.aiDraft) as string | null,
+    priorPeriodId: (r.priorPeriodId ?? r.prior_period_id ?? null) as string | null,
   };
 }
 

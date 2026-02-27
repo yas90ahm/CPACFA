@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
-import { useCloseSession, useCloseReadiness } from '@/lib/queries/close-session';
+import { useCloseSession, useCloseReadiness, useAdvanceSession, useCertifySession, useLockSession, useReopenSession } from '@/lib/queries/close-session';
 import { useCertification } from '@/lib/queries/certification';
 import { useAuth } from '@/lib/auth';
 import { useStatements } from '@/lib/queries/statements';
@@ -128,7 +128,11 @@ export default function ReviewPage() {
     };
   }, [session, reconciliations, variances, journalEntries.length, manifestData?.totalFiles, participants]);
 
-  const [localState, setLocalState] = useState<CloseState | null>(null);
+  const advanceMutation = useAdvanceSession(sessionId);
+  const certifyMutation = useCertifySession(sessionId);
+  const lockMutation = useLockSession(sessionId);
+  const reopenMutation = useReopenSession(sessionId);
+
   const [showSubmitDialog, setShowSubmitDialog] = useState(false);
   const [showCertifyDialog, setShowCertifyDialog] = useState(false);
   const [showRejectDialog, setShowRejectDialog] = useState(false);
@@ -138,9 +142,10 @@ export default function ReviewPage() {
   const [reopenInput, setReopenInput] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [reopenReason, setReopenReason] = useState('');
-  const [certifyStep, setCertifyStep] = useState<'input' | 'progress' | 'complete'>('input');
+  const [certifyStep, setCertifyStep] = useState<'input' | 'progress' | 'complete' | 'error'>('input');
+  const [mutationError, setMutationError] = useState<string | null>(null);
 
-  const currentState = localState || session?.state || 'IN_PROGRESS';
+  const currentState = session?.state || 'IN_PROGRESS';
   const isReviewer = (userRole as string) === 'reviewer' || (userRole as string) === 'approver' || (userRole as string) === 'admin';
   const isPreparer = !isReviewer;
   const gatesWithTies: ReadinessGate[] = readiness?.gates ? [...readiness.gates] : [];
@@ -209,44 +214,76 @@ export default function ReviewPage() {
 
   const primaryAction = getPrimaryAction();
 
-  // State transition handlers
+  // State transition handlers — all wired to real API calls
   const handleSubmit = () => {
-    setLocalState('UNDER_REVIEW');
-    setShowSubmitDialog(false);
+    setMutationError(null);
+    advanceMutation.mutate({ target_state: 'UNDER_REVIEW' }, {
+      onSuccess: () => setShowSubmitDialog(false),
+      onError: (err) => {
+        setMutationError(err instanceof Error ? err.message : 'Failed to submit for review');
+        setShowSubmitDialog(false);
+      },
+    });
   };
 
   const handleCertify = () => {
     if (certifyInput !== 'CERTIFY') return;
+    setMutationError(null);
     setCertifyStep('progress');
-    setTimeout(() => {
-      setCertifyStep('complete');
-      setTimeout(() => {
-        setLocalState('CERTIFIED');
-        setShowCertifyDialog(false);
-        setCertifyInput('');
-        setCertifyStep('input');
-      }, 1500);
-    }, 2000);
+    certifyMutation.mutate({ confirmation: 'CERTIFY' }, {
+      onSuccess: () => {
+        setCertifyStep('complete');
+        setTimeout(() => {
+          setShowCertifyDialog(false);
+          setCertifyInput('');
+          setCertifyStep('input');
+        }, 1500);
+      },
+      onError: (err) => {
+        setCertifyStep('error');
+        setMutationError(err instanceof Error ? err.message : 'Certification failed');
+      },
+    });
   };
 
   const handleReject = () => {
-    if (!rejectReason.trim()) return;
-    setLocalState('IN_PROGRESS');
-    setShowRejectDialog(false);
-    setRejectReason('');
+    if (rejectReason.trim().length < 10) return;
+    setMutationError(null);
+    advanceMutation.mutate({ target_state: 'IN_PROGRESS', reason: rejectReason.trim() }, {
+      onSuccess: () => {
+        setShowRejectDialog(false);
+        setRejectReason('');
+      },
+      onError: (err) => {
+        setMutationError(err instanceof Error ? err.message : 'Failed to reject');
+      },
+    });
   };
 
   const handleLock = () => {
-    setLocalState('LOCKED');
-    setShowLockDialog(false);
+    setMutationError(null);
+    lockMutation.mutate(undefined, {
+      onSuccess: () => setShowLockDialog(false),
+      onError: (err) => {
+        setMutationError(err instanceof Error ? err.message : 'Failed to lock period');
+        setShowLockDialog(false);
+      },
+    });
   };
 
   const handleReopen = () => {
-    if (reopenInput !== 'REOPEN' || !reopenReason.trim()) return;
-    setLocalState('IN_PROGRESS');
-    setShowReopenDialog(false);
-    setReopenInput('');
-    setReopenReason('');
+    if (reopenInput !== 'REOPEN' || reopenReason.trim().length < 10) return;
+    setMutationError(null);
+    reopenMutation.mutate({ reason: reopenReason.trim() }, {
+      onSuccess: () => {
+        setShowReopenDialog(false);
+        setReopenInput('');
+        setReopenReason('');
+      },
+      onError: (err) => {
+        setMutationError(err instanceof Error ? err.message : 'Failed to reopen period');
+      },
+    });
   };
 
   return (
@@ -275,6 +312,17 @@ export default function ReviewPage() {
           )}
         </div>
       </div>
+
+      {/* Error display */}
+      {mutationError && (
+        <div className="bg-status-red-dim border border-status-red rounded-card p-4 flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 text-status-red shrink-0" />
+          <div className="flex-1 text-sm text-status-red">{mutationError}</div>
+          <button type="button" onClick={() => setMutationError(null)} className="text-status-red hover:opacity-70">
+            <XCircle className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Read-only banner for preparer in UNDER_REVIEW */}
       {currentState === 'UNDER_REVIEW' && isPreparer && (
@@ -503,6 +551,22 @@ export default function ReviewPage() {
                 <p className="text-status-green font-medium">Period certified successfully</p>
               </div>
             )}
+            {certifyStep === 'error' && (
+              <div className="py-6">
+                <XCircle className="w-12 h-12 text-status-red mx-auto mb-4" />
+                <p className="text-status-red font-medium text-center mb-2">Certification failed</p>
+                <p className="text-sm text-text-secondary text-center">{mutationError}</p>
+                <div className="flex justify-center mt-4">
+                  <button
+                    type="button"
+                    onClick={() => { setShowCertifyDialog(false); setCertifyInput(''); setCertifyStep('input'); setMutationError(null); }}
+                    className="px-4 py-2 rounded-input border border-border text-sm"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -546,15 +610,15 @@ export default function ReviewPage() {
               <button
                 type="button"
                 onClick={handleReject}
-                disabled={!rejectReason.trim()}
+                disabled={rejectReason.trim().length < 10 || advanceMutation.isPending}
                 className={cn(
                   'px-4 py-2 rounded-input text-sm font-medium',
-                  rejectReason.trim()
+                  rejectReason.trim().length >= 10
                     ? 'bg-status-red text-white hover:opacity-90'
                     : 'bg-surface-alt text-text-muted cursor-not-allowed'
                 )}
               >
-                Send Back
+                {advanceMutation.isPending ? 'Sending...' : 'Send Back'}
               </button>
             </div>
           </div>
@@ -621,7 +685,7 @@ export default function ReviewPage() {
               <button
                 type="button"
                 onClick={handleReopen}
-                disabled={reopenInput !== 'REOPEN' || !reopenReason.trim()}
+                disabled={reopenInput !== 'REOPEN' || reopenReason.trim().length < 10 || reopenMutation.isPending}
                 className={cn(
                   'px-4 py-2 rounded-input text-sm font-medium',
                   reopenInput === 'REOPEN' && reopenReason.trim()

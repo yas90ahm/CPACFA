@@ -69,8 +69,30 @@ export default function AdjustmentsPage() {
     },
   });
 
-  const [localTemplateSkips, setLocalTemplateSkips] = useState<Record<string, { reason: string }>>({});
-  const [localAppliedTemplates, setLocalAppliedTemplates] = useState<Record<string, { resultingJeId: string }>>({});
+  const applyTemplateMutation = useMutation({
+    mutationFn: (params: { applicationId: string; closeSessionId: string }) =>
+      apiFetch<{ jeId: string }>('/api/close/templates/apply', {
+        method: 'POST',
+        body: { applicationId: params.applicationId, closeSessionId: params.closeSessionId, createdBy: displayUser(user) },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['templates'] });
+      queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+      queryClient.invalidateQueries({ queryKey: ['readiness'] });
+    },
+  });
+
+  const skipTemplateMutation = useMutation({
+    mutationFn: (params: { applicationId: string; closeSessionId: string; reason: string }) =>
+      apiFetch('/api/close/templates/skip', {
+        method: 'POST',
+        body: params,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['templates'] });
+      queryClient.invalidateQueries({ queryKey: ['readiness'] });
+    },
+  });
   const [expandedJeId, setExpandedJeId] = useState<string | null>(null);
   const [slideOverOpen, setSlideOverOpen] = useState(false);
   const [slideOverMode, setSlideOverMode] = useState<'create' | 'edit' | 'view'>('create');
@@ -82,15 +104,7 @@ export default function AdjustmentsPage() {
   const [statusFilter, setStatusFilter] = useState<JournalEntryStatus | 'all'>('all');
   const [search, setSearch] = useState('');
 
-  const templates = useMemo(() => {
-    return templatesFromQuery.map((t) => {
-      const skip = localTemplateSkips[t.id];
-      if (skip) return { ...t, periodStatus: 'skipped' as const, skipReason: skip.reason, appliedOrSkippedBy: 'You', appliedOrSkippedAt: new Date().toISOString() };
-      const applied = localAppliedTemplates[t.id];
-      if (applied) return { ...t, periodStatus: 'applied' as const, resultingJeId: applied.resultingJeId, appliedOrSkippedBy: 'You', appliedOrSkippedAt: new Date().toISOString() };
-      return t;
-    });
-  }, [templatesFromQuery, localTemplateSkips, localAppliedTemplates]);
+  const templates = templatesFromQuery;
 
   const nextJeNumber = useMemo(() => {
     const max = entriesFromQuery.length ? Math.max(...entriesFromQuery.map((e) => e.jeNumber)) : 1045;
@@ -146,64 +160,43 @@ export default function AdjustmentsPage() {
 
   const handleApplyTemplate = useCallback(
     (template: AJETemplate) => {
-      createDraftMutation.mutate(
+      applyTemplateMutation.mutate(
+        { applicationId: template.id, closeSessionId: sessionId },
         {
-          closeSessionId: sessionId,
-          memo: template.name,
-          source: 'template',
-          lines: [
-            { accountRef: template.debitAccountCode, debit: template.amount, credit: 0 },
-            { accountRef: template.creditAccountCode, debit: 0, credit: template.amount },
-          ],
-        },
-        {
-          onSuccess: (je) => {
-            setLocalAppliedTemplates((prev) => ({ ...prev, [template.id]: { resultingJeId: je.id } }));
+          onSuccess: (result) => {
             setTab('entries');
-            setExpandedJeId(je.id);
+            setExpandedJeId(result.jeId);
             setSlideOverOpen(false);
           },
         }
       );
     },
-    [sessionId, createDraftMutation, setTab]
+    [sessionId, applyTemplateMutation, setTab]
   );
 
   const handleSkipTemplate = useCallback((templateId: string, reason: string) => {
-    setLocalTemplateSkips((prev) => ({ ...prev, [templateId]: { reason } }));
-  }, []);
+    skipTemplateMutation.mutate({ applicationId: templateId, closeSessionId: sessionId, reason });
+  }, [skipTemplateMutation, sessionId]);
 
-  const handleUndoSkip = useCallback((templateId: string) => {
-    setLocalTemplateSkips((prev) => {
-      const next = { ...prev };
-      delete next[templateId];
-      return next;
-    });
-  }, []);
+  const handleUndoSkip = useCallback((_templateId: string) => {
+    // Backend does not support undo skip — re-fetch to get latest status
+    queryClient.invalidateQueries({ queryKey: ['templates'] });
+  }, [queryClient]);
 
   const handleBulkApply = useCallback(async () => {
     const pending = templates.filter((t) => t.periodStatus === 'pending');
-    const next = { ...localAppliedTemplates };
+    let firstJeId: string | null = null;
     for (const t of pending) {
       try {
-        const je = await createDraftMutation.mutateAsync({
-          closeSessionId: sessionId,
-          memo: t.name,
-          source: 'template',
-          lines: [
-            { accountRef: t.debitAccountCode, debit: t.amount, credit: 0 },
-            { accountRef: t.creditAccountCode, debit: 0, credit: t.amount },
-          ],
-        });
-        next[t.id] = { resultingJeId: (je as { id: string }).id };
-      } catch (_) {
-        // skip on error
+        const result = await applyTemplateMutation.mutateAsync({ applicationId: t.id, closeSessionId: sessionId });
+        if (!firstJeId) firstJeId = result.jeId;
+      } catch {
+        // skip on error, continue with remaining templates
       }
     }
-    setLocalAppliedTemplates(next);
     setTab('entries');
-    if (pending.length) setExpandedJeId((next[pending[0].id] as { resultingJeId: string })?.resultingJeId ?? null);
-  }, [templates, sessionId, createDraftMutation, setTab, localAppliedTemplates]);
+    if (firstJeId) setExpandedJeId(firstJeId);
+  }, [templates, sessionId, applyTemplateMutation, setTab]);
 
   const openCreate = useCallback(() => {
     setSlideOverMode('create');

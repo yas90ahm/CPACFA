@@ -4,6 +4,8 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import type { AJETemplate } from '@/lib/types/journal-entry';
 
+const STALE_TIME = 30_000;
+
 interface TemplateApp {
   applicationId?: string;
   id?: string;
@@ -60,6 +62,7 @@ export function useAjeTemplates(sessionId: string | null) {
       return arr.map((a, i) => toAjeTemplate(a, sessionId, i));
     },
     enabled: !!sessionId,
+    staleTime: STALE_TIME,
   });
 }
 
@@ -112,6 +115,7 @@ export function useJournalEntries(sessionId: string | null, status?: string) {
       });
     },
     enabled: !!sessionId,
+    staleTime: STALE_TIME,
   });
 }
 

@@ -142,11 +142,58 @@ export default function ReconDetailPage() {
   const [addItemAmt, setAddItemAmt] = useState<string | null>(null);
   const [addItemType, setAddItemType] = useState<ReconcilingItemType>('Outstanding Check');
   const [addItemDate, setAddItemDate] = useState('');
-  const [localItems, setLocalItems] = useState<ReconcilingItem[] | null>(null);
   const [localEvidence, setLocalEvidence] = useState<EvidenceFile[]>([]);
   const [editingSupporting, setEditingSupporting] = useState(false);
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
+  const [savingSupporting, setSavingSupporting] = useState(false);
+
+  /* ── Supporting Balance Mutation ── */
+  const supportingBalanceMutation = useMutation({
+    mutationFn: (amount: string) =>
+      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/supporting-balance`, {
+        method: 'POST',
+        body: { amount },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reconciliation', sessionId, reconId] });
+      queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+      setSupportingBalanceLocal(null);
+      setEditingSupporting(false);
+      setSavingSupporting(false);
+    },
+    onError: () => setSavingSupporting(false),
+  });
+
+  /* ── Add Reconciling Item Mutation ── */
+  const addItemMutation = useMutation({
+    mutationFn: (params: { description: string; amount: string; item_type: string }) =>
+      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/items`, {
+        method: 'POST',
+        body: params,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reconciliation', sessionId, reconId] });
+      queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+      setAddItemDesc('');
+      setAddItemAmt(null);
+      setAddItemType('Outstanding Check');
+      setAddItemDate('');
+      setShowAddItem(false);
+    },
+  });
+
+  /* ── Delete Reconciling Item Mutation ── */
+  const deleteItemMutation = useMutation({
+    mutationFn: (itemId: string) =>
+      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/items/${itemId}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reconciliation', sessionId, reconId] });
+      queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+    },
+  });
 
   const evidenceFromApi: EvidenceFile[] = useMemo(
     () =>
@@ -163,7 +210,7 @@ export default function ReconDetailPage() {
     [evidenceData]
   );
   const evidence = [...evidenceFromApi, ...localEvidence];
-  const items = localItems ?? baseItems;
+  const items = baseItems;
   const activity: Array<{ id: string; user: string; description: string; timestamp: string }> = [];
 
   const supportingNum = useMemo(() => {
@@ -202,35 +249,36 @@ export default function ReconDetailPage() {
   }
 
   const handleSaveSupporting = useCallback(() => {
-    if (supportingBalanceLocal != null && supportingBalanceLocal !== '') {
-      setEditingSupporting(false);
+    if (supportingBalanceLocal != null && supportingBalanceLocal.trim() !== '') {
+      setSavingSupporting(true);
+      supportingBalanceMutation.mutate(supportingBalanceLocal.trim());
     }
-  }, [supportingBalanceLocal]);
+  }, [supportingBalanceLocal, supportingBalanceMutation]);
+
+  const FRONT_TO_BACKEND_TYPE: Record<ReconcilingItemType, string> = {
+    'Outstanding Check': 'outstanding_check',
+    'Deposit in Transit': 'deposit_in_transit',
+    'Bank Fee': 'bank_fee',
+    'Timing Difference': 'timing_difference',
+    'Error Correction': 'error_correction',
+    'Other': 'other',
+  };
 
   const handleAddItem = useCallback(() => {
-    const amt = addItemAmt ? parseFloat(addItemAmt.replace(/,/g, '')) : 0;
+    const amt = addItemAmt ? addItemAmt.replace(/,/g, '') : '0';
     if (!addItemDesc.trim()) return;
-    const newItem: ReconcilingItem = {
-      id: `ri-local-${Date.now()}`,
-      reconId,
+    addItemMutation.mutate({
       description: addItemDesc.trim(),
       amount: amt,
-      type: addItemType,
-      date: addItemDate || null,
-    };
-    setLocalItems((prev) => [...(prev ?? baseItems), newItem]);
-    setAddItemDesc('');
-    setAddItemAmt(null);
-    setAddItemType('Outstanding Check');
-    setAddItemDate('');
-    setShowAddItem(false);
-  }, [reconId, baseItems, addItemDesc, addItemAmt, addItemType, addItemDate]);
+      item_type: FRONT_TO_BACKEND_TYPE[addItemType] ?? 'other',
+    });
+  }, [addItemDesc, addItemAmt, addItemType, addItemMutation]);
 
   const handleDeleteItem = useCallback(
     (id: string) => {
-      setLocalItems((prev) => (prev ?? baseItems).filter((i) => i.id !== id));
+      deleteItemMutation.mutate(id);
     },
-    [baseItems]
+    [deleteItemMutation]
   );
 
   const handleUpload = useCallback(
@@ -245,7 +293,6 @@ export default function ReconDetailPage() {
     if (id.startsWith('ev-local-')) {
       setLocalEvidence((prev) => prev.filter((f) => f.id !== id));
     }
-    // Base evidence is read-only for delete in mock
   }, []);
 
   const handleMarkComplete = useCallback(() => {
@@ -420,10 +467,11 @@ export default function ReconDetailPage() {
                     <div className="text-xs text-text-muted mt-1">from {recon.sourceDocumentType}</div>
                     <button
                       type="button"
-                      className="mt-2 text-xs text-accent hover:underline"
+                      className="mt-2 text-xs text-accent hover:underline disabled:opacity-50"
                       onClick={handleSaveSupporting}
+                      disabled={savingSupporting || !supportingBalanceLocal?.trim()}
                     >
-                      Save
+                      {savingSupporting ? 'Saving...' : 'Save'}
                     </button>
                   </div>
                 ) : (
@@ -567,8 +615,13 @@ export default function ReconDetailPage() {
                       className="w-full px-3 py-2 rounded-input border border-border bg-input text-sm"
                     />
                     <div className="flex gap-2">
-                      <button type="button" className="px-4 py-2 rounded-input bg-accent text-white text-sm" onClick={handleAddItem}>
-                        Save
+                      <button
+                        type="button"
+                        className="px-4 py-2 rounded-input bg-accent text-white text-sm disabled:opacity-50"
+                        onClick={handleAddItem}
+                        disabled={addItemMutation.isPending || !addItemDesc.trim()}
+                      >
+                        {addItemMutation.isPending ? 'Saving...' : 'Save'}
                       </button>
                       <button type="button" className="px-4 py-2 rounded-input border border-border text-sm" onClick={() => setShowAddItem(false)}>
                         Cancel

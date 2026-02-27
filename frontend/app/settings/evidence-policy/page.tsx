@@ -22,7 +22,7 @@ export default function EvidencePolicyPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (payload: { enforcementMode: 'off' | 'warn_only' | 'hard_block'; materialityThreshold?: string }) =>
+    mutationFn: (payload: { enforcementMode: 'off' | 'warn_only' | 'hard_block'; materialityThreshold?: string; maxFileSizeMB?: number; sha256Enabled?: boolean }) =>
       apiFetch('/api/close/evidence-policy', { method: 'PUT', body: payload }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['evidence-policy'] }),
   });
@@ -46,6 +46,8 @@ export default function EvidencePolicyPage() {
     updateMutation.mutate({
       enforcementMode: mode,
       materialityThreshold: jeThreshold || undefined,
+      maxFileSizeMB: parseInt(maxFileSizeMB, 10) || 10,
+      sha256Enabled,
     });
   };
 

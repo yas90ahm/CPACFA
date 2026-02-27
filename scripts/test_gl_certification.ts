@@ -2,14 +2,15 @@
  * Integration test for GL → TB → Certification flow
  *
  * Tests:
- * 1. Login (or use API_TOKEN)
- * 2. COA upload
- * 3. GL upload
- * 4. GL → TB derivation
- * 5. Create/ensure close session
- * 6. Initialize checklist and complete items
- * 7. Advance to locked
- * 8. Certify
+ * 0. Login (or use API_TOKEN)
+ * 1. COA upload
+ * 2. GL upload
+ * 3. GL → TB derivation
+ * 4. Create/ensure close session
+ * 5. Initialize checklist and complete items
+ * 6. Advance through state machine (open → in_progress → under_review)
+ * 7. Certify (under_review → certified)
+ * 8. Lock (certified → locked, terminal state)
  * 9. Export (audit binder with GL)
  * 10. Verification
  *
@@ -399,46 +400,226 @@ async function testInitializeChecklist(): Promise<boolean> {
   }
 }
 
-async function testAdvanceToLocked(): Promise<boolean> {
-  console.log('\n=== STEP 6: Advance to Locked ===');
-  try {
-    const res = await makeRequest(
-      'POST',
-      `/api/close/sessions/${closeSessionId}/advance`
-    );
-    const d = res.data as {
-      success?: boolean;
-      statusAfter?: string;
-      actionTaken?: string;
-      blockers?: unknown[];
-    };
-    if (res.status === 200 && (d.success !== false) && (d.statusAfter === 'locked' || d.statusAfter === 'certified')) {
-      results.push({
-        step: 'Advance to Locked',
-        status: 'PASS',
-        message: `Status: ${d.statusAfter}, action: ${d.actionTaken ?? 'ok'}`,
-        data: d,
+async function resolveAllIssues(): Promise<boolean> {
+  const listRes = await makeRequest('GET', `/api/close/issues?closeSessionId=${closeSessionId}`);
+  const rawData = listRes.data as Record<string, unknown>;
+  const issuesList = (rawData.issues ?? rawData.data ?? (Array.isArray(rawData) ? rawData : [])) as Array<Record<string, unknown>>;
+  const issues = issuesList.map(i => ({
+    id: (i.id ?? i.issueId ?? i.issue_id) as string,
+    status: (i.status ?? '') as string,
+    severity: (i.severity ?? '') as string,
+  }));
+  // Terminal statuses are 'verified' and 'waived' — only those are excluded from blocking check
+  const nonTerminal = issues.filter(i => i.status !== 'verified' && i.status !== 'waived');
+  if (nonTerminal.length === 0) {
+    console.log('   No open issues');
+    return true;
+  }
+  let count = 0;
+  for (const issue of nonTerminal) {
+    // Step 1: resolve if not already resolved (use valid ResolutionType enum value)
+    if (issue.status !== 'resolved') {
+      const resolveRes = await makeRequest('POST', `/api/close/issues/${issue.id}/resolve`, {
+        resolutionType: 'manual_correction',
+        resolutionDescription: 'Resolved for integration test',
       });
-      console.log(`✅ PASS: Advanced to ${d.statusAfter}`);
-      return true;
+      if (resolveRes.status !== 200) {
+        console.log(`   ⚠️  Failed to resolve issue ${issue.id} (${issue.severity}/${issue.status}): ${resolveRes.status} ${JSON.stringify(resolveRes.data).slice(0, 200)}`);
+        // Fallback: waive (only works for warning/info severity, not critical/blocking)
+        if (issue.severity === 'warning' || issue.severity === 'info') {
+          const waiveRes = await makeRequest('POST', `/api/close/issues/${issue.id}/waive`, {
+            justification: 'Waived for integration test — not material',
+          });
+          if (waiveRes.status === 200) count++;
+        }
+        continue;
+      }
     }
-    if (res.status === 422 && Array.isArray(d.blockers) && d.blockers.length > 0) {
-      results.push({
-        step: 'Advance to Locked',
-        status: 'FAIL',
-        message: 'Blockers present',
-        data: { blockers: d.blockers },
-      });
-      console.log('❌ FAIL: Blockers:', JSON.stringify(d.blockers, null, 2));
+    // Step 2: verify (makes it terminal; issue must be in 'resolved' status)
+    const verifyRes = await makeRequest('POST', `/api/close/issues/${issue.id}/verify`, { method: 'manual_review' });
+    if (verifyRes.status === 200) {
+      count++;
+    } else {
+      console.log(`   ⚠️  Failed to verify issue ${issue.id}: ${verifyRes.status} ${JSON.stringify(verifyRes.data).slice(0, 200)}`);
+    }
+  }
+  console.log(`   Resolved ${count}/${nonTerminal.length} issue(s) to terminal state`);
+  return true;
+}
+
+async function completeAllReconciliations(): Promise<boolean> {
+  // List reconciliations
+  const listRes = await makeRequest('GET', `/api/close/sessions/${closeSessionId}/reconciliations`);
+  const recons = (listRes.data as { reconciliations?: Array<{ reconId: string; accountCode: string; glBalance?: number | string; status?: string }> })?.reconciliations ?? [];
+  if (recons.length === 0) {
+    console.log('   No reconciliations to complete');
+    return true;
+  }
+
+  const dummyPdf = new Blob(['%PDF-1.0 dummy evidence for integration test'], { type: 'application/pdf' });
+  for (const recon of recons) {
+    if (recon.status === 'completed' || recon.status === 'approved') continue;
+
+    // Set supporting balance = GL balance (makes variance zero)
+    const balance = recon.glBalance ?? 0;
+    await makeRequest(
+      'POST',
+      `/api/close/sessions/${closeSessionId}/reconciliations/${recon.reconId}/supporting-balance`,
+      { amount: balance, source: 'integration-test' }
+    );
+
+    // Upload evidence (multipart)
+    const form = new FormData();
+    form.append('file', dummyPdf, `evidence-${recon.accountCode}.pdf`);
+    form.append('description', 'Integration test evidence');
+    const opts: RequestInit = {
+      method: 'POST',
+      headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+      body: form,
+    };
+    await fetch(`${BASE_URL}/api/close/sessions/${closeSessionId}/reconciliations/${recon.reconId}/evidence`, opts);
+
+    // Complete
+    const completeRes = await makeRequest(
+      'POST',
+      `/api/close/sessions/${closeSessionId}/reconciliations/${recon.reconId}/complete`,
+      { preparedBy: 'integration-test' }
+    );
+    if (completeRes.status !== 200) {
+      console.log(`   ⚠️  Could not complete recon ${recon.accountCode}: ${completeRes.status} ${JSON.stringify(completeRes.data).slice(0, 120)}`);
+    }
+  }
+  console.log(`   Completed ${recons.length} reconciliation(s)`);
+  return true;
+}
+
+async function mapAllAccounts(): Promise<boolean> {
+  // Get taxonomy lines
+  const taxRes = await makeRequest('GET', '/api/coa-mapping/taxonomy');
+  const taxonomy = taxRes.data as { lines?: Array<{ fsLineId: string; statement: string; label: string }> };
+  const lines = taxonomy?.lines ?? [];
+  if (lines.length === 0) {
+    console.log('   ⚠️  No taxonomy lines available');
+    return true;
+  }
+
+  // Get TB accounts (API may use snake_case or camelCase)
+  const tbRes = await makeRequest('GET', `/api/gl/trial-balance?period=${TEST_PERIOD}`);
+  const tb = tbRes.data as { derivedTB?: { entries?: Array<Record<string, unknown>> } };
+  const entries = tb?.derivedTB?.entries ?? [];
+  if (entries.length === 0) {
+    console.log('   No TB entries to map');
+    return true;
+  }
+
+  // Find a default line per statement type
+  const assetLine = lines.find(l => l.statement === 'balance_sheet' && /asset/i.test(l.label))?.fsLineId ?? lines[0]?.fsLineId;
+  const liabLine = lines.find(l => l.statement === 'balance_sheet' && /liab/i.test(l.label))?.fsLineId;
+  const eqLine = lines.find(l => l.statement === 'balance_sheet' && /equity/i.test(l.label))?.fsLineId;
+  const revLine = lines.find(l => l.statement === 'income_statement' && /revenue/i.test(l.label))?.fsLineId;
+  const expLine = lines.find(l => l.statement === 'income_statement' && /expense/i.test(l.label))?.fsLineId;
+  const fallback = assetLine ?? lines[0]?.fsLineId ?? 'bs_assets_0';
+
+  function pickLine(name: string): string {
+    const lower = (name ?? '').toLowerCase();
+    if (/cash|bank|receivable|inventory|prepaid|equipment|property|asset/.test(lower)) return assetLine ?? fallback;
+    if (/payable|accrued|debt|loan|liability/.test(lower)) return liabLine ?? fallback;
+    if (/equity|capital|stock|retained/.test(lower)) return eqLine ?? fallback;
+    if (/revenue|sales|income/.test(lower)) return revLine ?? fallback;
+    if (/expense|cost|salary|rent|depreciation/.test(lower)) return expLine ?? fallback;
+    return fallback;
+  }
+
+  const mappings = entries
+    .map(e => {
+      const code = (e.accountCode ?? e.account_code ?? '') as string;
+      const name = (e.accountName ?? e.account_name ?? '') as string;
+      return { accountCode: code, fsLineId: pickLine(name), name };
+    })
+    .filter(m => m.accountCode);
+
+  if (mappings.length > 0) {
+    const mapRes = await makeRequest('POST', '/api/coa-mapping/map', {
+      entityId: TEST_ENTITY_ID,
+      mappings: mappings.map(m => ({ accountCode: m.accountCode, fsLineId: m.fsLineId })),
+    });
+    console.log(`   Mapped ${mappings.length} account(s): ${mapRes.status} ${JSON.stringify(mapRes.data).slice(0, 120)}`);
+  } else {
+    console.log(`   ⚠️  No accounts with codes found in TB (${entries.length} entries). Keys: ${entries[0] ? Object.keys(entries[0]).join(', ') : 'none'}`);
+  }
+  return true;
+}
+
+async function testAdvanceToLocked(): Promise<boolean> {
+  console.log('\n=== STEP 6: Advance through state machine (open → in_progress → under_review) ===');
+  try {
+    // The state machine requires stepping through: open → in_progress → under_review
+    // Then certify and lock are separate endpoints.
+
+    // Step 6a: open → in_progress
+    let res = await makeRequest('POST', `/api/close/sessions/${closeSessionId}/advance`);
+    let d = res.data as { statusAfter?: string; actionTaken?: string; blockers?: unknown[] };
+    console.log(`   6a advance: ${res.status} → ${d.statusAfter ?? '?'} (action: ${d.actionTaken ?? '?'})`);
+    if (res.status !== 200 || d.statusAfter !== 'in_progress') {
+      results.push({ step: 'Advance to Locked', status: 'FAIL', message: `Expected in_progress, got ${d.statusAfter}`, data: res.data });
+      console.log('❌ FAIL: Could not advance to in_progress');
       return false;
     }
+
+    // Step 6b: Generate statements (required for readiness gate)
+    res = await makeRequest('POST', `/api/close/sessions/${closeSessionId}/statement-packages/generate`, {});
+    const gen = res.data as { id?: string; error?: string };
+    console.log(`   6b generate statements: ${res.status} ${gen.id ? 'OK pkg=' + gen.id : JSON.stringify(gen).slice(0, 150)}`);
+
+    // Step 6c: Complete all reconciliations (readiness gate requires them)
+    console.log('   6c completing reconciliations...');
+    await completeAllReconciliations();
+
+    // Step 6d: Map all accounts to taxonomy lines (readiness gate requires mapping)
+    console.log('   6d mapping accounts...');
+    await mapAllAccounts();
+
+    // Step 6e: Re-generate statements after mapping (mapping can change line assignments)
+    res = await makeRequest('POST', `/api/close/sessions/${closeSessionId}/statement-packages/generate`, {});
+    const gen2 = res.data as { id?: string };
+    console.log(`   6e re-generate statements: ${res.status} ${gen2.id ? 'OK' : JSON.stringify(gen2).slice(0, 100)}`);
+
+    // Step 6f: Resolve all open issues, then attempt advance (loop up to 3 times
+    // because cascades can create new issues after resolution)
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      console.log(`   6f.${attempt} resolving issues...`);
+      await resolveAllIssues();
+
+      res = await makeRequest('POST', `/api/close/sessions/${closeSessionId}/advance`);
+      d = res.data as { statusAfter?: string; actionTaken?: string; blockers?: unknown[] };
+      console.log(`   6f.${attempt} advance: ${res.status} → ${d.statusAfter ?? '?'} (action: ${d.actionTaken ?? '?'})`);
+
+      if (res.status === 200 && d.statusAfter === 'under_review') break;
+
+      if (res.status === 422 && Array.isArray(d.blockers) && d.blockers.length > 0) {
+        const msgs = (d.blockers as Array<{ message?: string }>).map(b => b.message ?? '').join('; ');
+        console.log(`   ⚠️  Blockers: ${msgs.slice(0, 400)}`);
+        // If only issues remain, loop; otherwise break
+        if (!msgs.includes('issue(s) open')) break;
+      } else {
+        break;
+      }
+    }
+
+    if (res.status !== 200 || d.statusAfter !== 'under_review') {
+      results.push({ step: 'Advance to Locked', status: 'FAIL', message: `Expected under_review, got ${d.statusAfter}`, data: res.data });
+      console.log('❌ FAIL: Could not advance to under_review');
+      return false;
+    }
+
     results.push({
       step: 'Advance to Locked',
-      status: 'FAIL',
-      data: res.data,
+      status: 'PASS',
+      message: 'Advanced to under_review',
+      data: d,
     });
-    console.log('❌ FAIL:', res.status, res.data);
-    return false;
+    console.log('✅ PASS: Advanced to under_review');
+    return true;
   } catch (e: unknown) {
     const err = e as { response?: { data?: unknown }; message?: string };
     results.push({
@@ -452,7 +633,7 @@ async function testAdvanceToLocked(): Promise<boolean> {
 }
 
 async function testCertify(): Promise<boolean> {
-  console.log('\n=== STEP 7: Certify Session ===');
+  console.log('\n=== STEP 7: Certify Session (under_review → certified) ===');
   try {
     const res = await makeRequest(
       'POST',
@@ -462,6 +643,7 @@ async function testCertify(): Promise<boolean> {
     const d = res.data as {
       certifiedSnapshotId?: string;
       snapshotHash?: string;
+      snapshotHashVersion?: number;
       status?: string;
     };
     if (res.status === 200 && (d.certifiedSnapshotId || d.snapshotHash || d.status === 'certified')) {
@@ -498,8 +680,45 @@ async function testCertify(): Promise<boolean> {
   }
 }
 
+async function testLock(): Promise<boolean> {
+  console.log('\n=== STEP 8: Lock Session (certified → locked) ===');
+  try {
+    const res = await makeRequest(
+      'POST',
+      `/api/close/sessions/${closeSessionId}/lock`
+    );
+    const d = res.data as { status?: string; id?: string };
+    if (res.status === 200 && d.status === 'locked') {
+      results.push({
+        step: 'Lock',
+        status: 'PASS',
+        message: 'Session locked (terminal state)',
+        data: d,
+      });
+      console.log('✅ PASS: Locked');
+      return true;
+    }
+    results.push({
+      step: 'Lock',
+      status: 'FAIL',
+      data: res.data,
+    });
+    console.log('❌ FAIL:', res.status, res.data);
+    return false;
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: unknown }; message?: string };
+    results.push({
+      step: 'Lock',
+      status: 'FAIL',
+      error: err.response?.data ?? err.message,
+    });
+    console.log('❌ FAIL:', err.response?.data ?? err.message);
+    return false;
+  }
+}
+
 async function testAuditBinder(): Promise<boolean> {
-  console.log('\n=== STEP 8: Audit Binder (with GL) ===');
+  console.log('\n=== STEP 9: Audit Binder (with GL) ===');
   try {
     const res = await makeRequest(
       'GET',
@@ -541,7 +760,7 @@ async function testAuditBinder(): Promise<boolean> {
 }
 
 async function testVerification(): Promise<boolean> {
-  console.log('\n=== STEP 9: Verification ===');
+  console.log('\n=== STEP 10: Verification ===');
   try {
     // Get snapshot ID from session
     const sessRes = await makeRequest('GET', `/api/close/sessions/${closeSessionId}`);
@@ -665,13 +884,19 @@ async function runTests(): Promise<void> {
   }
 
   if (!(await testAdvanceToLocked())) {
-    console.log('\n⛔ Stopping: Advance to locked failed');
+    console.log('\n⛔ Stopping: Advance to under_review failed');
     printSummary();
     return;
   }
 
   if (!(await testCertify())) {
     console.log('\n⛔ Stopping: Certification failed');
+    printSummary();
+    return;
+  }
+
+  if (!(await testLock())) {
+    console.log('\n⛔ Stopping: Lock failed');
     printSummary();
     return;
   }

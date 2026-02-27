@@ -8,8 +8,11 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://sovereign:sovereign_dev@db:5432/sovereign_engine
+      SLM_SERVICE_URL: http://slm:8000
     depends_on:
       db:
+        condition: service_healthy
+      slm:
         condition: service_healthy
     restart: unless-stopped
     volumes:

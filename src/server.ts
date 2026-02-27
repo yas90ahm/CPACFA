@@ -58,6 +58,7 @@ import devDiagnosticsRouter from './routes/dev_diagnostics.js';
 import { runWorkerLoop } from './services/job_worker.js';
 import { send500 } from './lib/errorHandler.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
+import { runInBoundaryScope } from './lib/ai_boundary.js';
 
 assertNoDestructiveInStagingOrProduction();
 
@@ -79,6 +80,10 @@ app.use(cors(corsOptions));
 
 app.use(express.json({ limit: '1mb' }));
 app.use(requestIdMiddleware);
+
+// AI boundary scope: each request gets its own advisory-context counter
+// so concurrent requests don't interfere with each other.
+app.use((_req, _res, next) => { runInBoundaryScope(next); });
 
 // Health check (public)
 app.get('/health', (_req, res) => {

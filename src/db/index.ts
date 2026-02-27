@@ -280,6 +280,12 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 121, file: '121_money_column_precision.sql' },
   { version: 122, file: '122_gl_account_name.sql' },
   { version: 123, file: '123_fix_unexplained_variance_sign.sql' },
+  { version: 124, file: '124_coa_mapping_cash_flow_class.sql' },
+  { version: 125, file: '125_cf_taxonomy_lines.sql' },
+  { version: 126, file: '126_oci_discontinued_taxonomy.sql' },
+  { version: 127, file: '127_variance_explanation_source.sql' },
+  { version: 128, file: '128_audit_ledger_chain_enforcement.sql' },
+  { version: 129, file: '129_ai_classification_suggestions.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 

@@ -31,8 +31,10 @@ export function useCertification(sessionId: string | null) {
           })),
           verified: (raw.verified as boolean) ?? false,
         };
-      } catch {
-        return null;
+      } catch (err) {
+        // 404 is expected when session is not yet certified
+        if (err && typeof err === 'object' && 'status' in err && (err as { status: number }).status === 404) return null;
+        throw err;
       }
     },
     enabled: !!sessionId,

@@ -21,6 +21,27 @@ import {
  * and "Interest income" / "Fee income" as REVENUE.
  */
 const DEFAULT_KEYWORDS: [RegExp | string, AccountType][] = [
+  // --- Compound phrases first (most specific → least specific) ---
+  // Contra-asset accounts: "accumulated" or "allowance" patterns → ASSET
+  ['accumulated depreciation', 'ASSET'],
+  ['accumulated amortization', 'ASSET'],
+  ['allowance for', 'ASSET'],
+  // Deferred/unearned items
+  ['deferred tax asset', 'ASSET'],
+  ['deferred tax', 'LIABILITY'],
+  ['deferred revenue', 'LIABILITY'],
+  ['unearned revenue', 'LIABILITY'],
+  ['deferred rent', 'LIABILITY'],
+  // Expense phrases that contain "income" — must precede the bare "income" keyword
+  ['income tax expense', 'EXPENSE'],
+  ['income tax', 'EXPENSE'],
+  ['tax expense', 'EXPENSE'],
+  ['interest expense', 'EXPENSE'],
+  // Revenue phrases with "income" — must precede bare "income"
+  ['fee income', 'REVENUE'],
+  ['interest income', 'REVENUE'],
+  ['other income', 'REVENUE'],
+  // --- Single-word / short keywords ---
   ['cash', 'ASSET'],
   ['account receivable', 'ASSET'],
   ['receivable', 'ASSET'],
@@ -28,6 +49,8 @@ const DEFAULT_KEYWORDS: [RegExp | string, AccountType][] = [
   ['prepaid', 'ASSET'],
   ['property', 'ASSET'],
   ['equipment', 'ASSET'],
+  ['goodwill', 'ASSET'],
+  ['intangible', 'ASSET'],
   ['asset', 'ASSET'],
   ['account payable', 'LIABILITY'],
   ['payable', 'LIABILITY'],
@@ -41,8 +64,6 @@ const DEFAULT_KEYWORDS: [RegExp | string, AccountType][] = [
   ['common stock', 'EQUITY'],
   ['revenue', 'REVENUE'],
   ['sales', 'REVENUE'],
-  ['fee income', 'REVENUE'],
-  ['interest income', 'REVENUE'],
   ['income', 'REVENUE'],
   ['expense', 'EXPENSE'],
   ['cost of good', 'EXPENSE'],
@@ -51,8 +72,7 @@ const DEFAULT_KEYWORDS: [RegExp | string, AccountType][] = [
   ['wage', 'EXPENSE'],
   ['rent', 'EXPENSE'],
   ['depreciation', 'EXPENSE'],
-  ['interest expense', 'EXPENSE'],
-  ['tax expense', 'EXPENSE'],
+  ['amortization', 'EXPENSE'],
 ];
 
 function getCodificationRef(type: AccountType) {

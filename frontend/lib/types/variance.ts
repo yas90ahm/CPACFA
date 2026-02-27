@@ -2,6 +2,7 @@ export type VarianceExplanationStatus = 'not_required' | 'pending' | 'explained'
 
 export interface VarianceRecord {
   id: string;
+  fsLineId: string;
   lineItemName: string;
   statementType: string;
   priorAmount: string;
@@ -15,4 +16,5 @@ export interface VarianceRecord {
   approvedBy: string | null;
   approvedAt: string | null;
   aiDraftExplanation: string | null;
+  priorPeriodId: string | null;
 }

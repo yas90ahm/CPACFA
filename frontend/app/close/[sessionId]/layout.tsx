@@ -57,6 +57,7 @@ function CloseSessionInner({ children }: { children: React.ReactNode }) {
       />
       <StateMachineBanner
         currentState={state}
+        sessionId={sessionId}
         gatesRemaining={gatesRemaining}
         canAdvance={canAdvance}
         isReviewer={false}

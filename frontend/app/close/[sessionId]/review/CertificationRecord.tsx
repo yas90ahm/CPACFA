@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Check, Download, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { apiFetch } from '@/lib/api';
 import type { CertificationArtifact } from '@/lib/types/certification';
 
 export interface CertificationRecordProps {
@@ -15,14 +16,26 @@ export function CertificationRecord({ artifact, entityName, periodLabel }: Certi
   const [expandedHash, setExpandedHash] = useState(false);
   const [expandedKey, setExpandedKey] = useState(false);
   const [verifyResult, setVerifyResult] = useState<boolean | null>(null);
+  const [verifying, setVerifying] = useState(false);
 
   const formatDate = (iso: string) => {
     const d = new Date(iso);
     return d.toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit', timeZoneName: 'short' });
   };
 
-  const handleVerify = () => {
-    setTimeout(() => setVerifyResult(true), 500);
+  const handleVerify = async () => {
+    setVerifying(true);
+    try {
+      const res = await apiFetch<{ valid: boolean }>('/api/verification/certification/verify', {
+        method: 'POST',
+        body: { artifactId: artifact.id, sessionId: artifact.sessionId },
+      });
+      setVerifyResult(res.valid);
+    } catch {
+      setVerifyResult(false);
+    } finally {
+      setVerifying(false);
+    }
   };
 
   const handleDownload = () => {
@@ -111,9 +124,10 @@ export function CertificationRecord({ artifact, entityName, periodLabel }: Certi
         <button
           type="button"
           onClick={handleVerify}
-          className="px-4 py-2 rounded-input border border-border text-sm hover:bg-hover"
+          disabled={verifying}
+          className="px-4 py-2 rounded-input border border-border text-sm hover:bg-hover disabled:opacity-50"
         >
-          Verify Independently
+          {verifying ? 'Verifying...' : 'Verify Independently'}
         </button>
         <button
           type="button"
