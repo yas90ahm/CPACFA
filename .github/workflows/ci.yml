@@ -44,6 +44,23 @@ jobs:
           fi
           echo "No floating-point violations found."
 
+      - name: SoD bypass audit
+        run: |
+          echo "Checking for hardcoded ALLOW_SAME_USER_APPROVE bypass..."
+          VIOLATIONS=$(grep -rn 'ALLOW_SAME_USER_APPROVE' src/ --include="*.ts" \
+            | grep -v 'process\.env' \
+            | grep -v '\.test\.' \
+            | grep -v '/tests/' \
+            | grep -v '// ' \
+            | grep -v '\*' \
+            || true)
+          if [ -n "$VIOLATIONS" ]; then
+            echo "ERROR: ALLOW_SAME_USER_APPROVE referenced without process.env (possible hardcode):"
+            echo "$VIOLATIONS"
+            exit 1
+          fi
+          echo "No SoD bypass hardcodes found."
+
   test:
     runs-on: ubuntu-latest
     needs: [typecheck-and-build]

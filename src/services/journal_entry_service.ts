@@ -24,8 +24,17 @@ import { runJustifier, hashJustifierInputs } from '../ai/ai_orchestrator.js';
 import { JUSTIFIER_PROMPT_VERSION } from '../ai/prompts/justifier.prompt.js';
 import { executeCascade, CascadeTriggerType } from './cascade_engine.js';
 
-const ALLOW_SAME_USER_APPROVE =
-  process.env.ALLOW_SAME_USER_APPROVE === '1' || process.env.ALLOW_SAME_USER_APPROVE === 'true';
+/**
+ * Segregation of duties bypass — DEVELOPMENT ONLY.
+ * In production (NODE_ENV=production or MODE=prod), this always returns false
+ * regardless of the ALLOW_SAME_USER_APPROVE environment variable.
+ */
+function isSameUserApproveAllowed(): boolean {
+  if (process.env.NODE_ENV === 'production' || process.env.MODE === 'prod') {
+    return false;
+  }
+  return process.env.ALLOW_SAME_USER_APPROVE === '1' || process.env.ALLOW_SAME_USER_APPROVE === 'true';
+}
 
 export class JournalEntryError extends Error {
   constructor(
@@ -106,7 +115,7 @@ export async function proposeJE(pool: Pool, tenantId: string, id: string): Promi
   return updated!;
 }
 
-/** Approve a proposed JE (proposed → approved). Enforces segregation unless ALLOW_SAME_USER_APPROVE. */
+/** Approve a proposed JE (proposed → approved). Enforces segregation of duties. */
 export async function approveJE(
   pool: Pool,
   tenantId: string,
@@ -118,9 +127,9 @@ export async function approveJE(
   if (je.status !== 'proposed') {
     throw new JournalEntryError(`Only proposed JEs can be approved; current status: ${je.status}`, 'INVALID_STATUS');
   }
-  if (!ALLOW_SAME_USER_APPROVE && je.createdBy && je.createdBy === approvedBy) {
+  if (!isSameUserApproveAllowed() && je.createdBy && je.createdBy === approvedBy) {
     throw new JournalEntryError(
-      'Segregation of duties: approver cannot be the same as preparer (created_by). Set ALLOW_SAME_USER_APPROVE=1 for single-user override.',
+      'Segregation of duties: approver cannot be the same as preparer (created_by). SoD is enforced in production.',
       'SEGREGATION'
     );
   }
