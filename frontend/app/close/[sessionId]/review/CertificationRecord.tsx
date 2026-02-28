@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, Download, FileText } from 'lucide-react';
+import { Check, Download, FileText, FileDown, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import type { CertificationArtifact } from '@/lib/types/certification';
 
 export interface CertificationRecordProps {
@@ -13,10 +14,14 @@ export interface CertificationRecordProps {
 }
 
 export function CertificationRecord({ artifact, entityName, periodLabel }: CertificationRecordProps) {
+  const { getAuthToken } = useAuth();
   const [expandedHash, setExpandedHash] = useState(false);
   const [expandedKey, setExpandedKey] = useState(false);
   const [verifyResult, setVerifyResult] = useState<boolean | null>(null);
   const [verifying, setVerifying] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingJson, setExportingJson] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const formatDate = (iso: string) => {
     const d = new Date(iso);
@@ -47,6 +52,75 @@ export function CertificationRecord({ artifact, entityName, periodLabel }: Certi
     a.download = `certification-${artifact.sessionId}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleExportBinderPdf = async () => {
+    setExportingPdf(true);
+    setExportError(null);
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+      const token = getAuthToken();
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(
+        `${baseUrl}/api/audit/binder/export/pdf?closeSessionId=${artifact.sessionId}`,
+        { headers }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Export failed' }));
+        throw new Error((err as { error?: string }).error || 'PDF export failed');
+      }
+      const contentType = res.headers.get('content-type') ?? '';
+      if (!contentType.includes('application/pdf')) {
+        throw new Error('Server did not return a valid PDF');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Audit_Binder_${artifact.sessionId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : 'PDF export failed');
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
+  const handleExportBinderJson = async () => {
+    setExportingJson(true);
+    setExportError(null);
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+      const token = getAuthToken();
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(
+        `${baseUrl}/api/audit/binder?closeSessionId=${artifact.sessionId}`,
+        { headers }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Export failed' }));
+        throw new Error((err as { error?: string }).error || 'JSON export failed');
+      }
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Audit_Binder_${artifact.sessionId}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : 'JSON export failed');
+    } finally {
+      setExportingJson(false);
+    }
   };
 
   return (
@@ -164,6 +238,35 @@ export function CertificationRecord({ artifact, entityName, periodLabel }: Certi
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="border-t border-border-light pt-4">
+        <h3 className="text-sm font-medium text-text-secondary mb-3">Audit Binder Export</h3>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={handleExportBinderPdf}
+            disabled={exportingPdf}
+            className="px-4 py-2 rounded-input bg-accent text-white text-sm hover:bg-accent/90 disabled:opacity-50 flex items-center gap-2"
+          >
+            {exportingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+            {exportingPdf ? 'Exporting...' : 'Export PDF'}
+          </button>
+          <button
+            type="button"
+            onClick={handleExportBinderJson}
+            disabled={exportingJson}
+            className="px-4 py-2 rounded-input border border-border text-sm hover:bg-hover disabled:opacity-50 flex items-center gap-2"
+          >
+            {exportingJson ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+            {exportingJson ? 'Exporting...' : 'Export JSON'}
+          </button>
+        </div>
+        {exportError && (
+          <div className="mt-2 p-2 rounded-input bg-status-red-dim text-status-red text-sm">
+            {exportError}
+          </div>
+        )}
       </div>
     </div>
   );
