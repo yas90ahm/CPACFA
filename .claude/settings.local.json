@@ -34,7 +34,18 @@
       "Bash(echo EXIT_CODE=$?:*)",
       "Bash(cd /c/Users/yasir/CPACFA && npx tsc --noEmit 2>&1)",
       "Bash(echo BUILD CLEAN:*)",
-      "Bash(echo === $svc ===:*)"
+      "Bash(echo === $svc ===:*)",
+      "Bash(echo docker-compose.yml: VALID:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(npm run:*)",
+      "Bash(BASE_URL=http://localhost:3000 npx tsx:*)",
+      "Bash(do echo:*)",
+      "Bash(git:*)",
+      "Bash(UAT_API_URL=http://localhost:3000 npx tsx:*)",
+      "Bash(npx tsx:*)",
+      "Bash(mv:*)"
     ]
   }
 }
