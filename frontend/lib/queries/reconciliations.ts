@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
+import { toMoneyString } from '@/lib/money';
 import type { Reconciliation, ReconcilingItem, ReconcilingItemType } from '@/lib/types/reconciliation';
 
 const STALE_TIME = 30_000;
@@ -21,30 +22,25 @@ function toReconcilingItem(raw: Record<string, unknown>, reconId: string): Recon
     id: (raw.itemId ?? raw.id) as string,
     reconId,
     description: (raw.description ?? '') as string,
-    amount: parseFloat(String(raw.amount ?? 0)),
+    amount: toMoneyString(raw.amount),
     type: BACKEND_ITEM_TYPE_TO_FRONT[type] ?? 'Other',
     date: (raw.createdAt ?? raw.date) as string | null,
   };
 }
 
 function toReconciliation(raw: Record<string, unknown>, sessionId: string): Reconciliation {
-  const gl = parseFloat(String(raw.glBalance ?? 0));
-  const sup = raw.supportingBalance != null ? parseFloat(String(raw.supportingBalance)) : null;
-  const items = parseFloat(String(raw.reconcilingItemsTotal ?? 0));
-  // Use server-computed values (GENERATED ALWAYS columns) — never compute money in JS
-  const variance = raw.variance != null ? parseFloat(String(raw.variance)) : (sup != null ? gl - sup : 0);
-  const unexplained = raw.unexplainedVariance != null ? parseFloat(String(raw.unexplainedVariance)) : (sup != null ? variance - items : 0);
   return {
     id: (raw.reconId ?? raw.id) as string,
     sessionId,
     accountCode: (raw.accountCode as string) ?? '',
     accountName: (raw.accountName as string) ?? '',
-    glBalance: gl,
-    supportingBalance: sup,
-    variance,
-    reconcilingItemsTotal: items,
-    unexplainedVariance: unexplained,
-    tolerance: parseFloat(String(raw.toleranceAmount ?? raw.tolerance ?? 0)),
+    glBalance: toMoneyString(raw.glBalance),
+    supportingBalance: raw.supportingBalance != null ? toMoneyString(raw.supportingBalance) : null,
+    // Use server-computed values (GENERATED ALWAYS columns) — pass through as strings
+    variance: toMoneyString(raw.variance),
+    reconcilingItemsTotal: toMoneyString(raw.reconcilingItemsTotal),
+    unexplainedVariance: toMoneyString(raw.unexplainedVariance),
+    tolerance: toMoneyString(raw.toleranceAmount ?? raw.tolerance),
     status: ((raw.status as string) ?? 'not_started') as Reconciliation['status'],
     evidenceCount: (raw.supportingDocumentRefs as string[])?.length ?? 0,
     preparer: (raw.preparedBy ?? raw.preparer) as string | null,

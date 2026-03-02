@@ -23,6 +23,9 @@ export interface StatementLineItem {
   lineItemName: string;
   taxonomyLineId: string;
   amount: string;
+  priorAmount?: string;
+  changeAmount?: string;
+  changePercent?: string | null;
   displayOrder: number;
   isSubtotal: boolean;
   isGrandTotal: boolean;

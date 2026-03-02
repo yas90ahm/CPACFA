@@ -7,6 +7,7 @@ import { MoneyCell } from '@/components/shared/MoneyCell';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { cn } from '@/lib/utils';
+import { formatMoney } from '@/lib/format';
 import type { AJETemplate } from '@/lib/types/journal-entry';
 
 const FREQ_BADGE: Record<string, 'neutral' | 'info'> = { Monthly: 'info', Quarterly: 'neutral', Annual: 'neutral' };
@@ -216,7 +217,7 @@ export function AdjustmentsTemplatesTab({
         }}
         title="Apply template?"
         message={`Create a draft journal entry from "${applyConfirm?.name}".`}
-        detail={`Accounts: ${applyConfirm?.debitAccountCode} ${applyConfirm?.debitAccountName} (debit) ↔ ${applyConfirm?.creditAccountCode} ${applyConfirm?.creditAccountName} (credit)\nAmount: $${applyConfirm?.amount?.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+        detail={`Accounts: ${applyConfirm?.debitAccountCode} ${applyConfirm?.debitAccountName} (debit) ↔ ${applyConfirm?.creditAccountCode} ${applyConfirm?.creditAccountName} (credit)\nAmount: ${formatMoney(applyConfirm?.amount, { showDollar: true })}`}
         confirmLabel="Apply"
       />
 

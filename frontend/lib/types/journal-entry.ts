@@ -11,7 +11,8 @@ export interface AJETemplate {
   debitAccountName: string;
   creditAccountCode: string;
   creditAccountName: string;
-  amount: number;
+  /** Decimal string from backend */
+  amount: string;
   periodStatus: TemplatePeriodStatus;
   appliedOrSkippedBy: string | null;
   appliedOrSkippedAt: string | null;
@@ -28,8 +29,10 @@ export interface JournalEntryLine {
   accountCode: string;
   accountName: string;
   description: string | null;
-  debit: number;
-  credit: number;
+  /** Decimal string from backend — never convert to JS number */
+  debit: string;
+  /** Decimal string from backend — never convert to JS number */
+  credit: string;
 }
 
 export interface JournalEntry {

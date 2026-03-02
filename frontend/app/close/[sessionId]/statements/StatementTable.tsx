@@ -2,91 +2,62 @@
 
 import React, { useState, useCallback } from 'react';
 import { MoneyCell } from '@/components/shared/MoneyCell';
-import { parseMoney } from '@/lib/format';
 import type { StatementLineItem, AccountRollup, JournalEntryRef } from '@/lib/types/statements';
-import type { JournalEntry, JournalEntryLine } from '@/lib/types/journal-entry';
 
-function formatAmount(amount: string): string {
-  if (!amount) return '—';
+/**
+ * Format a GAAP-style amount string for display: "1234567.89" -> "1,234,567.89"
+ * Negative amounts shown in parentheses: "-1234.56" -> "(1,234.56)"
+ *
+ * Uses parseFloat internally for pure formatting/presentation only.
+ * This is acceptable because the result is never used for financial computation —
+ * all arithmetic happens on the backend via Decimal.js + PostgreSQL NUMERIC(20,2).
+ */
+function formatGaapAmount(amount: string, showDollar: boolean = false): string {
+  if (!amount) return '';
   const n = parseFloat(amount);
   if (Number.isNaN(n)) return amount;
-  return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const abs = Math.abs(n);
+  const formatted = abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const prefix = showDollar ? '$ ' : '';
+  return n < 0 ? `${prefix}(${formatted})` : `${prefix}${formatted}`;
 }
 
 function amountCell(amount: string, isGrandTotal: boolean, isSubtotal: boolean, onClick?: () => void) {
   const hasAmount = amount && amount.trim() !== '';
-  const formatted = hasAmount ? formatAmount(amount) : '—';
-  const num = hasAmount ? parseMoney(amount) : 0;
+  // parseFloat for UI-only sign check (color determination), not financial computation
+  const isNeg = hasAmount && parseFloat(amount) < 0;
+  const showDollar = isGrandTotal || isSubtotal;
   const clickable = onClick && hasAmount && !isSubtotal && !isGrandTotal;
   return (
-    <td className="text-right font-mono tabular-nums text-sm py-1.5">
+    <td className={`text-right font-mono tabular-nums text-sm py-1.5 ${isGrandTotal ? 'border-t-2 border-b-[3px] border-double border-text-muted' : isSubtotal ? 'border-t border-text-muted/50' : ''}`}>
       {clickable ? (
         <button
           type="button"
           onClick={onClick}
           className="border-b border-dotted border-current hover:bg-hover rounded px-1 -mx-1"
         >
-          <MoneyCell value={num} showDollar />
+          <span className={isNeg ? 'text-status-red' : ''}>{formatGaapAmount(amount)}</span>
         </button>
       ) : hasAmount ? (
-        <span className={isGrandTotal ? 'font-bold text-base' : isSubtotal ? 'font-bold' : ''}>
-          <MoneyCell value={num} showDollar />
+        <span className={`${isGrandTotal ? 'font-bold' : isSubtotal ? 'font-semibold' : ''} ${isNeg ? 'text-status-red' : ''}`}>
+          {formatGaapAmount(amount, showDollar)}
         </span>
       ) : (
-        <span className="text-text-muted">—</span>
+        <span />
       )}
     </td>
   );
-}
-
-function buildSyntheticJe(ref: JournalEntryRef, accountCode: string, accountName: string): JournalEntry {
-  const amt = parseFloat(ref.amount);
-  const isDebit = amt >= 0;
-  const numMatch = ref.jeNumber.match(/\d+/);
-  const jeNum = numMatch ? parseInt(numMatch[0], 10) : 0;
-  const lines: JournalEntryLine[] = isDebit
-    ? [
-        { id: 'l1', accountCode, accountName, description: null, debit: Math.abs(amt), credit: 0 },
-        { id: 'l2', accountCode: 'OFFSET', accountName: 'Offset', description: null, debit: 0, credit: Math.abs(amt) },
-      ]
-    : [
-        { id: 'l1', accountCode: 'OFFSET', accountName: 'Offset', description: null, debit: Math.abs(amt), credit: 0 },
-        { id: 'l2', accountCode, accountName, description: null, debit: 0, credit: Math.abs(amt) },
-      ];
-  return {
-    id: ref.jeId,
-    sessionId: '',
-    jeNumber: ref.jeNumber === 'GL Import' ? 0 : jeNum,
-    date: ref.date,
-    memo: ref.memo,
-    status: 'posted',
-    source: 'manual',
-    templateId: null,
-    templateName: null,
-    lines,
-    evidenceCount: 0,
-    createdBy: 'System',
-    createdAt: ref.date,
-    proposedBy: null,
-    proposedAt: null,
-    approvedBy: null,
-    approvedAt: null,
-    postedBy: null,
-    postedAt: null,
-    rejectedBy: null,
-    rejectedAt: null,
-    rejectionReason: null,
-  };
 }
 
 export interface StatementTableProps {
   lines: StatementLineItem[];
   showPriorPeriod?: boolean;
   showChanges?: boolean;
-  onOpenJe?: (entry: JournalEntry) => void;
+  /** Called with a real JE ID when user clicks a journal entry reference. */
+  onOpenJeById?: (jeId: string) => void;
 }
 
-export function StatementTable({ lines, showPriorPeriod, showChanges, onOpenJe }: StatementTableProps) {
+export function StatementTable({ lines, showPriorPeriod, showChanges, onOpenJeById }: StatementTableProps) {
   const [expandedLineId, setExpandedLineId] = useState<string | null>(null);
   const [expandedAccountKey, setExpandedAccountKey] = useState<string | null>(null);
 
@@ -99,14 +70,6 @@ export function StatementTable({ lines, showPriorPeriod, showChanges, onOpenJe }
     const key = `${lineId}:${accountCode}`;
     setExpandedAccountKey((prev) => (prev === key ? null : key));
   }, []);
-
-  const handleOpenJe = useCallback(
-    (ref: JournalEntryRef, accountCode: string, accountName: string) => {
-      const entry = buildSyntheticJe(ref, accountCode, accountName);
-      onOpenJe?.(entry);
-    },
-    [onOpenJe]
-  );
 
   return (
     <div className="overflow-x-auto">
@@ -136,7 +99,11 @@ export function StatementTable({ lines, showPriorPeriod, showChanges, onOpenJe }
                   >
                     {row.lineItemName}
                   </td>
-                  {showPriorPeriod && <td className="text-right font-mono text-sm text-text-muted py-1.5">—</td>}
+                  {showPriorPeriod && amountCell(
+                    row.priorAmount ?? '',
+                    row.isGrandTotal ?? false,
+                    row.isSubtotal ?? false
+                  )}
                   {amountCell(
                     row.amount,
                     row.isGrandTotal ?? false,
@@ -145,8 +112,14 @@ export function StatementTable({ lines, showPriorPeriod, showChanges, onOpenJe }
                   )}
                   {showChanges && (
                     <>
-                      <td className="text-right font-mono text-sm text-text-muted py-1.5">—</td>
-                      <td className="text-right font-mono text-sm text-text-muted py-1.5">—</td>
+                      {amountCell(
+                        row.changeAmount ?? '',
+                        row.isGrandTotal ?? false,
+                        row.isSubtotal ?? false
+                      )}
+                      <td className={`text-right font-mono tabular-nums text-sm py-1.5 ${row.changePercent != null && parseFloat(row.changePercent) < 0 ? 'text-status-red' : ''}`}>
+                        {row.changePercent != null ? `${formatGaapAmount(row.changePercent)}%` : ''}
+                      </td>
                     </>
                   )}
                 </tr>
@@ -173,13 +146,17 @@ export function StatementTable({ lines, showPriorPeriod, showChanges, onOpenJe }
                               </td>
                               {showPriorPeriod && <td />}
                               <td className="text-right font-mono text-sm py-1">
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenJe(ent, acc.accountCode, acc.accountName)}
-                                  className="border-b border-dotted border-current hover:bg-hover rounded px-1 -mx-1"
-                                >
-                                  <MoneyCell value={parseMoney(ent.amount)} showDollar />
-                                </button>
+                                {ent.jeId && onOpenJeById ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => onOpenJeById(ent.jeId)}
+                                    className="border-b border-dotted border-current hover:bg-hover rounded px-1 -mx-1"
+                                  >
+                                    <MoneyCell value={ent.amount} showDollar />
+                                  </button>
+                                ) : (
+                                  <MoneyCell value={ent.amount} showDollar />
+                                )}
                               </td>
                               {showChanges && <><td /><td /></>}
                             </tr>

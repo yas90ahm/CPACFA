@@ -3,20 +3,18 @@
 import { useQuery } from '@tanstack/react-query';
 import type { TrialBalanceData, TrialBalanceRow } from '@/lib/types/trial-balance';
 import { apiFetch } from '@/lib/api';
+import { toMoneyString } from '@/lib/money';
 
 const STALE = 30_000;
 
 function toTrialBalanceRow(r: Record<string, unknown>): TrialBalanceRow {
-  const debit = parseFloat(String(r.debitBalance ?? 0));
-  const credit = parseFloat(String(r.creditBalance ?? 0));
-  const net = parseFloat(String(r.netBalance ?? 0)) || debit - credit;
   return {
     accountCode: (r.accountCode as string) ?? '',
     accountName: (r.accountName as string) ?? '',
     accountType: ((r.accountType as string) ?? 'UNKNOWN').toUpperCase() as TrialBalanceRow['accountType'],
-    debitBalance: debit,
-    creditBalance: credit,
-    netBalance: net,
+    debitBalance: toMoneyString(r.debitBalance),
+    creditBalance: toMoneyString(r.creditBalance),
+    netBalance: toMoneyString(r.netBalance),
     mappingReportingLineId: (r.mappingReportingLineId as string) ?? null,
     mappingReportingLineName: (r.mappingReportingLineName as string) ?? null,
     mappingStatus: ((r.mappingStatus as string) ?? 'unmapped') as TrialBalanceRow['mappingStatus'],
@@ -37,8 +35,8 @@ export function useTrialBalance(sessionId: string | null, isAdjusted: boolean) {
         periodLabel: (raw.periodLabel as string) ?? '',
         isAdjusted: (raw.isAdjusted as boolean) ?? isAdjusted,
         rows,
-        totalDebits: parseFloat(String(raw.totalDebits ?? 0)),
-        totalCredits: parseFloat(String(raw.totalCredits ?? 0)),
+        totalDebits: toMoneyString(raw.totalDebits),
+        totalCredits: toMoneyString(raw.totalCredits),
         glEntriesByAccount: {},
       };
     },

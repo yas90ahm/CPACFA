@@ -11,9 +11,11 @@ import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import { FileUpload } from '@/components/shared/FileUpload';
 import { FileList } from '@/components/shared/FileList';
 import { useTrialBalanceContext } from '../context/trial-balance-context';
+import { useCloseSession } from '@/lib/queries/close-session';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, apiUpload } from '@/lib/api';
-import { parseMoney } from '@/lib/format';
+import { parseMoneyStr } from '@/lib/format';
+import { sumMoneyStrings, moneyAbs, isMoneyZero } from '@/lib/money';
 import { MATERIALITY_THRESHOLD } from '@/lib/types/journal-entry';
 import type { JournalEntry, JournalEntryLine } from '@/lib/types/journal-entry';
 import type { EvidenceFile } from '@/lib/types/evidence';
@@ -57,6 +59,9 @@ export function JournalEntryForm({
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const { rows: tbRows } = useTrialBalanceContext();
+  const { data: sessionData } = useCloseSession(sessionId);
+  // Default JE date to session period end, falling back to today
+  const defaultDate = sessionData?.periodEnd ?? new Date().toISOString().slice(0, 10);
 
   const { data: manifest } = useQuery({
     queryKey: ['evidence-manifest', sessionId],
@@ -107,7 +112,7 @@ export function JournalEntryForm({
     [mappedAccounts]
   );
 
-  const [date, setDate] = useState(entry?.date ?? '2026-01-31');
+  const [date, setDate] = useState(entry?.date ?? defaultDate);
   const [memo, setMemo] = useState(entry?.memo ?? '');
   const [lines, setLines] = useState<FormLine[]>([
     { id: 'line-1', accountCode: null, accountName: null, description: '', debit: null, credit: null },
@@ -117,7 +122,7 @@ export function JournalEntryForm({
 
   useEffect(() => {
     if (!open) return;
-    setDate(entry?.date ?? '2026-01-31');
+    setDate(entry?.date ?? defaultDate);
     setMemo(entry?.memo ?? '');
     setLines(
       entry?.lines?.length
@@ -126,8 +131,8 @@ export function JournalEntryForm({
             accountCode: l.accountCode,
             accountName: l.accountName,
             description: l.description ?? '',
-            debit: l.debit ? String(l.debit) : null,
-            credit: l.credit ? String(l.credit) : null,
+            debit: !isMoneyZero(l.debit) ? l.debit : null,
+            credit: !isMoneyZero(l.credit) ? l.credit : null,
           }))
         : [
             { id: 'line-1', accountCode: null, accountName: null, description: '', debit: null, credit: null },
@@ -137,14 +142,14 @@ export function JournalEntryForm({
     setLocalEvidence([]);
   }, [open, entry?.id, entry?.date, entry?.memo, entry?.lines]);
 
-  const totalDebits = useMemo(() => lines.reduce((s, l) => s + (l.debit ? parseMoney(l.debit) : 0), 0), [lines]);
-  const totalCredits = useMemo(() => lines.reduce((s, l) => s + (l.credit ? parseMoney(l.credit) : 0), 0), [lines]);
-  const difference = totalDebits - totalCredits;
+  const totalDebits = useMemo(() => sumMoneyStrings(lines.map(l => l.debit)), [lines]);
+  const totalCredits = useMemo(() => sumMoneyStrings(lines.map(l => l.credit)), [lines]);
+  const difference = moneyAbs(totalDebits) - moneyAbs(totalCredits);
   const isBalanced = Math.abs(difference) < 0.01;
   const hasMemo = memo.trim().length >= 5;
-  const hasTwoLinesWithAmounts = lines.filter((l) => (l.debit && parseMoney(l.debit) !== 0) || (l.credit && parseMoney(l.credit) !== 0)).length >= 2;
+  const hasTwoLinesWithAmounts = lines.filter((l) => !isMoneyZero(l.debit) || !isMoneyZero(l.credit)).length >= 2;
   const allLinesHaveAccount = lines.every((l) => l.accountCode != null);
-  const entryTotal = totalDebits;
+  const entryTotal = moneyAbs(totalDebits);
   const evidenceRequired = entryTotal >= MATERIALITY_THRESHOLD;
   const evidenceOk = !evidenceRequired || evidenceFromApi.length + localEvidence.length >= 1;
   const canSubmit = isBalanced && hasMemo && hasTwoLinesWithAmounts && allLinesHaveAccount && evidenceOk;
@@ -188,7 +193,10 @@ export function JournalEntryForm({
       if (entry?.id) {
         uploadEvidenceMutation.mutate({ jeId: entry.id, file });
       } else {
-        const hash = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+        // Compute real SHA-256 hash from file contents
+        const buffer = await file.arrayBuffer();
+        const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+        const hash = Array.from(new Uint8Array(hashBuffer))
           .map((b) => b.toString(16).padStart(2, '0'))
           .join('');
         setLocalEvidence((prev) => [
@@ -215,8 +223,8 @@ export function JournalEntryForm({
       accountCode: l.accountCode ?? '',
       accountName: l.accountName ?? '',
       description: l.description || null,
-      debit: l.debit ? parseMoney(l.debit) : 0,
-      credit: l.credit ? parseMoney(l.credit) : 0,
+      debit: l.debit ? parseMoneyStr(l.debit) : '0.00',
+      credit: l.credit ? parseMoneyStr(l.credit) : '0.00',
     }));
     return {
       ...(entry ?? {}),
@@ -336,16 +344,16 @@ export function JournalEntryForm({
                     </td>
                     <td className="py-2">
                       {readonly ? (
-                        <MoneyCell value={l.debit ? parseMoney(l.debit) : 0} showDollar />
+                        <MoneyCell value={l.debit} showDollar />
                       ) : (
-                        <MoneyInput value={l.debit} onChange={(v) => handleDebitChange(l.id, v)} size="sm" disabled={!!(l.credit && parseMoney(l.credit) !== 0)} />
+                        <MoneyInput value={l.debit} onChange={(v) => handleDebitChange(l.id, v)} size="sm" disabled={!isMoneyZero(l.credit)} />
                       )}
                     </td>
                     <td className="py-2">
                       {readonly ? (
-                        <MoneyCell value={l.credit ? parseMoney(l.credit) : 0} showDollar />
+                        <MoneyCell value={l.credit} showDollar />
                       ) : (
-                        <MoneyInput value={l.credit} onChange={(v) => handleCreditChange(l.id, v)} size="sm" disabled={!!(l.debit && parseMoney(l.debit) !== 0)} />
+                        <MoneyInput value={l.credit} onChange={(v) => handleCreditChange(l.id, v)} size="sm" disabled={!isMoneyZero(l.debit)} />
                       )}
                     </td>
                     {!readonly && (
@@ -371,14 +379,14 @@ export function JournalEntryForm({
 
         {evidenceRequired ? (
           <div>
-            <p className="text-sm text-status-amber mb-2">Entries of $10,000 or more require supporting documentation</p>
+            <p className="text-sm text-status-amber mb-2">Entries of ${MATERIALITY_THRESHOLD.toLocaleString()} or more require supporting documentation</p>
             {!readonly && <FileUpload onUpload={handleUpload} maxSizeMB={10} />}
             {((entry?.id ? evidenceFromApi : []).length + localEvidence.length > 0) && (
               <FileList files={entry?.id ? [...evidenceFromApi, ...localEvidence] : localEvidence} showHash readonly={readonly} />
             )}
           </div>
         ) : (
-          <p className="text-sm text-text-muted">Evidence optional for entries below $10,000</p>
+          <p className="text-sm text-text-muted">Evidence optional for entries below ${MATERIALITY_THRESHOLD.toLocaleString()}</p>
         )}
 
         <div className="rounded-input border border-border p-3 space-y-2 text-sm">

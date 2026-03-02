@@ -1,7 +1,6 @@
 'use client';
 
 import { MoneyCell } from '@/components/shared/MoneyCell';
-import { parseMoney } from '@/lib/format';
 
 export interface EquityColumnarProps {
   columns: string[];
@@ -33,7 +32,7 @@ export function EquityTable({ columns, rows }: EquityColumnarProps) {
               <td className="py-1.5 pr-4 font-medium">{row.label}</td>
               {row.values.map((val, j) => (
                 <td key={j} className="text-right font-mono tabular-nums text-sm py-1.5 px-2">
-                  {val === '—' ? <span className="text-text-muted">—</span> : <MoneyCell value={parseMoney(val)} showDollar />}
+                  {val === '—' ? <span className="text-text-muted">—</span> : <MoneyCell value={val} showDollar />}
                 </td>
               ))}
             </tr>

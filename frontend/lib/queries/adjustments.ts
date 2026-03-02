@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
+import { toMoneyString } from '@/lib/money';
 import type { AJETemplate } from '@/lib/types/journal-entry';
 
 const STALE_TIME = 30_000;
@@ -11,7 +12,7 @@ interface TemplateApp {
   id?: string;
   templateId?: string;
   status?: string;
-  template?: { name?: string; lines?: Array<{ account_ref?: string; debit?: number; credit?: number }> };
+  template?: { name?: string; lines?: Array<{ account_ref?: string; debit?: unknown; credit?: unknown }> };
   skipReason?: string;
   appliedAt?: string;
   appliedBy?: string;
@@ -28,9 +29,9 @@ function toAjeTemplate(
   const periodStatus = status === 'applied' ? 'applied' : status === 'skipped' ? 'skipped' : 'pending';
   const t = a.template;
   const lines = t?.lines ?? [];
-  const debitLine = lines.find((l) => (l.debit ?? 0) > 0);
-  const creditLine = lines.find((l) => (l.credit ?? 0) > 0);
-  const amount = (debitLine?.debit ?? creditLine?.credit ?? 0) as number;
+  const debitLine = lines.find((l) => parseFloat(String(l.debit ?? 0)) > 0);
+  const creditLine = lines.find((l) => parseFloat(String(l.credit ?? 0)) > 0);
+  const amount = toMoneyString(debitLine?.debit ?? creditLine?.credit ?? 0);
   return {
     id,
     sessionId,
@@ -84,8 +85,8 @@ export function useJournalEntries(sessionId: string | null, status?: string) {
             accountCode: (line.account_ref ?? line.accountCode ?? '') as string,
             accountName: (line.accountName ?? '') as string,
             description: (line.description ?? null) as string | null,
-            debit: parseFloat(String(line.debit ?? 0)),
-            credit: parseFloat(String(line.credit ?? 0)),
+            debit: toMoneyString(line.debit),
+            credit: toMoneyString(line.credit),
           };
         });
         return {

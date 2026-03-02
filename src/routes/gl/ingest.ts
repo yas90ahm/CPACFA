@@ -30,13 +30,27 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
   fileFilter: (_req, file, cb) => {
     const mime = file.mimetype?.toLowerCase() ?? '';
-    if (mime === 'text/csv') {
+    const name = file.originalname?.toLowerCase() ?? '';
+    const csvMimes = ['text/csv', 'application/csv', 'text/plain', 'application/vnd.ms-excel', 'application/octet-stream'];
+    if (csvMimes.includes(mime) || name.endsWith('.csv') || name.endsWith('.xlsx') || name.endsWith('.xls')) {
       cb(null, true);
     } else {
-      cb(new Error('Only CSV files are allowed for GL upload.'));
+      cb(new Error(`Unsupported file type "${mime}". Accepted: CSV (.csv), Excel (.xlsx, .xls).`));
     }
   },
 });
+
+/** Multer error handler — catches file filter / size errors before route handler. */
+function handleMulterError(req: Request, res: Response, next: import('express').NextFunction) {
+  upload.single('file')(req, res, (err: unknown) => {
+    if (err) {
+      const msg = err instanceof Error ? err.message : 'File upload failed';
+      res.status(400).json({ error: msg });
+      return;
+    }
+    next();
+  });
+}
 
 /**
  * POST /api/gl/parse
@@ -44,7 +58,7 @@ const upload = multer({
  */
 router.post(
   '/parse',
-  upload.single('file'),
+  handleMulterError,
   requireValidTenantId,
   async (req: Request, res: Response) => {
     try {
@@ -79,7 +93,7 @@ router.post(
  */
 router.post(
   '/ingest',
-  upload.single('file'),
+  handleMulterError,
   requireValidTenantId,
   async (req: Request, res: Response) => {
     try {

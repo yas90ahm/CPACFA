@@ -25,9 +25,9 @@ CREATE TABLE IF NOT EXISTS ai_coa_suggestions (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_ai_coa_suggestions_tenant_session
+CREATE INDEX IF NOT EXISTS idx_ai_coa_suggestions_tenant_session
   ON ai_coa_suggestions(tenant_id, close_session_id);
-CREATE INDEX idx_ai_coa_suggestions_status
+CREATE INDEX IF NOT EXISTS idx_ai_coa_suggestions_status
   ON ai_coa_suggestions(tenant_id, status);
 
 -- Cash Flow classification suggestions (from SLM DistilBERT)
@@ -51,9 +51,9 @@ CREATE TABLE IF NOT EXISTS ai_cf_suggestions (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_ai_cf_suggestions_tenant_session
+CREATE INDEX IF NOT EXISTS idx_ai_cf_suggestions_tenant_session
   ON ai_cf_suggestions(tenant_id, close_session_id);
-CREATE INDEX idx_ai_cf_suggestions_status
+CREATE INDEX IF NOT EXISTS idx_ai_cf_suggestions_status
   ON ai_cf_suggestions(tenant_id, status);
 
 COMMIT;

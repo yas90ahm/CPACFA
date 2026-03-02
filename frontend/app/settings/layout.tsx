@@ -6,7 +6,7 @@ import { TopBar } from '@/components/shell/TopBar';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { useAuth } from '@/lib/auth';
 import { useEntities } from '@/lib/queries/entities';
-import { cn } from '@/lib/utils';
+import { cn, getUserDisplay } from '@/lib/utils';
 import {
   Building2,
   ShieldCheck,
@@ -33,8 +33,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   const { user } = useAuth();
   const { data: entities = [] } = useEntities();
   const entityName = entities.length > 0 ? entities[0].name : 'My Company';
-  const userName = user?.email ?? '';
-  const userInitials = user?.email?.slice(0, 2).toUpperCase() ?? '';
+  const { displayName: userName, initials: userInitials } = getUserDisplay(user);
 
   return (
     <AuthGuard>

@@ -14,6 +14,7 @@
 
 import { randomUUID } from 'crypto';
 import type { Pool } from 'pg';
+import { withTransaction } from '../db/transaction.js';
 import { from, sumRound2 } from '../utils/decimal.js';
 import type {
   ReconRequirement,
@@ -319,27 +320,32 @@ export async function completeReconciliation(
     );
   }
 
-  const updated = await reconRepo.updateReconStatus(
-    pool,
-    tenantId,
-    reconId,
-    'completed',
-    {
-      varianceExplanation: varianceExplanation ?? recon.varianceExplanation,
-      preparedBy: userId,
-      preparedAt: new Date().toISOString(),
-    }
-  );
-  if (!updated) throw new PeriodReconciliationError('Reconciliation not found', 'NOT_FOUND');
+  // Wrap status update + cascade in a single transaction
+  const updated = await withTransaction(pool, async (client) => {
+    const result = await reconRepo.updateReconStatus(
+      client as unknown as Pool,
+      tenantId,
+      reconId,
+      'completed',
+      {
+        varianceExplanation: varianceExplanation ?? recon.varianceExplanation,
+        preparedBy: userId,
+        preparedAt: new Date().toISOString(),
+      }
+    );
+    if (!result) throw new PeriodReconciliationError('Reconciliation not found', 'NOT_FOUND');
 
-  const { executeCascade, CascadeTriggerType } = await import('./cascade_engine.js');
-  await executeCascade(pool, tenantId, {
-    type: CascadeTriggerType.RECON_COMPLETED,
-    period_id: recon.periodId,
-    entity_id: recon.entityId,
-    triggered_by: userId,
-    affected_accounts: [recon.accountCode],
-    details: { recon_id: recon.reconId },
+    const { executeCascade, CascadeTriggerType } = await import('./cascade_engine.js');
+    await executeCascade(client as unknown as Pool, tenantId, {
+      type: CascadeTriggerType.RECON_COMPLETED,
+      period_id: recon.periodId,
+      entity_id: recon.entityId,
+      triggered_by: userId,
+      affected_accounts: [recon.accountCode],
+      details: { recon_id: recon.reconId },
+    });
+
+    return result;
   });
 
   return updated;
@@ -367,23 +373,28 @@ export async function approveReconciliation(
     );
   }
 
-  const updated = await reconRepo.updateReconStatus(
-    pool,
-    tenantId,
-    reconId,
-    'approved',
-    { reviewedBy: userId, reviewedAt: new Date().toISOString() }
-  );
-  if (!updated) throw new PeriodReconciliationError('Reconciliation not found', 'NOT_FOUND');
+  // Wrap status update + cascade in a single transaction
+  const updated = await withTransaction(pool, async (client) => {
+    const result = await reconRepo.updateReconStatus(
+      client as unknown as Pool,
+      tenantId,
+      reconId,
+      'approved',
+      { reviewedBy: userId, reviewedAt: new Date().toISOString() }
+    );
+    if (!result) throw new PeriodReconciliationError('Reconciliation not found', 'NOT_FOUND');
 
-  const { executeCascade, CascadeTriggerType } = await import('./cascade_engine.js');
-  await executeCascade(pool, tenantId, {
-    type: CascadeTriggerType.RECON_APPROVED,
-    period_id: recon.periodId,
-    entity_id: recon.entityId,
-    triggered_by: userId,
-    affected_accounts: [recon.accountCode],
-    details: { recon_id: recon.reconId, approved: true },
+    const { executeCascade, CascadeTriggerType } = await import('./cascade_engine.js');
+    await executeCascade(client as unknown as Pool, tenantId, {
+      type: CascadeTriggerType.RECON_APPROVED,
+      period_id: recon.periodId,
+      entity_id: recon.entityId,
+      triggered_by: userId,
+      affected_accounts: [recon.accountCode],
+      details: { recon_id: recon.reconId, approved: true },
+    });
+
+    return result;
   });
 
   return updated;

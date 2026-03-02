@@ -12,7 +12,8 @@ export interface ReconcilingItem {
   id: string;
   reconId: string;
   description: string;
-  amount: number;
+  /** Decimal string from backend — never convert to JS number */
+  amount: string;
   type: ReconcilingItemType;
   date: string | null;
 }
@@ -22,12 +23,18 @@ export interface Reconciliation {
   sessionId: string;
   accountCode: string;
   accountName: string;
-  glBalance: number;
-  supportingBalance: number | null;
-  variance: number;
-  reconcilingItemsTotal: number;
-  unexplainedVariance: number;
-  tolerance: number;
+  /** Decimal string from backend */
+  glBalance: string;
+  /** Decimal string from backend */
+  supportingBalance: string | null;
+  /** Decimal string from backend (GENERATED ALWAYS column) */
+  variance: string;
+  /** Decimal string from backend (GENERATED ALWAYS column) */
+  reconcilingItemsTotal: string;
+  /** Decimal string from backend (GENERATED ALWAYS column) */
+  unexplainedVariance: string;
+  /** Decimal string from backend */
+  tolerance: string;
   status: ReconStatus;
   evidenceCount: number;
   preparer: string | null;

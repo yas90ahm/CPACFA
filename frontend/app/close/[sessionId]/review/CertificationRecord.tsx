@@ -124,10 +124,12 @@ export function CertificationRecord({ artifact, entityName, periodLabel }: Certi
   };
 
   return (
-    <div className="bg-surface border border-status-green rounded-card p-6 space-y-6">
-      <div className="flex items-center gap-2">
-        <Check className="w-6 h-6 text-status-green" />
-        <h2 className="text-xl font-display text-status-green">CERTIFIED</h2>
+    <div className="bg-surface border-2 border-certified rounded-card p-6 space-y-6">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-full bg-certified-dim flex items-center justify-center">
+          <Check className="w-6 h-6 text-certified" />
+        </div>
+        <h2 className="text-xl font-display text-certified">CERTIFIED</h2>
       </div>
 
       <div className="space-y-2">

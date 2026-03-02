@@ -6,6 +6,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-download the sentence-transformer model so it's baked into the image
+# (avoids HuggingFace download at runtime which can timeout on Cloud Run)
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
+
 # Copy model artifacts and scripts
 COPY models/ models/
 COPY scripts/ scripts/

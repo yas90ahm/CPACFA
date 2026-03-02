@@ -10,7 +10,8 @@ import { MoneyCell } from '@/components/shared/MoneyCell';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { FilterBar } from '@/components/shared/FilterBar';
 import type { Reconciliation, ReconStatus } from '@/lib/types/reconciliation';
-import { Paperclip, Check } from 'lucide-react';
+import { moneyAbs, cmpMoney, sumMoneyStrings } from '@/lib/money';
+import { Paperclip, Check, AlertCircle } from 'lucide-react';
 
 const STATUS_ORDER: ReconStatus[] = ['not_started', 'in_progress', 'completed', 'approved'];
 const STATUS_LABEL: Record<ReconStatus, string> = {
@@ -36,6 +37,8 @@ export default function ReconciliationPage() {
   const recons = reconciliations ?? [];
   const initAttempted = useRef(false);
 
+  const [initError, setInitError] = useState<string | null>(null);
+
   const initializeMutation = useMutation({
     mutationFn: () =>
       apiFetch(`/api/close/sessions/${sessionId}/reconciliations/initialize`, {
@@ -44,6 +47,9 @@ export default function ReconciliationPage() {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+    },
+    onError: (err) => {
+      setInitError(err instanceof Error ? err.message : 'Failed to initialize reconciliations');
     },
   });
 
@@ -61,6 +67,7 @@ export default function ReconciliationPage() {
   }, [isLoading, reconciliations, initializeMutation.isPending]);
 
   const [search, setSearch] = useState('');
+  const hasIncomplete = recons.some((r) => r.status === 'not_started' || r.status === 'in_progress');
   const [statusFilter, setStatusFilter] = useState<ReconStatus | 'all'>('all');
   const [overToleranceOnly, setOverToleranceOnly] = useState(false);
   const [sortKey, setSortKey] = useState<keyof Reconciliation | string>('status');
@@ -74,7 +81,7 @@ export default function ReconciliationPage() {
     }
     if (statusFilter !== 'all') list = list.filter((r) => r.status === statusFilter);
     if (overToleranceOnly) {
-      list = list.filter((r) => r.supportingBalance != null && Math.abs(r.unexplainedVariance) > r.tolerance);
+      list = list.filter((r) => r.supportingBalance != null && moneyAbs(r.unexplainedVariance) > moneyAbs(r.tolerance));
     }
     return list;
   }, [recons, search, statusFilter, overToleranceOnly]);
@@ -88,11 +95,10 @@ export default function ReconciliationPage() {
         return sortDir === 'asc' ? ia - ib : ib - ia;
       }
       if (sortKey === 'glBalance' || sortKey === 'supportingBalance' || sortKey === 'variance' || sortKey === 'unexplainedVariance' || sortKey === 'tolerance') {
-        const va = a[sortKey as keyof Reconciliation] as number | null | undefined;
-        const vb = b[sortKey as keyof Reconciliation] as number | null | undefined;
-        const aVal = va ?? -Infinity;
-        const bVal = vb ?? -Infinity;
-        return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
+        const va = a[sortKey as keyof Reconciliation] as string | null | undefined;
+        const vb = b[sortKey as keyof Reconciliation] as string | null | undefined;
+        const c = cmpMoney(va, vb);
+        return sortDir === 'asc' ? c : -c;
       }
       if (sortKey === 'accountCode' || sortKey === 'accountName' || sortKey === 'preparer' || sortKey === 'reviewer') {
         const va = String(a[sortKey as keyof Reconciliation] ?? '');
@@ -110,22 +116,15 @@ export default function ReconciliationPage() {
   const inProgress = recons.filter((r) => r.status === 'in_progress').length;
   const notStarted = recons.filter((r) => r.status === 'not_started').length;
   const approved = recons.filter((r) => r.status === 'approved').length;
-  const overTolerance = recons.filter((r) => r.supportingBalance != null && Math.abs(r.unexplainedVariance) > r.tolerance).length;
+  const overTolerance = recons.filter((r) => r.supportingBalance != null && moneyAbs(r.unexplainedVariance) > moneyAbs(r.tolerance)).length;
   const progressPct = total ? Math.round((completed / total) * 1000) / 10 : 0;
 
   const totals = useMemo(() => {
-    let gl = 0,
-      sup = 0,
-      varTot = 0,
-      unexTot = 0;
-    filtered.forEach((r) => {
-      gl += r.glBalance;
-      if (r.supportingBalance != null) {
-        sup += r.supportingBalance;
-        varTot += r.variance;
-        unexTot += r.unexplainedVariance;
-      }
-    });
+    const gl = sumMoneyStrings(filtered.map((r) => r.glBalance));
+    const withSupporting = filtered.filter((r) => r.supportingBalance != null);
+    const sup = sumMoneyStrings(withSupporting.map((r) => r.supportingBalance));
+    const varTot = sumMoneyStrings(withSupporting.map((r) => r.variance));
+    const unexTot = sumMoneyStrings(withSupporting.map((r) => r.unexplainedVariance));
     return { gl, sup, varTot, unexTot };
   }, [filtered]);
 
@@ -147,7 +146,7 @@ export default function ReconciliationPage() {
   };
 
   const rowClassName = (row: Reconciliation) => {
-    const over = row.supportingBalance != null && Math.abs(row.unexplainedVariance) > row.tolerance;
+    const over = row.supportingBalance != null && moneyAbs(row.unexplainedVariance) > moneyAbs(row.tolerance);
     const completedNotApproved = row.status === 'completed' && !row.reviewer;
     if (over) return 'border-l-4 border-l-status-red';
     if (completedNotApproved) return 'border-l-4 border-l-status-amber';
@@ -200,7 +199,7 @@ export default function ReconciliationPage() {
       sortKey: 'variance',
       cell: (row: Reconciliation) => {
         if (row.supportingBalance == null) return <span className="text-text-muted font-mono">—</span>;
-        const over = Math.abs(row.unexplainedVariance) > row.tolerance;
+        const over = moneyAbs(row.unexplainedVariance) > moneyAbs(row.tolerance);
         return (
           <MoneyCell
             value={row.variance}
@@ -218,7 +217,7 @@ export default function ReconciliationPage() {
       sortKey: 'unexplainedVariance',
       cell: (row: Reconciliation) => {
         if (row.supportingBalance == null) return <span className="text-text-muted font-mono">—</span>;
-        const over = Math.abs(row.unexplainedVariance) > row.tolerance;
+        const over = moneyAbs(row.unexplainedVariance) > moneyAbs(row.tolerance);
         return (
           <MoneyCell
             value={row.unexplainedVariance}
@@ -320,15 +319,41 @@ export default function ReconciliationPage() {
     );
   }
 
+  if (initError) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h1 className="font-display text-2xl text-primary">Reconciliation</h1>
+          <p className="text-text-secondary text-sm mt-0.5">Prove every significant balance sheet account</p>
+        </div>
+        <div className="bg-status-red-dim border border-status-red rounded-card p-4 flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 text-status-red shrink-0" />
+          <div className="flex-1 text-sm text-status-red">{initError}</div>
+          <button
+            type="button"
+            onClick={() => { setInitError(null); initAttempted.current = false; }}
+            className="px-3 py-1.5 rounded-input border border-status-red text-status-red text-sm hover:opacity-80"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="font-display text-2xl text-primary">Reconciliation</h1>
-        <p className="text-text-secondary text-sm mt-0.5">Prove every significant balance sheet account</p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="font-display text-2xl text-primary">Reconciliation</h1>
+          <p className="text-text-secondary text-sm mt-0.5">Prove every significant balance sheet account</p>
+        </div>
+        <span className="text-sm text-text-secondary">
+          {completed} of {total} complete ({progressPct}%)
+        </span>
       </div>
 
       <div className="flex flex-wrap items-center gap-4 py-3 px-4 rounded-input bg-surface border border-border">
-        <span className="text-text-secondary text-sm">Total Required: {total}</span>
         <span className="text-status-green text-sm">Completed: {completed}</span>
         <span className="text-accent text-sm">In Progress: {inProgress}</span>
         <span className="text-text-muted text-sm">Not Started: {notStarted}</span>
@@ -342,7 +367,6 @@ export default function ReconciliationPage() {
           <div className="h-2 bg-elevated rounded-full overflow-hidden">
             <div className="h-full bg-status-green rounded-full" style={{ width: `${progressPct}%` }} />
           </div>
-          <span className="text-xs text-text-tertiary">{completed}/{total} ({progressPct}%)</span>
         </div>
       </div>
 

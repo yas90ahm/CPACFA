@@ -6,12 +6,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SlideOverPanel } from '@/components/shared/SlideOverPanel';
 import { MoneyInput } from '@/components/shared/MoneyInput';
 import { apiFetch } from '@/lib/api';
+import { cn } from '@/lib/utils';
 import { Plus, Pencil, Power, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
 
 interface TemplateLine {
   accountRef: string;
-  debit?: number;
-  credit?: number;
+  debit?: string;
+  credit?: string;
   description?: string;
 }
 
@@ -26,7 +27,10 @@ interface Template {
   updatedAt: string;
 }
 
-function formatMoney(n: number): string {
+function formatMoney(v: string | number | null | undefined): string {
+  if (v == null) return '$0.00';
+  const n = typeof v === 'number' ? v : parseFloat(v);
+  if (Number.isNaN(n)) return '$0.00';
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n);
 }
 
@@ -38,14 +42,28 @@ export default function TemplatesSettingsPage() {
   });
   const templates = data?.templates ?? [];
 
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const showToast = (type: 'success' | 'error', message: string) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), type === 'success' ? 3000 : 5000);
+  };
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/close/templates/${id}`, { method: 'DELETE' }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['close-templates'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['close-templates'] });
+      showToast('success', 'Template deleted.');
+    },
+    onError: (err) => showToast('error', err instanceof Error ? err.message : 'Failed to delete template'),
   });
   const updateMutation = useMutation({
     mutationFn: ({ id, body }: { id: string; body: Partial<{ name: string; memo: string; lines: TemplateLine[]; frequency: string; isActive: boolean }> }) =>
       apiFetch(`/api/close/templates/${id}`, { method: 'PUT', body }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['close-templates'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['close-templates'] });
+      showToast('success', 'Template updated.');
+    },
+    onError: (err) => showToast('error', err instanceof Error ? err.message : 'Failed to update template'),
   });
 
   const createMutation = useMutation({
@@ -54,31 +72,51 @@ export default function TemplatesSettingsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['close-templates'] });
       setPanelOpen(false);
+      setEditingTemplate(null);
       setNewName('');
       setNewMemo('');
       setNewFreq('monthly');
-      setNewLines([{ accountRef: '', debit: 0, credit: undefined }, { accountRef: '', debit: undefined, credit: 0 }]);
+      setNewLines([{ accountRef: '', debit: '0', credit: undefined }, { accountRef: '', debit: undefined, credit: '0' }]);
+      showToast('success', 'Template created.');
     },
+    onError: (err) => showToast('error', err instanceof Error ? err.message : 'Failed to create template'),
   });
 
   const [panelOpen, setPanelOpen] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<Template | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [newMemo, setNewMemo] = useState('');
   const [newFreq, setNewFreq] = useState<'monthly' | 'quarterly' | 'annually'>('monthly');
-  const [newLines, setNewLines] = useState<Array<{ accountRef: string; debit?: number; credit?: number }>>([
-    { accountRef: '', debit: 0, credit: undefined },
-    { accountRef: '', debit: undefined, credit: 0 },
+  const [newLines, setNewLines] = useState<Array<{ accountRef: string; debit?: string; credit?: string }>>([
+    { accountRef: '', debit: '0', credit: undefined },
+    { accountRef: '', debit: undefined, credit: '0' },
   ]);
 
-  const handleCreateTemplate = () => {
+  const openEditTemplate = (t: Template) => {
+    setEditingTemplate(t);
+    setNewName(t.name);
+    setNewMemo(t.memo);
+    setNewFreq(t.frequency);
+    setNewLines(t.lines.map((l) => ({ accountRef: l.accountRef, debit: l.debit, credit: l.credit })));
+    setPanelOpen(true);
+  };
+
+  const handleSaveTemplate = () => {
     if (!newName.trim() || !newMemo.trim()) return;
-    createMutation.mutate({
+    const payload = {
       name: newName.trim(),
       memo: newMemo.trim(),
       lines: newLines.filter((l) => l.accountRef.trim()),
       frequency: newFreq,
-    });
+    };
+    if (editingTemplate) {
+      updateMutation.mutate({ id: editingTemplate.id, body: payload }, {
+        onSuccess: () => { setPanelOpen(false); setEditingTemplate(null); },
+      });
+    } else {
+      createMutation.mutate(payload);
+    }
   };
 
   if (isLoading && templates.length === 0) return <div className="text-text-secondary">Loading templates...</div>;
@@ -90,7 +128,7 @@ export default function TemplatesSettingsPage() {
           <h1 className="text-2xl font-display text-primary">Recurring Entry Templates</h1>
           <p className="text-text-secondary text-sm mt-1">Templates are proposed at the start of each close period</p>
         </div>
-        <button type="button" onClick={() => setPanelOpen(true)} className="inline-flex items-center gap-2 px-4 py-2 rounded-input bg-accent text-accent-contrast text-sm font-medium hover:opacity-90">
+        <button type="button" onClick={() => { setEditingTemplate(null); setNewName(''); setNewMemo(''); setNewFreq('monthly'); setNewLines([{ accountRef: '', debit: '0', credit: undefined }, { accountRef: '', debit: undefined, credit: '0' }]); setPanelOpen(true); }} className="inline-flex items-center gap-2 px-4 py-2 rounded-input bg-accent text-accent-contrast text-sm font-medium hover:opacity-90">
           <Plus className="w-4 h-4" /> New Template
         </button>
       </div>
@@ -116,9 +154,9 @@ export default function TemplatesSettingsPage() {
           </thead>
           <tbody>
             {templates.map((t) => {
-              const debitLine = t.lines.find((l) => (l.debit ?? 0) > 0);
-              const creditLine = t.lines.find((l) => (l.credit ?? 0) > 0);
-              const amount = debitLine?.debit ?? creditLine?.credit ?? 0;
+              const debitLine = t.lines.find((l) => l.debit != null && parseFloat(l.debit) > 0);
+              const creditLine = t.lines.find((l) => l.credit != null && parseFloat(l.credit) > 0);
+              const amount = debitLine?.debit ?? creditLine?.credit ?? '0';
               return (
               <Fragment key={t.id}>
                 <tr className="border-b border-border-light hover:bg-hover/50">
@@ -135,7 +173,7 @@ export default function TemplatesSettingsPage() {
                   <td className="py-2.5 px-4">{t.isActive ? 'Yes' : 'No'}</td>
                   <td className="py-2.5 px-4 text-text-secondary">{new Date(t.createdAt).toLocaleDateString()}</td>
                   <td className="py-2.5 px-4 flex items-center gap-1">
-                    <button type="button" className="p-1.5 rounded-input text-text-secondary hover:bg-hover" aria-label="Edit"><Pencil className="w-4 h-4" /></button>
+                    <button type="button" onClick={() => openEditTemplate(t)} className="p-1.5 rounded-input text-text-secondary hover:bg-hover" aria-label="Edit"><Pencil className="w-4 h-4" /></button>
                     <button type="button" onClick={() => updateMutation.mutate({ id: t.id, body: { isActive: !t.isActive } })} className="p-1.5 rounded-input text-text-secondary hover:bg-hover" aria-label="Toggle active"><Power className="w-4 h-4" /></button>
                     <button type="button" onClick={() => deleteMutation.mutate(t.id)} className="p-1.5 rounded-input text-text-secondary hover:bg-status-red-dim hover:text-status-red" aria-label="Delete"><Trash2 className="w-4 h-4" /></button>
                   </td>
@@ -154,16 +192,29 @@ export default function TemplatesSettingsPage() {
         </table>
       </div>
 
-      <SlideOverPanel open={panelOpen} onClose={() => setPanelOpen(false)} title="New Recurring Entry Template" width={560} footer={
+      {toast && (
+        <div
+          className={cn(
+            'fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg border text-sm shadow-lg',
+            toast.type === 'success'
+              ? 'border-status-green bg-status-green-dim text-status-green'
+              : 'border-status-red bg-status-red-dim text-status-red'
+          )}
+        >
+          {toast.message}
+        </div>
+      )}
+
+      <SlideOverPanel open={panelOpen} onClose={() => { setPanelOpen(false); setEditingTemplate(null); }} title={editingTemplate ? 'Edit Template' : 'New Recurring Entry Template'} width={560} footer={
         <>
-          <button type="button" className="px-4 py-2 rounded-input border border-border text-sm" onClick={() => setPanelOpen(false)}>Cancel</button>
+          <button type="button" className="px-4 py-2 rounded-input border border-border text-sm" onClick={() => { setPanelOpen(false); setEditingTemplate(null); }}>Cancel</button>
           <button
             type="button"
             className="px-4 py-2 rounded-input bg-accent text-accent-contrast text-sm disabled:opacity-50"
-            onClick={handleCreateTemplate}
-            disabled={createMutation.isPending || !newName.trim() || !newMemo.trim()}
+            onClick={handleSaveTemplate}
+            disabled={(createMutation.isPending || updateMutation.isPending) || !newName.trim() || !newMemo.trim()}
           >
-            {createMutation.isPending ? 'Saving...' : 'Save Template'}
+            {(createMutation.isPending || updateMutation.isPending) ? 'Saving...' : editingTemplate ? 'Update Template' : 'Save Template'}
           </button>
         </>
       }>
@@ -202,13 +253,13 @@ export default function TemplatesSettingsPage() {
                     className="rounded-input border border-border bg-input px-2 py-1.5 text-sm"
                   />
                   <MoneyInput
-                    value={line.debit != null ? String(line.debit) : null}
-                    onChange={(v) => setNewLines((prev) => prev.map((l, j) => j === i ? { ...l, debit: v ? parseFloat(v.replace(/,/g, '')) : undefined } : l))}
+                    value={line.debit ?? null}
+                    onChange={(v) => setNewLines((prev) => prev.map((l, j) => j === i ? { ...l, debit: v ? v.replace(/,/g, '') : undefined } : l))}
                     size="sm"
                   />
                   <MoneyInput
-                    value={line.credit != null ? String(line.credit) : null}
-                    onChange={(v) => setNewLines((prev) => prev.map((l, j) => j === i ? { ...l, credit: v ? parseFloat(v.replace(/,/g, '')) : undefined } : l))}
+                    value={line.credit ?? null}
+                    onChange={(v) => setNewLines((prev) => prev.map((l, j) => j === i ? { ...l, credit: v ? v.replace(/,/g, '') : undefined } : l))}
                     size="sm"
                   />
                 </div>

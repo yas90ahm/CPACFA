@@ -9,7 +9,7 @@ import { StatusBadge } from '@/components/shared/StatusBadge';
 import { SlideOverPanel } from '@/components/shared/SlideOverPanel';
 import { TopBar } from '@/components/shell/TopBar';
 import { useAuth } from '@/lib/auth';
-import { cn } from '@/lib/utils';
+import { cn, getUserDisplay } from '@/lib/utils';
 import type { SessionListItem } from '@/lib/types/session-list';
 import type { CloseState } from '@/lib/types/close-session';
 import { Lock, Plus } from 'lucide-react';
@@ -48,8 +48,16 @@ export default function ClosePage() {
   const createSession = useCreateSession();
   const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [entitySelect, setEntitySelect] = useState('');
-  const [periodStart, setPeriodStart] = useState('2026-02-01');
-  const [periodEnd, setPeriodEnd] = useState('2026-02-28');
+  // Default to current month
+  const [periodStart, setPeriodStart] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  });
+  const [periodEnd, setPeriodEnd] = useState(() => {
+    const now = new Date();
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  });
 
   useEffect(() => {
     if (entities.length > 0 && !entitySelect) {
@@ -87,8 +95,8 @@ export default function ClosePage() {
       <TopBar
         entityName={entityName}
         showPeriod={false}
-        userName={user?.email ?? ''}
-        userInitials={user?.email?.slice(0, 2).toUpperCase() ?? ''}
+        userName={getUserDisplay(user).displayName}
+        userInitials={getUserDisplay(user).initials}
       />
       <div className="min-h-screen bg-primary pt-14">
       <div className="max-w-5xl mx-auto p-8">

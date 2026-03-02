@@ -181,16 +181,16 @@ export function InvestigationPanel({
             <div className="grid grid-cols-3 gap-4 text-center">
               <div>
                 <div className="text-xs text-text-secondary">Current</div>
-                <div className="font-mono font-medium"><MoneyCell value={parseFloat(result.current_total)} showDollar /></div>
+                <div className="font-mono font-medium"><MoneyCell value={result.current_total} showDollar /></div>
               </div>
               <div>
                 <div className="text-xs text-text-secondary">Prior</div>
-                <div className="font-mono font-medium"><MoneyCell value={parseFloat(result.prior_total)} showDollar /></div>
+                <div className="font-mono font-medium"><MoneyCell value={result.prior_total} showDollar /></div>
               </div>
               <div>
                 <div className="text-xs text-text-secondary">Change</div>
                 <div className={cn('font-mono font-medium', parseFloat(result.delta) >= 0 ? 'text-status-green' : 'text-status-red')}>
-                  <MoneyCell value={parseFloat(result.delta)} showDollar /> ({result.delta_pct})
+                  <MoneyCell value={result.delta} showDollar /> ({result.delta_pct})
                 </div>
               </div>
             </div>
@@ -214,7 +214,7 @@ export function InvestigationPanel({
                     </div>
                     <div className="flex items-center gap-3">
                       <span className={cn('font-mono text-sm', parseFloat(a.delta) >= 0 ? 'text-status-green' : 'text-status-red')}>
-                        <MoneyCell value={parseFloat(a.delta)} showDollar />
+                        <MoneyCell value={a.delta} showDollar />
                       </span>
                       <span className="text-xs text-text-tertiary">{a.contribution_pct}</span>
                       <ChevronRight className="w-4 h-4 text-text-tertiary" />
@@ -242,7 +242,7 @@ export function InvestigationPanel({
                       <span className="text-sm text-primary">{a.account_name}</span>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="font-mono text-sm text-status-green"><MoneyCell value={parseFloat(a.current_balance)} showDollar /></span>
+                      <span className="font-mono text-sm text-status-green"><MoneyCell value={a.current_balance} showDollar /></span>
                       <ChevronRight className="w-4 h-4 text-text-tertiary" />
                     </div>
                   </button>
@@ -262,7 +262,7 @@ export function InvestigationPanel({
                       <span className="font-mono text-xs mr-2">{a.account_code}</span>
                       <span className="text-sm">{a.account_name}</span>
                     </div>
-                    <span className="font-mono text-sm text-status-red"><MoneyCell value={parseFloat(a.prior_balance)} showDollar /></span>
+                    <span className="font-mono text-sm text-status-red"><MoneyCell value={a.prior_balance} showDollar /></span>
                   </div>
                 ))}
               </div>
@@ -313,8 +313,8 @@ export function InvestigationPanel({
                   <tr key={i} className="border-b border-border-light">
                     <td className="py-1.5 font-mono text-xs">{e.date}</td>
                     <td className="py-1.5" title={e.memo}>{e.description || e.memo}</td>
-                    <td className="py-1.5 text-right font-mono">{parseFloat(e.debit) > 0 ? <MoneyCell value={parseFloat(e.debit)} /> : ''}</td>
-                    <td className="py-1.5 text-right font-mono">{parseFloat(e.credit) > 0 ? <MoneyCell value={parseFloat(e.credit)} /> : ''}</td>
+                    <td className="py-1.5 text-right font-mono">{parseFloat(e.debit) > 0 ? <MoneyCell value={e.debit} /> : ''}</td>
+                    <td className="py-1.5 text-right font-mono">{parseFloat(e.credit) > 0 ? <MoneyCell value={e.credit} /> : ''}</td>
                     <td className="py-1.5 font-mono text-xs text-text-tertiary">{e.je_number}</td>
                   </tr>
                 ))}

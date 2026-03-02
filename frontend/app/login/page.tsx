@@ -29,10 +29,10 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg-primary, #0C0E13)' }}>
       <div className="w-full max-w-md p-8 rounded-xl" style={{ backgroundColor: 'var(--bg-surface, #14161D)', border: '1px solid var(--border-default, #2A2D37)' }}>
         <h1 className="text-3xl font-display mb-1" style={{ color: 'var(--text-primary, #E8EAF0)', fontStyle: 'italic' }}>
-          Sovereign
+          Sabit
         </h1>
         <p className="mb-8" style={{ color: 'var(--text-secondary, #9DA3B0)', fontSize: '14px' }}>
-          CPA Close Engine
+          Financial Close Engine
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">

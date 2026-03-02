@@ -24,17 +24,20 @@ export function useStatements(sessionId: string | null) {
           equityColumnar: { columns: [] as string[], rows: [] as { label: string; values: string[] }[] },
         };
       }
-      const linesRes = await apiFetch<{ lines: Array<{ id?: string; fsLineId?: string; name?: string; amount?: string; statement?: string; displayOrder?: number; indentLevel?: number; isSubtotal?: boolean; isGrandTotal?: boolean; sectionName?: string }> }>(
-        `/api/close/statement-packages/${pkg.id}/lines`
+      const linesRes = await apiFetch<{ lines: Array<{ id?: string; fsLineId?: string; name?: string; amount?: string; priorAmount?: string; changeAmount?: string; changePercent?: string | null; statement?: string; displayOrder?: number; indentLevel?: number; isSubtotal?: boolean; isGrandTotal?: boolean; sectionName?: string }> }>(
+        `/api/close/statement-packages/${pkg.id}/lines?includePrior=true`
       );
       const stMap: Record<string, 'income_statement' | 'balance_sheet' | 'cash_flow' | 'equity'> = { profit_and_loss: 'income_statement', income_statement: 'income_statement', balance_sheet: 'balance_sheet', cash_flow: 'cash_flow', equity: 'equity' };
-      const toLine = (l: { id?: string; fsLineId?: string; name?: string; amount?: string; statement?: string; displayOrder?: number; indentLevel?: number; isSubtotal?: boolean; isGrandTotal?: boolean; sectionName?: string }) => ({
+      const toLine = (l: { id?: string; fsLineId?: string; name?: string; amount?: string; priorAmount?: string; changeAmount?: string; changePercent?: string | null; statement?: string; displayOrder?: number; indentLevel?: number; isSubtotal?: boolean; isGrandTotal?: boolean; sectionName?: string }) => ({
         id: l.id ?? `${pkg.id}:${l.fsLineId}`,
         statementType: (stMap[l.statement ?? ''] ?? 'income_statement') as 'income_statement' | 'balance_sheet' | 'cash_flow' | 'equity',
         sectionName: l.sectionName ?? '',
         lineItemName: l.name ?? l.fsLineId ?? '',
         taxonomyLineId: l.fsLineId ?? l.id ?? '',
         amount: String(l.amount ?? '0'),
+        priorAmount: l.priorAmount,
+        changeAmount: l.changeAmount,
+        changePercent: l.changePercent,
         displayOrder: l.displayOrder ?? 0,
         isSubtotal: l.isSubtotal ?? false,
         isGrandTotal: l.isGrandTotal ?? false,

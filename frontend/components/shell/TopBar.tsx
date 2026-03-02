@@ -39,7 +39,7 @@ export function TopBar(p: TopBarProps) {
   return (
     <header className="fixed top-0 left-0 right-0 h-14 z-40 flex items-center justify-between px-4 bg-surface border-b border-border print:hidden">
       <div className="flex items-center gap-6">
-        <span className="font-display text-lg tracking-[0.2em] uppercase text-primary">Sovereign</span>
+        <span className="font-display text-lg tracking-[0.2em] uppercase text-primary">Sabit</span>
         {isPortfolio ? (
           <span className="text-base font-medium text-primary">Portfolio Dashboard</span>
         ) : (

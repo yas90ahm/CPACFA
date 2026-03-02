@@ -13,6 +13,7 @@ import { useCloseSession } from '@/lib/queries/close-session';
 import { useCOASuggestions, useGenerateSuggestions, useAcceptSuggestion, useRejectSuggestion } from '@/lib/queries/suggestions';
 import type { TrialBalanceRow, AccountType } from '@/lib/types/trial-balance';
 import type { COASuggestion } from '@/lib/types/suggestion';
+import { sumMoneyStrings } from '@/lib/money';
 import { Pencil, Check, X, Sparkles, Loader2 } from 'lucide-react';
 
 /** API taxonomy line (flat). */
@@ -224,15 +225,28 @@ export default function MappingPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="font-display text-2xl text-primary">Account Mapping</h1>
-        <p className="text-text-secondary text-sm mt-0.5">Map GL accounts to reporting line items</p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="font-display text-2xl text-primary">Account Mapping</h1>
+          <p className="text-text-secondary text-sm mt-0.5">Map GL accounts to reporting line items</p>
+        </div>
+        {unmappedCount > 0 && (
+          <button
+            type="button"
+            disabled={generateMutation.isPending}
+            onClick={() => generateMutation.mutate(undefined)}
+            className="px-4 py-2 rounded-input bg-accent text-white text-sm font-medium hover:bg-accent/90 disabled:opacity-50 flex items-center gap-2"
+          >
+            {generateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            {generateMutation.isPending ? 'Generating...' : 'Auto-Map Remaining'}
+          </button>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-4 py-2 px-3 rounded-input bg-surface border border-border">
         <span className="text-text-secondary text-sm">Total Accounts: {totalAccounts}</span>
         <span className="text-status-green text-sm">Mapped: {mappedCount}</span>
-        <span className={cn('text-sm', unmappedCount > 0 ? 'text-status-red font-medium' : 'text-status-green')}>
+        <span className={cn('text-sm', unmappedCount > 0 ? 'text-status-amber font-medium' : 'text-status-green')}>
           Unmapped: {unmappedCount}
         </span>
         <div className="flex-1 min-w-[120px] max-w-[200px] h-2 bg-elevated rounded-full overflow-hidden">
@@ -289,7 +303,7 @@ export default function MappingPage() {
                       key={r.accountCode}
                       className={cn(
                         'border-b border-border-light hover:bg-hover',
-                        !r.mappingReportingLineId && 'border-l-4 border-l-status-red'
+                        !r.mappingReportingLineId && 'border-l-4 border-l-status-amber bg-status-amber/5'
                       )}
                     >
                       <td className="px-3 py-2 font-mono text-sm text-primary">{r.accountCode}</td>
@@ -309,7 +323,7 @@ export default function MappingPage() {
                             </span>
                           </div>
                         ) : (
-                          <span className="text-status-red">Unmapped</span>
+                          <span className="text-status-amber">⚠ Unmapped</span>
                         )}
                       </td>
                       <td className="px-3 py-2">
@@ -571,14 +585,19 @@ function TaxonomyTree({
   rows: TrialBalanceRow[];
 }) {
   const countByLine = useMemo(() => {
-    const map: Record<string, { count: number; balance: number }> = {};
+    // Group rows by their mapped reporting line
+    const groups: Record<string, string[]> = {};
     rows.forEach((r) => {
       if (r.mappingReportingLineId) {
-        if (!map[r.mappingReportingLineId]) map[r.mappingReportingLineId] = { count: 0, balance: 0 };
-        map[r.mappingReportingLineId].count += 1;
-        map[r.mappingReportingLineId].balance += r.netBalance;
+        if (!groups[r.mappingReportingLineId]) groups[r.mappingReportingLineId] = [];
+        groups[r.mappingReportingLineId].push(r.netBalance);
       }
     });
+    // Build result with count and summed balance (as money string)
+    const map: Record<string, { count: number; balance: string }> = {};
+    for (const [lineId, balances] of Object.entries(groups)) {
+      map[lineId] = { count: balances.length, balance: sumMoneyStrings(balances) };
+    }
     return map;
   }, [rows]);
 

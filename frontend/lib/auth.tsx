@@ -17,6 +17,7 @@ export interface AuthUser {
   tenantId: string;
   role: string;
   email?: string;
+  name?: string;
 }
 
 interface AuthContextValue {
@@ -87,7 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, password, tenantId: tenantId || undefined }),
         });
-        let data: { error?: string; token?: string; userId?: string; tenantId?: string; role?: string };
+        let data: { error?: string; token?: string; userId?: string; tenantId?: string; role?: string; email?: string; name?: string | null };
         try {
           data = await res.json();
         } catch {
@@ -102,7 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           tenantId: string;
           role: string;
         };
-        const authUser = { userId, tenantId: tid, role, email };
+        const authUser: AuthUser = { userId, tenantId: tid, role, email: data.email ?? email, name: data.name ?? undefined };
         setToken(t);
         setUser(authUser);
         saveToStorage(t, authUser);

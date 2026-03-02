@@ -37,6 +37,26 @@ export function getPeriodEndDate(periodLabel: string): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** Derive display name and initials from user fields. */
+export function getUserDisplay(user: { name?: string; email?: string } | null | undefined): { displayName: string; initials: string } {
+  if (!user) return { displayName: 'User', initials: 'U' };
+  const name = user.name?.trim();
+  if (name) {
+    const parts = name.split(/\s+/);
+    const initials = parts.length >= 2
+      ? (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase()
+      : name.slice(0, 2).toUpperCase();
+    return { displayName: name, initials };
+  }
+  const email = user.email?.trim();
+  if (email) {
+    const local = email.split('@')[0] ?? '';
+    const formatted = local.replace(/[._-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    return { displayName: formatted, initials: formatted.slice(0, 2).toUpperCase() };
+  }
+  return { displayName: 'User', initials: 'U' };
+}
+
 /** Period type from label for filter/display. */
 export function getPeriodType(periodLabel: string): 'monthly' | 'quarterly' | 'annual' {
   const t = periodLabel.trim();

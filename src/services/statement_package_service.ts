@@ -6,6 +6,7 @@
 import { randomUUID } from 'crypto';
 import { createHash } from 'crypto';
 import type { Pool } from 'pg';
+import { withTransaction } from '../db/transaction.js';
 import type { TrialBalanceResult, BalanceSheet, CashFlowStatement, EquityChangesStatement } from '../types/financial.js';
 import type { StatementPackage, StatementLine, StatementDiffJson, ValidationResult } from '../types/statement_package.js';
 import { buildValidatedStatements, buildBalanceSheet, MathematicalIntegrityError } from './financialStatements.js';
@@ -342,106 +343,110 @@ export async function generateStatements(
     equityStatement
   );
   const inputHash = hashStatementInput(closeSessionId, entries);
-  const nextVersion = (await repo.getMaxVersionByCloseSessionId(pool, tenantId, closeSessionId)) + 1;
-  const id = randomUUID();
-  const pkg = await repo.insertStatementPackage(pool, tenantId, id, {
-    closeSessionId,
-    version: nextVersion,
-    inputHash,
-    generatedBy: opts?.generatedBy,
-    status: opts?.status ?? 'draft',
-    engineVersion: ENGINE_VERSION,
-    ruleVersionsSnapshot: opts?.ruleVersionsSnapshot,
-    validationResults,
-  });
-  const lines = flattenToLines(id, result.balanceSheet, result.profitAndLoss, cashFlowStatement, equityStatement);
-  for (const line of lines) {
-    await repo.insertStatementLine(pool, {
-      packageId: line.packageId,
-      fsLineId: line.fsLineId,
-      amount: line.amount,
-      statement: line.statement,
-      metadata: line.metadata,
-      displayOrder: line.displayOrder,
-      indentLevel: line.indentLevel,
-      isSubtotal: line.isSubtotal,
-      isGrandTotal: line.isGrandTotal,
-      sectionName: line.sectionName,
-    });
-  }
-  const previousPackages = await repo.listStatementPackagesByCloseSessionId(pool, tenantId, closeSessionId, 2);
-  const prevPkg = previousPackages.length >= 2 ? previousPackages[1] : undefined;
-  if (prevPkg) {
-    const prevLines = await repo.listStatementLinesByPackageId(pool, prevPkg.id);
-    const nextLines = await repo.listStatementLinesByPackageId(pool, id);
-    const diff = computeDiff(prevLines, nextLines);
-    await repo.upsertStatementDiff(pool, prevPkg.id, id, diff);
-  }
-  await clearStatementsStaleSince(pool, tenantId, closeSessionId);
-
-  // Compute variances for period-over-period (after statement generation)
-  const priorSessions = await listSessions(pool, { tenantId, entityId: session.entityId });
-  const priorSession = priorSessions
-    .filter((s) => (s.periodEnd as string) < session.periodEnd)
-    .sort((a, b) => (b.periodEnd as string).localeCompare(a.periodEnd as string))[0];
-  if (priorSession) {
-    const priorPkgs = await repo.listStatementPackagesByCloseSessionId(pool, tenantId, priorSession.id, 1);
-    const priorPkg = priorPkgs[0];
-    let priorLinesInput: Array<{ fsLineId: string; amount: number; statement: string; label?: string }> | null = null;
-    if (priorPkg) {
-      const priorLines = await repo.listStatementLinesByPackageId(pool, priorPkg.id);
-      priorLinesInput = priorLines.map((l) => ({
-        fsLineId: l.fsLineId,
-        amount: l.amount,
-        statement: l.statement,
-        label: (l.metadata as { label?: string })?.label,
-      }));
-    } else if (priorTB) {
-      // No statement package for prior period — build lines from adjusted TB
-      const priorResult = buildValidatedStatements(priorTB);
-      const priorCF = buildCashFlowStatement(priorTB, priorResult.profitAndLoss);
-      const priorEq = buildEquityChangesStatement(priorResult.balanceSheet, undefined, priorResult.profitAndLoss);
-      const priorFlatLines = flattenToLines('__prior_derived__', priorResult.balanceSheet, priorResult.profitAndLoss, priorCF, priorEq);
-      priorLinesInput = priorFlatLines.map((l) => ({
-        fsLineId: l.fsLineId,
-        amount: l.amount,
-        statement: l.statement,
-        label: (l.metadata as { label?: string })?.label,
-      }));
-    }
-    if (priorLinesInput) {
-      const currentLines = lines.map((l) => ({
-        fsLineId: l.fsLineId,
-        amount: l.amount,
-        statement: l.statement,
-        label: (l.metadata as { label?: string })?.label,
-      }));
-      const entitySettings = await getEntitySettings(pool, tenantId, session.entityId);
-      const materialPct = Number(entitySettings.varianceMaterialityPercent) || 10;
-      await computeVariances(pool, {
-        tenantId,
-        closeSessionId,
-        periodLabel,
-        currentLines,
-        priorLines: priorLinesInput,
-        materialThresholdPct: materialPct,
-      });
-    }
-  }
-
-  await recordMaterialEvent(pool, {
-    tenantId,
-    periodLabel,
-    eventType: 'statement_package_generation',
-    deterministicFlagSnapshot: {
-      packageId: id,
+  const pkg = await withTransaction(pool, async (client) => {
+    const tx = client as unknown as Pool;
+    const nextVersion = (await repo.getMaxVersionByCloseSessionId(tx, tenantId, closeSessionId)) + 1;
+    const id = randomUUID();
+    const created = await repo.insertStatementPackage(tx, tenantId, id, {
       closeSessionId,
       version: nextVersion,
       inputHash,
+      generatedBy: opts?.generatedBy,
+      status: opts?.status ?? 'draft',
       engineVersion: ENGINE_VERSION,
-      lineCount: lines.length,
-    },
-    createdBy: opts?.generatedBy,
+      ruleVersionsSnapshot: opts?.ruleVersionsSnapshot,
+      validationResults,
+    });
+    const lines = flattenToLines(id, result.balanceSheet, result.profitAndLoss, cashFlowStatement, equityStatement);
+    for (const line of lines) {
+      await repo.insertStatementLine(tx, {
+        packageId: line.packageId,
+        fsLineId: line.fsLineId,
+        amount: line.amount,
+        statement: line.statement,
+        metadata: line.metadata,
+        displayOrder: line.displayOrder,
+        indentLevel: line.indentLevel,
+        isSubtotal: line.isSubtotal,
+        isGrandTotal: line.isGrandTotal,
+        sectionName: line.sectionName,
+      });
+    }
+    const previousPackages = await repo.listStatementPackagesByCloseSessionId(tx, tenantId, closeSessionId, 2);
+    const prevPkg = previousPackages.length >= 2 ? previousPackages[1] : undefined;
+    if (prevPkg) {
+      const prevLines = await repo.listStatementLinesByPackageId(tx, prevPkg.id);
+      const nextLines = await repo.listStatementLinesByPackageId(tx, id);
+      const diff = computeDiff(prevLines, nextLines);
+      await repo.upsertStatementDiff(tx, prevPkg.id, id, diff);
+    }
+    await clearStatementsStaleSince(tx, tenantId, closeSessionId);
+
+    // Compute variances for period-over-period (after statement generation)
+    const priorSessions = await listSessions(tx, { tenantId, entityId: session.entityId });
+    const priorSession = priorSessions
+      .filter((s) => (s.periodEnd as string) < session.periodEnd)
+      .sort((a, b) => (b.periodEnd as string).localeCompare(a.periodEnd as string))[0];
+    if (priorSession) {
+      const priorPkgs = await repo.listStatementPackagesByCloseSessionId(tx, tenantId, priorSession.id, 1);
+      const priorPkgForVariance = priorPkgs[0];
+      let priorLinesInput: Array<{ fsLineId: string; amount: number; statement: string; label?: string }> | null = null;
+      if (priorPkgForVariance) {
+        const priorLines = await repo.listStatementLinesByPackageId(tx, priorPkgForVariance.id);
+        priorLinesInput = priorLines.map((l) => ({
+          fsLineId: l.fsLineId,
+          amount: l.amount,
+          statement: l.statement,
+          label: (l.metadata as { label?: string })?.label,
+        }));
+      } else if (priorTB) {
+        // No statement package for prior period — build lines from adjusted TB
+        const priorResult = buildValidatedStatements(priorTB);
+        const priorCF = buildCashFlowStatement(priorTB, priorResult.profitAndLoss);
+        const priorEq = buildEquityChangesStatement(priorResult.balanceSheet, undefined, priorResult.profitAndLoss);
+        const priorFlatLines = flattenToLines('__prior_derived__', priorResult.balanceSheet, priorResult.profitAndLoss, priorCF, priorEq);
+        priorLinesInput = priorFlatLines.map((l) => ({
+          fsLineId: l.fsLineId,
+          amount: l.amount,
+          statement: l.statement,
+          label: (l.metadata as { label?: string })?.label,
+        }));
+      }
+      if (priorLinesInput) {
+        const currentLines = lines.map((l) => ({
+          fsLineId: l.fsLineId,
+          amount: l.amount,
+          statement: l.statement,
+          label: (l.metadata as { label?: string })?.label,
+        }));
+        const entitySettings = await getEntitySettings(tx, tenantId, session.entityId);
+        const materialPct = Number(entitySettings.varianceMaterialityPercent) || 10;
+        await computeVariances(tx, {
+          tenantId,
+          closeSessionId,
+          periodLabel,
+          currentLines,
+          priorLines: priorLinesInput,
+          materialThresholdPct: materialPct,
+        });
+      }
+    }
+
+    await recordMaterialEvent(tx, {
+      tenantId,
+      periodLabel,
+      eventType: 'statement_package_generation',
+      deterministicFlagSnapshot: {
+        packageId: id,
+        closeSessionId,
+        version: nextVersion,
+        inputHash,
+        engineVersion: ENGINE_VERSION,
+        lineCount: lines.length,
+      },
+      createdBy: opts?.generatedBy,
+    });
+    return created;
   });
   return pkg;
 }

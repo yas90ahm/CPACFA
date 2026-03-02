@@ -9,7 +9,21 @@ import { useAdvanceSession } from '@/lib/queries/close-session';
 import { apiUpload } from '@/lib/api';
 import type { FieldMapping } from '@/lib/types/ingest';
 import type { GLParseResult, ValidationResult, TBPreview } from '@/lib/types/ingest';
-import { Check, AlertTriangle, X } from 'lucide-react';
+import { Check, AlertTriangle, X, Download } from 'lucide-react';
+
+/** Backend ingest response shape (for 207 partial success) */
+interface IngestResponse {
+  status?: 'partial' | 'success';
+  message?: string;
+  balancedCount?: number;
+  imbalancedCount?: number;
+  imbalancedEntries?: Array<{
+    entryId: string;
+    debits: number;
+    credits: number;
+    difference: number;
+  }>;
+}
 
 /** Backend parse response shape */
 interface ParsePreviewResponse {
@@ -91,6 +105,14 @@ const GL_REQUIRED_FIELDS: FieldMapping[] = [
   { fieldId: 'reference', label: 'Reference', required: false },
 ];
 
+/** Escape a value for CSV (wrap in quotes if it contains commas, quotes, or newlines) */
+function csvEscape(value: string): string {
+  if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
 function formatMoney(s: string): string {
   const n = parseFloat(s);
   if (Number.isNaN(n)) return s;
@@ -118,6 +140,8 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
   const [validationError, setValidationError] = useState<ValidationResult | null>(null);
   const [advanceError, setAdvanceError] = useState<string | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [ingestResult, setIngestResult] = useState<IngestResponse | null>(null);
+  const [rawParseErrors, setRawParseErrors] = useState<string[]>([]);
 
   useEffect(() => {
     setStep('parsing');
@@ -164,6 +188,7 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
       .then((result) => {
         const prev = result.preview;
         if (!result.success && result.errors?.length) {
+          setRawParseErrors(result.errors);
           setValidationError({
             passed: false,
             errors: result.errors.map((e) => ({ message: e })),
@@ -218,12 +243,19 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
   const ingest = async () => {
     setStep('ingesting');
     setAdvanceError(null);
+    setIngestResult(null);
     try {
       const period = periodLabelToParam(periodLabel);
       const formData = new FormData();
       formData.append('file', file);
       formData.append('columnMapping', JSON.stringify(mappingsToBackend(mappings)));
-      await apiUpload(`/api/gl/ingest?period=${encodeURIComponent(period)}`, formData);
+      const result = await apiUpload<IngestResponse>(`/api/gl/ingest?period=${encodeURIComponent(period)}`, formData);
+      if (result.status === 'partial' && result.imbalancedCount && result.imbalancedCount > 0) {
+        setIngestResult(result);
+        setAdvanceError(`Partial import: ${result.balancedCount ?? 0} entries imported, ${result.imbalancedCount} entries imbalanced. ${result.message ?? ''}`);
+        setStep('confirm');
+        return;
+      }
       await advanceSession.mutateAsync({});
       queryClient.invalidateQueries({ queryKey: ['trial-balance', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
@@ -232,6 +264,68 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
       setStep('confirm');
       setAdvanceError(err instanceof Error ? err.message : 'Failed to ingest or advance. Try again.');
     }
+  };
+
+  /** Generate and download a CSV error report from validation or ingest errors */
+  const downloadErrorReport = () => {
+    const lines: string[] = [];
+
+    // Check for imbalanced entries from ingest (207 partial)
+    if (ingestResult?.imbalancedEntries?.length) {
+      lines.push('Entry ID,Debits,Credits,Difference');
+      for (const entry of ingestResult.imbalancedEntries) {
+        lines.push(
+          [
+            csvEscape(entry.entryId),
+            entry.debits.toFixed(2),
+            entry.credits.toFixed(2),
+            entry.difference.toFixed(2),
+          ].join(',')
+        );
+      }
+    }
+
+    // Check for validation errors (from parse with mapping)
+    if (validationError?.errors?.length) {
+      if (lines.length > 0) lines.push(''); // blank separator
+      lines.push('Error #,Message,Detail,Affected Rows');
+      validationError.errors.forEach((e, i) => {
+        lines.push(
+          [
+            String(i + 1),
+            csvEscape(e.message),
+            csvEscape(e.detail ?? ''),
+            e.rows?.join('; ') ?? '',
+          ].join(',')
+        );
+      });
+    }
+
+    // Check for raw parse errors (string[])
+    if (!validationError?.errors?.length && rawParseErrors.length) {
+      lines.push('Error #,Message');
+      rawParseErrors.forEach((msg, i) => {
+        lines.push([String(i + 1), csvEscape(msg)].join(','));
+      });
+    }
+
+    // Fallback: if somehow nothing structured, dump the parseError string
+    if (lines.length === 0 && parseError) {
+      lines.push('Error #,Message');
+      lines.push(`1,${csvEscape(parseError)}`);
+    }
+
+    if (lines.length === 0) return; // nothing to download
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `gl-error-report-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   if (step === 'parsing') {
@@ -389,9 +483,21 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
       <div className="max-w-2xl space-y-6">
         <h2 className="text-lg font-display text-primary">Ready to ingest</h2>
         {advanceError && (
-          <div className="bg-status-red/10 border border-status-red rounded-card p-4 flex items-start gap-2 text-sm text-status-red">
-            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>{advanceError}</span>
+          <div className="bg-status-red/10 border border-status-red rounded-card p-4 space-y-3">
+            <div className="flex items-start gap-2 text-sm text-status-red">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{advanceError}</span>
+            </div>
+            {ingestResult?.imbalancedEntries && ingestResult.imbalancedEntries.length > 0 && (
+              <button
+                type="button"
+                onClick={downloadErrorReport}
+                className="px-3 py-1.5 rounded-input bg-surface border border-border text-sm font-medium hover:bg-hover inline-flex items-center gap-2 text-primary"
+              >
+                <Download className="w-4 h-4" />
+                Download Error Report ({ingestResult.imbalancedCount ?? ingestResult.imbalancedEntries.length} imbalanced entries)
+              </button>
+            )}
           </div>
         )}
         <div className="bg-surface border border-border rounded-card p-6 space-y-4">
@@ -438,13 +544,28 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
           <h2 className="text-lg font-display text-status-red flex items-center gap-2">
             <X className="w-5 h-5" /> Parse Failed
           </h2>
-          <div className="bg-surface border border-border rounded-card p-5">
+          <div className="bg-surface border border-border rounded-card p-5 space-y-4">
             <p className="text-sm text-primary">{parseError}</p>
-            <p className="text-sm text-text-secondary mt-4">Check the file format and try again.</p>
+            <div className="border-t border-border pt-4">
+              <p className="text-sm font-medium text-primary mb-2">Expected CSV format:</p>
+              <p className="text-xs text-text-secondary mb-2">Your file should include columns for these fields (exact names are flexible):</p>
+              <div className="bg-surface-alt rounded-input p-3 font-mono text-xs text-text-secondary overflow-x-auto">
+                date, account_code, account_name, debit, credit
+              </div>
+              <p className="text-xs text-text-tertiary mt-2">
+                Also accepted: description, reference/entry_id. Column headers are auto-detected — common variants like &quot;GL Account&quot;, &quot;Dr&quot;, &quot;Cr&quot; work too.
+              </p>
+            </div>
           </div>
-          <button type="button" onClick={onBack} className="px-4 py-2 rounded-input border border-border text-sm font-medium hover:bg-hover">
-            Upload New File
-          </button>
+          <div className="flex gap-3">
+            <button type="button" onClick={onBack} className="px-4 py-2 rounded-input border border-border text-sm font-medium hover:bg-hover">
+              Upload New File
+            </button>
+            <button type="button" onClick={downloadErrorReport} className="px-4 py-2 rounded-input bg-surface-alt border border-border text-sm font-medium hover:bg-hover inline-flex items-center gap-2">
+              <Download className="w-4 h-4" />
+              Download Error Report
+            </button>
+          </div>
         </div>
       );
     }
@@ -470,7 +591,8 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
           <button type="button" onClick={onBack} className="px-4 py-2 rounded-input border border-border text-sm font-medium hover:bg-hover">
             Upload New File
           </button>
-          <button type="button" className="px-4 py-2 rounded-input bg-surface-alt border border-border text-sm font-medium hover:bg-hover">
+          <button type="button" onClick={downloadErrorReport} className="px-4 py-2 rounded-input bg-surface-alt border border-border text-sm font-medium hover:bg-hover inline-flex items-center gap-2">
+            <Download className="w-4 h-4" />
             Download Error Report
           </button>
         </div>

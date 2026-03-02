@@ -9,11 +9,10 @@ import { useAuth } from '@/lib/auth';
 import { AISuggestionCard } from '@/components/shared/AISuggestionCard';
 import { MoneyCell } from '@/components/shared/MoneyCell';
 import { apiFetch } from '@/lib/api';
-import { parseMoney } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { VarianceRecord } from '@/lib/types/variance';
 import { InvestigationPanel } from '@/components/investigation/InvestigationPanel';
-import { Check, X, ChevronDown, ChevronRight, Search } from 'lucide-react';
+import { Check, X, ChevronDown, ChevronRight, Search, Loader2, Zap } from 'lucide-react';
 
 const STATEMENT_LABELS: Record<string, string> = {
   income_statement: 'IS',
@@ -28,9 +27,9 @@ function changeColor(
   changeAmount: string,
   changePercent: string
 ): 'favorable' | 'unfavorable' | 'neutral' {
-  const num = parseFloat(changeAmount);
-  const pct = parseFloat(changePercent);
-  if (num === 0 && pct === 0) return 'neutral';
+  const num = parseFloat(changeAmount || '0');
+  const pct = parseFloat(changePercent || '0');
+  if (isNaN(num) || isNaN(pct) || (num === 0 && pct === 0)) return 'neutral';
   const isRevenue = /revenue|income|sales/i.test(lineItemName) && statementType === 'income_statement';
   const isExpense = /cogs|expense|cost/i.test(lineItemName) && statementType === 'income_statement';
   if (isRevenue) return num > 0 ? 'favorable' : 'unfavorable';
@@ -57,6 +56,8 @@ export default function VariancePage() {
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
   const [approvingIds, setApprovingIds] = useState<Set<string>>(new Set());
   const [investigatingVariance, setInvestigatingVariance] = useState<VarianceRecord | null>(null);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [draftingAll, setDraftingAll] = useState(false);
 
   const filtered = useMemo(() => {
     let list = [...variances];
@@ -109,8 +110,12 @@ export default function VariancePage() {
       });
       queryClient.invalidateQueries({ queryKey: ['variances', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['readiness', sessionId] });
-    } catch {
-      // Error will be visible from variance refetch
+      setToast({ type: 'success', message: 'Explanation saved.' });
+      setTimeout(() => setToast(null), 3000);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to save explanation';
+      setToast({ type: 'error', message: msg });
+      setTimeout(() => setToast(null), 5000);
     } finally {
       setSavingIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
     }
@@ -125,35 +130,95 @@ export default function VariancePage() {
       });
       queryClient.invalidateQueries({ queryKey: ['variances', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['readiness', sessionId] });
-    } catch {
-      // Error will be visible from variance refetch
+      setToast({ type: 'success', message: 'Explanation approved.' });
+      setTimeout(() => setToast(null), 3000);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to approve explanation';
+      setToast({ type: 'error', message: msg });
+      setTimeout(() => setToast(null), 5000);
     } finally {
       setApprovingIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
     }
   }, [sessionId, queryClient]);
+
+  const materialUnexplained = useMemo(
+    () => variances.filter((v) => v.isMaterial && v.explanationStatus === 'pending'),
+    [variances]
+  );
+
+  const handleDraftAll = useCallback(async () => {
+    setDraftingAll(true);
+    let drafted = 0;
+    try {
+      for (const v of materialUnexplained) {
+        // Use cached AI draft if available, otherwise fetch from API
+        let draft = v.aiDraftExplanation;
+        if (!draft) {
+          try {
+            const result = await apiFetch<{ draftExplanation: string | null }>(`/api/close/variances/${v.id}/ai-draft`);
+            draft = result.draftExplanation;
+          } catch {
+            // Skip on error
+          }
+        }
+        if (draft) {
+          setLocalExplanations((prev) => ({ ...prev, [v.id]: draft! }));
+          setExplanationSources((prev) => ({ ...prev, [v.id]: 'ai_draft' }));
+          drafted++;
+        }
+      }
+      setToast({ type: 'success', message: `Drafted ${drafted} explanation${drafted !== 1 ? 's' : ''}. Review and save each one.` });
+      setTimeout(() => setToast(null), 5000);
+      // Expand the first unexplained variance for review
+      if (materialUnexplained.length > 0) setExpandedId(materialUnexplained[0].id);
+    } catch {
+      setToast({ type: 'error', message: 'Failed to draft explanations.' });
+      setTimeout(() => setToast(null), 5000);
+    } finally {
+      setDraftingAll(false);
+    }
+  }, [materialUnexplained, apiFetch]);
 
   const entityName = session?.entityName ?? 'Entity';
   const periodLabel = session?.periodLabel ?? 'Period';
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-display text-primary">Variance Analysis</h1>
-        <p className="text-text-secondary text-sm mt-0.5">
-          Period-over-period comparison — {periodLabel} vs Prior Period
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-display text-primary">Variance Analysis</h1>
+          <p className="text-text-secondary text-sm mt-0.5">
+            {periodLabel} vs Prior Period
+          </p>
+        </div>
+        {materialUnexplained.length > 0 && (
+          <button
+            type="button"
+            onClick={handleDraftAll}
+            disabled={draftingAll}
+            className="px-4 py-2 rounded-input bg-accent text-white text-sm font-medium hover:bg-accent/90 disabled:opacity-50 flex items-center gap-2"
+          >
+            {draftingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+            {draftingAll ? 'Drafting...' : `Draft All Explanations (${materialUnexplained.length})`}
+          </button>
+        )}
       </div>
 
       {/* Summary bar */}
       <div className="flex flex-wrap items-center gap-6 py-3 px-4 rounded-card border border-border bg-surface">
-        <span className="text-sm text-text-secondary">Total Line Items Analyzed: <strong className="text-primary">{stats.total}</strong></span>
-        <span className="text-sm text-text-secondary">Material Variances: <strong className="text-primary">{stats.material}</strong></span>
-        <span className="text-sm text-status-green">Explained: <strong>{stats.explained}</strong></span>
-        <span className={cn('text-sm', stats.unexplained > 0 ? 'text-status-red font-medium' : 'text-text-secondary')}>
-          Unexplained: <strong>{stats.unexplained}</strong>
+        <span className="text-sm text-text-secondary">
+          {stats.explained} of {stats.material} explained ({stats.material ? Math.round((stats.explained / stats.material) * 100) : 0}%)
         </span>
+        <div className="flex-1 min-w-[100px] max-w-[160px] h-2 bg-elevated rounded-full overflow-hidden">
+          <div className="h-full bg-status-green rounded-full transition-all" style={{ width: `${stats.material ? Math.round((stats.explained / stats.material) * 100) : 0}%` }} />
+        </div>
         <span className="text-sm text-status-green">Approved: <strong>{stats.approved}</strong></span>
-        <span className="text-xs text-text-muted">Material threshold: $50,000 or 10%</span>
+        <span className={cn('text-sm', stats.unexplained > 0 ? 'text-status-red font-medium' : 'text-text-secondary')}>
+          Need explanation: <strong>{stats.unexplained}</strong>
+        </span>
+        <span className="text-xs text-text-muted">
+          Threshold: {variances[0]?.materialityThreshold ? `$${parseFloat(variances[0].materialityThreshold).toLocaleString()} or 10%` : 'From settings'}
+        </span>
       </div>
 
       {/* Filters */}
@@ -197,6 +262,19 @@ export default function VariancePage() {
       </div>
 
       {/* Table */}
+      {variances.length === 0 ? (
+        <div className="bg-surface border border-border rounded-card p-12 text-center">
+          <p className="text-lg font-medium text-primary mb-2">No variance data yet</p>
+          <p className="text-text-secondary text-sm max-w-md mx-auto">
+            Variances are generated when financial statements are produced. Generate statements first, then return here to review period-over-period changes.
+          </p>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="bg-surface border border-border rounded-card p-12 text-center">
+          <p className="text-primary font-medium mb-1">No variances match the current filters</p>
+          <p className="text-text-secondary text-sm">Try adjusting the filters above to see more results.</p>
+        </div>
+      ) : (
       <div className="bg-surface border border-border rounded-card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-sm">
@@ -246,13 +324,13 @@ export default function VariancePage() {
                       <td className="py-2 px-3 text-center font-mono text-text-secondary">{STATEMENT_LABELS[v.statementType] ?? v.statementType}</td>
                       <td className="py-2 px-3 font-medium">{v.lineItemName}</td>
                       <td className="py-2 px-3 text-right font-mono tabular-nums">
-                        <MoneyCell value={parseMoney(v.priorAmount)} showDollar />
+                        <MoneyCell value={v.priorAmount} showDollar />
                       </td>
                       <td className="py-2 px-3 text-right font-mono tabular-nums">
-                        <MoneyCell value={parseMoney(v.currentAmount)} showDollar />
+                        <MoneyCell value={v.currentAmount} showDollar />
                       </td>
                       <td className={cn('py-2 px-3 text-right font-mono tabular-nums', color === 'favorable' && 'text-status-green', color === 'unfavorable' && 'text-status-red')}>
-                        <MoneyCell value={parseMoney(v.changeAmount)} showDollar />
+                        <MoneyCell value={v.changeAmount} showDollar />
                       </td>
                       <td className={cn('py-2 px-3 text-right font-mono tabular-nums', color === 'favorable' && 'text-status-green', color === 'unfavorable' && 'text-status-red')}>
                         {v.changePercent}%
@@ -365,6 +443,19 @@ export default function VariancePage() {
           </table>
         </div>
       </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div
+          className={cn(
+            'fixed bottom-4 right-4 px-4 py-3 rounded-card border text-sm font-medium z-50',
+            toast.type === 'success' ? 'border-status-green bg-status-green-dim text-status-green' : 'border-status-red bg-status-red-dim text-status-red'
+          )}
+        >
+          {toast.message}
+        </div>
+      )}
 
       <InvestigationPanel
         open={!!investigatingVariance}

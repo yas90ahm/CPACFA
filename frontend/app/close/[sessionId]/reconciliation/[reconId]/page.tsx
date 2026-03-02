@@ -8,9 +8,9 @@ import { useReconciliations, useReconciliation } from '@/lib/queries/reconciliat
 import { useCloseSession } from '@/lib/queries/close-session';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, apiUpload } from '@/lib/api';
-import { parseMoney } from '@/lib/format';
 import { MoneyInput } from '@/components/shared/MoneyInput';
 import { MoneyCell } from '@/components/shared/MoneyCell';
+import { moneyAbs, sumMoneyStrings, fmtMoney } from '@/lib/money';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { FileUpload } from '@/components/shared/FileUpload';
 import { FileList } from '@/components/shared/FileList';
@@ -195,6 +195,61 @@ export default function ReconDetailPage() {
     },
   });
 
+  /* ── Activity Log (audit log) ── */
+  const { data: activityData } = useQuery({
+    queryKey: ['recon-activity', reconId],
+    queryFn: () =>
+      apiFetch<{
+        entries: Array<{
+          id: string;
+          timestamp: string;
+          actor: string;
+          action: string;
+          resource?: string;
+          detail?: string;
+        }>;
+      }>(`/api/close/audit-log`, {
+        params: { resource: `reconciliation:${reconId}` },
+      }),
+    enabled: !!reconId,
+  });
+
+  const activity: Array<{ id: string; user: string; description: string; timestamp: string }> = useMemo(
+    () =>
+      (activityData?.entries ?? []).map((e) => ({
+        id: e.id,
+        user: e.actor,
+        description: [e.action, e.detail].filter(Boolean).join(' — '),
+        timestamp: e.timestamp,
+      })),
+    [activityData]
+  );
+
+  /* ── Save Notes Mutation (via audit log) ── */
+  const saveNotesMutation = useMutation({
+    mutationFn: (notes: string) =>
+      apiFetch(`/api/close/audit-log`, {
+        method: 'POST',
+        body: {
+          actor: user?.email ?? user?.userId ?? 'unknown',
+          action: 'recon_notes_updated',
+          resource: `reconciliation:${reconId}`,
+          detail: notes,
+        },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['recon-activity', reconId] });
+    },
+  });
+
+  const handleNotesBlur = useCallback(() => {
+    const trimmed = notesLocal.trim();
+    const existing = (recon?.notes ?? '').trim();
+    if (trimmed && trimmed !== existing) {
+      saveNotesMutation.mutate(trimmed);
+    }
+  }, [notesLocal, recon?.notes, saveNotesMutation]);
+
   const evidenceFromApi: EvidenceFile[] = useMemo(
     () =>
       (evidenceData?.attachments ?? []).map((a) => ({
@@ -211,40 +266,49 @@ export default function ReconDetailPage() {
   );
   const evidence = [...evidenceFromApi, ...localEvidence];
   const items = baseItems;
-  const activity: Array<{ id: string; user: string; description: string; timestamp: string }> = [];
 
-  const supportingNum = useMemo(() => {
-    if (supportingBalanceLocal != null && supportingBalanceLocal.trim() !== '') return parseMoney(supportingBalanceLocal);
-    return recon?.supportingBalance ?? null;
-  }, [supportingBalanceLocal, recon?.supportingBalance]);
-
-  const supportingDisplay = supportingBalanceLocal ?? (recon?.supportingBalance != null ? String(recon.supportingBalance) : null);
+  // Supporting balance: use local edit if present, otherwise backend value
+  const hasUnsavedSupporting = supportingBalanceLocal != null && supportingBalanceLocal.trim() !== '';
+  const hasSupportingBalance = recon?.supportingBalance != null;
+  const supportingDisplay = supportingBalanceLocal ?? (recon?.supportingBalance ?? null);
   const notesDisplay = notesLocal !== '' ? notesLocal : (recon?.notes ?? '');
   const isCompleted = recon?.status === 'completed' || recon?.status === 'approved';
   const isApproved = recon?.status === 'approved';
   const isPreparer = recon?.preparer != null && (user?.userId === recon.preparer || user?.email === recon.preparer);
-  const isReviewer = !isPreparer;
-  const canApproveOwn = false;
+  // SoD: A user is only a valid reviewer if a preparer exists AND current user is NOT that preparer.
+  // If preparer is null (nobody has completed it yet), nobody can approve.
+  const isReviewer = recon?.preparer != null && !isPreparer;
+  // Defense-in-depth: disable approve button for the preparer even if UI logic shows it
+  const canApproveOwn = isPreparer;
   const periodEnd = session?.periodEnd ?? session?.createdAt ?? null;
   const periodEndDisplay = periodEnd ? new Date(periodEnd).toISOString().slice(0, 10) : '—';
 
-  const variance = recon && supportingNum != null ? recon.glBalance - supportingNum : 0;
-  const itemsTotal = items.reduce((s, i) => s + i.amount, 0);
-  const unexplained = supportingNum != null ? variance - itemsTotal : 0;
-  const withinTolerance = supportingNum != null && Math.abs(unexplained) <= (recon?.tolerance ?? 0);
-  const overTolerance = supportingNum != null && Math.abs(unexplained) > (recon?.tolerance ?? 0);
+  // Use backend-computed values (Decimal.js + NUMERIC) — never recalculate in JavaScript.
+  // moneyAbs() is parseFloat-based but only used for UI display decisions (color, sort), not financial computation.
+  const toleranceVal = moneyAbs(recon?.tolerance);
+  const displayItemsTotal = sumMoneyStrings(items.map(i => i.amount));
+  // Backend-authoritative values for variance/unexplained
+  const backendVariance = recon?.variance ?? null;
+  const backendUnexplained = recon?.unexplainedVariance ?? null;
+  const withinTolerance = hasSupportingBalance && backendUnexplained != null && moneyAbs(backendUnexplained) <= toleranceVal;
+  const overTolerance = hasSupportingBalance && backendUnexplained != null && moneyAbs(backendUnexplained) > toleranceVal;
 
+  // Completeness gate uses ONLY backend-computed values — no JS floating-point arithmetic.
+  // User must save supporting balance first (no unsaved local edits).
   const canMarkComplete =
     recon &&
     (recon.status === 'not_started' || recon.status === 'in_progress') &&
-    supportingNum != null &&
-    Math.abs(unexplained) <= recon.tolerance &&
+    hasSupportingBalance &&
+    !hasUnsavedSupporting &&
+    backendUnexplained != null &&
+    moneyAbs(backendUnexplained) <= toleranceVal &&
     evidence.length >= 1;
 
   const missingForComplete: string[] = [];
   if (recon && (recon.status === 'not_started' || recon.status === 'in_progress')) {
-    if (supportingNum == null) missingForComplete.push('Supporting balance required');
-    if (supportingNum != null && Math.abs(unexplained) > recon.tolerance) missingForComplete.push('Unexplained variance must be within tolerance');
+    if (!hasSupportingBalance) missingForComplete.push('Supporting balance required');
+    if (hasUnsavedSupporting) missingForComplete.push('Save supporting balance before completing');
+    if (hasSupportingBalance && backendUnexplained != null && moneyAbs(backendUnexplained) > toleranceVal) missingForComplete.push('Unexplained variance must be within tolerance');
     if (evidence.length < 1) missingForComplete.push('At least one supporting document required');
   }
 
@@ -456,10 +520,10 @@ export default function ReconDetailPage() {
               </div>
               <div>
                 <div className="text-xs text-text-secondary mb-1">Supporting Balance</div>
-                {(recon.status === 'not_started' || recon.status === 'in_progress') && (editingSupporting || (supportingNum == null && recon.supportingBalance == null)) ? (
+                {(recon.status === 'not_started' || recon.status === 'in_progress') && (editingSupporting || (!hasSupportingBalance && supportingBalanceLocal == null)) ? (
                   <div>
                     <MoneyInput
-                      value={supportingBalanceLocal ?? (recon.supportingBalance != null ? String(recon.supportingBalance) : null)}
+                      value={supportingBalanceLocal ?? (recon.supportingBalance ?? null)}
                       onChange={setSupportingBalanceLocal}
                       size="lg"
                       placeholder="0.00"
@@ -477,10 +541,10 @@ export default function ReconDetailPage() {
                 ) : (
                   <div>
                     <div className="font-mono text-xl tabular-nums">
-                      {supportingNum != null ? <MoneyCell value={supportingNum} showDollar /> : <span className="text-text-muted">—</span>}
+                      {hasSupportingBalance || supportingDisplay != null ? <MoneyCell value={supportingDisplay} showDollar /> : <span className="text-text-muted">—</span>}
                     </div>
                     <div className="text-xs text-text-muted mt-1">from {recon.sourceDocumentType}</div>
-                    {(recon.status === 'not_started' || recon.status === 'in_progress') && (supportingNum != null || supportingBalanceLocal != null) && (
+                    {(recon.status === 'not_started' || recon.status === 'in_progress') && (hasSupportingBalance || supportingBalanceLocal != null) && (
                       <button
                         type="button"
                         className="mt-2 text-xs text-accent hover:underline inline-flex items-center gap-1"
@@ -497,7 +561,7 @@ export default function ReconDetailPage() {
               <div
                 className={cn(
                   'px-6 py-4 rounded-input border-2 text-center',
-                  supportingNum == null
+                  !hasSupportingBalance
                     ? 'border-border-light text-text-muted'
                     : withinTolerance
                       ? 'border-status-green text-status-green'
@@ -506,18 +570,18 @@ export default function ReconDetailPage() {
               >
                 <div className="text-sm font-medium">Variance</div>
                 <div className="font-mono text-xl tabular-nums mt-1">
-                  {supportingNum == null ? (
+                  {!hasSupportingBalance ? (
                     'Enter supporting balance'
                   ) : (
-                    <MoneyCell value={variance} showDollar />
+                    <MoneyCell value={backendVariance} showDollar />
                   )}
                 </div>
-                {supportingNum != null && (
+                {hasSupportingBalance && backendUnexplained != null && (
                   <div className="text-xs mt-2">
-                    {withinTolerance ? 'Within tolerance ✓' : overTolerance ? `Over tolerance by ${Math.abs(unexplained).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : ''}
+                    {withinTolerance ? 'Within tolerance ✓' : overTolerance ? `Over tolerance by ${fmtMoney(backendUnexplained, { dollar: true })}` : ''}
                   </div>
                 )}
-                <div className="text-xs text-text-muted mt-1">Tolerance: ${(recon.tolerance ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+                <div className="text-xs text-text-muted mt-1">Tolerance: {fmtMoney(recon.tolerance, { dollar: true })}</div>
               </div>
             </div>
           </section>
@@ -567,14 +631,14 @@ export default function ReconDetailPage() {
               <div>
                 <span className="text-text-secondary text-sm">Items total: </span>
                 <span className="font-mono font-medium">
-                  <MoneyCell value={itemsTotal} showDollar />
+                  <MoneyCell value={recon.reconcilingItemsTotal} showDollar />
                 </span>
               </div>
-              <div className={cn('text-sm font-medium', Math.abs(unexplained) <= (recon.tolerance ?? 0) ? 'text-status-green' : 'text-status-red')}>
-                Unexplained: <MoneyCell value={unexplained} showDollar />
-                {Math.abs(unexplained) <= (recon.tolerance ?? 0) && ' ✓ Fully reconciled'}
-                {unexplained !== 0 && Math.abs(unexplained) <= (recon.tolerance ?? 0) && ' — within tolerance'}
-                {Math.abs(unexplained) > (recon.tolerance ?? 0) && ' — add reconciling items or investigate'}
+              <div className={cn('text-sm font-medium', withinTolerance ? 'text-status-green' : 'text-status-red')}>
+                Unexplained: <MoneyCell value={backendUnexplained} showDollar />
+                {withinTolerance && moneyAbs(backendUnexplained) < 0.01 && ' ✓ Fully reconciled'}
+                {withinTolerance && moneyAbs(backendUnexplained) >= 0.01 && ' — within tolerance'}
+                {overTolerance && ' — add reconciling items or investigate'}
               </div>
             </div>
             {(recon.status === 'not_started' || recon.status === 'in_progress') && (
@@ -638,7 +702,7 @@ export default function ReconDetailPage() {
             <textarea
               value={notesDisplay}
               onChange={(e) => setNotesLocal(e.target.value)}
-              onBlur={() => {}}
+              onBlur={handleNotesBlur}
               disabled={isApproved}
               placeholder="Add notes about this reconciliation..."
               className="w-full px-3 py-2 rounded-input border border-border bg-input text-sm min-h-[80px]"

@@ -342,11 +342,14 @@ export default function AuditTrailPage() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div>
-        <h1 className="text-2xl font-display text-primary">Audit Trail</h1>
-        <p className="text-text-secondary text-sm mt-0.5">
-          Complete record of all actions — hash-chain verified
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-display text-primary">Audit Trail</h1>
+          <p className="text-text-secondary text-sm mt-0.5">
+            Complete record of all actions — hash-chain verified
+          </p>
+        </div>
+        <span className="text-sm text-text-secondary">{events.length} events</span>
       </div>
 
       {/* Hash Chain Status Banner */}

@@ -33,6 +33,28 @@ function formatGeneratedAt(iso: string | null): string {
   return `Generated ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
 }
 
+function InlineValidation({ checks }: { checks: { id: string; name: string; passing: boolean; detail: string }[] }) {
+  if (checks.length === 0) return null;
+  return (
+    <div className="mt-8 pt-6 border-t border-border print:mt-4 print:pt-2">
+      <h3 className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-3">Validation</h3>
+      <div className="space-y-1.5">
+        {checks.map((c) => (
+          <div key={c.id} className="flex items-center gap-2 text-sm">
+            {c.passing ? (
+              <Check className="w-4 h-4 text-status-green shrink-0" />
+            ) : (
+              <X className="w-4 h-4 text-status-red shrink-0" />
+            )}
+            <span className={c.passing ? 'text-text-secondary' : 'text-status-red'}>{c.name}</span>
+            {c.detail && <span className="text-text-tertiary text-xs ml-1">({c.detail})</span>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function StatementsPage() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -77,10 +99,12 @@ export default function StatementsPage() {
       setGenerating(false);
       setRegenerateConfirm(false);
       setToast({ type: 'success', message: 'Statements generated successfully.' });
+      setTimeout(() => setToast(null), 3000);
     },
     onError: (err: Error) => {
       setGenerating(false);
       setToast({ type: 'warning', message: err.message || 'Failed to generate statements' });
+      setTimeout(() => setToast(null), 5000);
     },
   });
 
@@ -131,13 +155,29 @@ export default function StatementsPage() {
     handleGenerate();
   }, [handleGenerate]);
 
-  const openJe = useCallback((entry: JournalEntry) => {
-    setJePanelEntry(entry);
-    setJePanelOpen(true);
+  const openJeById = useCallback(async (jeId: string) => {
+    try {
+      const je = await apiFetch<JournalEntry>(`/api/close/journal-entries/${jeId}`);
+      setJePanelEntry(je);
+      setJePanelOpen(true);
+    } catch {
+      // JE not found or not accessible — ignore
+    }
   }, []);
 
   const entityName = session?.entityName ?? 'Entity';
   const periodLabel = session?.periodLabel ?? 'Period';
+
+  /** Derive "For the Period Ended ..." or "As of ..." date from session period. */
+  const periodEndDisplay = (() => {
+    if (!session?.periodEnd) return periodLabel;
+    try {
+      const d = new Date(session.periodEnd + 'T00:00:00');
+      return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    } catch {
+      return periodLabel;
+    }
+  })();
 
   return (
     <div className="space-y-4 print:space-y-0">
@@ -234,51 +274,80 @@ export default function StatementsPage() {
 
       {/* Content */}
       <div className="bg-surface border border-border rounded-card p-6 print:border-0 print:shadow-none print:p-0">
+        {!hasStatements && tab !== 'validation' && (
+          <div className="text-center py-12">
+            <p className="text-lg font-medium text-primary mb-2">No statements generated yet</p>
+            <p className="text-text-secondary text-sm mb-6 max-w-md mx-auto">
+              Generate financial statements from your adjusted trial balance. All four statements (Income Statement, Balance Sheet, Cash Flow, Equity) will be produced.
+            </p>
+            <button
+              type="button"
+              onClick={handleRegenerate}
+              disabled={generating}
+              className="px-6 py-2.5 rounded-input bg-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-70 inline-flex items-center gap-2"
+            >
+              {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              Generate Statements
+            </button>
+          </div>
+        )}
         {tab === 'income-statement' && statements?.incomeStatement && (
           <>
-            <h2 className="text-lg font-display text-primary mb-1 print:mb-2">INCOME STATEMENT</h2>
-            <p className="text-sm text-text-secondary mb-4 print:mb-2">{entityName}</p>
-            <p className="text-sm text-text-secondary mb-6 print:mb-4">For the Period Ended January 31, 2026</p>
+            <div className="text-center mb-6 print:mb-4">
+              <h2 className="text-lg font-display text-primary mb-1 print:mb-2">{entityName}</h2>
+              <p className="text-sm font-medium text-primary">INCOME STATEMENT</p>
+              <p className="text-sm text-text-secondary">For the Period Ended {periodEndDisplay}</p>
+            </div>
             <StatementTable
               lines={statements.incomeStatement.lines}
               showPriorPeriod={showPriorPeriod}
               showChanges={showChanges}
-              onOpenJe={openJe}
+              onOpenJeById={openJeById}
             />
+            {validation && <InlineValidation checks={validation.checks} />}
           </>
         )}
         {tab === 'balance-sheet' && statements?.balanceSheet && (
           <>
-            <h2 className="text-lg font-display text-primary mb-1 print:mb-2">BALANCE SHEET</h2>
-            <p className="text-sm text-text-secondary mb-4 print:mb-2">{entityName}</p>
-            <p className="text-sm text-text-secondary mb-6 print:mb-4">As of January 31, 2026</p>
+            <div className="text-center mb-6 print:mb-4">
+              <h2 className="text-lg font-display text-primary mb-1 print:mb-2">{entityName}</h2>
+              <p className="text-sm font-medium text-primary">BALANCE SHEET</p>
+              <p className="text-sm text-text-secondary">As of {periodEndDisplay}</p>
+            </div>
             <StatementTable
               lines={statements.balanceSheet.lines}
               showPriorPeriod={showPriorPeriod}
               showChanges={showChanges}
-              onOpenJe={openJe}
+              onOpenJeById={openJeById}
             />
+            {validation && <InlineValidation checks={validation.checks} />}
           </>
         )}
         {tab === 'cash-flow' && statements?.cashFlow && (
           <>
-            <h2 className="text-lg font-display text-primary mb-1 print:mb-2">STATEMENT OF CASH FLOWS (Indirect Method)</h2>
-            <p className="text-sm text-text-secondary mb-4 print:mb-2">{entityName}</p>
-            <p className="text-sm text-text-secondary mb-6 print:mb-4">For the Period Ended January 31, 2026</p>
+            <div className="text-center mb-6 print:mb-4">
+              <h2 className="text-lg font-display text-primary mb-1 print:mb-2">{entityName}</h2>
+              <p className="text-sm font-medium text-primary">STATEMENT OF CASH FLOWS</p>
+              <p className="text-sm text-text-secondary">For the Period Ended {periodEndDisplay}</p>
+            </div>
             <StatementTable
               lines={statements.cashFlow.lines}
               showPriorPeriod={showPriorPeriod}
               showChanges={showChanges}
-              onOpenJe={openJe}
+              onOpenJeById={openJeById}
             />
+            {validation && <InlineValidation checks={validation.checks} />}
           </>
         )}
         {tab === 'equity' && statements?.equityColumnar && (
           <>
-            <h2 className="text-lg font-display text-primary mb-1 print:mb-2">STATEMENT OF STOCKHOLDERS&apos; EQUITY</h2>
-            <p className="text-sm text-text-secondary mb-4 print:mb-2">{entityName}</p>
-            <p className="text-sm text-text-secondary mb-6 print:mb-4">For the Period Ended January 31, 2026</p>
+            <div className="text-center mb-6 print:mb-4">
+              <h2 className="text-lg font-display text-primary mb-1 print:mb-2">{entityName}</h2>
+              <p className="text-sm font-medium text-primary">STATEMENT OF STOCKHOLDERS&apos; EQUITY</p>
+              <p className="text-sm text-text-secondary">For the Period Ended {periodEndDisplay}</p>
+            </div>
             <EquityTable columns={statements.equityColumnar.columns} rows={statements.equityColumnar.rows} />
+            {validation && <InlineValidation checks={validation.checks} />}
           </>
         )}
         {tab === 'validation' && validation && (

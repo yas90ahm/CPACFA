@@ -58,7 +58,7 @@ router.post('/login', loginLimiter, validateBody(loginSchema), async (req: Reque
       email: user.email,
       role: user.role,
     });
-    res.json({ token, userId: user.id, tenantId: user.tenant_id, role: user.role });
+    res.json({ token, userId: user.id, tenantId: user.tenant_id, role: user.role, email: user.email, name: user.name ?? null });
   } catch (e) {
     send500(res, e, 'Login failed');
   }
@@ -89,14 +89,14 @@ router.post('/register', registerLimiter, validateBody(registerSchema), async (r
     }
     const { createUser } = await import('../db/repositories/user_repository.js');
     const passwordHash = await hashPassword(password);
-    const user = await createUser(tenantId, email, passwordHash, roleValue);
+    const user = await createUser(tenantId, email, passwordHash, roleValue, name ?? undefined);
     const token = signToken({
       userId: user.id,
       tenantId: user.tenant_id,
       email: user.email,
       role: user.role,
     });
-    res.status(201).json({ token, userId: user.id, tenantId: user.tenant_id, role: user.role });
+    res.status(201).json({ token, userId: user.id, tenantId: user.tenant_id, role: user.role, email: user.email, name: user.name ?? null });
   } catch (e) {
     send500(res, e, 'Registration failed');
   }

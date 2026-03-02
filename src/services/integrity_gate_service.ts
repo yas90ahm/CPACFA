@@ -132,14 +132,19 @@ function getTrialBalanceTotals(
 /**
  * Resolve tolerance from financial_rules.json using equations.*.toleranceKey (ASC/IFRS).
  */
+const MAX_ROUNDING_TOLERANCE = 0.01; // Hard cap: never exceed $0.01
+
 function getToleranceForGate(): number {
   const rules = getFinancialRules();
   const equations = rules.equations ?? {};
   const tbEq = equations.debits_equal_credits ?? {};
   const key = (tbEq as { toleranceKey?: string }).toleranceKey ?? 'roundingTolerance';
-  if (key === 'roundingTolerance') return rules.roundingTolerance;
-  if (key === 'materiality.defaultThreshold') return rules.materiality.defaultThreshold;
-  return rules.roundingTolerance;
+  let raw: number;
+  if (key === 'roundingTolerance') raw = rules.roundingTolerance;
+  else if (key === 'materiality.defaultThreshold') raw = rules.materiality.defaultThreshold;
+  else raw = rules.roundingTolerance;
+  // Enforce hard cap — config values above $0.01 are clamped
+  return Math.min(raw, MAX_ROUNDING_TOLERANCE);
 }
 
 /**

@@ -33,10 +33,33 @@ export default function IntegrationsPage() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/accounting-integration/connections/${id}`, { method: 'DELETE' }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['accounting-connections'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accounting-connections'] });
+      setToast({ type: 'success', message: 'Connection removed.' });
+      setTimeout(() => setToast(null), 3000);
+    },
+    onError: (err) => {
+      setToast({ type: 'error', message: err instanceof Error ? err.message : 'Failed to disconnect' });
+      setTimeout(() => setToast(null), 5000);
+    },
   });
 
   const [disconnectConfirm, setDisconnectConfirm] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [testingId, setTestingId] = useState<string | null>(null);
+
+  const handleTestConnection = async (conn: Connection) => {
+    setTestingId(conn.id);
+    try {
+      await apiFetch(`/api/accounting-integration/connections/${conn.id}/test`, { method: 'POST' });
+      setToast({ type: 'success', message: `${PROVIDER_NAMES[conn.provider] ?? conn.name} connection verified.` });
+    } catch (err) {
+      setToast({ type: 'error', message: err instanceof Error ? err.message : 'Connection test failed' });
+    } finally {
+      setTestingId(null);
+      setTimeout(() => setToast(null), 4000);
+    }
+  };
 
   const handleDisconnect = (id: string) => {
     deleteMutation.mutate(id);
@@ -74,7 +97,14 @@ export default function IntegrationsPage() {
             <div className="mt-4 flex flex-wrap gap-2">
               {connected ? (
                 <>
-                  <button type="button" className="px-3 py-1.5 rounded-input border border-border text-sm hover:bg-hover">Test Connection</button>
+                  <button
+                    type="button"
+                    onClick={() => handleTestConnection(conn)}
+                    disabled={testingId === conn.id}
+                    className="px-3 py-1.5 rounded-input border border-border text-sm hover:bg-hover disabled:opacity-50"
+                  >
+                    {testingId === conn.id ? 'Testing...' : 'Test Connection'}
+                  </button>
                   <button
                     type="button"
                     onClick={() => setDisconnectConfirm(disconnectConfirm === conn.id ? null : conn.id)}
@@ -103,6 +133,19 @@ export default function IntegrationsPage() {
         })
         )}
       </div>
+
+      {toast && (
+        <div
+          className={cn(
+            'fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg border text-sm shadow-lg',
+            toast.type === 'success'
+              ? 'border-status-green bg-status-green-dim text-status-green'
+              : 'border-status-red bg-status-red-dim text-status-red'
+          )}
+        >
+          {toast.message}
+        </div>
+      )}
     </div>
   );
 }

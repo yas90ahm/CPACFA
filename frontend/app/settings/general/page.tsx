@@ -23,10 +23,22 @@ export default function GeneralSettingsPage() {
     enabled: !!entityId,
   });
 
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
   const updateMutation = useMutation({
     mutationFn: (payload: { entityName?: string; fiscalYearEnd?: number; baseCurrency?: string; autoLockDays?: number; varianceMaterialityDollar?: string; varianceMaterialityPercent?: string }) =>
       apiFetch(`/api/settings/general?entityId=${entityId}`, { method: 'PUT', body: payload }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings-general', entityId] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings-general', entityId] });
+      queryClient.invalidateQueries({ queryKey: ['settings-entities'] });
+      setToast({ type: 'success', message: 'Settings saved successfully.' });
+      setTimeout(() => setToast(null), 3000);
+    },
+    onError: (err) => {
+      const msg = err instanceof Error ? err.message : 'Failed to save settings';
+      setToast({ type: 'error', message: msg });
+      setTimeout(() => setToast(null), 5000);
+    },
   });
 
   const [entityName, setEntityName] = useState('');
@@ -35,7 +47,6 @@ export default function GeneralSettingsPage() {
   const [autoLockDays, setAutoLockDays] = useState('0');
   const [varianceDollar, setVarianceDollar] = useState('');
   const [variancePercent, setVariancePercent] = useState('');
-  const saved = updateMutation.isSuccess;
 
   useEffect(() => {
     if (!data) return;
@@ -152,14 +163,30 @@ export default function GeneralSettingsPage() {
         <button
           type="button"
           onClick={handleSave}
+          disabled={updateMutation.isPending}
           className={cn(
-            'px-4 py-2 rounded-input text-sm font-medium',
-            saved ? 'bg-status-green text-white' : 'bg-accent text-accent-contrast hover:opacity-90'
+            'px-4 py-2 rounded-input text-sm font-medium transition-colors',
+            updateMutation.isPending
+              ? 'bg-accent/50 text-accent-contrast cursor-wait'
+              : 'bg-accent text-accent-contrast hover:opacity-90'
           )}
         >
-          {saved ? 'Saved' : 'Save Changes'}
+          {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
         </button>
       </div>
+
+      {toast && (
+        <div
+          className={cn(
+            'fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg border text-sm shadow-lg transition-all',
+            toast.type === 'success'
+              ? 'border-status-green bg-status-green-dim text-status-green'
+              : 'border-status-red bg-status-red-dim text-status-red'
+          )}
+        >
+          {toast.message}
+        </div>
+      )}
     </div>
   );
 }

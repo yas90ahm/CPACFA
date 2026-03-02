@@ -13,9 +13,19 @@ import { JournalEntryForm } from './JournalEntryForm';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { MoneyCell } from '@/components/shared/MoneyCell';
 import { cn } from '@/lib/utils';
+import { sumMoneyStrings } from '@/lib/money';
 import type { JournalEntry, JournalEntryStatus, AJETemplate } from '@/lib/types/journal-entry';
 
 const displayUser = (user: { userId: string; email?: string } | null) => user?.email ?? user?.userId ?? 'Unknown';
+
+function useToast() {
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const show = useCallback((type: 'success' | 'error', message: string) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), type === 'success' ? 3000 : 5000);
+  }, []);
+  return { toast, show };
+}
 
 export default function AdjustmentsPage() {
   const params = useParams();
@@ -24,6 +34,7 @@ export default function AdjustmentsPage() {
   const tab = searchParams.get('tab') === 'templates' ? 'templates' : 'entries';
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const { toast, show: showToast } = useToast();
 
   const { data: templatesFromQuery = [] } = useAjeTemplates(sessionId);
   const { data: entriesFromQuery = [] } = useJournalEntries(sessionId);
@@ -32,7 +43,9 @@ export default function AdjustmentsPage() {
     mutationFn: (jeId: string) => apiFetch(`/api/close/journal-entries/${jeId}/propose`, { method: 'POST' }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+      showToast('success', 'Entry submitted for approval.');
     },
+    onError: (err) => showToast('error', err instanceof Error ? err.message : 'Failed to propose entry'),
   });
 
   const approveMutation = useMutation({
@@ -45,7 +58,9 @@ export default function AdjustmentsPage() {
       queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
       queryClient.invalidateQueries({ queryKey: ['trial-balance'] });
       queryClient.invalidateQueries({ queryKey: ['readiness'] });
+      showToast('success', 'Entry approved.');
     },
+    onError: (err) => showToast('error', err instanceof Error ? err.message : 'Failed to approve entry'),
   });
 
   const rejectMutation = useMutation({
@@ -56,7 +71,9 @@ export default function AdjustmentsPage() {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+      showToast('success', 'Entry rejected.');
     },
+    onError: (err) => showToast('error', err instanceof Error ? err.message : 'Failed to reject entry'),
   });
 
   const postMutation = useMutation({
@@ -67,6 +84,7 @@ export default function AdjustmentsPage() {
       queryClient.invalidateQueries({ queryKey: ['readiness'] });
       queryClient.invalidateQueries({ queryKey: ['reconciliations'] });
     },
+    onError: (err) => showToast('error', err instanceof Error ? err.message : 'Failed to post entry'),
   });
 
   const applyTemplateMutation = useMutation({
@@ -79,7 +97,9 @@ export default function AdjustmentsPage() {
       queryClient.invalidateQueries({ queryKey: ['templates'] });
       queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
       queryClient.invalidateQueries({ queryKey: ['readiness'] });
+      showToast('success', 'Template applied.');
     },
+    onError: (err) => showToast('error', err instanceof Error ? err.message : 'Failed to apply template'),
   });
 
   const skipTemplateMutation = useMutation({
@@ -91,7 +111,9 @@ export default function AdjustmentsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['templates'] });
       queryClient.invalidateQueries({ queryKey: ['readiness'] });
+      showToast('success', 'Template skipped.');
     },
+    onError: (err) => showToast('error', err instanceof Error ? err.message : 'Failed to skip template'),
   });
   const [expandedJeId, setExpandedJeId] = useState<string | null>(null);
   const [slideOverOpen, setSlideOverOpen] = useState(false);
@@ -106,10 +128,7 @@ export default function AdjustmentsPage() {
 
   const templates = templatesFromQuery;
 
-  const nextJeNumber = useMemo(() => {
-    const max = entriesFromQuery.length ? Math.max(...entriesFromQuery.map((e) => e.jeNumber)) : 1045;
-    return max + 1;
-  }, [entriesFromQuery]);
+  // JE numbers are assigned by the backend — no frontend generation needed
 
   const allEntries = useMemo(
     () => [...entriesFromQuery].sort((a, b) => b.jeNumber - a.jeNumber),
@@ -121,13 +140,13 @@ export default function AdjustmentsPage() {
   const approvedCount = allEntries.filter((e) => e.status === 'approved').length;
   const postedCount = allEntries.filter((e) => e.status === 'posted').length;
   const totalDebitImpact = useMemo(
-    () => allEntries.filter((e) => e.status === 'posted').reduce((s, e) => s + e.lines.reduce((sum, l) => sum + l.debit, 0), 0),
+    () => sumMoneyStrings(allEntries.filter((e) => e.status === 'posted').flatMap((e) => e.lines.map((l) => l.debit))),
     [allEntries]
   );
   const pendingTemplatesCount = templates.filter((t) => t.periodStatus === 'pending').length;
 
   const createDraftMutation = useMutation({
-    mutationFn: (payload: { closeSessionId: string; memo: string; source: 'manual' | 'template'; lines: Array<{ accountRef: string; debit?: number; credit?: number; description?: string }>; templateId?: string | null }) =>
+    mutationFn: (payload: { closeSessionId: string; memo: string; source: 'manual' | 'template'; lines: Array<{ accountRef: string; debit?: string; credit?: string; description?: string }>; templateId?: string | null }) =>
       apiFetch<JournalEntry>(`/api/close/journal-entries`, {
         method: 'POST',
         body: {
@@ -140,14 +159,18 @@ export default function AdjustmentsPage() {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+      showToast('success', 'Draft created.');
     },
+    onError: (err) => showToast('error', err instanceof Error ? err.message : 'Failed to create draft'),
   });
 
   const deleteJeMutation = useMutation({
     mutationFn: (jeId: string) => apiFetch(`/api/close/journal-entries/${jeId}`, { method: 'DELETE' }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+      showToast('success', 'Entry deleted.');
     },
+    onError: (err) => showToast('error', err instanceof Error ? err.message : 'Failed to delete entry'),
   });
   const setTab = useCallback(
     (t: 'entries' | 'templates') => {
@@ -438,9 +461,20 @@ export default function AdjustmentsPage() {
 
       {postSuccessJe && (
         <div className="fixed bottom-4 right-4 z-50 bg-surface border border-border rounded-card shadow-lg p-4 max-w-sm">
-          <p className="font-medium text-status-green">✓ JE #{postSuccessJe.jeNumber} posted successfully</p>
+          <p className="font-medium text-status-green">JE #{postSuccessJe.jeNumber} posted successfully</p>
           <p className="text-sm text-text-secondary mt-2">Cascade effects: Adjusted TB updated, statements marked stale, reconciliation GL balances refreshed.</p>
           <button type="button" className="mt-3 text-sm text-accent hover:underline" onClick={() => setPostSuccessJe(null)}>Dismiss</button>
+        </div>
+      )}
+
+      {toast && (
+        <div
+          className={cn(
+            'fixed bottom-4 right-4 px-4 py-3 rounded-card border text-sm font-medium z-50',
+            toast.type === 'success' ? 'border-status-green bg-status-green-dim text-status-green' : 'border-status-red bg-status-red-dim text-status-red'
+          )}
+        >
+          {toast.message}
         </div>
       )}
     </div>

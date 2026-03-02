@@ -73,16 +73,15 @@ export default function ReviewPage() {
     const totalLiabLine = bs.find((l) => /total liabilities/i.test(l.lineItemName));
     const totalEquityLine = bs.find((l) => /total equity|stockholders'? equity/i.test(l.lineItemName));
     const cashLine = bs.find((l) => /cash|cash and/i.test(l.lineItemName));
-    const parse = (s: string) => (s ? parseFloat(String(s).replace(/,/g, '')) : 0);
     return {
-      revenue: revenueLine ? parse(revenueLine.amount) : 0,
-      grossProfit: 0,
-      operatingIncome: 0,
-      netIncome: netIncomeLine ? parse(netIncomeLine.amount) : 0,
-      assets: totalAssetsLine ? parse(totalAssetsLine.amount) : 0,
-      liabilities: totalLiabLine ? parse(totalLiabLine.amount) : 0,
-      equity: totalEquityLine ? parse(totalEquityLine.amount) : 0,
-      cash: cashLine ? parse(cashLine.amount) : 0,
+      revenue: revenueLine?.amount ?? null,
+      grossProfit: null,
+      operatingIncome: null,
+      netIncome: netIncomeLine?.amount ?? null,
+      assets: totalAssetsLine?.amount ?? null,
+      liabilities: totalLiabLine?.amount ?? null,
+      equity: totalEquityLine?.amount ?? null,
+      cash: cashLine?.amount ?? null,
     };
   }, [statementsData]);
 
@@ -499,9 +498,21 @@ export default function ReviewPage() {
           >
             {certifyStep === 'input' && (
               <>
-                <h3 className="font-display text-lg text-primary mb-2">Certify Period</h3>
-                <p className="text-text-secondary text-sm mb-4">
-                  Type <strong className="font-mono">CERTIFY</strong> to confirm certification of this period.
+                <h3 className="font-display text-lg text-certified mb-4">Certify {session?.periodLabel ?? 'Period'}</h3>
+                <div className="bg-certified-dim border border-certified/20 rounded-input p-4 mb-4 text-sm text-text-secondary space-y-2">
+                  <p className="font-medium text-primary">By certifying, you attest that:</p>
+                  <ul className="list-disc list-inside space-y-1 text-text-secondary">
+                    <li>All financial data has been reviewed</li>
+                    <li>All adjustments are supported and approved</li>
+                    <li>All material variances have been explained</li>
+                    <li>The financial statements are complete and accurate</li>
+                  </ul>
+                  <p className="text-xs text-text-tertiary mt-2">
+                    This will create an immutable, cryptographically signed certification artifact. The system will re-validate all gates at the moment of certification.
+                  </p>
+                </div>
+                <p className="text-text-secondary text-sm mb-3">
+                  Type <strong className="font-mono text-primary">CERTIFY</strong> to confirm:
                 </p>
                 <input
                   type="text"
@@ -527,13 +538,13 @@ export default function ReviewPage() {
                     onClick={handleCertify}
                     disabled={certifyInput !== 'CERTIFY'}
                     className={cn(
-                      'px-4 py-2 rounded-input text-sm font-medium',
+                      'px-6 py-2 rounded-input text-sm font-medium',
                       certifyInput === 'CERTIFY'
-                        ? 'bg-status-green text-white hover:opacity-90'
+                        ? 'bg-certified text-black hover:opacity-90'
                         : 'bg-surface-alt text-text-muted cursor-not-allowed'
                     )}
                   >
-                    Certify
+                    Certify {session?.periodLabel ?? 'Period'}
                   </button>
                 </div>
               </>

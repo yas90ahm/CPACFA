@@ -21,10 +21,21 @@ export default function EvidencePolicyPage() {
     queryFn: () => apiFetch<EvidencePolicyResponse>('/api/close/evidence-policy'),
   });
 
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
   const updateMutation = useMutation({
     mutationFn: (payload: { enforcementMode: 'off' | 'warn_only' | 'hard_block'; materialityThreshold?: string; maxFileSizeMB?: number; sha256Enabled?: boolean }) =>
       apiFetch('/api/close/evidence-policy', { method: 'PUT', body: payload }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['evidence-policy'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['evidence-policy'] });
+      setToast({ type: 'success', message: 'Policy saved successfully.' });
+      setTimeout(() => setToast(null), 3000);
+    },
+    onError: (err) => {
+      const msg = err instanceof Error ? err.message : 'Failed to save policy';
+      setToast({ type: 'error', message: msg });
+      setTimeout(() => setToast(null), 5000);
+    },
   });
 
   const [jeThreshold, setJeThreshold] = useState(data?.materialityThreshold ?? '');
@@ -93,9 +104,30 @@ export default function EvidencePolicyPage() {
         </label>
       </section>
 
-      <button type="button" onClick={handleSave} className={cn('px-4 py-2 rounded-input text-sm font-medium', saved ? 'bg-status-green text-white' : 'bg-accent text-accent-contrast')}>
-        {saved ? 'Saved' : 'Save Policy'}
+      <button
+        type="button"
+        onClick={handleSave}
+        disabled={updateMutation.isPending}
+        className={cn(
+          'px-4 py-2 rounded-input text-sm font-medium',
+          updateMutation.isPending ? 'bg-accent/50 text-accent-contrast cursor-wait' : 'bg-accent text-accent-contrast hover:opacity-90'
+        )}
+      >
+        {updateMutation.isPending ? 'Saving...' : 'Save Policy'}
       </button>
+
+      {toast && (
+        <div
+          className={cn(
+            'fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg border text-sm shadow-lg',
+            toast.type === 'success'
+              ? 'border-status-green bg-status-green-dim text-status-green'
+              : 'border-status-red bg-status-red-dim text-status-red'
+          )}
+        >
+          {toast.message}
+        </div>
+      )}
     </div>
   );
 }

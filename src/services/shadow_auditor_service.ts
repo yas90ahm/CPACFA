@@ -93,14 +93,14 @@ export function runPrePostChecks(input: PrePostCheckInput): PrePostCheckResult {
       severity = 'block';
     }
 
-    // Zero both — warn (no movement)
+    // Zero both — block (no financial movement, line serves no purpose)
     if (debit === 0 && credit === 0) {
       flags.push({
         code: 'ZERO_LINE',
-        message: `Line ${i + 1}: account "${accountRef}" has zero debit and credit.`,
-        severity: 'warn',
+        message: `Line ${i + 1}: account "${accountRef}" has zero debit and credit. Lines must have a non-zero debit or credit.`,
+        severity: 'block',
       });
-      if (severity !== 'block') severity = 'warn';
+      severity = 'block';
     }
 
     // Materiality threshold — warn when any line amount exceeds configured threshold

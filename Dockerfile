@@ -36,7 +36,7 @@ COPY shared/ ./shared/
 
 # Docker entrypoint (runs migrations then starts app)
 COPY scripts/docker-entrypoint.sh ./docker-entrypoint.sh
-RUN chmod +x docker-entrypoint.sh
+RUN sed -i 's/\r$//' docker-entrypoint.sh && chmod +x docker-entrypoint.sh
 
 # Writable directories for evidence storage and local storage
 RUN mkdir -p /app/data/evidence /app/storage && \

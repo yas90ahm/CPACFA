@@ -11,6 +11,7 @@ import { useReconciliations } from '@/lib/queries/reconciliations';
 import { useAjeTemplates, useJournalEntries } from '@/lib/queries/adjustments';
 import { useVariances } from '@/lib/queries/variance';
 import { useAuth } from '@/lib/auth';
+import { getUserDisplay } from '@/lib/utils';
 import { TrialBalanceProvider, useTrialBalanceContext } from './context/trial-balance-context';
 
 function CloseSessionInner({ children }: { children: React.ReactNode }) {
@@ -51,8 +52,8 @@ function CloseSessionInner({ children }: { children: React.ReactNode }) {
         entityName={session?.entityName}
         periodLabel={session?.periodLabel}
         state={state}
-        userName={session?.createdBy ?? user?.email}
-        userInitials={session?.createdBy?.slice(0, 2).toUpperCase() ?? user?.email?.slice(0, 2).toUpperCase() ?? 'U'}
+        userName={getUserDisplay(user).displayName}
+        userInitials={getUserDisplay(user).initials}
         showBackToPortfolio={showBackToPortfolio}
       />
       <StateMachineBanner

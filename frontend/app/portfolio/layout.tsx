@@ -3,11 +3,11 @@
 import { TopBar } from '@/components/shell/TopBar';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { useAuth } from '@/lib/auth';
+import { getUserDisplay } from '@/lib/utils';
 
 export default function PortfolioLayout({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  const displayName = user?.email ?? 'Portfolio User';
-  const initials = user?.email?.slice(0, 2).toUpperCase() ?? 'PU';
+  const { displayName, initials } = getUserDisplay(user);
 
   return (
     <AuthGuard>

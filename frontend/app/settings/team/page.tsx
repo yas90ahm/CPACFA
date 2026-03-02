@@ -42,24 +42,44 @@ export default function TeamPage() {
   });
   const members = data?.members ?? [];
 
+  const showToast = (type: 'success' | 'error', message: string) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), type === 'success' ? 3000 : 5000);
+  };
+
   const inviteMutation = useMutation({
     mutationFn: (body: { email: string; name?: string; role: string }) =>
       apiFetch('/api/settings/team/invite', { method: 'POST', body }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings-team'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings-team'] });
+      showToast('success', 'Invitation sent.');
+    },
+    onError: (err) => showToast('error', err instanceof Error ? err.message : 'Failed to send invitation'),
   });
   const roleMutation = useMutation({
     mutationFn: ({ userId, role }: { userId: string; role: string }) =>
       apiFetch(`/api/settings/team/${userId}/role`, { method: 'PUT', body: { role } }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings-team'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings-team'] });
+      setEditingRoleId(null);
+      showToast('success', 'Role updated.');
+    },
+    onError: (err) => showToast('error', err instanceof Error ? err.message : 'Failed to update role'),
   });
   const deactivateMutation = useMutation({
     mutationFn: (userId: string) => apiFetch(`/api/settings/team/${userId}/deactivate`, { method: 'PUT' }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings-team'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings-team'] });
+      showToast('success', 'Member deactivated.');
+    },
+    onError: (err) => showToast('error', err instanceof Error ? err.message : 'Failed to deactivate member'),
   });
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<TeamRole>('CONTROLLER');
+  const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const controllers = members.filter((m) => m.role === 'CONTROLLER' && m.status === 'active').length;
   const reviewersOrCertifiers = members.filter((m) => (m.role === 'REVIEWER' || m.role === 'CERTIFIER') && m.status === 'active').length;
@@ -113,12 +133,26 @@ export default function TeamPage() {
                 <td className="py-2.5 px-4">{m.name || '—'}</td>
                 <td className="py-2.5 px-4">{m.email}</td>
                 <td className="py-2.5 px-4">
-                  <span className={cn('px-1.5 py-0.5 rounded text-xs', ROLE_BADGE_STYLE[m.role])}>{ROLE_LABELS[m.role]}</span>
+                  {editingRoleId === m.id ? (
+                    <select
+                      value={m.role}
+                      onChange={(e) => roleMutation.mutate({ userId: m.id, role: e.target.value })}
+                      onBlur={() => setEditingRoleId(null)}
+                      autoFocus
+                      className="rounded-input border border-accent bg-input px-2 py-1 text-xs"
+                    >
+                      {(['CONTROLLER', 'REVIEWER', 'CERTIFIER', 'ADMIN'] as const).map((r) => (
+                        <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className={cn('px-1.5 py-0.5 rounded text-xs', ROLE_BADGE_STYLE[m.role])}>{ROLE_LABELS[m.role]}</span>
+                  )}
                 </td>
                 <td className="py-2.5 px-4 capitalize">{m.status}</td>
                 <td className="py-2.5 px-4 text-text-secondary">{m.lastActiveAt ? new Date(m.lastActiveAt).toLocaleDateString() : '—'}</td>
                 <td className="py-2.5 px-4 flex items-center gap-1">
-                  <button type="button" className="p-1.5 rounded-input text-text-secondary hover:bg-hover" aria-label="Edit role"><Pencil className="w-4 h-4" /></button>
+                  <button type="button" onClick={() => setEditingRoleId(editingRoleId === m.id ? null : m.id)} className="p-1.5 rounded-input text-text-secondary hover:bg-hover" aria-label="Edit role"><Pencil className="w-4 h-4" /></button>
                   <button type="button" onClick={() => deactivateMutation.mutate(m.id)} className="p-1.5 rounded-input text-text-secondary hover:bg-status-red-dim hover:text-status-red" aria-label="Deactivate"><UserX className="w-4 h-4" /></button>
                 </td>
               </tr>
@@ -138,6 +172,19 @@ export default function TeamPage() {
           </p>
         )}
       </div>
+
+      {toast && (
+        <div
+          className={cn(
+            'fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg border text-sm shadow-lg',
+            toast.type === 'success'
+              ? 'border-status-green bg-status-green-dim text-status-green'
+              : 'border-status-red bg-status-red-dim text-status-red'
+          )}
+        >
+          {toast.message}
+        </div>
+      )}
 
       <SlideOverPanel open={inviteOpen} onClose={() => setInviteOpen(false)} title="Invite Team Member" footer={
         <>

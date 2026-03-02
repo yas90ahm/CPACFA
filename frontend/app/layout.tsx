@@ -25,7 +25,7 @@ const instrumentSerif = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
-  title: 'Sovereign — CPA Close Engine',
+  title: 'Sabit — Financial Close Engine',
   description: 'GL to certified financial statements for PE-backed mid-market companies.',
 };
 
