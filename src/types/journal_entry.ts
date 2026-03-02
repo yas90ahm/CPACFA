@@ -26,7 +26,16 @@ export interface JournalEntry {
   createdBy?: string;
   approvedBy?: string;
   postedAt?: string;
+  /** Effective accounting date of the entry (within the close period). */
+  entryDate?: string;
+  /** Date when a reversing entry should be auto-created (first day of next period). */
   reversalDate?: string;
+  /** True if this JE is a reversal of another posted entry. */
+  isReversal?: boolean;
+  /** ID of the original JE that this entry reverses. */
+  reversesJeId?: string;
+  /** ID of the JE that reverses this entry (set on the original after reversal). */
+  reversedByJeId?: string;
   /** Set when status is 'rejected'. */
   rejectionReason?: string;
   rejectedBy?: string;

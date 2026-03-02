@@ -58,6 +58,7 @@ export interface JournalEntry {
   rejectedBy: string | null;
   rejectedAt: string | null;
   rejectionReason: string | null;
+  reversalDate?: string | null;
 }
 
 export const MATERIALITY_THRESHOLD = 10_000;

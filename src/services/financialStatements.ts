@@ -149,7 +149,18 @@ export function buildBalanceSheet(
   const totalRevenue = sumLines(revenueLines);
   const totalExpenses = sumLines(expenseLines);
   const totalOci = sumLines(ociLines);
-  const totalEquity = round2(plus(plus(equityOnly, minus(totalRevenue, totalExpenses)), totalOci));
+  let totalEquity = round2(plus(plus(equityOnly, minus(totalRevenue, totalExpenses)), totalOci));
+
+  // Statement-level rounding adjustment: if sum-of-rounded-lines creates a micro-imbalance
+  // (≤ $0.01), add a rounding adjustment line to equity so statements tie exactly.
+  const bsDiff = round2(minus(totalAssets, plus(totalLiabilities, totalEquity)));
+  if (bsDiff !== 0 && Math.abs(bsDiff) <= 0.01) {
+    equity.push({
+      label: 'Rounding adjustment',
+      amount: bsDiff,
+    });
+    totalEquity = round2(plus(totalEquity, bsDiff));
+  }
 
   const totalDebits = sumRound2(entries.map((e) => e.debit ?? 0));
   const totalCredits = sumRound2(entries.map((e) => e.credit ?? 0));

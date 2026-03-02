@@ -43,6 +43,16 @@ const ITEM_TYPES: ReconcilingItemType[] = [
   'Bank Fee',
   'Timing Difference',
   'Error Correction',
+  'Accrual',
+  'Amortization',
+  'Depreciation',
+  'Addition',
+  'Disposal',
+  'Reclassification',
+  'Write-off',
+  'Payment',
+  'Collection',
+  'Intercompany',
   'Other',
 ];
 
@@ -308,7 +318,7 @@ export default function ReconDetailPage() {
   if (recon && (recon.status === 'not_started' || recon.status === 'in_progress')) {
     if (!hasSupportingBalance) missingForComplete.push('Supporting balance required');
     if (hasUnsavedSupporting) missingForComplete.push('Save supporting balance before completing');
-    if (hasSupportingBalance && backendUnexplained != null && moneyAbs(backendUnexplained) > toleranceVal) missingForComplete.push('Unexplained variance must be within tolerance');
+    if (hasSupportingBalance && backendUnexplained != null && moneyAbs(backendUnexplained) > toleranceVal) missingForComplete.push('Unexplained difference must be within tolerance');
     if (evidence.length < 1) missingForComplete.push('At least one supporting document required');
   }
 
@@ -325,6 +335,16 @@ export default function ReconDetailPage() {
     'Bank Fee': 'bank_fee',
     'Timing Difference': 'timing_difference',
     'Error Correction': 'error_correction',
+    'Accrual': 'accrual',
+    'Amortization': 'amortization',
+    'Depreciation': 'depreciation',
+    'Addition': 'addition',
+    'Disposal': 'disposal',
+    'Reclassification': 'reclassification',
+    'Write-off': 'write_off',
+    'Payment': 'payment',
+    'Collection': 'collection',
+    'Intercompany': 'intercompany',
     'Other': 'other',
   };
 
@@ -568,7 +588,7 @@ export default function ReconDetailPage() {
                       : 'border-status-red text-status-red'
                 )}
               >
-                <div className="text-sm font-medium">Variance</div>
+                <div className="text-sm font-medium">Difference</div>
                 <div className="font-mono text-xl tabular-nums mt-1">
                   {!hasSupportingBalance ? (
                     'Enter supporting balance'

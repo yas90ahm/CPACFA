@@ -113,7 +113,12 @@ export function AdjustmentsEntriesTab({
       align: 'right' as const,
       cell: (row: JournalEntry) => <MoneyCell value={sumMoneyStrings(row.lines.map(l => l.credit))} showDollar />,
     },
-    { id: 'status', header: 'Status', width: '110px', cell: (row: JournalEntry) => <StatusBadge variant={STATUS_BADGE[row.status]} label={STATUS_LABEL[row.status]} /> },
+    { id: 'status', header: 'Status', width: '130px', cell: (row: JournalEntry) => (
+      <div className="flex items-center gap-1.5">
+        <StatusBadge variant={STATUS_BADGE[row.status]} label={STATUS_LABEL[row.status]} />
+        {row.reversalDate && <span className="text-xs text-accent font-medium" title={`Reverses on ${row.reversalDate}`}>↺</span>}
+      </div>
+    ) },
     { id: 'source', header: 'Source', width: '90px', cell: (row: JournalEntry) => <span className="text-sm">{row.source === 'template' ? 'Template' : 'Manual'}</span> },
     {
       id: 'evidence',

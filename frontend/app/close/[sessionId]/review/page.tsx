@@ -394,7 +394,7 @@ export default function ReviewPage() {
             </h2>
             <div className="space-y-3">
               <div className="flex justify-between items-center">
-                <span className="text-sm text-text-secondary">Adjusting Entries</span>
+                <span className="text-sm text-text-secondary">Journal Entries</span>
                 <span className="text-sm font-medium text-primary">{activitySummary.adjustingEntries}</span>
               </div>
               <div className="flex justify-between items-center">

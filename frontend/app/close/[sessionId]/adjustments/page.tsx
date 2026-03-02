@@ -146,7 +146,7 @@ export default function AdjustmentsPage() {
   const pendingTemplatesCount = templates.filter((t) => t.periodStatus === 'pending').length;
 
   const createDraftMutation = useMutation({
-    mutationFn: (payload: { closeSessionId: string; memo: string; source: 'manual' | 'template'; lines: Array<{ accountRef: string; debit?: string; credit?: string; description?: string }>; templateId?: string | null }) =>
+    mutationFn: (payload: { closeSessionId: string; memo: string; source: 'manual' | 'template'; lines: Array<{ accountRef: string; debit?: string; credit?: string; description?: string }>; templateId?: string | null; reversalDate?: string | null }) =>
       apiFetch<JournalEntry>(`/api/close/journal-entries`, {
         method: 'POST',
         body: {
@@ -155,6 +155,7 @@ export default function AdjustmentsPage() {
           source: payload.source,
           createdBy: displayUser(user),
           lines: payload.lines,
+          ...(payload.reversalDate ? { reversalDate: payload.reversalDate } : {}),
         },
       }),
     onSuccess: () => {
@@ -255,6 +256,7 @@ export default function AdjustmentsPage() {
               credit: l.credit,
               description: l.description ?? undefined,
             })),
+            reversalDate: payload.reversalDate ?? null,
           },
           { onSuccess: () => setSlideOverOpen(false) }
         );
@@ -279,6 +281,7 @@ export default function AdjustmentsPage() {
               credit: l.credit,
               description: l.description ?? undefined,
             })),
+            reversalDate: payload.reversalDate ?? null,
           },
           {
             onSuccess: async (je) => {
@@ -351,7 +354,7 @@ export default function AdjustmentsPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="font-display text-2xl text-primary">Adjusting Entries</h1>
+        <h1 className="font-display text-2xl text-primary">Journal Entries</h1>
         <p className="text-text-secondary text-sm mt-0.5">Templates and journal entries for this period</p>
       </div>
 

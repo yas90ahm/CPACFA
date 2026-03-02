@@ -6,6 +6,16 @@ export type ReconcilingItemType =
   | 'Bank Fee'
   | 'Timing Difference'
   | 'Error Correction'
+  | 'Accrual'
+  | 'Amortization'
+  | 'Depreciation'
+  | 'Addition'
+  | 'Disposal'
+  | 'Reclassification'
+  | 'Write-off'
+  | 'Payment'
+  | 'Collection'
+  | 'Intercompany'
   | 'Other';
 
 export interface ReconcilingItem {

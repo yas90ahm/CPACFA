@@ -22,6 +22,16 @@ const ACCOUNT_TYPE_STYLE: Record<AccountType, string> = {
   EXPENSE: 'bg-status-red-dim text-status-red',
 };
 
+/** Detect contra accounts: debit-normal accounts with credit balances and vice versa. */
+function isContraAccount(r: TrialBalanceRow): boolean {
+  const debit = parseFloat(r.debitBalance) || 0;
+  const credit = parseFloat(r.creditBalance) || 0;
+  if (debit === 0 && credit === 0) return false;
+  const debitNormal = r.accountType === 'ASSET' || r.accountType === 'EXPENSE';
+  if (debitNormal) return credit > debit;
+  return debit > credit;
+}
+
 export default function TrialBalancePage() {
   const p = useParams();
   const sessionId = p.sessionId as string;
@@ -117,7 +127,15 @@ export default function TrialBalancePage() {
       id: 'name',
       header: 'Account Name',
       align: 'left' as const,
-      cell: (r: TrialBalanceRow) => <span className="text-primary">{r.accountName}</span>,
+      cell: (r: TrialBalanceRow) => {
+        const isContra = isContraAccount(r);
+        return (
+          <span className="text-primary">
+            {r.accountName}
+            {isContra && <span className="ml-1 text-xs text-muted-foreground italic">(contra)</span>}
+          </span>
+        );
+      },
     },
     {
       id: 'type',

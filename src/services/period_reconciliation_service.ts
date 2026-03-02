@@ -433,6 +433,46 @@ export async function rejectReconciliation(
   return updated;
 }
 
+/** Reopen an approved reconciliation (e.g. new information discovered). Requires reason. */
+export async function reopenApprovedReconciliation(
+  pool: Pool,
+  tenantId: string,
+  reconId: string,
+  reason: string,
+  userId: string
+): Promise<PeriodReconciliation> {
+  if (!reason || reason.trim().length < 10) {
+    throw new PeriodReconciliationError(
+      'Reason is required (minimum 10 characters) to reopen an approved reconciliation',
+      'VALIDATION'
+    );
+  }
+
+  const recon = await reconRepo.getPeriodReconciliationById(pool, tenantId, reconId);
+  if (!recon) throw new PeriodReconciliationError('Reconciliation not found', 'NOT_FOUND');
+  if (recon.status !== 'approved') {
+    throw new PeriodReconciliationError(
+      `Only approved reconciliations can be reopened; current: ${recon.status}`,
+      'VALIDATION'
+    );
+  }
+
+  const updated = await reconRepo.updateReconStatus(pool, tenantId, reconId, 'in_progress');
+  if (!updated) throw new PeriodReconciliationError('Reconciliation not found', 'NOT_FOUND');
+
+  const { executeCascade, CascadeTriggerType } = await import('./cascade_engine.js');
+  await executeCascade(pool, tenantId, {
+    type: CascadeTriggerType.RECON_REJECTED,
+    period_id: recon.periodId,
+    entity_id: recon.entityId,
+    triggered_by: userId,
+    affected_accounts: [recon.accountCode],
+    details: { recon_id: recon.reconId, reason, reopened_from: 'approved' },
+  });
+
+  return updated;
+}
+
 export async function getPeriodReconciliation(
   pool: Pool,
   tenantId: string,

@@ -24,6 +24,16 @@ export type ReconItemType =
   | 'bank_fee'
   | 'timing_difference'
   | 'error_correction'
+  | 'accrual'
+  | 'amortization'
+  | 'depreciation'
+  | 'addition'
+  | 'disposal'
+  | 'reclassification'
+  | 'write_off'
+  | 'payment'
+  | 'collection'
+  | 'intercompany'
   | 'other';
 
 export interface ReconRequirement {

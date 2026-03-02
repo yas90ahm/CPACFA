@@ -481,7 +481,7 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
   if (step === 'confirm' && tbPreview) {
     return (
       <div className="max-w-2xl space-y-6">
-        <h2 className="text-lg font-display text-primary">Ready to ingest</h2>
+        <h2 className="text-lg font-display text-primary">Ready to import</h2>
         {advanceError && (
           <div className="bg-status-red/10 border border-status-red rounded-card p-4 space-y-3">
             <div className="flex items-start gap-2 text-sm text-status-red">
@@ -515,7 +515,7 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
             Back to Preview
           </button>
           <button type="button" onClick={ingest} className="px-4 py-2 rounded-input bg-accent text-accent-contrast text-sm font-medium hover:opacity-90">
-            Ingest & Begin Close
+            Import & Begin Close
           </button>
         </div>
       </div>

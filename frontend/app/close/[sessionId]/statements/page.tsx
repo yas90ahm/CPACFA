@@ -248,7 +248,7 @@ export default function StatementsPage() {
             )}
           >
             {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            {!hasStatements ? 'Generate Statements' : isStale ? 'Regenerate Statements' : 'Regenerate'}
+            {!hasStatements ? 'Prepare Statements' : isStale ? 'Update Statements' : 'Reprepare'}
           </button>
         </div>
       </div>
@@ -278,7 +278,7 @@ export default function StatementsPage() {
           <div className="text-center py-12">
             <p className="text-lg font-medium text-primary mb-2">No statements generated yet</p>
             <p className="text-text-secondary text-sm mb-6 max-w-md mx-auto">
-              Generate financial statements from your adjusted trial balance. All four statements (Income Statement, Balance Sheet, Cash Flow, Equity) will be produced.
+              Prepare financial statements from your adjusted trial balance. All four statements (Income Statement, Balance Sheet, Cash Flow, Equity) will be produced.
             </p>
             <button
               type="button"
@@ -287,7 +287,7 @@ export default function StatementsPage() {
               className="px-6 py-2.5 rounded-input bg-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-70 inline-flex items-center gap-2"
             >
               {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-              Generate Statements
+              Prepare Statements
             </button>
           </div>
         )}
@@ -407,9 +407,9 @@ export default function StatementsPage() {
         open={regenerateConfirm}
         onClose={() => setRegenerateConfirm(false)}
         onConfirm={handleConfirmRegenerate}
-        title="Regenerate statements?"
-        message="Regenerate all four statements? This will replace the current statements and re-run variance analysis."
-        confirmLabel="Regenerate"
+        title="Reprepare statements?"
+        message="Reprepare all four statements? This will replace the current statements and re-run variance analysis."
+        confirmLabel="Reprepare"
       />
 
       {/* JE detail panel */}

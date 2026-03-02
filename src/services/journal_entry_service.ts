@@ -199,6 +199,22 @@ export async function postJE(pool: Pool, tenantId: string, id: string, aiPool?: 
   if (!je.memo || je.memo.trim().length === 0) {
     throw new JournalEntryError('Cannot post journal entry without a memo', 'VALIDATION');
   }
+
+  // Validate entry date falls within close period and doesn't conflict with prior periods
+  if (je.closeSessionId) {
+    const session = await getCloseSessionById(pool, tenantId, je.closeSessionId);
+    if (session && je.entryDate) {
+      const periodResult = await validatePeriod(pool, tenantId, je.closeSessionId, je.entryDate);
+      if (!periodResult.valid) {
+        throw new JournalEntryError(periodResult.errors.join('; '), 'VALIDATION');
+      }
+      const priorResult = await validateNoPriorPeriodConflict(pool, tenantId, je.entryDate, je.closeSessionId);
+      if (!priorResult.valid) {
+        throw new JournalEntryError(priorResult.errors.join('; '), 'VALIDATION');
+      }
+    }
+  }
+
   const lines = await repo.listJournalEntryLines(pool, id);
 
   const { getEvidencePolicy } = await import('../db/repositories/evidence_policy_repository.js');
@@ -336,15 +352,58 @@ export function validateBalanced(
   return { valid: true, errors: [] };
 }
 
-/** Validate that the close session exists and period is valid (for future effective-date checks). */
+/** Validate that the close session exists and entry date falls within the period. */
 export async function validatePeriod(
   pool: Pool,
   tenantId: string,
-  closeSessionId: string
+  closeSessionId: string,
+  entryDate?: string
 ): Promise<ValidationResult> {
   const session = await getCloseSessionById(pool, tenantId, closeSessionId);
   if (!session) {
     return { valid: false, errors: [`Close session ${closeSessionId} not found`] };
+  }
+  if (entryDate && session.periodStart && session.periodEnd) {
+    const eDate = new Date(entryDate);
+    const pStart = new Date(session.periodStart);
+    const pEnd = new Date(session.periodEnd);
+    if (eDate < pStart || eDate > pEnd) {
+      return {
+        valid: false,
+        errors: [`Entry date ${entryDate} is outside the close period [${session.periodStart}, ${session.periodEnd}]`],
+      };
+    }
+  }
+  return { valid: true, errors: [] };
+}
+
+/** Check that no CERTIFIED or LOCKED session already covers the given date range (prior-period posting prevention). */
+export async function validateNoPriorPeriodConflict(
+  pool: Pool,
+  tenantId: string,
+  entryDate: string,
+  currentSessionId: string
+): Promise<ValidationResult> {
+  try {
+    const r = await pool.query(
+      `SELECT id, period_start, period_end, status FROM close_sessions
+       WHERE tenant_id = $1
+         AND id != $2
+         AND status IN ('certified', 'locked')
+         AND period_start <= $3::date
+         AND period_end >= $3::date
+       LIMIT 1`,
+      [tenantId, currentSessionId, entryDate]
+    );
+    if (r.rows.length > 0) {
+      const s = r.rows[0];
+      return {
+        valid: false,
+        errors: [`Cannot post to date ${entryDate}: period [${s.period_start}, ${s.period_end}] is already ${s.status} (session ${s.id})`],
+      };
+    }
+  } catch {
+    // Table may not exist in some test environments
   }
   return { valid: true, errors: [] };
 }
@@ -461,6 +520,116 @@ export async function deleteDraftJE(
     },
   });
   return { deleted: true, id };
+}
+
+/**
+ * Reverse a posted journal entry by creating a new draft JE with flipped debits/credits.
+ * The original entry remains immutable; a new reversal entry is created and linked.
+ * The reversal must go through the standard draft → proposed → approved → posted workflow.
+ */
+export async function reversePostedJE(
+  pool: Pool,
+  tenantId: string,
+  originalId: string,
+  userId: string,
+  reversalDate?: string
+): Promise<JournalEntry> {
+  const original = await repo.getJournalEntryById(pool, originalId, tenantId);
+  if (!original) throw new JournalEntryError('Journal entry not found', 'NOT_FOUND');
+  if (original.status !== 'posted' && original.status !== 'exported') {
+    throw new JournalEntryError(
+      `Only posted or exported JEs can be reversed; current status: ${original.status}`,
+      'INVALID_STATUS'
+    );
+  }
+  if (original.reversedByJeId) {
+    throw new JournalEntryError(
+      `Journal entry ${originalId} has already been reversed by JE ${original.reversedByJeId}`,
+      'VALIDATION'
+    );
+  }
+
+  const originalLines = await repo.listJournalEntryLines(pool, originalId);
+
+  // Create the reversal draft with flipped debits/credits
+  const reversalInput: CreateDraftJEInput = {
+    closeSessionId: original.closeSessionId,
+    tenantId,
+    memo: `Reversal of JE ${originalId}: ${original.memo ?? ''}`.trim(),
+    source: 'manual',
+    createdBy: userId,
+    lines: originalLines.map((l) => ({
+      accountRef: l.accountRef,
+      debit: l.credit, // flip: original credit becomes reversal debit
+      credit: l.debit, // flip: original debit becomes reversal credit
+      description: `Reversal: ${l.description ?? l.accountRef}`,
+      amountProvenance: { kind: 'human_entered' as const, enteredBy: userId },
+    })),
+  };
+
+  const reversalJE = await createDraftJE(pool, reversalInput);
+
+  // Link the reversal to the original
+  await pool.query(
+    `UPDATE journal_entries SET reverses_je_id = $1, is_reversal = TRUE WHERE id = $2 AND tenant_id = $3`,
+    [originalId, reversalJE.id, tenantId]
+  );
+  // Link the original to the reversal
+  await pool.query(
+    `UPDATE journal_entries SET reversed_by_je_id = $1 WHERE id = $2 AND tenant_id = $3 AND status IN ('posted', 'exported')`,
+    [reversalJE.id, originalId, tenantId]
+  );
+
+  const periodLabel = original.closeSessionId
+    ? (await getCloseSessionById(pool, tenantId, original.closeSessionId))?.periodEnd?.slice(0, 7)
+    : undefined;
+  await recordMaterialEvent(pool, {
+    tenantId,
+    periodLabel,
+    eventType: 'je_posting',
+    deterministicFlagSnapshot: {
+      event: 'je_reversal_created',
+      originalJeId: originalId,
+      reversalJeId: reversalJE.id,
+      reversalDate: reversalDate ?? undefined,
+      createdBy: userId,
+    },
+  });
+
+  return reversalJE;
+}
+
+/**
+ * Auto-create reversal entries for all posted JEs that have a reversalDate
+ * matching or preceding the given date. Used by period-end batch job.
+ */
+export async function processScheduledReversals(
+  pool: Pool,
+  tenantId: string,
+  asOfDate: string,
+  userId: string
+): Promise<{ created: string[]; skipped: string[] }> {
+  const r = await pool.query(
+    `SELECT id FROM journal_entries
+     WHERE tenant_id = $1
+       AND status IN ('posted', 'exported')
+       AND reversal_date IS NOT NULL
+       AND reversal_date <= $2::date
+       AND reversed_by_je_id IS NULL
+       AND is_reversal = FALSE`,
+    [tenantId, asOfDate]
+  );
+  const created: string[] = [];
+  const skipped: string[] = [];
+  for (const row of r.rows) {
+    try {
+      const reversal = await reversePostedJE(pool, tenantId, row.id, userId);
+      created.push(reversal.id);
+    } catch {
+      skipped.push(row.id);
+    }
+  }
+  return { created, skipped };
 }
 
 export async function addJEAttachment(

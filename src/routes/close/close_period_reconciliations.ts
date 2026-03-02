@@ -18,6 +18,7 @@ import {
   completeReconciliation,
   approveReconciliation,
   rejectReconciliation,
+  reopenApprovedReconciliation,
   listPeriodReconciliations,
   getPeriodReconciliation,
   listReconcilingItems,
@@ -389,6 +390,38 @@ router.post('/sessions/:periodId/reconciliations/:reconId/reject', async (req: R
       return;
     }
     send500(res, e, 'Reject reconciliation failed');
+  }
+});
+
+/** POST /api/close/sessions/:periodId/reconciliations/:reconId/reopen */
+router.post('/sessions/:periodId/reconciliations/:reconId/reopen', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    const reconId = req.params.reconId ?? '';
+    const periodId = req.params.periodId ?? '';
+    const body = req.body as { reason?: string };
+    if (!tenantId || !pool || !reconId) {
+      res.status(400).json({ error: 'Tenant context and reconId required' });
+      return;
+    }
+    if (!await guardSessionWritable(res, pool, tenantId, periodId)) return;
+    const updated = await reopenApprovedReconciliation(
+      pool,
+      tenantId,
+      reconId,
+      body?.reason ?? '',
+      getUserId(req)
+    );
+    res.json(updated);
+  } catch (e) {
+    if (e instanceof PeriodReconciliationError) {
+      if (e.code === 'NOT_FOUND') res.status(404).json({ error: e.message });
+      else if (e.code === 'VALIDATION') res.status(400).json({ error: e.message });
+      else send500(res, e, 'Reopen reconciliation failed');
+      return;
+    }
+    send500(res, e, 'Reopen reconciliation failed');
   }
 });
 

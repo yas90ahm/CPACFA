@@ -13,6 +13,16 @@ const BACKEND_ITEM_TYPE_TO_FRONT: Record<string, ReconcilingItemType> = {
   bank_fee: 'Bank Fee',
   timing_difference: 'Timing Difference',
   error_correction: 'Error Correction',
+  accrual: 'Accrual',
+  amortization: 'Amortization',
+  depreciation: 'Depreciation',
+  addition: 'Addition',
+  disposal: 'Disposal',
+  reclassification: 'Reclassification',
+  write_off: 'Write-off',
+  payment: 'Payment',
+  collection: 'Collection',
+  intercompany: 'Intercompany',
   other: 'Other',
 };
 

@@ -40,6 +40,8 @@ export interface TrialBalanceEntry {
   classificationSource?: ClassificationSource;
   /** Auditable rationale for classification (deposition-ready). */
   classificationRationale?: string;
+  /** Opening balance (prior period closing balance). Only applicable to BS accounts. */
+  openingBalance?: number;
 }
 
 /** Reference to authoritative standard (FASB or IASB) */

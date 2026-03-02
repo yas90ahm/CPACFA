@@ -287,6 +287,10 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 128, file: '128_audit_ledger_chain_enforcement.sql' },
   { version: 129, file: '129_ai_classification_suggestions.sql' },
   { version: 130, file: '130_reject_zero_zero_je_lines.sql' },
+  { version: 131, file: '131_je_balance_trigger_on_post.sql' },
+  { version: 132, file: '132_recon_items_total_auto_update.sql' },
+  { version: 133, file: '133_je_reversal_support.sql' },
+  { version: 134, file: '134_gl_upload_history.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 

@@ -52,7 +52,7 @@ const PIPELINE_STEPS = [
   { id: 'map', label: 'Map', path: 'mapping' },
   { id: 'recon', label: 'Recon', path: 'reconciliation' },
   { id: 'adjust', label: 'Adjust', path: 'adjustments' },
-  { id: 'generate', label: 'Generate', path: 'statements' },
+  { id: 'generate', label: 'Prepare', path: 'statements' },
   { id: 'variance', label: 'Variance', path: 'variance' },
   { id: 'review', label: 'Review', path: 'review' },
   { id: 'certify', label: 'Certify', path: 'review' },

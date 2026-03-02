@@ -114,6 +114,7 @@ export function JournalEntryForm({
 
   const [date, setDate] = useState(entry?.date ?? defaultDate);
   const [memo, setMemo] = useState(entry?.memo ?? '');
+  const [reverseNextPeriod, setReverseNextPeriod] = useState(false);
   const [lines, setLines] = useState<FormLine[]>([
     { id: 'line-1', accountCode: null, accountName: null, description: '', debit: null, credit: null },
     { id: 'line-2', accountCode: null, accountName: null, description: '', debit: null, credit: null },
@@ -124,6 +125,7 @@ export function JournalEntryForm({
     if (!open) return;
     setDate(entry?.date ?? defaultDate);
     setMemo(entry?.memo ?? '');
+    setReverseNextPeriod(!!entry?.reversalDate);
     setLines(
       entry?.lines?.length
         ? entry.lines.map((l) => ({
@@ -217,6 +219,21 @@ export function JournalEntryForm({
     [entry?.id, user, uploadEvidenceMutation]
   );
 
+  const computedReversalDate = useMemo(() => {
+    if (!reverseNextPeriod) return null;
+    // First day of the month after periodEnd
+    const periodEnd = sessionData?.periodEnd;
+    if (periodEnd) {
+      const d = new Date(periodEnd);
+      d.setMonth(d.getMonth() + 1, 1);
+      return d.toISOString().slice(0, 10);
+    }
+    // Fallback: first day of next month from JE date
+    const d = new Date(date);
+    d.setMonth(d.getMonth() + 1, 1);
+    return d.toISOString().slice(0, 10);
+  }, [reverseNextPeriod, sessionData?.periodEnd, date]);
+
   const buildEntry = useCallback((): Partial<JournalEntry> & { lines: JournalEntryLine[] } => {
     const jeLines: JournalEntryLine[] = lines.map((l) => ({
       id: l.id,
@@ -230,9 +247,10 @@ export function JournalEntryForm({
       ...(entry ?? {}),
       date,
       memo: memo.trim(),
+      reversalDate: computedReversalDate,
       lines: jeLines,
     } as Partial<JournalEntry> & { lines: JournalEntryLine[] };
-  }, [date, memo, lines, entry]);
+  }, [date, memo, lines, entry, computedReversalDate]);
 
   const readonly = mode === 'view';
   const title = mode === 'create' ? 'New Journal Entry' : mode === 'edit' ? `Edit Journal Entry #${entry?.jeNumber}` : `Journal Entry #${entry?.jeNumber}`;
@@ -289,6 +307,29 @@ export function JournalEntryForm({
             placeholder="Describe the purpose of this entry"
             className="w-full px-3 py-2 rounded-input border border-border bg-input text-sm"
           />
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="reverse-next-period"
+            checked={reverseNextPeriod}
+            onChange={(e) => setReverseNextPeriod(e.target.checked)}
+            disabled={readonly}
+            className="rounded border-border"
+          />
+          <label htmlFor="reverse-next-period" className="text-sm text-text-secondary">
+            Reverse in next period
+          </label>
+          {reverseNextPeriod && computedReversalDate && (
+            <span className="text-xs text-text-muted ml-2">
+              (reversal date: {computedReversalDate})
+            </span>
+          )}
+          {readonly && entry?.reversalDate && (
+            <span className="text-xs text-accent ml-2">
+              Reversal: {entry.reversalDate}
+            </span>
+          )}
         </div>
         {entry?.templateName && (
           <p className="text-sm text-text-muted">From template: {entry.templateName}</p>

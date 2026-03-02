@@ -193,7 +193,7 @@ export default function ReconciliationPage() {
     },
     {
       id: 'variance',
-      header: 'Variance',
+      header: 'Difference',
       width: '130px',
       align: 'right' as const,
       sortKey: 'variance',

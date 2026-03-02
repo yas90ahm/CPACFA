@@ -173,6 +173,62 @@ export async function getAdjustedTrialBalance(
   return mergeAdjustmentsIntoEntries(result.entries, adjustmentPayloads);
 }
 
+/**
+ * Enrich adjusted TB entries with opening balances from the prior period.
+ * Opening balance = prior period's adjusted TB net balance (debit - credit) for each BS account.
+ * Only BS accounts (ASSET, LIABILITY, EQUITY) carry forward; P&L accounts reset each period.
+ */
+export async function enrichWithOpeningBalances(
+  entries: TrialBalanceEntry[],
+  tenantId: string,
+  periodLabel: string,
+  pool: Pool
+): Promise<TrialBalanceEntry[]> {
+  const priorPeriodLabel = getPriorPeriodLabel(periodLabel);
+  if (!priorPeriodLabel) return entries;
+
+  try {
+    const priorTB = await getUnadjustedOrRollup(tenantId, priorPeriodLabel, pool);
+    if (!priorTB || priorTB.entries.length === 0) return entries;
+
+    const priorByAccount = new Map<string, number>();
+    for (const e of priorTB.entries) {
+      const key = (e.accountCode ?? e.accountName ?? '').trim() || e.accountName;
+      const netBalance = (e.debit ?? 0) - (e.credit ?? 0);
+      priorByAccount.set(key, netBalance);
+    }
+
+    return entries.map((e) => {
+      const key = accountKey(e);
+      const at = e.accountType;
+      // Only BS accounts carry opening balances
+      if (at === 'ASSET' || at === 'LIABILITY' || at === 'EQUITY') {
+        const opening = priorByAccount.get(key);
+        if (opening !== undefined) {
+          return { ...e, openingBalance: opening };
+        }
+      }
+      return e;
+    });
+  } catch {
+    // Prior period may not exist; that's fine for first close
+    return entries;
+  }
+}
+
+/** Compute prior period label (YYYY-MM → previous month). */
+function getPriorPeriodLabel(periodLabel: string): string | null {
+  const match = periodLabel.match(/^(\d{4})-(\d{2})$/);
+  if (!match) return null;
+  let year = parseInt(match[1], 10);
+  let month = parseInt(match[2], 10) - 1;
+  if (month === 0) {
+    month = 12;
+    year -= 1;
+  }
+  return `${year}-${String(month).padStart(2, '0')}`;
+}
+
 /** Map COA account_type (Asset/Liability) to financial.ts AccountType (ASSET/LIABILITY). */
 function mapAccountTypeToFinancial(
   t?: string

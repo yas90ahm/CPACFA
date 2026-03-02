@@ -754,6 +754,36 @@ export async function lockCloseSession(pool: Pool, sessionId: string, tenantId: 
   });
 }
 
+/**
+ * Auto-lock certified sessions that have been certified for longer than `daysAfterCert` days.
+ * Intended to be called by a scheduled job (e.g. daily cron).
+ * Returns the list of session IDs that were auto-locked.
+ */
+export async function autoLockCertifiedSessions(
+  pool: Pool,
+  tenantId: string,
+  daysAfterCert: number = 30
+): Promise<string[]> {
+  const certifiedSessions = await repo.listCloseSessions(pool, tenantId, undefined, 'certified');
+  const cutoff = Date.now() - daysAfterCert * 24 * 60 * 60 * 1000;
+  const locked: string[] = [];
+
+  for (const session of certifiedSessions) {
+    if (!session.certifiedAt) continue;
+    const certTime = new Date(session.certifiedAt).getTime();
+    if (certTime <= cutoff) {
+      try {
+        await lockCloseSession(pool, session.id, tenantId, 'system:auto-lock');
+        locked.push(session.id);
+      } catch {
+        // Skip sessions that fail to lock (e.g. concurrent modification)
+      }
+    }
+  }
+
+  return locked;
+}
+
 export type AdvanceResult = AdvanceResultSuccess | AdvanceResultFailure;
 
 const REMEDIATION = 'Complete checklist, resolve issues, and ensure integrity before advancing.';

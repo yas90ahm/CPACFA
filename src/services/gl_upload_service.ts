@@ -4,6 +4,7 @@
  */
 
 import { parse } from 'csv-parse/sync';
+import { createHash } from 'crypto';
 import type { Pool } from 'pg';
 import type {
   GeneralLedgerLine,
@@ -742,9 +743,58 @@ export async function uploadGLForPeriod(
     }));
     perfMetrics.group_ms = Date.now() - groupStart;
 
+    // Duplicate detection: hash the file and compare against last upload
+    const fileHash = createHash('sha256').update(fileBuffer).digest('hex');
+    try {
+      const lastUpload = await pool.query(
+        `SELECT file_hash FROM gl_upload_history WHERE tenant_id = $1 AND period_label = $2 ORDER BY uploaded_at DESC LIMIT 1`,
+        [tenantId, periodLabel]
+      );
+      if (lastUpload.rows.length > 0 && lastUpload.rows[0].file_hash === fileHash) {
+        perfMetrics.total_ms = Date.now() - startTime;
+        return {
+          success: false,
+          balancedCount: 0,
+          imbalancedCount: 0,
+          errors: ['Duplicate file: this exact file has already been uploaded for this period. Upload a different file or make corrections first.'],
+          perfMetrics,
+        };
+      }
+    } catch {
+      // gl_upload_history table may not exist yet — continue without duplicate check
+    }
+
+    // Date range validation: flag entries dated outside the close period
+    const dateWarnings: string[] = [];
+    const periodMatch = periodLabel.match(/^(\d{4})-(\d{2})$/);
+    if (periodMatch) {
+      const year = parseInt(periodMatch[1], 10);
+      const month = parseInt(periodMatch[2], 10);
+      const periodStart = new Date(year, month - 1, 1);
+      const periodEnd = new Date(year, month, 0); // last day of month
+      let outOfRange = 0;
+      for (const line of lines) {
+        if (line.entry_date) {
+          const d = new Date(line.entry_date);
+          if (d < periodStart || d > periodEnd) {
+            outOfRange++;
+          }
+        }
+      }
+      if (outOfRange > 0) {
+        dateWarnings.push(`${outOfRange} GL line(s) have dates outside the period ${periodLabel}. Review for accuracy.`);
+      }
+    }
+
     const validateStart = Date.now();
     const validation = await validateGLEntries(pool, tenantId, lines, 0.01, isRegisterFormat);
     perfMetrics.validate_ms = Date.now() - validateStart;
+
+    // Include date warnings in validation errors (non-blocking for now, just warnings)
+    if (dateWarnings.length > 0 && !validation.errors.length) {
+      // Attach as warnings rather than blocking errors
+      (validation as { warnings?: string[] }).warnings = dateWarnings;
+    }
 
     if (validation.errors.length > 0) {
       perfMetrics.total_ms = Date.now() - startTime;
@@ -778,6 +828,18 @@ export async function uploadGLForPeriod(
       const tbStart = Date.now();
       await deriveAndPersistTB(pool, tenantId, periodLabel, uploadedBy);
       perfMetrics.derive_tb_ms = Date.now() - tbStart;
+
+      // Record file hash for duplicate detection on subsequent uploads
+      try {
+        await pool.query(
+          `INSERT INTO gl_upload_history (tenant_id, period_label, file_hash, uploaded_by, uploaded_at, row_count)
+           VALUES ($1, $2, $3, $4, NOW(), $5)
+           ON CONFLICT DO NOTHING`,
+          [tenantId, periodLabel, fileHash, uploadedBy, lines.length]
+        );
+      } catch {
+        // Non-critical: table may not exist yet
+      }
     }
 
     const imbalancedSummary =

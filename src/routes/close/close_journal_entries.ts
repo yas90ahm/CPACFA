@@ -22,6 +22,7 @@ import {
   validatePeriod,
   validateMaterialityWarnings,
   addJEAttachment,
+  reversePostedJE,
   JournalEntryError,
 } from '../../services/journal_entry_service.js';
 import {
@@ -411,6 +412,29 @@ router.post('/journal-entries/:id/export', async (req: Request, res: Response) =
       return;
     }
     send500(res, e, 'Export JE failed');
+  }
+});
+
+/** POST /api/close/journal-entries/:id/reverse — create a reversing entry for a posted JE */
+router.post('/journal-entries/:id/reverse', async (req: Request, res: Response) => {
+  try {
+    const pool = getTenantPool(req);
+    const tenantId = getTenantId(req);
+    if (!pool || !tenantId) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const id = req.params.id ?? '';
+    const userId = (req as AuthRequest).userId ?? 'anonymous';
+    const reversalDate = req.body?.reversalDate as string | undefined;
+    const reversalJE = await reversePostedJE(pool, tenantId, id, userId, reversalDate);
+    res.status(201).json({ reversalJE, originalJeId: id });
+  } catch (e) {
+    if (e instanceof JournalEntryError) {
+      res.status(e.code === 'NOT_FOUND' ? 404 : e.code === 'INVALID_STATUS' ? 403 : 400).json({ error: e.message, code: e.code });
+      return;
+    }
+    send500(res, e, 'Reverse journal entry failed');
   }
 });
 
