@@ -22,6 +22,9 @@ export function CertificationRecord({ artifact, entityName, periodLabel }: Certi
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingJson, setExportingJson] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [snapshotOpen, setSnapshotOpen] = useState(false);
+  const [snapshotData, setSnapshotData] = useState<Record<string, unknown> | null>(null);
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
 
   const formatDate = (iso: string) => {
     const d = new Date(iso);
@@ -123,6 +126,21 @@ export function CertificationRecord({ artifact, entityName, periodLabel }: Certi
     }
   };
 
+  const handleViewSnapshot = async () => {
+    setSnapshotLoading(true);
+    try {
+      const res = await apiFetch<{ artifact: Record<string, unknown> }>(
+        `/api/verification/certification/artifacts/${artifact.sessionId}`
+      );
+      setSnapshotData(res.artifact ?? res);
+      setSnapshotOpen(true);
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : 'Failed to load snapshot');
+    } finally {
+      setSnapshotLoading(false);
+    }
+  };
+
   return (
     <div className="bg-surface border-2 border-certified rounded-card p-6 space-y-6">
       <div className="flex items-center gap-3">
@@ -215,10 +233,12 @@ export function CertificationRecord({ artifact, entityName, periodLabel }: Certi
         </button>
         <button
           type="button"
-          className="px-4 py-2 rounded-input border border-border text-sm hover:bg-hover flex items-center gap-2"
+          onClick={handleViewSnapshot}
+          disabled={snapshotLoading}
+          className="px-4 py-2 rounded-input border border-border text-sm hover:bg-hover flex items-center gap-2 disabled:opacity-50"
         >
-          <FileText className="w-4 h-4" />
-          View Snapshot
+          {snapshotLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+          {snapshotLoading ? 'Loading...' : 'View Snapshot'}
         </button>
       </div>
 
@@ -270,6 +290,20 @@ export function CertificationRecord({ artifact, entityName, periodLabel }: Certi
           </div>
         )}
       </div>
+
+      {snapshotOpen && snapshotData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setSnapshotOpen(false)}>
+          <div className="bg-surface border border-border rounded-card p-6 max-w-3xl max-h-[80vh] overflow-auto w-full mx-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-display text-primary">Certification Snapshot</h3>
+              <button type="button" onClick={() => setSnapshotOpen(false)} className="text-text-secondary hover:text-primary text-sm">Close</button>
+            </div>
+            <pre className="text-xs font-mono text-text-secondary bg-surface-alt rounded-input p-4 overflow-auto max-h-[60vh] whitespace-pre-wrap">
+              {JSON.stringify(snapshotData, null, 2)}
+            </pre>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -384,8 +384,8 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
         <h2 className="text-lg font-display text-primary">Processing general ledger...</h2>
         <StepProgress
           steps={[
-            { label: 'Parsed 1,247 entries', status: 'complete' },
-            { label: 'Identified 52 unique accounts', status: 'complete' },
+            { label: `Parsed ${parseResult?.rowCount?.toLocaleString() ?? '—'} entries`, status: 'complete' },
+            { label: `Identified ${parseResult?.accountCount?.toLocaleString() ?? '—'} unique accounts`, status: 'complete' },
             { label: 'Aggregating trial balance...', status: 'active' },
             { label: 'Validating balances', status: 'pending' },
           ]}

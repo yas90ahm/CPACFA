@@ -199,7 +199,13 @@ export default function CloseDashboardPage() {
           <button
             type="button"
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-input bg-accent text-white text-sm font-medium hover:opacity-90"
-            onClick={() => {/* Agent-assisted mode — to be wired */}}
+            onClick={() => {
+              // Navigate to the first incomplete pipeline step
+              const firstIncomplete = PIPELINE_STEPS.find((s) => pipelineStatus[s.id] !== 'complete');
+              if (firstIncomplete) {
+                window.location.href = `/close/${sessionId}/${firstIncomplete.path}`;
+              }
+            }}
           >
             <Zap className="w-4 h-4" /> Prepare Close
           </button>

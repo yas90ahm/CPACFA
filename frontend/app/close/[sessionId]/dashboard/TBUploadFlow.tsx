@@ -195,13 +195,19 @@ export function TBUploadFlow({ sessionId, file, onBack }: TBUploadFlowProps) {
     setStep('ingesting');
     setAdvanceError(null);
     try {
+      // Persist trial balance data via ingest endpoint before advancing
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('columnMapping', JSON.stringify(mappingsToBackend(mappings)));
+      await apiUpload('/api/trial-balance/ingest', formData);
+
       await advanceSession.mutateAsync({});
       queryClient.invalidateQueries({ queryKey: ['trial-balance', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       router.push(`/close/${sessionId}/dashboard`);
     } catch (err) {
       setStep('confirm');
-      setAdvanceError(err instanceof Error ? err.message : 'Failed to advance session. Try again.');
+      setAdvanceError(err instanceof Error ? err.message : 'Failed to import trial balance. Try again.');
     }
   };
 
