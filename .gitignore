@@ -14,7 +14,7 @@ out/
 build/
 
 # Local storage (attachments, export packages) — use STORAGE_LOCAL_BASE_PATH in prod
-storage/
+/storage/
 
 # Python
 __pycache__/
