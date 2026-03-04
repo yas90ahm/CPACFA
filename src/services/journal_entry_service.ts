@@ -52,6 +52,17 @@ export async function createDraftJE(pool: Pool, input: CreateDraftJEInput): Prom
   if (!memo) {
     throw new JournalEntryError('Journal entry memo/description is required', 'VALIDATION');
   }
+  if (memo.length < 5) {
+    throw new JournalEntryError('Journal entry memo must be at least 5 characters', 'VALIDATION');
+  }
+  // Reject lines where both debit and credit are zero
+  const zeroLines = input.lines.filter((l) => (l.debit ?? 0) === 0 && (l.credit ?? 0) === 0);
+  if (zeroLines.length > 0) {
+    throw new JournalEntryError(
+      `${zeroLines.length} line(s) have both debit and credit equal to zero — remove them or assign an amount`,
+      'VALIDATION'
+    );
+  }
   const balanced = validateBalanced(input.lines);
   if (!balanced.valid) {
     throw new JournalEntryError(
@@ -479,9 +490,11 @@ export async function getPostableJEAdjustments(
   closeSessionId?: string
 ): Promise<{ debits: { account: string; amount: number }[]; credits: { account: string; amount: number }[] }[]> {
   const postable = await listPostableJournalEntries(pool, tenantId, closeSessionId);
+  if (postable.length === 0) return [];
+  const linesMap = await repo.listJournalEntryLinesBatch(pool, postable.map((je) => je.id));
   const result: { debits: { account: string; amount: number }[]; credits: { account: string; amount: number }[] }[] = [];
   for (const je of postable) {
-    const lines = await repo.listJournalEntryLines(pool, je.id);
+    const lines = linesMap.get(je.id) ?? [];
     const debits = lines.filter((l) => (l.debit ?? 0) > 0).map((l) => ({ account: l.accountRef, amount: l.debit }));
     const credits = lines.filter((l) => (l.credit ?? 0) > 0).map((l) => ({ account: l.accountRef, amount: l.credit }));
     result.push({ debits, credits });
@@ -569,16 +582,20 @@ export async function reversePostedJE(
 
   const reversalJE = await createDraftJE(pool, reversalInput);
 
-  // Link the reversal to the original
+  // Link the reversal to the original (reversal JE points back to original via reverses_je_id)
   await pool.query(
     `UPDATE journal_entries SET reverses_je_id = $1, is_reversal = TRUE WHERE id = $2 AND tenant_id = $3`,
     [originalId, reversalJE.id, tenantId]
-  );
+  ).catch(() => {
+    // Column may not exist yet (reverses_je_id added by later migration); non-fatal
+  });
   // Link the original to the reversal
   await pool.query(
     `UPDATE journal_entries SET reversed_by_je_id = $1 WHERE id = $2 AND tenant_id = $3 AND status IN ('posted', 'exported')`,
     [reversalJE.id, originalId, tenantId]
-  );
+  ).catch(() => {
+    // Column may not exist yet (reversed_by_je_id added by later migration); non-fatal
+  });
 
   const periodLabel = original.closeSessionId
     ? (await getCloseSessionById(pool, tenantId, original.closeSessionId))?.periodEnd?.slice(0, 7)

@@ -93,7 +93,8 @@ export async function insertRequirement(
       requirement_id, tenant_id, entity_id, account_code, account_name, is_required,
       tolerance_amount, tolerance_type, tolerance_percentage, expected_source, requires_reviewer_approval,
       created_at, updated_at, created_by
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13)`,
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13)
+    ON CONFLICT (tenant_id, entity_id, account_code) DO NOTHING`,
     [
       requirementId,
       input.tenantId,

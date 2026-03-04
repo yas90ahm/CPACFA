@@ -1,0 +1,15 @@
+entry_id,entry_date,account_code,account_name,debit,credit,description
+JE001,2026-02-01,1000,Cash,96000.00,0.00,Opening cash (from Jan close)
+JE001,2026-02-01,3000,Common Stock,0.00,100000.00,Equity carry-forward
+JE001B,2026-02-01,1100,Accounts Receivable,13000.00,0.00,AR carry-forward
+JE001B,2026-02-01,3100,Retained Earnings,0.00,9000.00,Jan net income carry-forward
+JE002,2026-02-05,1100,Accounts Receivable,30000.00,0.00,February sales
+JE002,2026-02-05,4000,Revenue,0.00,30000.00,February sales
+JE003,2026-02-10,5000,Cost of Goods Sold,12000.00,0.00,February COGS
+JE003,2026-02-10,1000,Cash,0.00,12000.00,February COGS payment
+JE004,2026-02-15,1000,Cash,25000.00,0.00,Customer payments received
+JE004,2026-02-15,1100,Accounts Receivable,0.00,25000.00,Customer payments received
+JE005,2026-02-28,5100,Salary Expense,12000.00,0.00,February payroll
+JE005,2026-02-28,1000,Cash,0.00,12000.00,February payroll
+JE006,2026-02-28,5200,Rent Expense,3000.00,0.00,February office rent
+JE006,2026-02-28,1000,Cash,0.00,3000.00,February office rent

@@ -291,6 +291,13 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 132, file: '132_recon_items_total_auto_update.sql' },
   { version: 133, file: '133_je_reversal_support.sql' },
   { version: 134, file: '134_gl_upload_history.sql' },
+  { version: 135, file: '135_recon_notes_column.sql' },
+  { version: 136, file: '136_recon_prior_period_ref.sql' },
+  { version: 137, file: '137_mapping_auto_accept.sql' },
+  { version: 138, file: '138_template_auto_apply.sql' },
+  { version: 139, file: '139_fiscal_year_end_day.sql' },
+  { version: 140, file: '140_cumulative_statement_packages.sql' },
+  { version: 141, file: '141_cascade_performance_indexes.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 

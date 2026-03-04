@@ -852,13 +852,18 @@ export async function advanceSession(
       }
       currentSession = await updateStatus(client, input.tenantId, input.closeSessionId, next, input.certifiedBy ?? 'advance-api');
       if (next === 'in_progress') {
-        const { initializeReconciliations } = await import('./period_reconciliation_service.js');
-        await initializeReconciliations(
-          client as unknown as Pool,
-          input.tenantId,
-          input.closeSessionId,
-          currentSession.entityId
-        );
+        try {
+          const { initializeReconciliations } = await import('./period_reconciliation_service.js');
+          await initializeReconciliations(
+            client as unknown as Pool,
+            input.tenantId,
+            input.closeSessionId,
+            currentSession.entityId
+          );
+        } catch (initErr) {
+          console.warn('[advance] initializeReconciliations failed (non-fatal):', (initErr as Error).message);
+          // Non-fatal: session still advances to in_progress even if recon init fails
+        }
       }
       return currentSession;
     });

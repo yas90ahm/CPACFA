@@ -4,6 +4,8 @@
  */
 
 export type StatementPackageStatus = 'draft' | 'final';
+export type StatementPackageType = 'standard' | 'cumulative';
+export type CumulativePeriod = 'QTD' | 'YTD';
 
 export interface StatementPackage {
   id: string;
@@ -17,6 +19,14 @@ export interface StatementPackage {
   ruleVersionsSnapshot?: Record<string, unknown>;
   /** Cross-statement validation (net income tie, cash tie, RE tie). */
   validationResults?: ValidationResult[];
+  /** 'standard' for monthly, 'cumulative' for QTD/YTD. */
+  packageType?: StatementPackageType;
+  /** 'QTD' or 'YTD' when packageType is 'cumulative'. */
+  cumulativePeriod?: CumulativePeriod;
+  /** Note describing derivation (e.g. "Derived from certified monthly periods: Jan, Feb, Mar 2026"). */
+  cumulativeNote?: string;
+  /** IDs of the close sessions included in this cumulative package. */
+  includedSessionIds?: string[];
 }
 
 export interface ValidationResult {

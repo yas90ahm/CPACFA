@@ -32,7 +32,10 @@ export type AuditLedgerEventType =
   | 'ai_mapping_suggestion_edited'
   | 'ai_variance_draft_accepted'
   | 'ai_variance_draft_rejected'
-  | 'ai_variance_draft_edited';
+  | 'ai_variance_draft_edited'
+  | 'mapping_auto_accepted'
+  | 'mapping_prior_period_reused'
+  | 'template_auto_applied';
 
 /** Payload for appending one ledger entry (append-only). */
 export interface AuditLedgerEntryInput {

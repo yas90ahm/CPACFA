@@ -51,6 +51,7 @@ export interface CoaSuggestion {
   alternatives: Array<Record<string, unknown>>;
   modelVersion: string;
   status: string;
+  autoAccepted?: boolean;
 }
 
 export interface CfSuggestion {
@@ -104,6 +105,55 @@ export async function generateClassificationSuggestions(
     accountNames = unmappedAccounts.map((a) => a.account_name);
   } else {
     unmappedAccounts = accountNames.map((name) => ({ account_code: null, account_name: name }));
+  }
+
+  if (accountNames.length === 0) {
+    return { coaSuggestions: [], cfSuggestions: [], errors: [] };
+  }
+
+  // Reuse mapping rules from prior certified sessions for accounts that already had rules
+  let priorReusedCount = 0;
+  try {
+    const existingRulesResult = await pool.query<{ source_account_name_pattern: string; source_account_number_pattern: string | null }>(
+      `SELECT DISTINCT source_account_name_pattern, source_account_number_pattern
+       FROM tenant_coa_mapping_rules WHERE tenant_id = $1 AND entity_id = $2`,
+      [tenantId, entityId]
+    );
+    if (existingRulesResult.rows.length > 0) {
+      const existingPatterns = new Set(
+        existingRulesResult.rows.map((r) =>
+          r.source_account_number_pattern || r.source_account_name_pattern
+        )
+      );
+      const alreadyMapped: string[] = [];
+      for (const acc of unmappedAccounts) {
+        const code = acc.account_code ?? acc.account_name;
+        if (existingPatterns.has(code) || existingPatterns.has(acc.account_name)) {
+          alreadyMapped.push(acc.account_name);
+        }
+      }
+      if (alreadyMapped.length > 0) {
+        priorReusedCount = alreadyMapped.length;
+        // Remove already-mapped accounts from the SLM request
+        const alreadyMappedSet = new Set(alreadyMapped);
+        accountNames = accountNames.filter((n) => !alreadyMappedSet.has(n));
+        unmappedAccounts = unmappedAccounts.filter((a) => !alreadyMappedSet.has(a.account_name));
+        try {
+          await appendEntry(pool, {
+            tenantId,
+            eventType: 'mapping_prior_period_reused',
+            deterministicFlagSnapshot: {
+              closeSessionId,
+              count: priorReusedCount,
+              accounts: alreadyMapped.slice(0, 20),
+            },
+            userPromptRationale: `Reused ${priorReusedCount} mapping rules from prior periods`,
+          });
+        } catch { /* non-fatal */ }
+      }
+    }
+  } catch {
+    /* non-fatal: prior rule lookup failed */
   }
 
   if (accountNames.length === 0) {
@@ -216,6 +266,47 @@ export async function generateClassificationSuggestions(
       modelVersion: r.model_version,
       status: 'pending',
     });
+  }
+
+  // Auto-accept high-confidence suggestions if enabled
+  try {
+    const { getEntitySettings } = await import('./entity_settings_service.js');
+    const settings = await getEntitySettings(pool, tenantId, entityId);
+    if (settings.mappingAutoAcceptEnabled && coaSuggestions.length > 0) {
+      const threshold = settings.mappingConfidenceThreshold;
+      let autoAcceptedCount = 0;
+      for (const suggestion of coaSuggestions) {
+        if (suggestion.confidence >= threshold && suggestion.status === 'pending') {
+          try {
+            await acceptCoaSuggestion(pool, tenantId, suggestion.id, 'auto_accept');
+            await pool.query(
+              `UPDATE ai_coa_suggestions SET auto_accepted = TRUE, auto_accepted_at = NOW() WHERE id = $1 AND tenant_id = $2`,
+              [suggestion.id, tenantId]
+            );
+            suggestion.status = 'accepted';
+            autoAcceptedCount++;
+          } catch {
+            /* non-fatal: skip individual auto-accept failures */
+          }
+        }
+      }
+      if (autoAcceptedCount > 0) {
+        try {
+          await appendEntry(pool, {
+            tenantId,
+            eventType: 'mapping_auto_accepted',
+            deterministicFlagSnapshot: {
+              closeSessionId,
+              count: autoAcceptedCount,
+              threshold,
+            },
+            userPromptRationale: `Auto-accepted ${autoAcceptedCount} COA mapping suggestions with confidence >= ${threshold}`,
+          });
+        } catch { /* non-fatal */ }
+      }
+    }
+  } catch {
+    /* non-fatal: auto-accept feature failed gracefully */
   }
 
   return { coaSuggestions, cfSuggestions, errors: allErrors };
@@ -500,7 +591,7 @@ export async function listCoaSuggestions(
   status?: string
 ): Promise<CoaSuggestion[]> {
   let sql = `SELECT id, account_code, account_name, suggested_fs_line_id, suggested_fs_line_label,
-    confidence, confidence_band, tier, alternatives, model_version, status
+    confidence, confidence_band, tier, alternatives, model_version, status, auto_accepted
     FROM ai_coa_suggestions WHERE tenant_id = $1 AND close_session_id = $2`;
   const params: unknown[] = [tenantId, closeSessionId];
   if (status) {
@@ -522,6 +613,7 @@ export async function listCoaSuggestions(
     alternatives: (typeof r.alternatives === 'string' ? JSON.parse(r.alternatives) : r.alternatives) as Array<Record<string, unknown>>,
     modelVersion: r.model_version as string,
     status: r.status as string,
+    autoAccepted: (r.auto_accepted as boolean) ?? false,
   }));
 }
 

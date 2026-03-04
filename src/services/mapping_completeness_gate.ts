@@ -125,10 +125,10 @@ export async function checkMappingCompleteness(
     const code = accountCode || accountName;
     if (!code) continue;
 
-    const matched = rules.some((r) => ruleMatches(r, accountName, accountCode || undefined));
+    const matched = rules.some((r) => ruleMatches(r, accountName, code || undefined));
     if (!matched) {
       unmapped.push({
-        account_code: accountCode || '',
+        account_code: code,
         account_name: accountName,
         account_type: String(accountType ?? ''),
         balance: formatBalance(debit, credit, accountType),
@@ -141,7 +141,7 @@ export async function checkMappingCompleteness(
     const accountCode = (e as { accountCode?: string }).accountCode ?? (e as { account_code?: string }).account_code ?? '';
     const code = accountCode || accountName;
     if (!code) return false;
-    return rules.some((r) => ruleMatches(r, accountName, accountCode || undefined));
+    return rules.some((r) => ruleMatches(r, accountName, code || undefined));
   }).length;
 
   return {

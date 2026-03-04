@@ -11,8 +11,8 @@ import { formatMoney } from '@/lib/format';
 import type { AJETemplate } from '@/lib/types/journal-entry';
 
 const FREQ_BADGE: Record<string, 'neutral' | 'info'> = { Monthly: 'info', Quarterly: 'neutral', Annual: 'neutral' };
-const PERIOD_BADGE: Record<string, 'warning' | 'success' | 'neutral'> = { pending: 'warning', applied: 'success', skipped: 'neutral' };
-const PERIOD_LABEL: Record<string, string> = { pending: 'Pending', applied: 'Applied', skipped: 'Skipped' };
+const PERIOD_BADGE: Record<string, 'warning' | 'success' | 'neutral' | 'info'> = { pending: 'warning', applied: 'success', skipped: 'neutral', auto_applied: 'info' };
+const PERIOD_LABEL: Record<string, string> = { pending: 'Pending', applied: 'Applied', skipped: 'Skipped', auto_applied: 'Auto-applied' };
 
 export interface AdjustmentsTemplatesTabProps {
   sessionId: string;
@@ -40,7 +40,7 @@ export function AdjustmentsTemplatesTab({
   const [bulkApplyConfirm, setBulkApplyConfirm] = useState(false);
 
   const pending = templates.filter((t) => t.periodStatus === 'pending');
-  const resolved = templates.filter((t) => t.periodStatus === 'applied' || t.periodStatus === 'skipped');
+  const resolved = templates.filter((t) => t.periodStatus === 'applied' || t.periodStatus === 'skipped' || t.periodStatus === 'auto_applied');
   const allResolved = pending.length === 0;
 
   const columns = [
@@ -115,7 +115,7 @@ export function AdjustmentsTemplatesTab({
             </div>
           );
         }
-        if (row.periodStatus === 'applied' && row.resultingJeId) {
+        if ((row.periodStatus === 'applied' || row.periodStatus === 'auto_applied') && row.resultingJeId) {
           const num = jeNumberById[row.resultingJeId];
           return (
             <Link href={`/close/${sessionId}/adjustments?tab=entries`} className="text-sm text-accent hover:underline">

@@ -8,6 +8,7 @@ import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useCloseSession } from '@/lib/queries/close-session';
 import { useStatements, useValidation } from '@/lib/queries/statements';
+import { useCumulativePeriods, useGenerateCumulative } from '@/lib/queries/cumulative';
 import { StatementTable } from './StatementTable';
 import { EquityTable } from './EquityTable';
 import { JournalEntryForm } from '../adjustments/JournalEntryForm';
@@ -15,7 +16,9 @@ import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { SlideOverPanel } from '@/components/shared/SlideOverPanel';
 import { cn } from '@/lib/utils';
 import type { JournalEntry } from '@/lib/types/journal-entry';
-import { Check, X, AlertTriangle, Loader2, FileDown } from 'lucide-react';
+import { Check, X, AlertTriangle, Loader2, FileDown, Calendar } from 'lucide-react';
+
+type PeriodView = 'current' | 'QTD' | 'YTD';
 
 const TABS = [
   { id: 'income-statement', label: 'Income Statement', href: 'income-statement' },
@@ -64,6 +67,11 @@ export default function StatementsPage() {
   const { data: session } = useCloseSession(sessionId);
   const { data: statements } = useStatements(sessionId);
   const { data: validation } = useValidation(sessionId);
+  const { data: cumulativePeriods } = useCumulativePeriods(sessionId);
+
+  const [periodView, setPeriodView] = useState<PeriodView>('current');
+  const generateCumulative = useGenerateCumulative(sessionId);
+  const [cumulativeError, setCumulativeError] = useState<string | null>(null);
 
   const [generating, setGenerating] = useState(false);
   const [regenerateConfirm, setRegenerateConfirm] = useState(false);
@@ -253,6 +261,63 @@ export default function StatementsPage() {
         </div>
       </div>
 
+      {/* Period View Toggle */}
+      <div className="flex items-center gap-2 print:hidden">
+        <Calendar className="w-4 h-4 text-text-secondary" />
+        <span className="text-sm text-text-secondary">Period:</span>
+        {(['current', 'QTD', 'YTD'] as const).map((pv) => (
+          <button
+            key={pv}
+            type="button"
+            onClick={() => {
+              setPeriodView(pv);
+              setCumulativeError(null);
+              if (pv !== 'current' && session?.periodEnd) {
+                generateCumulative.mutate(
+                  { cumulativeType: pv as 'QTD' | 'YTD', throughPeriodEnd: session.periodEnd },
+                  {
+                    onError: (err: Error) => setCumulativeError(err.message),
+                  }
+                );
+              }
+            }}
+            className={cn(
+              'px-3 py-1 text-sm rounded-md',
+              periodView === pv ? 'bg-accent text-white' : 'border border-border text-text-secondary hover:bg-hover'
+            )}
+          >
+            {pv === 'current' ? 'Current Period' : pv === 'QTD' ? 'Quarter-to-Date' : 'Year-to-Date'}
+          </button>
+        ))}
+      </div>
+
+      {/* Cumulative Banner */}
+      {periodView !== 'current' && !cumulativeError && (
+        <div className="p-3 rounded-card border border-accent/30 bg-accent/5 text-sm text-text-secondary print:hidden">
+          <span className="font-medium text-accent">
+            Cumulative {periodView === 'QTD' ? `Q${cumulativePeriods?.qtd?.quarter ?? ''}` : 'YTD'}{' '}
+            {periodView === 'QTD' ? cumulativePeriods?.qtd?.fiscalYear : cumulativePeriods?.ytd?.fiscalYear}
+          </span>
+          {' '}({(periodView === 'QTD' ? cumulativePeriods?.qtd?.periods : cumulativePeriods?.ytd?.periods)?.map((p) => p.label).join(' + ') ?? ''})
+          {' '}&mdash; derived from certified monthly closes
+        </div>
+      )}
+
+      {/* Cumulative Error */}
+      {cumulativeError && periodView !== 'current' && (
+        <div className="p-3 rounded-card border border-status-red bg-status-red-dim text-sm text-status-red print:hidden">
+          {cumulativeError}
+          {/* Show missing periods */}
+          {(periodView === 'QTD' ? cumulativePeriods?.qtd?.periods : cumulativePeriods?.ytd?.periods)
+            ?.filter((p) => p.status !== 'certified' && p.status !== 'locked')
+            .map((p) => (
+              <span key={p.sessionId} className="ml-2">
+                <a href={`/close/${p.sessionId}/dashboard`} className="underline">{p.label} ({p.status})</a>
+              </span>
+            ))}
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="border-b border-border print:border-0 print:hidden">
         <nav className="flex gap-6" aria-label="Statement tabs">
@@ -296,7 +361,9 @@ export default function StatementsPage() {
             <div className="text-center mb-6 print:mb-4">
               <h2 className="text-lg font-display text-primary mb-1 print:mb-2">{entityName}</h2>
               <p className="text-sm font-medium text-primary">INCOME STATEMENT</p>
-              <p className="text-sm text-text-secondary">For the Period Ended {periodEndDisplay}</p>
+              <p className="text-sm text-text-secondary">
+                {periodView === 'QTD' ? `For the Quarter Ended ${periodEndDisplay}` : periodView === 'YTD' ? `For the Year Ended ${periodEndDisplay}` : `For the Period Ended ${periodEndDisplay}`}
+              </p>
             </div>
             <StatementTable
               lines={statements.incomeStatement.lines}
@@ -328,7 +395,9 @@ export default function StatementsPage() {
             <div className="text-center mb-6 print:mb-4">
               <h2 className="text-lg font-display text-primary mb-1 print:mb-2">{entityName}</h2>
               <p className="text-sm font-medium text-primary">STATEMENT OF CASH FLOWS</p>
-              <p className="text-sm text-text-secondary">For the Period Ended {periodEndDisplay}</p>
+              <p className="text-sm text-text-secondary">
+                {periodView === 'QTD' ? `For the Quarter Ended ${periodEndDisplay}` : periodView === 'YTD' ? `For the Year Ended ${periodEndDisplay}` : `For the Period Ended ${periodEndDisplay}`}
+              </p>
             </div>
             <StatementTable
               lines={statements.cashFlow.lines}
@@ -344,7 +413,9 @@ export default function StatementsPage() {
             <div className="text-center mb-6 print:mb-4">
               <h2 className="text-lg font-display text-primary mb-1 print:mb-2">{entityName}</h2>
               <p className="text-sm font-medium text-primary">STATEMENT OF STOCKHOLDERS&apos; EQUITY</p>
-              <p className="text-sm text-text-secondary">For the Period Ended {periodEndDisplay}</p>
+              <p className="text-sm text-text-secondary">
+                {periodView === 'QTD' ? `For the Quarter Ended ${periodEndDisplay}` : periodView === 'YTD' ? `For the Year Ended ${periodEndDisplay}` : `For the Period Ended ${periodEndDisplay}`}
+              </p>
             </div>
             <EquityTable columns={statements.equityColumnar.columns} rows={statements.equityColumnar.rows} />
             {validation && <InlineValidation checks={validation.checks} />}

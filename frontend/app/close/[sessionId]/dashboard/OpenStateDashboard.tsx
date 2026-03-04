@@ -61,7 +61,7 @@ export function OpenStateDashboard({ sessionId, periodLabel, entityName }: OpenS
             Status: <StatusBadge variant="neutral" label="OPEN" />
           </p>
         </div>
-        <TBUploadFlow sessionId={sessionId} file={tbFile} onBack={() => setTbFile(null)} />
+        <TBUploadFlow sessionId={sessionId} periodLabel={periodLabel} file={tbFile} onBack={() => setTbFile(null)} />
       </div>
     );
   }

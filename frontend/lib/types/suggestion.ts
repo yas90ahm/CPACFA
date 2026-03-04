@@ -10,6 +10,7 @@ export interface COASuggestion {
   alternatives: Array<{ line_item_id: string; label: string; score: number }>;
   modelVersion: string;
   status: 'pending' | 'accepted' | 'rejected' | 'expired';
+  autoAccepted?: boolean;
 }
 
 export interface CFSuggestion {

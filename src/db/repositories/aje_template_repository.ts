@@ -14,6 +14,8 @@ interface TemplateRow {
   lines: unknown;
   frequency: string;
   is_active: boolean;
+  consecutive_unchanged_applications: number;
+  auto_apply_eligible: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -46,6 +48,8 @@ function rowToTemplate(row: TemplateRow): AjeTemplate {
     lines,
     frequency: row.frequency as AjeTemplate['frequency'],
     isActive: row.is_active,
+    consecutiveUnchangedApplications: row.consecutive_unchanged_applications ?? 0,
+    autoApplyEligible: row.auto_apply_eligible ?? false,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -94,7 +98,8 @@ export async function insertTemplate(
     ]
   );
   const r = await pool.query<TemplateRow>(
-    `SELECT id, tenant_id, entity_id, name, memo, lines, frequency, is_active, created_at, updated_at
+    `SELECT id, tenant_id, entity_id, name, memo, lines, frequency, is_active,
+       consecutive_unchanged_applications, auto_apply_eligible, created_at, updated_at
      FROM tenant_aje_templates WHERE id = $1 AND tenant_id = $2`,
     [id, input.tenantId]
   );
@@ -104,7 +109,8 @@ export async function insertTemplate(
 
 export async function getTemplateById(pool: Pool, tenantId: string, id: string): Promise<AjeTemplate | null> {
   const r = await pool.query<TemplateRow>(
-    `SELECT id, tenant_id, entity_id, name, memo, lines, frequency, is_active, created_at, updated_at
+    `SELECT id, tenant_id, entity_id, name, memo, lines, frequency, is_active,
+       consecutive_unchanged_applications, auto_apply_eligible, created_at, updated_at
      FROM tenant_aje_templates WHERE id = $1 AND tenant_id = $2`,
     [id, tenantId]
   );
@@ -116,7 +122,8 @@ export async function listTemplates(
   tenantId: string,
   filters?: { entityId?: string; isActive?: boolean }
 ): Promise<AjeTemplate[]> {
-  let sql = `SELECT id, tenant_id, entity_id, name, memo, lines, frequency, is_active, created_at, updated_at
+  let sql = `SELECT id, tenant_id, entity_id, name, memo, lines, frequency, is_active,
+       consecutive_unchanged_applications, auto_apply_eligible, created_at, updated_at
              FROM tenant_aje_templates WHERE tenant_id = $1`;
   const params: unknown[] = [tenantId];
   if (filters?.entityId != null) {
@@ -152,6 +159,8 @@ export async function updateTemplate(
   if (input.lines != null) {
     updates.push(`lines = $${i++}::jsonb`);
     params.push(JSON.stringify(input.lines));
+    // Reset consecutive counter when template lines change
+    updates.push('consecutive_unchanged_applications = 0', 'auto_apply_eligible = FALSE');
   }
   if (input.frequency != null) {
     updates.push(`frequency = $${i++}`);
@@ -173,6 +182,60 @@ export async function updateTemplate(
   return getTemplateById(pool, tenantId, id);
 }
 
+/** Get templates eligible for auto-apply (consecutive unchanged >= N and auto_apply_eligible). */
+export async function getAutoApplyEligibleTemplates(
+  pool: Pool,
+  tenantId: string,
+  entityId?: string,
+  minConsecutive?: number
+): Promise<AjeTemplate[]> {
+  const n = minConsecutive ?? 3;
+  let sql = `SELECT id, tenant_id, entity_id, name, memo, lines, frequency, is_active,
+       consecutive_unchanged_applications, auto_apply_eligible, created_at, updated_at
+     FROM tenant_aje_templates
+     WHERE tenant_id = $1 AND is_active = TRUE AND auto_apply_eligible = TRUE
+       AND consecutive_unchanged_applications >= $2`;
+  const params: unknown[] = [tenantId, n];
+  if (entityId) {
+    params.push(entityId);
+    sql += ` AND (entity_id IS NULL OR entity_id = $${params.length})`;
+  }
+  sql += ` ORDER BY name`;
+  const r = await pool.query<TemplateRow>(sql, params);
+  return r.rows.map(rowToTemplate);
+}
+
+/** Increment consecutive unchanged counter and set eligible if threshold met. */
+export async function incrementConsecutiveUnchanged(
+  pool: Pool,
+  tenantId: string,
+  templateId: string,
+  threshold: number
+): Promise<void> {
+  await pool.query(
+    `UPDATE tenant_aje_templates
+     SET consecutive_unchanged_applications = consecutive_unchanged_applications + 1,
+         auto_apply_eligible = CASE WHEN consecutive_unchanged_applications + 1 >= $1 THEN TRUE ELSE auto_apply_eligible END,
+         updated_at = NOW()
+     WHERE id = $2 AND tenant_id = $3`,
+    [threshold, templateId, tenantId]
+  );
+}
+
+/** Reset consecutive counter when a template is modified. */
+export async function resetConsecutiveUnchanged(
+  pool: Pool,
+  tenantId: string,
+  templateId: string
+): Promise<void> {
+  await pool.query(
+    `UPDATE tenant_aje_templates
+     SET consecutive_unchanged_applications = 0, auto_apply_eligible = FALSE, updated_at = NOW()
+     WHERE id = $1 AND tenant_id = $2`,
+    [templateId, tenantId]
+  );
+}
+
 export async function insertApplication(
   pool: Pool,
   id: string,
@@ -181,7 +244,7 @@ export async function insertApplication(
     templateId: string;
     closeSessionId: string;
     periodLabel: string;
-    status: 'proposed' | 'applied' | 'skipped';
+    status: 'proposed' | 'applied' | 'skipped' | 'auto_applied';
     appliedJeId?: string;
     skippedAt?: string;
   }

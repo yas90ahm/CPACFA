@@ -4,7 +4,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useState, useMemo, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
-import { useReconciliations, useReconciliation } from '@/lib/queries/reconciliations';
+import { useReconciliations, useReconciliation, useCopyPriorPeriod } from '@/lib/queries/reconciliations';
 import { useCloseSession } from '@/lib/queries/close-session';
 import { useAuth } from '@/lib/auth';
 import { apiFetch, apiUpload } from '@/lib/api';
@@ -80,6 +80,8 @@ export default function ReconDetailPage() {
   const { data: reconData } = useReconciliation(sessionId, reconId);
   const recon = reconData?.reconciliation ?? null;
   const baseItems = reconData?.items ?? [];
+
+  const copyPriorMutation = useCopyPriorPeriod(sessionId, reconId);
 
   const { data: evidenceData } = useQuery({
     queryKey: ['recon-evidence', sessionId, reconId],
@@ -235,19 +237,15 @@ export default function ReconDetailPage() {
     [activityData]
   );
 
-  /* ── Save Notes Mutation (via audit log) ── */
+  /* ── Save Notes Mutation ── */
   const saveNotesMutation = useMutation({
     mutationFn: (notes: string) =>
-      apiFetch(`/api/close/audit-log`, {
-        method: 'POST',
-        body: {
-          actor: user?.email ?? user?.userId ?? 'unknown',
-          action: 'recon_notes_updated',
-          resource: `reconciliation:${reconId}`,
-          detail: notes,
-        },
+      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/notes`, {
+        method: 'PUT',
+        body: { notes },
       }),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reconciliation', sessionId, reconId] });
       queryClient.invalidateQueries({ queryKey: ['recon-activity', reconId] });
     },
   });
@@ -577,6 +575,38 @@ export default function ReconDetailPage() {
                 )}
               </div>
             </div>
+            {recon.priorPeriodGlBalance != null && (
+              <div className="mt-4 p-3 rounded-input bg-elevated border border-border-light">
+                <div className="text-xs font-medium text-text-secondary mb-2">Prior Period Reference</div>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <span className="text-text-muted text-xs">GL Balance:</span>
+                    <span className="font-mono ml-1"><MoneyCell value={recon.priorPeriodGlBalance} showDollar /></span>
+                  </div>
+                  <div>
+                    <span className="text-text-muted text-xs">Supporting:</span>
+                    <span className="font-mono ml-1">
+                      {recon.priorPeriodSupportingBalance != null
+                        ? <MoneyCell value={recon.priorPeriodSupportingBalance} showDollar />
+                        : '—'}
+                    </span>
+                  </div>
+                </div>
+                {!recon.copiedFromPrior && !hasSupportingBalance && (recon.status === 'not_started' || recon.status === 'in_progress') && (
+                  <button
+                    type="button"
+                    className="mt-2 text-xs text-accent hover:underline disabled:opacity-50"
+                    onClick={() => copyPriorMutation.mutate()}
+                    disabled={copyPriorMutation.isPending}
+                  >
+                    {copyPriorMutation.isPending ? 'Copying...' : 'Copy from last period'}
+                  </button>
+                )}
+                {recon.copiedFromPrior && (
+                  <div className="mt-1 text-xs text-status-green">Copied from prior period</div>
+                )}
+              </div>
+            )}
             <div className="mt-6 flex justify-center">
               <div
                 className={cn(

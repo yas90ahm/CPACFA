@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { toMoneyString } from '@/lib/money';
 import type { Reconciliation, ReconcilingItem, ReconcilingItemType } from '@/lib/types/reconciliation';
@@ -59,6 +59,9 @@ function toReconciliation(raw: Record<string, unknown>, sessionId: string): Reco
     approvedAt: (raw.reviewedAt ?? raw.approvedAt) as string | null,
     rejectedReason: raw.rejectedReason as string | null,
     notes: raw.notes as string | null,
+    priorPeriodGlBalance: raw.priorPeriodGlBalance != null ? toMoneyString(raw.priorPeriodGlBalance) : null,
+    priorPeriodSupportingBalance: raw.priorPeriodSupportingBalance != null ? toMoneyString(raw.priorPeriodSupportingBalance) : null,
+    copiedFromPrior: (raw.copiedFromPrior as boolean) ?? false,
     sourceDocumentType: (raw.supportingSource ?? raw.sourceDocumentType ?? 'other') as string,
   };
 }
@@ -97,5 +100,34 @@ export function useReconciliation(sessionId: string | null, reconId: string | nu
     },
     enabled: !!sessionId && !!reconId,
     staleTime: STALE_TIME,
+  });
+}
+
+export function usePriorPeriodData(sessionId: string | null) {
+  return useQuery({
+    queryKey: ['prior-period-recons', sessionId],
+    queryFn: async (): Promise<Reconciliation[]> => {
+      if (!sessionId) return [];
+      const res = await apiFetch<{ reconciliations: unknown[] }>(
+        `/api/close/sessions/${sessionId}/reconciliations/prior-period`
+      );
+      return (res.reconciliations ?? []).map((r) => toReconciliation(r as Record<string, unknown>, sessionId));
+    },
+    enabled: !!sessionId,
+    staleTime: STALE_TIME,
+  });
+}
+
+export function useCopyPriorPeriod(sessionId: string, reconId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/copy-prior`, {
+        method: 'POST',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reconciliation', sessionId, reconId] });
+      queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+    },
   });
 }

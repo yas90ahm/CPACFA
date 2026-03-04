@@ -87,9 +87,13 @@ export async function initializeReconciliations(
   if (requirements.length === 0 && tb.length > 0) {
     const bsAccounts = tb.filter((row) => {
       const t = (row.accountType ?? '').toUpperCase();
-      return t === 'ASSET' || t === 'LIABILITY';
+      return t === 'ASSET' || t === 'LIABILITY' || t === 'EQUITY'
+        || t === 'CURRENT_ASSET' || t === 'NON_CURRENT_ASSET'
+        || t === 'CURRENT_LIABILITY' || t === 'NON_CURRENT_LIABILITY';
     });
-    for (const account of bsAccounts) {
+    // If no typed accounts, fall back to all accounts (common when classifier hasn't run)
+    const accountsToUse = bsAccounts.length > 0 ? bsAccounts : tb;
+    for (const account of accountsToUse) {
       const code = (account.accountCode ?? account.accountName ?? '').trim();
       if (!code) continue;
       await reqRepo.insertRequirement(pool, randomUUID(), {
@@ -129,6 +133,27 @@ export async function initializeReconciliations(
     });
     created.push(recon);
   }
+
+  // Set prior period reference fields from most recent certified session
+  const allRecons = [...existing, ...created];
+  if (allRecons.length > 0) {
+    const priorRecons = await reconRepo.getPriorPeriodRecons(pool, tenantId, entityId, periodId);
+    if (priorRecons.length > 0) {
+      const priorByAccount = new Map(priorRecons.map((p) => [p.accountCode, p]));
+      for (const recon of allRecons) {
+        const prior = priorByAccount.get(recon.accountCode);
+        if (prior && !recon.priorPeriodSessionId) {
+          await reconRepo.setPriorPeriodRef(
+            pool, tenantId, recon.reconId,
+            prior.periodId,
+            prior.glBalance,
+            prior.supportingBalance
+          );
+        }
+      }
+    }
+  }
+
   return created;
 }
 
@@ -144,13 +169,19 @@ export async function refreshGLBalances(
   const session = await getCloseSessionById(pool, tenantId, periodId);
   if (!session) return { updated: 0, reverted: [] };
   const periodLabel = (session.periodEnd ?? '').slice(0, 7);
-  const tbResult = await getTrialBalanceForCertification(
-    pool,
-    tenantId,
-    periodLabel,
-    periodId
-  );
-  const tb = tbResult.trialBalance;
+  let tb: { accountCode?: string; accountName: string; debit: number; credit: number; accountType?: string }[] = [];
+  try {
+    const tbResult = await getTrialBalanceForCertification(
+      pool,
+      tenantId,
+      periodLabel,
+      periodId
+    );
+    tb = tbResult.trialBalance;
+  } catch {
+    // No TB yet — nothing to refresh against
+    return { updated: 0, reverted: [] };
+  }
 
   const recons = await reconRepo.listPeriodReconciliationsByPeriod(pool, tenantId, periodId);
   let updated = 0;
@@ -470,6 +501,55 @@ export async function reopenApprovedReconciliation(
     details: { recon_id: recon.reconId, reason, reopened_from: 'approved' },
   });
 
+  return updated;
+}
+
+/** Get prior period recon data for an entity. */
+export async function getPriorPeriodData(
+  pool: Pool,
+  tenantId: string,
+  entityId: string,
+  currentSessionId: string
+): Promise<PeriodReconciliation[]> {
+  return reconRepo.getPriorPeriodRecons(pool, tenantId, entityId, currentSessionId);
+}
+
+/** Copy prior period data into a current reconciliation. */
+export async function copyPriorPeriod(
+  pool: Pool,
+  tenantId: string,
+  reconId: string,
+  entityId: string,
+  currentSessionId: string
+): Promise<PeriodReconciliation> {
+  const recon = await reconRepo.getPeriodReconciliationById(pool, tenantId, reconId);
+  if (!recon) throw new PeriodReconciliationError('Reconciliation not found', 'NOT_FOUND');
+  if (recon.copiedFromPrior) {
+    throw new PeriodReconciliationError('Already copied from prior period', 'VALIDATION');
+  }
+
+  const priorRecons = await reconRepo.getPriorPeriodRecons(pool, tenantId, entityId, currentSessionId);
+  const priorRecon = priorRecons.find((p) => p.accountCode === recon.accountCode);
+  if (!priorRecon) {
+    throw new PeriodReconciliationError('No prior period data found for this account', 'NOT_FOUND');
+  }
+
+  const updated = await reconRepo.copyFromPriorPeriod(pool, tenantId, reconId, priorRecon);
+  if (!updated) throw new PeriodReconciliationError('Reconciliation not found', 'NOT_FOUND');
+  return updated;
+}
+
+/** Update notes on a reconciliation. */
+export async function updateReconNotes(
+  pool: Pool,
+  tenantId: string,
+  reconId: string,
+  notes: string
+): Promise<PeriodReconciliation> {
+  const recon = await reconRepo.getPeriodReconciliationById(pool, tenantId, reconId);
+  if (!recon) throw new PeriodReconciliationError('Reconciliation not found', 'NOT_FOUND');
+  const updated = await reconRepo.updateReconNotes(pool, tenantId, reconId, notes);
+  if (!updated) throw new PeriodReconciliationError('Reconciliation not found', 'NOT_FOUND');
   return updated;
 }
 

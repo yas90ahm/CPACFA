@@ -9,6 +9,7 @@ import { send500 } from '../../lib/errorHandler.js';
 import * as varianceService from '../../services/variance_analysis_service.js';
 import * as repo from '../../db/repositories/variance_analysis_repository.js';
 import { guardSessionWritable } from '../../lib/session_write_guard.js';
+import { computeCumulativeVariances, type ComparisonType } from '../../services/cumulative_variance_service.js';
 
 const router = Router();
 
@@ -118,6 +119,37 @@ router.get('/sessions/:closeSessionId/variance-status', async (req: Request, res
     res.json(result);
   } catch (e) {
     send500(res, e, 'Get variance status failed');
+  }
+});
+
+/** GET /api/close/sessions/:closeSessionId/variances/cumulative — cumulative QTD/YTD variance analysis */
+router.get('/sessions/:closeSessionId/variances/cumulative', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const closeSessionId = req.params.closeSessionId;
+    const cumulativeType = (req.query.cumulativeType as string) ?? 'QTD';
+    if (!['QTD', 'YTD'].includes(cumulativeType)) {
+      res.status(400).json({ error: 'cumulativeType must be QTD or YTD' });
+      return;
+    }
+    const comparisonType = (req.query.comparisonType as ComparisonType) ?? 'prior_year_same_period';
+    const result = await computeCumulativeVariances(
+      pool, tenantId, closeSessionId,
+      cumulativeType as 'QTD' | 'YTD',
+      comparisonType
+    );
+    res.json(result);
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('Close session not found')) {
+      res.status(404).json({ error: e.message });
+      return;
+    }
+    send500(res, e, 'Compute cumulative variances failed');
   }
 });
 

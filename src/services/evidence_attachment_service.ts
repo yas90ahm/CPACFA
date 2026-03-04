@@ -45,6 +45,7 @@ export interface AttachEvidenceInput {
 export interface AttachEvidenceResult {
   evidenceId: string;
   linkId: string;
+  hashSha256?: string;
 }
 
 export class EvidenceAttachmentError extends Error {
@@ -141,6 +142,7 @@ export async function attachEvidenceToJournalEntry(
   return {
     evidenceId: record.id,
     linkId: link.id,
+    hashSha256: input.hashSha256,
   };
 }
 
@@ -250,6 +252,7 @@ export async function attachEvidenceWithFile(
   return {
     evidenceId: record.id,
     linkId: link.id,
+    hashSha256,
   };
 }
 
@@ -357,6 +360,7 @@ export async function attachEvidenceToReconciliation(
   return {
     evidenceId: record.id,
     linkId: link.id,
+    hashSha256,
   };
 }
 

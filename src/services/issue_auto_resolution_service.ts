@@ -59,11 +59,14 @@ export async function runCascade(
   const openBefore = await getOpenIssuesForPeriod(pool, periodId, tenantId);
   const openIdsBefore = new Set(openBefore.map((i) => i.issueId));
 
-  await detection.detectUnmappedAccounts(ctx);
-  await detection.detectBalanceSheetImbalance(ctx);
-  await detection.detectIncompleteReconciliations(ctx);
-  await detection.detectPendingAjeTemplates(ctx);
-  await detection.detectUnexplainedVariances(ctx);
+  // Run all detection functions in parallel — they are independent
+  await Promise.all([
+    detection.detectUnmappedAccounts(ctx),
+    detection.detectBalanceSheetImbalance(ctx),
+    detection.detectIncompleteReconciliations(ctx),
+    detection.detectPendingAjeTemplates(ctx),
+    detection.detectUnexplainedVariances(ctx),
+  ]);
 
   const { getIssue } = await import('./issue_service.js');
   for (const issue of openBefore) {

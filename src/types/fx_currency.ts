@@ -32,6 +32,21 @@ export interface RemeasurementResult {
   lines: { label: string; originalAmount: number; currency: string; translatedAmount: number; rateType: string }[];
 }
 
+/** FX rates for translation: closing, average, and historic rates by currency code. */
+export interface FxRates {
+  closing?: Record<string, number>;
+  average?: Record<string, number>;
+  historic?: Record<string, number>;
+}
+
+/** Monetary/non-monetary position for unrealized FX gain/loss computation. */
+export interface FxPosition {
+  accountCode?: string;
+  amount: number;
+  currency: string;
+  isMonetary: boolean;
+}
+
 /** Result of current-rate translation with CTA */
 export interface TranslationResultWithCTA {
   reportingCurrency: string;

@@ -1,6 +1,6 @@
 export type TemplateFrequency = 'Monthly' | 'Quarterly' | 'Annual';
 
-export type TemplatePeriodStatus = 'pending' | 'applied' | 'skipped';
+export type TemplatePeriodStatus = 'pending' | 'applied' | 'skipped' | 'auto_applied';
 
 export interface AJETemplate {
   id: string;
@@ -18,6 +18,8 @@ export interface AJETemplate {
   appliedOrSkippedAt: string | null;
   resultingJeId: string | null;
   skipReason: string | null;
+  autoApplyEligible?: boolean;
+  consecutiveUnchangedApplications?: number;
 }
 
 export type JournalEntryStatus = 'draft' | 'proposed' | 'approved' | 'posted' | 'rejected';

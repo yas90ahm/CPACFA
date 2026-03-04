@@ -53,5 +53,8 @@ export interface Reconciliation {
   approvedAt: string | null;
   rejectedReason: string | null;
   notes: string | null;
+  priorPeriodGlBalance: string | null;
+  priorPeriodSupportingBalance: string | null;
+  copiedFromPrior: boolean;
   sourceDocumentType: string;
 }

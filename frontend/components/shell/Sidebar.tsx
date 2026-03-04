@@ -14,6 +14,13 @@ import {
   Award,
   History,
   Settings,
+  Building2,
+  Calculator,
+  Star,
+  AlertTriangle,
+  PieChart,
+  Globe,
+  GitMerge,
 } from 'lucide-react';
 
 const navItems: {
@@ -31,6 +38,13 @@ const navItems: {
   { href: 'mapping', label: 'Mapping', icon: ArrowRightLeft },
   { href: 'reconciliation', label: 'Reconciliation', icon: ShieldCheck, badgeProp: 'recon' },
   { href: 'adjustments', label: 'Adjustments', icon: PenLine, badgeProp: 'adjustments' },
+  { href: 'fixed-assets', label: 'Fixed Assets', icon: Building2 },
+  { href: 'deferred-tax', label: 'Deferred Tax', icon: Calculator },
+  { href: 'stock-compensation', label: 'Equity Comp', icon: Star },
+  { href: 'impairment', label: 'Impairment', icon: AlertTriangle },
+  { href: 'segments', label: 'Segments', icon: PieChart },
+  { href: 'fx-translation', label: 'FX Translation', icon: Globe },
+  { href: 'consolidation', label: 'Consolidation', icon: GitMerge },
   { href: 'statements', label: 'Statements', icon: FileText, stale: false },
   { href: 'variance', label: 'Variance', icon: TrendingUp, badge: 2 },
   { href: 'review', label: 'Review & Certify', icon: Award },
@@ -65,7 +79,7 @@ export function Sidebar({
         {navItems.map((item, idx) => {
           const href = item.external ? item.href : `${base}/${item.href}`;
           const isActive = pathname === href || (item.href !== 'dashboard' && pathname?.startsWith(href));
-          const isSeparator = item.label === 'Audit Trail';
+          const isSeparator = item.label === 'Audit Trail' || item.label === 'Fixed Assets' || item.label === 'Statements';
           return (
             <div key={item.href}>
               {isSeparator && <div className="my-2 border-t border-border-light" />}

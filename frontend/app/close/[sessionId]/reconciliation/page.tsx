@@ -236,6 +236,19 @@ export default function ReconciliationPage() {
       cell: (row: Reconciliation) => <MoneyCell value={row.tolerance} showDollar />,
     },
     {
+      id: 'prior',
+      header: 'Prior',
+      width: '120px',
+      align: 'right' as const,
+      sortKey: undefined,
+      cell: (row: Reconciliation) =>
+        row.priorPeriodSupportingBalance != null ? (
+          <MoneyCell value={row.priorPeriodSupportingBalance} showDollar />
+        ) : (
+          <span className="text-text-muted font-mono">—</span>
+        ),
+    },
+    {
       id: 'status',
       header: 'Status',
       width: '110px',
@@ -304,7 +317,7 @@ export default function ReconciliationPage() {
       <td className="px-3 py-2.5 text-right font-mono text-xs">
         <MoneyCell value={totals.unexTot} showDollar />
       </td>
-      <td colSpan={5} />
+      <td colSpan={6} />
     </tr>
   );
 

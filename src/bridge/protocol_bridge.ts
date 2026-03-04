@@ -85,7 +85,7 @@ const jeLineSchema = z.object({
 const createDraftJESchema = z.object({
   commandType: z.literal('CreateDraftJE'),
   closeSessionId: z.string().uuid(),
-  memo: z.string().min(1, 'Memo is required'),
+  memo: z.string().min(5, 'Memo must be at least 5 characters'),
   source: z.enum(['manual', 'suggestion', 'recon', 'accrual']),
   createdBy: z.string().optional(),
   lines: z.array(jeLineSchema).min(1),

@@ -55,6 +55,11 @@ import { getSessionTrialBalance } from '../../services/session_trial_balance_ser
 import * as auditLedgerRepo from '../../db/repositories/audit_ledger_repository.js';
 import { normalizeMoney } from '../../utils/decimal.js';
 import { guardSessionWritable } from '../../lib/session_write_guard.js';
+import {
+  generateCumulativeStatements,
+  getCumulativePeriods,
+} from '../../services/cumulative_statement_service.js';
+import { getComparativeStatementLines } from '../../services/comparative_statements_service.js';
 
 const router = Router();
 
@@ -883,7 +888,7 @@ router.get('/statement-packages/:id', async (req: Request, res: Response) => {
   }
 });
 
-/** GET /api/close/statement-packages/:id/lines — get package with lines. Query: includePrior=true for prior period comparison. */
+/** GET /api/close/statement-packages/:id/lines — get package with lines. Query: includePrior=true, comparativePeriods=N */
 router.get('/statement-packages/:id/lines', async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
@@ -894,6 +899,20 @@ router.get('/statement-packages/:id/lines', async (req: Request, res: Response) 
     }
     const id = req.params.id ?? '';
     const includePrior = req.query.includePrior === 'true' || req.query.includePrior === '1';
+    const comparativePeriods = req.query.comparativePeriods ? Number(req.query.comparativePeriods) : 0;
+
+    // Comparative multi-column mode
+    if (comparativePeriods > 0) {
+      const comparative = await getComparativeStatementLines(pool, tenantId, id, comparativePeriods);
+      const pkg = await getStatementPackage(pool, tenantId, id);
+      if (!pkg) {
+        res.status(404).json({ error: 'Statement package not found' });
+        return;
+      }
+      res.json({ package: pkg, lines: comparative.lines, periods: comparative.periods, comparative: true });
+      return;
+    }
+
     const result = await getStatementPackageWithLines(pool, tenantId, id, includePrior);
     if (!result) {
       res.status(404).json({ error: 'Statement package not found' });
@@ -943,6 +962,64 @@ router.get('/sessions/:id/statement-packages/:pkgId/lines/:lineId/accounts', asy
     res.json(result);
   } catch (e) {
     send500(res, e, 'Get accounts for line item failed');
+  }
+});
+
+/** POST /api/close/sessions/:id/statement-packages/generate-cumulative — generate QTD/YTD cumulative statements */
+router.post('/sessions/:id/statement-packages/generate-cumulative', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const id = req.params.id ?? '';
+    const body = req.body as { cumulativeType?: string; throughPeriodEnd?: string };
+    if (!body.cumulativeType || !['QTD', 'YTD'].includes(body.cumulativeType)) {
+      res.status(400).json({ error: 'cumulativeType must be QTD or YTD' });
+      return;
+    }
+    if (!body.throughPeriodEnd) {
+      res.status(400).json({ error: 'throughPeriodEnd is required (YYYY-MM-DD)' });
+      return;
+    }
+    const pkg = await generateCumulativeStatements(pool, tenantId, id, {
+      cumulativeType: body.cumulativeType as 'QTD' | 'YTD',
+      throughPeriodEnd: body.throughPeriodEnd,
+    }, { generatedBy: (req as AuthRequest).userId });
+    res.status(201).json(pkg);
+  } catch (e) {
+    if (e instanceof Error && (e.message.includes('not yet certified') || e.message.includes('no close session') || e.message.includes('no statement package'))) {
+      res.status(409).json({ error: e.message });
+      return;
+    }
+    if (e instanceof Error && e.message.includes('Close session not found')) {
+      res.status(404).json({ error: e.message });
+      return;
+    }
+    send500(res, e, 'Generate cumulative statements failed');
+  }
+});
+
+/** GET /api/close/sessions/:id/cumulative-periods — available QTD/YTD periods */
+router.get('/sessions/:id/cumulative-periods', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const id = req.params.id ?? '';
+    const result = await getCumulativePeriods(pool, tenantId, id);
+    res.json(result);
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('Close session not found')) {
+      res.status(404).json({ error: e.message });
+      return;
+    }
+    send500(res, e, 'Get cumulative periods failed');
   }
 });
 

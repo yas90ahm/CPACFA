@@ -321,6 +321,11 @@ export default function MappingPage() {
                             <span className={cn('px-1.5 py-0.5 rounded text-[10px] border', CONFIDENCE_BADGE[suggestion.confidenceBand])}>
                               {suggestion.confidenceBand.toUpperCase()}
                             </span>
+                            {suggestion.autoAccepted && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] bg-status-green-dim text-status-green border border-status-green/30">
+                                Auto-accepted
+                              </span>
+                            )}
                           </div>
                         ) : (
                           <span className="text-status-amber">⚠ Unmapped</span>
@@ -543,6 +548,11 @@ export default function MappingPage() {
                           <span className={cn('px-1.5 py-0.5 rounded text-[10px] border', CONFIDENCE_BADGE[s.confidenceBand])}>
                             {s.confidenceBand.toUpperCase()} ({Math.round(s.confidence * 100)}%)
                           </span>
+                          {s.autoAccepted && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] bg-status-green-dim text-status-green border border-status-green/30">
+                              Auto-accepted
+                            </span>
+                          )}
                         </div>
                         {s.alternatives.length > 0 && (
                           <div className="mt-1 text-[10px] text-text-tertiary">

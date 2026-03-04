@@ -3,6 +3,7 @@
  */
 
 import type { BalanceSheet, ProfitAndLoss, CashFlowStatement, EquityChangesStatement } from '../types/financial.js';
+import { from, minus } from '../utils/decimal.js';
 
 export type QualitySeverity = 'info' | 'warning' | 'critical';
 
@@ -42,7 +43,7 @@ export function evaluateQualityChecks(
   }
 
   const netMargin = profitAndLoss.totalRevenue
-    ? profitAndLoss.netIncome / (profitAndLoss.totalRevenue || 1)
+    ? from(profitAndLoss.netIncome).dividedBy(profitAndLoss.totalRevenue || 1).toNumber()
     : 0;
   if (netMargin > 0.6 || netMargin < -0.2) {
     checks.push({
@@ -65,8 +66,8 @@ export function evaluateQualityChecks(
   }
 
   if (cashFlow?.beginningCash != null && cashFlow?.endingCash != null) {
-    const implied = cashFlow.endingCash - cashFlow.beginningCash;
-    const delta = Math.abs(implied - cashFlow.netChangeInCash);
+    const implied = minus(cashFlow.endingCash, cashFlow.beginningCash);
+    const delta = from(implied).minus(cashFlow.netChangeInCash).abs().toNumber();
     if (delta > 1) {
       checks.push({
         id: 'cashflow-recon',
@@ -77,19 +78,19 @@ export function evaluateQualityChecks(
       });
     }
     const bsCash = balanceSheet.assets.find((a) => /cash|bank/i.test(a.label ?? ''))?.amount;
-    if (bsCash != null && Math.abs(bsCash - cashFlow.endingCash) > 1) {
+    if (bsCash != null && from(bsCash).minus(cashFlow.endingCash).abs().toNumber() > 1) {
       checks.push({
         id: 'cashflow-bs-cash',
         severity: 'warning',
         title: 'Cash vs Balance Sheet',
         message: 'Cash Flow ending cash does not match Balance Sheet cash line.',
-        metric: bsCash - cashFlow.endingCash,
+        metric: minus(bsCash, cashFlow.endingCash),
       });
     }
   }
 
   if (equityChanges?.closingEquity != null) {
-    const delta = Math.abs(equityChanges.closingEquity - balanceSheet.totalEquity);
+    const delta = from(equityChanges.closingEquity).minus(balanceSheet.totalEquity).abs().toNumber();
     if (delta > 1) {
       checks.push({
         id: 'equity-rollforward',

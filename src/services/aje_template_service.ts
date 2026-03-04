@@ -66,6 +66,73 @@ export async function proposeTemplatesForPeriod(
     proposed.push(app);
     existingTemplateIds.add(t.id);
   }
+  // Auto-apply eligible templates if enabled
+  try {
+    const { getEntitySettings } = await import('./entity_settings_service.js');
+    const settings = await getEntitySettings(pool, input.tenantId, input.entityId ?? 'default');
+    if (settings.templateAutoApplyEnabled) {
+      const eligible = await repo.getAutoApplyEligibleTemplates(
+        pool, input.tenantId, input.entityId, settings.autoApplyAfterNPeriods
+      );
+      const autoAppliedNames: string[] = [];
+      for (const t of eligible) {
+        if (existingTemplateIds.has(t.id)) continue;
+        try {
+          // Create application as auto_applied
+          const appId = randomUUID();
+          const app = await repo.insertApplication(pool, appId, {
+            tenantId: input.tenantId,
+            templateId: t.id,
+            closeSessionId: input.closeSessionId,
+            periodLabel: input.periodLabel,
+            status: 'auto_applied',
+          });
+          // Create the draft JE
+          const lines = t.lines.map((l) => ({
+            accountRef: l.accountRef,
+            debit: l.debit ?? 0,
+            credit: l.credit ?? 0,
+            description: l.description,
+            amountProvenance:
+              (l.debit ?? 0) !== 0 || (l.credit ?? 0) !== 0
+                ? { kind: 'engine_calculation' as const, ruleId: t.id, ruleVersion: '1', inputs: { template: true, autoApplied: true } }
+                : undefined,
+          }));
+          const je = await createDraftJE(pool, {
+            closeSessionId: input.closeSessionId,
+            tenantId: input.tenantId,
+            memo: `[Auto-applied] ${t.memo}`,
+            source: 'accrual',
+            createdBy: 'auto_apply',
+            lines,
+          });
+          await repo.updateApplicationStatus(pool, input.tenantId, appId, 'applied', { appliedJeId: je.id });
+          existingTemplateIds.add(t.id);
+          autoAppliedNames.push(t.name);
+        } catch {
+          /* non-fatal: skip individual auto-apply failures */
+        }
+      }
+      if (autoAppliedNames.length > 0) {
+        try {
+          const { appendEntry } = await import('../db/repositories/audit_ledger_repository.js');
+          await appendEntry(pool, {
+            tenantId: input.tenantId,
+            eventType: 'template_auto_applied',
+            deterministicFlagSnapshot: {
+              closeSessionId: input.closeSessionId,
+              templates: autoAppliedNames,
+              count: autoAppliedNames.length,
+            },
+            userPromptRationale: `Auto-applied ${autoAppliedNames.length} templates: ${autoAppliedNames.join(', ')}`,
+          });
+        } catch { /* non-fatal */ }
+      }
+    }
+  } catch {
+    /* non-fatal: auto-apply feature failed gracefully */
+  }
+
   return { proposed, alreadyHandled };
 }
 
@@ -116,6 +183,16 @@ export async function applyTemplate(
     lines,
   });
   await repo.updateApplicationStatus(pool, input.tenantId, input.applicationId, 'applied', { appliedJeId: je.id });
+
+  // Increment consecutive unchanged counter for this template
+  try {
+    const { getEntitySettings } = await import('./entity_settings_service.js');
+    const settings = await getEntitySettings(pool, input.tenantId, template.entityId ?? 'default');
+    await repo.incrementConsecutiveUnchanged(pool, input.tenantId, template.id, settings.autoApplyAfterNPeriods);
+  } catch {
+    /* non-fatal */
+  }
+
   const updated = await repo.getApplicationsForSession(pool, input.tenantId, input.closeSessionId);
   const updatedApp = updated.find((a) => a.id === input.applicationId)!;
   return { jeId: je.id, application: updatedApp };

@@ -187,6 +187,11 @@ function mapReadinessToValidationSummary(readiness: {
 /**
  * Execute the full cascade for a financial mutation.
  * Single entry point for all downstream updates.
+ *
+ * Performance optimizations:
+ * - computeReadiness uses lightweight mode (skips verifyChain O(n) scan, N+1 evidence loops, mapping recompute)
+ * - Steps 3 (invalidate statements), 4 (readiness), and 5 (issues) run in parallel
+ * - Timing logs on each step for diagnostics
  */
 export async function executeCascade(
   pool: Pool,
@@ -202,9 +207,12 @@ export async function executeCascade(
   }
 
   const startTime = Date.now();
+  const timings: Record<string, number> = {};
   const result = emptyResult(0);
 
+  let t0 = Date.now();
   const session = await getCloseSessionById(pool, tenantId, trigger.period_id);
+  timings['step0_get_session'] = Date.now() - t0;
   if (!session) {
     return emptyResult(Date.now() - startTime);
   }
@@ -215,41 +223,38 @@ export async function executeCascade(
   // Downstream steps read fresh via getTrialBalanceForCertification.
   result.adjusted_tb_recalculated = tbAffecting;
 
-  // STEP 2: Refresh reconciliation GL balances
+  // STEP 2: Refresh reconciliation GL balances (must complete before steps 3-5)
   if (tbAffecting) {
+    t0 = Date.now();
     const { refreshGLBalances } = await import('./period_reconciliation_service.js');
-    const { updated, reverted } = await refreshGLBalances(pool, tenantId, trigger.period_id);
+    let updated = 0;
+    let reverted: string[] = [];
+    try {
+      ({ updated, reverted } = await refreshGLBalances(pool, tenantId, trigger.period_id));
+    } catch {
+      // No TB yet (e.g. mapping changed before GL uploaded) — skip recon refresh
+    }
     result.recon_balances_refreshed = updated;
-    const recons = await import('../db/repositories/period_reconciliation_repository.js').then(
-      (m) => m.listPeriodReconciliationsByPeriod(pool, tenantId, trigger.period_id)
-    );
-    for (const reconId of reverted) {
-      const r = recons.find((x) => x.reconId === reconId);
-      if (r) {
-        result.recon_status_changes.push({
-          reconId,
-          accountCode: r.accountCode,
-          previousStatus: 'completed',
-          newStatus: 'in_progress',
-        });
+    if (reverted.length > 0) {
+      const recons = await import('../db/repositories/period_reconciliation_repository.js').then(
+        (m) => m.listPeriodReconciliationsByPeriod(pool, tenantId, trigger.period_id)
+      );
+      for (const reconId of reverted) {
+        const r = recons.find((x) => x.reconId === reconId);
+        if (r) {
+          result.recon_status_changes.push({
+            reconId,
+            accountCode: r.accountCode,
+            previousStatus: 'completed',
+            newStatus: 'in_progress',
+          });
+        }
       }
     }
+    timings['step2_refresh_gl_balances'] = Date.now() - t0;
   }
 
-  // STEP 3: Invalidate statements (do NOT regenerate)
-  if (tbAffecting) {
-    const maxVer = await getMaxVersionByCloseSessionId(pool, tenantId, trigger.period_id);
-    if (maxVer > 0) {
-      await setStatementsStaleSince(pool, tenantId, trigger.period_id);
-      result.statements_invalidated = true;
-    }
-  }
-
-  // STEP 4: Re-run validation checks (computeReadiness)
-  const readiness = await computeReadiness(pool, tenantId, session);
-  result.validation_results = mapReadinessToValidationSummary(readiness);
-
-  // STEP 5: Update HITL issues (runCascade from Step 4)
+  // STEPS 3, 4, 5 run in parallel — they are independent of each other
   const hitlType = mapToHITLTriggerType(trigger.type);
   const hitlTrigger = {
     type: hitlType,
@@ -258,19 +263,58 @@ export async function executeCascade(
     triggered_by: trigger.triggered_by,
     details: trigger.details,
   };
-  const issueResult = await runIssueCascade(
-    pool,
-    tenantId,
-    trigger.period_id,
-    hitlTrigger,
-    depth + 1
-  );
+
+  const [step3Result, readiness, issueResult] = await Promise.all([
+    // STEP 3: Invalidate statements (do NOT regenerate)
+    (async () => {
+      if (!tbAffecting) return false;
+      const t3 = Date.now();
+      const maxVer = await getMaxVersionByCloseSessionId(pool, tenantId, trigger.period_id);
+      if (maxVer > 0) {
+        await setStatementsStaleSince(pool, tenantId, trigger.period_id);
+        timings['step3_invalidate_statements'] = Date.now() - t3;
+        return true;
+      }
+      timings['step3_invalidate_statements'] = Date.now() - t3;
+      return false;
+    })(),
+
+    // STEP 4: Re-run validation checks (lightweight — skips verifyChain, evidence N+1, mapping recompute)
+    (async () => {
+      const t4 = Date.now();
+      const r = await computeReadiness(pool, tenantId, session, { lightweight: true });
+      timings['step4_compute_readiness'] = Date.now() - t4;
+      return r;
+    })(),
+
+    // STEP 5: Update HITL issues (auto-verify resolved, create new)
+    (async () => {
+      const t5 = Date.now();
+      const r = await runIssueCascade(
+        pool,
+        tenantId,
+        trigger.period_id,
+        hitlTrigger,
+        depth + 1
+      );
+      timings['step5_issue_cascade'] = Date.now() - t5;
+      return r;
+    })(),
+  ]);
+
+  result.statements_invalidated = step3Result;
+  result.validation_results = mapReadinessToValidationSummary(readiness);
   result.issues_auto_verified = issueResult.issues_auto_verified;
   result.issues_created = issueResult.new_issues_created;
   result.issues_reopened = [];
 
-  // STEP 6: Close readiness — already computed in step 4; no additional storage
   result.duration_ms = Date.now() - startTime;
+
+  // Always log cascade timing for diagnostics
+  console.log(
+    `[cascade] ${trigger.type} on ${trigger.period_id}: ${result.duration_ms}ms | ` +
+      Object.entries(timings).map(([k, v]) => `${k}=${v}ms`).join(', ')
+  );
 
   if (result.duration_ms > MAX_CASCADE_MS) {
     console.warn(

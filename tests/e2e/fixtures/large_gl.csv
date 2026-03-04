@@ -1,0 +1,501 @@
+entry_id,entry_date,account_code,account_name,debit,credit,description
+JE001,2026-01-01,1000,Cash,500000.00,0.00,Initial capital contribution - opening entry
+JE001,2026-01-01,3000,Common Stock,0.00,500000.00,Initial capital contribution - opening entry
+JE002,2026-01-01,1100,Accounts Receivable,21706.36,0.00,Product sales on account
+JE002,2026-01-01,4000,Revenue,0.00,21706.36,Product sales on account
+JE003,2026-01-02,5900,Professional Fees,2182.14,0.00,Professional services paid in cash
+JE003,2026-01-02,1000,Cash,0.00,2182.14,Professional services paid in cash
+JE004,2026-01-03,5100,Salary Expense,35096.75,0.00,Salary expense paid in cash
+JE004,2026-01-03,1000,Cash,0.00,35096.75,Salary expense paid in cash
+JE005,2026-01-04,1300,Prepaid Expenses,9165.50,0.00,Prepaid rent payment
+JE005,2026-01-04,1000,Cash,0.00,9165.50,Prepaid rent payment
+JE006,2026-01-05,5900,Professional Fees,6586.11,0.00,Professional services on account
+JE006,2026-01-05,2000,Accounts Payable,0.00,6586.11,Professional services on account
+JE007,2026-01-06,5400,Depreciation Expense,5751.74,0.00,Monthly depreciation on equipment
+JE007,2026-01-06,1510,Accumulated Depreciation,0.00,5751.74,Monthly depreciation on equipment
+JE008,2026-01-07,2100,Accrued Liabilities,7879.97,0.00,Payment of accrued liabilities
+JE008,2026-01-07,1000,Cash,0.00,7879.97,Payment of accrued liabilities
+JE009,2026-01-08,6000,Income Tax Expense,22321.45,0.00,Income tax provision recorded
+JE009,2026-01-08,2400,Income Tax Payable,0.00,22321.45,Income tax provision recorded
+JE010,2026-01-09,3100,Retained Earnings,7357.79,0.00,Dividend payment from retained earnings
+JE010,2026-01-09,1000,Cash,0.00,7357.79,Dividend payment from retained earnings
+JE011,2026-01-10,5500,Insurance Expense,1537.11,0.00,Insurance expense recognized from prepaid
+JE011,2026-01-10,1400,Prepaid Insurance,0.00,1537.11,Insurance expense recognized from prepaid
+JE012,2026-01-11,1100,Accounts Receivable,27912.16,0.00,Product sales on account
+JE012,2026-01-11,4000,Revenue,0.00,27912.16,Product sales on account
+JE013,2026-01-12,1000,Cash,26441.05,0.00,Service revenue received in cash
+JE013,2026-01-12,4100,Service Revenue,0.00,26441.05,Service revenue received in cash
+JE014,2026-01-13,1010,Petty Cash,436.55,0.00,Petty cash fund replenishment
+JE014,2026-01-13,1000,Cash,0.00,436.55,Petty cash fund replenishment
+JE015,2026-01-14,5900,Professional Fees,2183.16,0.00,Professional services on account
+JE015,2026-01-14,2000,Accounts Payable,0.00,2183.16,Professional services on account
+JE016,2026-01-15,6000,Income Tax Expense,23409.51,0.00,Income tax provision recorded
+JE016,2026-01-15,2400,Income Tax Payable,0.00,23409.51,Income tax provision recorded
+JE017,2026-01-16,5600,Office Supplies Expense,1449.42,0.00,Office supplies purchased on account
+JE017,2026-01-16,2000,Accounts Payable,0.00,1449.42,Office supplies purchased on account
+JE018,2026-01-17,1000,Cash,16994.35,0.00,Customer advance payment received
+JE018,2026-01-17,2300,Unearned Revenue,0.00,16994.35,Customer advance payment received
+JE019,2026-01-18,5000,Cost of Goods Sold,17859.36,0.00,Cost of goods sold recognized
+JE019,2026-01-18,1200,Inventory,0.00,17859.36,Cost of goods sold recognized
+JE020,2026-01-19,5600,Office Supplies Expense,278.78,0.00,Office supplies purchased with cash
+JE020,2026-01-19,1000,Cash,0.00,278.78,Office supplies purchased with cash
+JE021,2026-01-20,1500,Equipment,24612.19,0.00,Equipment financed with note payable
+JE021,2026-01-20,2200,Notes Payable,0.00,24612.19,Equipment financed with note payable
+JE022,2026-01-21,5600,Office Supplies Expense,610.12,0.00,Office supplies purchased on account
+JE022,2026-01-21,2000,Accounts Payable,0.00,610.12,Office supplies purchased on account
+JE023,2026-01-22,2000,Accounts Payable,27679.71,0.00,Accounts payable payment
+JE023,2026-01-22,1000,Cash,0.00,27679.71,Accounts payable payment
+JE024,2026-01-23,1300,Prepaid Expenses,11284.28,0.00,Prepaid rent payment
+JE024,2026-01-23,1000,Cash,0.00,11284.28,Prepaid rent payment
+JE025,2026-01-24,5100,Salary Expense,29086.83,0.00,Salary expense accrued
+JE025,2026-01-24,2100,Accrued Liabilities,0.00,29086.83,Salary expense accrued
+JE026,2026-01-25,2400,Income Tax Payable,14565.35,0.00,Income tax payment made
+JE026,2026-01-25,1000,Cash,0.00,14565.35,Income tax payment made
+JE027,2026-01-26,5200,Rent Expense,7032.95,0.00,Monthly rent payment
+JE027,2026-01-26,1000,Cash,0.00,7032.95,Monthly rent payment
+JE028,2026-01-27,5700,Marketing Expense,2842.20,0.00,Marketing services on account
+JE028,2026-01-27,2000,Accounts Payable,0.00,2842.20,Marketing services on account
+JE029,2026-01-28,1500,Equipment,20282.96,0.00,Equipment purchase paid in cash
+JE029,2026-01-28,1000,Cash,0.00,20282.96,Equipment purchase paid in cash
+JE030,2026-01-29,1500,Equipment,14328.22,0.00,Equipment financed with note payable
+JE030,2026-01-29,2200,Notes Payable,0.00,14328.22,Equipment financed with note payable
+JE031,2026-01-30,5900,Professional Fees,9389.09,0.00,Professional services on account
+JE031,2026-01-30,2000,Accounts Payable,0.00,9389.09,Professional services on account
+JE032,2026-01-31,1200,Inventory,26852.35,0.00,Inventory purchased on account
+JE032,2026-01-31,2000,Accounts Payable,0.00,26852.35,Inventory purchased on account
+JE033,2026-01-01,1000,Cash,19918.33,0.00,Customer advance payment received
+JE033,2026-01-01,2300,Unearned Revenue,0.00,19918.33,Customer advance payment received
+JE034,2026-01-02,5900,Professional Fees,9115.50,0.00,Professional services paid in cash
+JE034,2026-01-02,1000,Cash,0.00,9115.50,Professional services paid in cash
+JE035,2026-01-03,5400,Depreciation Expense,1358.47,0.00,Monthly depreciation on equipment
+JE035,2026-01-03,1510,Accumulated Depreciation,0.00,1358.47,Monthly depreciation on equipment
+JE036,2026-01-04,1000,Cash,36347.20,0.00,Collection of accounts receivable
+JE036,2026-01-04,1100,Accounts Receivable,0.00,36347.20,Collection of accounts receivable
+JE037,2026-01-05,1500,Equipment,41929.68,0.00,Equipment financed with note payable
+JE037,2026-01-05,2200,Notes Payable,0.00,41929.68,Equipment financed with note payable
+JE038,2026-01-06,1000,Cash,867.33,0.00,Interest income received
+JE038,2026-01-06,4200,Interest Income,0.00,867.33,Interest income received
+JE039,2026-01-07,5600,Office Supplies Expense,1988.05,0.00,Office supplies purchased with cash
+JE039,2026-01-07,1000,Cash,0.00,1988.05,Office supplies purchased with cash
+JE040,2026-01-08,5400,Depreciation Expense,6983.12,0.00,Monthly depreciation on equipment
+JE040,2026-01-08,1510,Accumulated Depreciation,0.00,6983.12,Monthly depreciation on equipment
+JE041,2026-01-09,3100,Retained Earnings,16410.62,0.00,Dividend payment from retained earnings
+JE041,2026-01-09,1000,Cash,0.00,16410.62,Dividend payment from retained earnings
+JE042,2026-01-10,1000,Cash,26948.51,0.00,Additional capital contribution received
+JE042,2026-01-10,3200,Additional Paid-in Capital,0.00,26948.51,Additional capital contribution received
+JE043,2026-01-11,2200,Notes Payable,8571.42,0.00,Note payable principal payment
+JE043,2026-01-11,1000,Cash,0.00,8571.42,Note payable principal payment
+JE044,2026-01-12,5200,Rent Expense,5164.89,0.00,Monthly rent payment
+JE044,2026-01-12,1000,Cash,0.00,5164.89,Monthly rent payment
+JE045,2026-01-13,5200,Rent Expense,5002.41,0.00,Monthly rent payment
+JE045,2026-01-13,1000,Cash,0.00,5002.41,Monthly rent payment
+JE046,2026-01-14,5800,Travel Expense,960.60,0.00,Travel reimbursement from petty cash
+JE046,2026-01-14,1010,Petty Cash,0.00,960.60,Travel reimbursement from petty cash
+JE047,2026-01-15,5700,Marketing Expense,3260.30,0.00,Marketing services on account
+JE047,2026-01-15,2000,Accounts Payable,0.00,3260.30,Marketing services on account
+JE048,2026-01-16,5300,Utilities Expense,1522.29,0.00,Utilities accrued
+JE048,2026-01-16,2100,Accrued Liabilities,0.00,1522.29,Utilities accrued
+JE049,2026-01-17,1000,Cash,28577.40,0.00,Common stock issuance for cash
+JE049,2026-01-17,3000,Common Stock,0.00,28577.40,Common stock issuance for cash
+JE050,2026-01-18,5700,Marketing Expense,9393.46,0.00,Marketing services on account
+JE050,2026-01-18,2000,Accounts Payable,0.00,9393.46,Marketing services on account
+JE051,2026-01-19,1100,Accounts Receivable,42906.64,0.00,Product sales on account
+JE051,2026-01-19,4000,Revenue,0.00,42906.64,Product sales on account
+JE052,2026-01-20,1000,Cash,28719.74,0.00,Collection of accounts receivable
+JE052,2026-01-20,1100,Accounts Receivable,0.00,28719.74,Collection of accounts receivable
+JE053,2026-01-21,2200,Notes Payable,10062.29,0.00,Note payable principal payment
+JE053,2026-01-21,1000,Cash,0.00,10062.29,Note payable principal payment
+JE054,2026-01-22,2200,Notes Payable,7607.57,0.00,Note payable principal payment
+JE054,2026-01-22,1000,Cash,0.00,7607.57,Note payable principal payment
+JE055,2026-01-23,3100,Retained Earnings,15475.61,0.00,Dividend payment from retained earnings
+JE055,2026-01-23,1000,Cash,0.00,15475.61,Dividend payment from retained earnings
+JE056,2026-01-24,5300,Utilities Expense,2607.52,0.00,Utilities accrued
+JE056,2026-01-24,2100,Accrued Liabilities,0.00,2607.52,Utilities accrued
+JE057,2026-01-25,1500,Equipment,21035.99,0.00,Equipment purchase paid in cash
+JE057,2026-01-25,1000,Cash,0.00,21035.99,Equipment purchase paid in cash
+JE058,2026-01-26,5200,Rent Expense,5450.37,0.00,Monthly rent payment
+JE058,2026-01-26,1000,Cash,0.00,5450.37,Monthly rent payment
+JE059,2026-01-27,5000,Cost of Goods Sold,13062.32,0.00,Cost of goods sold recognized
+JE059,2026-01-27,1200,Inventory,0.00,13062.32,Cost of goods sold recognized
+JE060,2026-01-28,1000,Cash,3344.08,0.00,Customer advance payment received
+JE060,2026-01-28,2300,Unearned Revenue,0.00,3344.08,Customer advance payment received
+JE061,2026-01-29,5900,Professional Fees,10365.64,0.00,Professional services paid in cash
+JE061,2026-01-29,1000,Cash,0.00,10365.64,Professional services paid in cash
+JE062,2026-01-30,1000,Cash,33027.91,0.00,Common stock issuance for cash
+JE062,2026-01-30,3000,Common Stock,0.00,33027.91,Common stock issuance for cash
+JE063,2026-01-31,1000,Cash,459.84,0.00,Interest income received
+JE063,2026-01-31,4200,Interest Income,0.00,459.84,Interest income received
+JE064,2026-01-01,5900,Professional Fees,3624.02,0.00,Professional services on account
+JE064,2026-01-01,2000,Accounts Payable,0.00,3624.02,Professional services on account
+JE065,2026-01-02,6000,Income Tax Expense,12100.49,0.00,Income tax provision recorded
+JE065,2026-01-02,2400,Income Tax Payable,0.00,12100.49,Income tax provision recorded
+JE066,2026-01-03,1000,Cash,28970.03,0.00,Common stock issuance for cash
+JE066,2026-01-03,3000,Common Stock,0.00,28970.03,Common stock issuance for cash
+JE067,2026-01-04,1500,Equipment,19470.65,0.00,Equipment financed with note payable
+JE067,2026-01-04,2200,Notes Payable,0.00,19470.65,Equipment financed with note payable
+JE068,2026-01-05,2200,Notes Payable,3243.41,0.00,Note payable principal payment
+JE068,2026-01-05,1000,Cash,0.00,3243.41,Note payable principal payment
+JE069,2026-01-06,5000,Cost of Goods Sold,7204.74,0.00,Cost of goods sold recognized
+JE069,2026-01-06,1200,Inventory,0.00,7204.74,Cost of goods sold recognized
+JE070,2026-01-07,2200,Notes Payable,12966.85,0.00,Note payable principal payment
+JE070,2026-01-07,1000,Cash,0.00,12966.85,Note payable principal payment
+JE071,2026-01-08,5800,Travel Expense,517.44,0.00,Business travel expenses paid
+JE071,2026-01-08,1000,Cash,0.00,517.44,Business travel expenses paid
+JE072,2026-01-09,5400,Depreciation Expense,2580.64,0.00,Monthly depreciation on equipment
+JE072,2026-01-09,1510,Accumulated Depreciation,0.00,2580.64,Monthly depreciation on equipment
+JE073,2026-01-10,1000,Cash,37572.59,0.00,Collection of accounts receivable
+JE073,2026-01-10,1100,Accounts Receivable,0.00,37572.59,Collection of accounts receivable
+JE074,2026-01-11,5200,Rent Expense,2690.79,0.00,Rent expense recognized from prepaid
+JE074,2026-01-11,1300,Prepaid Expenses,0.00,2690.79,Rent expense recognized from prepaid
+JE075,2026-01-12,2300,Unearned Revenue,12725.87,0.00,Revenue recognized from customer advances
+JE075,2026-01-12,4000,Revenue,0.00,12725.87,Revenue recognized from customer advances
+JE076,2026-01-13,1000,Cash,1175.04,0.00,Interest income received
+JE076,2026-01-13,4200,Interest Income,0.00,1175.04,Interest income received
+JE077,2026-01-14,5200,Rent Expense,4013.36,0.00,Rent expense recognized from prepaid
+JE077,2026-01-14,1300,Prepaid Expenses,0.00,4013.36,Rent expense recognized from prepaid
+JE078,2026-01-15,5200,Rent Expense,4027.63,0.00,Rent expense recognized from prepaid
+JE078,2026-01-15,1300,Prepaid Expenses,0.00,4027.63,Rent expense recognized from prepaid
+JE079,2026-01-16,1300,Prepaid Expenses,4605.32,0.00,Prepaid rent payment
+JE079,2026-01-16,1000,Cash,0.00,4605.32,Prepaid rent payment
+JE080,2026-01-17,5600,Office Supplies Expense,1386.86,0.00,Office supplies purchased on account
+JE080,2026-01-17,2000,Accounts Payable,0.00,1386.86,Office supplies purchased on account
+JE081,2026-01-18,5400,Depreciation Expense,6790.96,0.00,Monthly depreciation on equipment
+JE081,2026-01-18,1510,Accumulated Depreciation,0.00,6790.96,Monthly depreciation on equipment
+JE082,2026-01-19,1500,Equipment,39013.25,0.00,Equipment purchase paid in cash
+JE082,2026-01-19,1000,Cash,0.00,39013.25,Equipment purchase paid in cash
+JE083,2026-01-20,5600,Office Supplies Expense,1136.92,0.00,Office supplies purchased with cash
+JE083,2026-01-20,1000,Cash,0.00,1136.92,Office supplies purchased with cash
+JE084,2026-01-21,1000,Cash,39314.54,0.00,Common stock issuance for cash
+JE084,2026-01-21,3000,Common Stock,0.00,39314.54,Common stock issuance for cash
+JE085,2026-01-22,1100,Accounts Receivable,26222.12,0.00,Product sales on account
+JE085,2026-01-22,4000,Revenue,0.00,26222.12,Product sales on account
+JE086,2026-01-23,1000,Cash,45335.78,0.00,Additional capital contribution received
+JE086,2026-01-23,3200,Additional Paid-in Capital,0.00,45335.78,Additional capital contribution received
+JE087,2026-01-24,5200,Rent Expense,12056.71,0.00,Monthly rent payment
+JE087,2026-01-24,1000,Cash,0.00,12056.71,Monthly rent payment
+JE088,2026-01-25,5100,Salary Expense,43554.15,0.00,Salary expense paid in cash
+JE088,2026-01-25,1000,Cash,0.00,43554.15,Salary expense paid in cash
+JE089,2026-01-26,5400,Depreciation Expense,6761.85,0.00,Monthly depreciation on equipment
+JE089,2026-01-26,1510,Accumulated Depreciation,0.00,6761.85,Monthly depreciation on equipment
+JE090,2026-01-27,6000,Income Tax Expense,10505.64,0.00,Income tax provision recorded
+JE090,2026-01-27,2400,Income Tax Payable,0.00,10505.64,Income tax provision recorded
+JE091,2026-01-28,5700,Marketing Expense,3567.20,0.00,Marketing expense paid in cash
+JE091,2026-01-28,1000,Cash,0.00,3567.20,Marketing expense paid in cash
+JE092,2026-01-29,5800,Travel Expense,2555.22,0.00,Business travel expenses paid
+JE092,2026-01-29,1000,Cash,0.00,2555.22,Business travel expenses paid
+JE093,2026-01-30,5300,Utilities Expense,820.26,0.00,Utilities accrued
+JE093,2026-01-30,2100,Accrued Liabilities,0.00,820.26,Utilities accrued
+JE094,2026-01-31,5200,Rent Expense,14032.77,0.00,Monthly rent payment
+JE094,2026-01-31,1000,Cash,0.00,14032.77,Monthly rent payment
+JE095,2026-01-01,5000,Cost of Goods Sold,23399.94,0.00,Cost of goods sold recognized
+JE095,2026-01-01,1200,Inventory,0.00,23399.94,Cost of goods sold recognized
+JE096,2026-01-02,5200,Rent Expense,5082.04,0.00,Monthly rent payment
+JE096,2026-01-02,1000,Cash,0.00,5082.04,Monthly rent payment
+JE097,2026-01-03,2400,Income Tax Payable,12233.92,0.00,Income tax payment made
+JE097,2026-01-03,1000,Cash,0.00,12233.92,Income tax payment made
+JE098,2026-01-04,5200,Rent Expense,3290.52,0.00,Monthly rent payment
+JE098,2026-01-04,1000,Cash,0.00,3290.52,Monthly rent payment
+JE099,2026-01-05,5800,Travel Expense,3961.27,0.00,Business travel expenses paid
+JE099,2026-01-05,1000,Cash,0.00,3961.27,Business travel expenses paid
+JE100,2026-01-06,2400,Income Tax Payable,6373.66,0.00,Income tax payment made
+JE100,2026-01-06,1000,Cash,0.00,6373.66,Income tax payment made
+JE101,2026-01-07,5200,Rent Expense,11162.85,0.00,Monthly rent payment
+JE101,2026-01-07,1000,Cash,0.00,11162.85,Monthly rent payment
+JE102,2026-01-08,1000,Cash,25709.40,0.00,Service revenue received in cash
+JE102,2026-01-08,4100,Service Revenue,0.00,25709.40,Service revenue received in cash
+JE103,2026-01-09,5900,Professional Fees,15835.35,0.00,Professional services paid in cash
+JE103,2026-01-09,1000,Cash,0.00,15835.35,Professional services paid in cash
+JE104,2026-01-10,1500,Equipment,36755.76,0.00,Equipment purchase paid in cash
+JE104,2026-01-10,1000,Cash,0.00,36755.76,Equipment purchase paid in cash
+JE105,2026-01-11,1000,Cash,4416.30,0.00,Collection of accounts receivable
+JE105,2026-01-11,1100,Accounts Receivable,0.00,4416.30,Collection of accounts receivable
+JE106,2026-01-12,5100,Salary Expense,15161.58,0.00,Salary expense paid in cash
+JE106,2026-01-12,1000,Cash,0.00,15161.58,Salary expense paid in cash
+JE107,2026-01-13,1300,Prepaid Expenses,2755.07,0.00,Prepaid rent payment
+JE107,2026-01-13,1000,Cash,0.00,2755.07,Prepaid rent payment
+JE108,2026-01-14,5000,Cost of Goods Sold,22937.28,0.00,Cost of goods sold recognized
+JE108,2026-01-14,1200,Inventory,0.00,22937.28,Cost of goods sold recognized
+JE109,2026-01-15,5000,Cost of Goods Sold,19618.71,0.00,Cost of goods sold recognized
+JE109,2026-01-15,1200,Inventory,0.00,19618.71,Cost of goods sold recognized
+JE110,2026-01-16,1000,Cash,1018.10,0.00,Interest income received
+JE110,2026-01-16,4200,Interest Income,0.00,1018.10,Interest income received
+JE111,2026-01-17,5400,Depreciation Expense,7505.32,0.00,Monthly depreciation on equipment
+JE111,2026-01-17,1510,Accumulated Depreciation,0.00,7505.32,Monthly depreciation on equipment
+JE112,2026-01-18,3100,Retained Earnings,22368.21,0.00,Dividend payment from retained earnings
+JE112,2026-01-18,1000,Cash,0.00,22368.21,Dividend payment from retained earnings
+JE113,2026-01-19,1200,Inventory,21984.07,0.00,Inventory purchased on account
+JE113,2026-01-19,2000,Accounts Payable,0.00,21984.07,Inventory purchased on account
+JE114,2026-01-20,2200,Notes Payable,6547.79,0.00,Note payable principal payment
+JE114,2026-01-20,1000,Cash,0.00,6547.79,Note payable principal payment
+JE115,2026-01-21,5600,Office Supplies Expense,1813.24,0.00,Office supplies purchased with cash
+JE115,2026-01-21,1000,Cash,0.00,1813.24,Office supplies purchased with cash
+JE116,2026-01-22,1000,Cash,2157.46,0.00,Customer advance payment received
+JE116,2026-01-22,2300,Unearned Revenue,0.00,2157.46,Customer advance payment received
+JE117,2026-01-23,5600,Office Supplies Expense,1320.46,0.00,Office supplies purchased on account
+JE117,2026-01-23,2000,Accounts Payable,0.00,1320.46,Office supplies purchased on account
+JE118,2026-01-24,2100,Accrued Liabilities,7814.12,0.00,Payment of accrued liabilities
+JE118,2026-01-24,1000,Cash,0.00,7814.12,Payment of accrued liabilities
+JE119,2026-01-25,5500,Insurance Expense,2434.59,0.00,Insurance expense recognized from prepaid
+JE119,2026-01-25,1400,Prepaid Insurance,0.00,2434.59,Insurance expense recognized from prepaid
+JE120,2026-01-26,1010,Petty Cash,855.26,0.00,Petty cash fund replenishment
+JE120,2026-01-26,1000,Cash,0.00,855.26,Petty cash fund replenishment
+JE121,2026-01-27,1000,Cash,11511.98,0.00,Customer advance payment received
+JE121,2026-01-27,2300,Unearned Revenue,0.00,11511.98,Customer advance payment received
+JE122,2026-01-28,1000,Cash,1254.74,0.00,Interest income received
+JE122,2026-01-28,4200,Interest Income,0.00,1254.74,Interest income received
+JE123,2026-01-29,5800,Travel Expense,637.19,0.00,Travel reimbursement from petty cash
+JE123,2026-01-29,1010,Petty Cash,0.00,637.19,Travel reimbursement from petty cash
+JE124,2026-01-30,5500,Insurance Expense,2262.59,0.00,Insurance expense recognized from prepaid
+JE124,2026-01-30,1400,Prepaid Insurance,0.00,2262.59,Insurance expense recognized from prepaid
+JE125,2026-01-31,5500,Insurance Expense,2128.86,0.00,Insurance expense recognized from prepaid
+JE125,2026-01-31,1400,Prepaid Insurance,0.00,2128.86,Insurance expense recognized from prepaid
+JE126,2026-01-01,5700,Marketing Expense,11552.80,0.00,Marketing expense paid in cash
+JE126,2026-01-01,1000,Cash,0.00,11552.80,Marketing expense paid in cash
+JE127,2026-01-02,5200,Rent Expense,14439.20,0.00,Monthly rent payment
+JE127,2026-01-02,1000,Cash,0.00,14439.20,Monthly rent payment
+JE128,2026-01-03,5200,Rent Expense,12283.72,0.00,Monthly rent payment
+JE128,2026-01-03,1000,Cash,0.00,12283.72,Monthly rent payment
+JE129,2026-01-04,1000,Cash,24193.44,0.00,Service revenue received in cash
+JE129,2026-01-04,4100,Service Revenue,0.00,24193.44,Service revenue received in cash
+JE130,2026-01-05,5700,Marketing Expense,9121.59,0.00,Marketing services on account
+JE130,2026-01-05,2000,Accounts Payable,0.00,9121.59,Marketing services on account
+JE131,2026-01-06,5000,Cost of Goods Sold,21428.18,0.00,Cost of goods sold recognized
+JE131,2026-01-06,1200,Inventory,0.00,21428.18,Cost of goods sold recognized
+JE132,2026-01-07,5200,Rent Expense,5273.36,0.00,Monthly rent payment
+JE132,2026-01-07,1000,Cash,0.00,5273.36,Monthly rent payment
+JE133,2026-01-08,3100,Retained Earnings,17754.20,0.00,Dividend payment from retained earnings
+JE133,2026-01-08,1000,Cash,0.00,17754.20,Dividend payment from retained earnings
+JE134,2026-01-09,2400,Income Tax Payable,9078.93,0.00,Income tax payment made
+JE134,2026-01-09,1000,Cash,0.00,9078.93,Income tax payment made
+JE135,2026-01-10,2300,Unearned Revenue,14495.53,0.00,Revenue recognized from customer advances
+JE135,2026-01-10,4000,Revenue,0.00,14495.53,Revenue recognized from customer advances
+JE136,2026-01-11,5200,Rent Expense,3211.24,0.00,Rent expense recognized from prepaid
+JE136,2026-01-11,1300,Prepaid Expenses,0.00,3211.24,Rent expense recognized from prepaid
+JE137,2026-01-12,6000,Income Tax Expense,24830.25,0.00,Income tax provision recorded
+JE137,2026-01-12,2400,Income Tax Payable,0.00,24830.25,Income tax provision recorded
+JE138,2026-01-13,1000,Cash,321.82,0.00,Interest income received
+JE138,2026-01-13,4200,Interest Income,0.00,321.82,Interest income received
+JE139,2026-01-14,5300,Utilities Expense,1321.80,0.00,Utilities accrued
+JE139,2026-01-14,2100,Accrued Liabilities,0.00,1321.80,Utilities accrued
+JE140,2026-01-15,5300,Utilities Expense,4757.11,0.00,Utilities payment
+JE140,2026-01-15,1000,Cash,0.00,4757.11,Utilities payment
+JE141,2026-01-16,3100,Retained Earnings,11526.56,0.00,Dividend payment from retained earnings
+JE141,2026-01-16,1000,Cash,0.00,11526.56,Dividend payment from retained earnings
+JE142,2026-01-17,5100,Salary Expense,21089.16,0.00,Salary expense accrued
+JE142,2026-01-17,2100,Accrued Liabilities,0.00,21089.16,Salary expense accrued
+JE143,2026-01-18,5800,Travel Expense,687.76,0.00,Business travel expenses paid
+JE143,2026-01-18,1000,Cash,0.00,687.76,Business travel expenses paid
+JE144,2026-01-19,6000,Income Tax Expense,9030.29,0.00,Income tax provision recorded
+JE144,2026-01-19,2400,Income Tax Payable,0.00,9030.29,Income tax provision recorded
+JE145,2026-01-20,5800,Travel Expense,865.62,0.00,Travel reimbursement from petty cash
+JE145,2026-01-20,1010,Petty Cash,0.00,865.62,Travel reimbursement from petty cash
+JE146,2026-01-21,1000,Cash,9468.43,0.00,Customer advance payment received
+JE146,2026-01-21,2300,Unearned Revenue,0.00,9468.43,Customer advance payment received
+JE147,2026-01-22,2100,Accrued Liabilities,9689.76,0.00,Payment of accrued liabilities
+JE147,2026-01-22,1000,Cash,0.00,9689.76,Payment of accrued liabilities
+JE148,2026-01-23,1000,Cash,19253.44,0.00,Service revenue received in cash
+JE148,2026-01-23,4100,Service Revenue,0.00,19253.44,Service revenue received in cash
+JE149,2026-01-24,1000,Cash,18806.34,0.00,Additional capital contribution received
+JE149,2026-01-24,3200,Additional Paid-in Capital,0.00,18806.34,Additional capital contribution received
+JE150,2026-01-25,5800,Travel Expense,3871.15,0.00,Business travel expenses paid
+JE150,2026-01-25,1000,Cash,0.00,3871.15,Business travel expenses paid
+JE151,2026-01-26,5000,Cost of Goods Sold,8615.63,0.00,Cost of goods sold recognized
+JE151,2026-01-26,1200,Inventory,0.00,8615.63,Cost of goods sold recognized
+JE152,2026-01-27,3100,Retained Earnings,14844.29,0.00,Dividend payment from retained earnings
+JE152,2026-01-27,1000,Cash,0.00,14844.29,Dividend payment from retained earnings
+JE153,2026-01-28,5900,Professional Fees,16095.69,0.00,Professional services paid in cash
+JE153,2026-01-28,1000,Cash,0.00,16095.69,Professional services paid in cash
+JE154,2026-01-29,2300,Unearned Revenue,2971.02,0.00,Revenue recognized from customer advances
+JE154,2026-01-29,4000,Revenue,0.00,2971.02,Revenue recognized from customer advances
+JE155,2026-01-30,1000,Cash,18970.82,0.00,Collection of accounts receivable
+JE155,2026-01-30,1100,Accounts Receivable,0.00,18970.82,Collection of accounts receivable
+JE156,2026-01-31,5200,Rent Expense,5605.54,0.00,Monthly rent payment
+JE156,2026-01-31,1000,Cash,0.00,5605.54,Monthly rent payment
+JE157,2026-01-01,1200,Inventory,9385.64,0.00,Inventory purchased on account
+JE157,2026-01-01,2000,Accounts Payable,0.00,9385.64,Inventory purchased on account
+JE158,2026-01-02,5900,Professional Fees,16826.53,0.00,Professional services paid in cash
+JE158,2026-01-02,1000,Cash,0.00,16826.53,Professional services paid in cash
+JE159,2026-01-03,1000,Cash,26012.96,0.00,Collection of accounts receivable
+JE159,2026-01-03,1100,Accounts Receivable,0.00,26012.96,Collection of accounts receivable
+JE160,2026-01-04,5700,Marketing Expense,6295.00,0.00,Marketing services on account
+JE160,2026-01-04,2000,Accounts Payable,0.00,6295.00,Marketing services on account
+JE161,2026-01-05,1000,Cash,26744.24,0.00,Service revenue received in cash
+JE161,2026-01-05,4100,Service Revenue,0.00,26744.24,Service revenue received in cash
+JE162,2026-01-06,5400,Depreciation Expense,4768.38,0.00,Monthly depreciation on equipment
+JE162,2026-01-06,1510,Accumulated Depreciation,0.00,4768.38,Monthly depreciation on equipment
+JE163,2026-01-07,5700,Marketing Expense,13542.83,0.00,Marketing expense paid in cash
+JE163,2026-01-07,1000,Cash,0.00,13542.83,Marketing expense paid in cash
+JE164,2026-01-08,5900,Professional Fees,2411.88,0.00,Professional services on account
+JE164,2026-01-08,2000,Accounts Payable,0.00,2411.88,Professional services on account
+JE165,2026-01-09,1000,Cash,459.73,0.00,Interest income received
+JE165,2026-01-09,4200,Interest Income,0.00,459.73,Interest income received
+JE166,2026-01-10,1010,Petty Cash,742.12,0.00,Petty cash fund replenishment
+JE166,2026-01-10,1000,Cash,0.00,742.12,Petty cash fund replenishment
+JE167,2026-01-11,5900,Professional Fees,15553.96,0.00,Professional services paid in cash
+JE167,2026-01-11,1000,Cash,0.00,15553.96,Professional services paid in cash
+JE168,2026-01-12,5600,Office Supplies Expense,1176.10,0.00,Office supplies purchased on account
+JE168,2026-01-12,2000,Accounts Payable,0.00,1176.10,Office supplies purchased on account
+JE169,2026-01-13,1100,Accounts Receivable,27215.86,0.00,Product sales on account
+JE169,2026-01-13,4000,Revenue,0.00,27215.86,Product sales on account
+JE170,2026-01-14,2300,Unearned Revenue,8128.49,0.00,Revenue recognized from customer advances
+JE170,2026-01-14,4000,Revenue,0.00,8128.49,Revenue recognized from customer advances
+JE171,2026-01-15,5500,Insurance Expense,1932.21,0.00,Insurance expense recognized from prepaid
+JE171,2026-01-15,1400,Prepaid Insurance,0.00,1932.21,Insurance expense recognized from prepaid
+JE172,2026-01-16,5300,Utilities Expense,3141.90,0.00,Utilities payment
+JE172,2026-01-16,1000,Cash,0.00,3141.90,Utilities payment
+JE173,2026-01-17,1000,Cash,32585.13,0.00,Collection of accounts receivable
+JE173,2026-01-17,1100,Accounts Receivable,0.00,32585.13,Collection of accounts receivable
+JE174,2026-01-18,1300,Prepaid Expenses,5459.09,0.00,Prepaid rent payment
+JE174,2026-01-18,1000,Cash,0.00,5459.09,Prepaid rent payment
+JE175,2026-01-19,1200,Inventory,23609.22,0.00,Inventory purchased on account
+JE175,2026-01-19,2000,Accounts Payable,0.00,23609.22,Inventory purchased on account
+JE176,2026-01-20,1010,Petty Cash,780.07,0.00,Petty cash fund replenishment
+JE176,2026-01-20,1000,Cash,0.00,780.07,Petty cash fund replenishment
+JE177,2026-01-21,1000,Cash,27416.06,0.00,Additional capital contribution received
+JE177,2026-01-21,3200,Additional Paid-in Capital,0.00,27416.06,Additional capital contribution received
+JE178,2026-01-22,1000,Cash,16586.77,0.00,Collection of accounts receivable
+JE178,2026-01-22,1100,Accounts Receivable,0.00,16586.77,Collection of accounts receivable
+JE179,2026-01-23,1200,Inventory,13576.87,0.00,Inventory purchased on account
+JE179,2026-01-23,2000,Accounts Payable,0.00,13576.87,Inventory purchased on account
+JE180,2026-01-24,1000,Cash,1883.13,0.00,Interest income received
+JE180,2026-01-24,4200,Interest Income,0.00,1883.13,Interest income received
+JE181,2026-01-25,5600,Office Supplies Expense,1009.02,0.00,Office supplies purchased with cash
+JE181,2026-01-25,1000,Cash,0.00,1009.02,Office supplies purchased with cash
+JE182,2026-01-26,5700,Marketing Expense,4866.89,0.00,Marketing expense paid in cash
+JE182,2026-01-26,1000,Cash,0.00,4866.89,Marketing expense paid in cash
+JE183,2026-01-27,5900,Professional Fees,5784.92,0.00,Professional services paid in cash
+JE183,2026-01-27,1000,Cash,0.00,5784.92,Professional services paid in cash
+JE184,2026-01-28,5300,Utilities Expense,1619.05,0.00,Utilities accrued
+JE184,2026-01-28,2100,Accrued Liabilities,0.00,1619.05,Utilities accrued
+JE185,2026-01-29,2200,Notes Payable,3061.19,0.00,Note payable principal payment
+JE185,2026-01-29,1000,Cash,0.00,3061.19,Note payable principal payment
+JE186,2026-01-30,6000,Income Tax Expense,14125.81,0.00,Income tax provision recorded
+JE186,2026-01-30,2400,Income Tax Payable,0.00,14125.81,Income tax provision recorded
+JE187,2026-01-31,5500,Insurance Expense,748.44,0.00,Insurance expense recognized from prepaid
+JE187,2026-01-31,1400,Prepaid Insurance,0.00,748.44,Insurance expense recognized from prepaid
+JE188,2026-01-01,2200,Notes Payable,4317.42,0.00,Note payable principal payment
+JE188,2026-01-01,1000,Cash,0.00,4317.42,Note payable principal payment
+JE189,2026-01-02,1100,Accounts Receivable,33651.99,0.00,Product sales on account
+JE189,2026-01-02,4000,Revenue,0.00,33651.99,Product sales on account
+JE190,2026-01-03,5500,Insurance Expense,2767.87,0.00,Insurance expense recognized from prepaid
+JE190,2026-01-03,1400,Prepaid Insurance,0.00,2767.87,Insurance expense recognized from prepaid
+JE191,2026-01-04,5300,Utilities Expense,1600.68,0.00,Utilities accrued
+JE191,2026-01-04,2100,Accrued Liabilities,0.00,1600.68,Utilities accrued
+JE192,2026-01-05,1000,Cash,28464.34,0.00,Service revenue received in cash
+JE192,2026-01-05,4100,Service Revenue,0.00,28464.34,Service revenue received in cash
+JE193,2026-01-06,1000,Cash,2135.14,0.00,Service revenue received in cash
+JE193,2026-01-06,4100,Service Revenue,0.00,2135.14,Service revenue received in cash
+JE194,2026-01-07,5700,Marketing Expense,7886.86,0.00,Marketing services on account
+JE194,2026-01-07,2000,Accounts Payable,0.00,7886.86,Marketing services on account
+JE195,2026-01-08,5500,Insurance Expense,1887.04,0.00,Insurance expense recognized from prepaid
+JE195,2026-01-08,1400,Prepaid Insurance,0.00,1887.04,Insurance expense recognized from prepaid
+JE196,2026-01-09,1500,Equipment,21065.22,0.00,Equipment financed with note payable
+JE196,2026-01-09,2200,Notes Payable,0.00,21065.22,Equipment financed with note payable
+JE197,2026-01-10,1400,Prepaid Insurance,5268.63,0.00,Prepaid insurance payment
+JE197,2026-01-10,1000,Cash,0.00,5268.63,Prepaid insurance payment
+JE198,2026-01-11,1100,Accounts Receivable,36521.30,0.00,Product sales on account
+JE198,2026-01-11,4000,Revenue,0.00,36521.30,Product sales on account
+JE199,2026-01-12,2400,Income Tax Payable,8595.47,0.00,Income tax payment made
+JE199,2026-01-12,1000,Cash,0.00,8595.47,Income tax payment made
+JE200,2026-01-13,1010,Petty Cash,602.27,0.00,Petty cash fund replenishment
+JE200,2026-01-13,1000,Cash,0.00,602.27,Petty cash fund replenishment
+JE201,2026-01-14,2300,Unearned Revenue,13665.10,0.00,Revenue recognized from customer advances
+JE201,2026-01-14,4000,Revenue,0.00,13665.10,Revenue recognized from customer advances
+JE202,2026-01-15,1000,Cash,9249.05,0.00,Customer advance payment received
+JE202,2026-01-15,2300,Unearned Revenue,0.00,9249.05,Customer advance payment received
+JE203,2026-01-16,5200,Rent Expense,3056.97,0.00,Rent expense recognized from prepaid
+JE203,2026-01-16,1300,Prepaid Expenses,0.00,3056.97,Rent expense recognized from prepaid
+JE204,2026-01-17,2000,Accounts Payable,21632.64,0.00,Accounts payable payment
+JE204,2026-01-17,1000,Cash,0.00,21632.64,Accounts payable payment
+JE205,2026-01-18,5200,Rent Expense,3374.86,0.00,Rent expense recognized from prepaid
+JE205,2026-01-18,1300,Prepaid Expenses,0.00,3374.86,Rent expense recognized from prepaid
+JE206,2026-01-19,5800,Travel Expense,767.06,0.00,Travel reimbursement from petty cash
+JE206,2026-01-19,1010,Petty Cash,0.00,767.06,Travel reimbursement from petty cash
+JE207,2026-01-20,2300,Unearned Revenue,8365.70,0.00,Revenue recognized from customer advances
+JE207,2026-01-20,4000,Revenue,0.00,8365.70,Revenue recognized from customer advances
+JE208,2026-01-21,5700,Marketing Expense,3577.74,0.00,Marketing expense paid in cash
+JE208,2026-01-21,1000,Cash,0.00,3577.74,Marketing expense paid in cash
+JE209,2026-01-22,5100,Salary Expense,14611.29,0.00,Salary expense paid in cash
+JE209,2026-01-22,1000,Cash,0.00,14611.29,Salary expense paid in cash
+JE210,2026-01-23,2400,Income Tax Payable,19821.85,0.00,Income tax payment made
+JE210,2026-01-23,1000,Cash,0.00,19821.85,Income tax payment made
+JE211,2026-01-24,2100,Accrued Liabilities,2277.54,0.00,Payment of accrued liabilities
+JE211,2026-01-24,1000,Cash,0.00,2277.54,Payment of accrued liabilities
+JE212,2026-01-25,1000,Cash,37986.59,0.00,Additional capital contribution received
+JE212,2026-01-25,3200,Additional Paid-in Capital,0.00,37986.59,Additional capital contribution received
+JE213,2026-01-26,1100,Accounts Receivable,23575.52,0.00,Product sales on account
+JE213,2026-01-26,4000,Revenue,0.00,23575.52,Product sales on account
+JE214,2026-01-27,6000,Income Tax Expense,21300.31,0.00,Income tax provision recorded
+JE214,2026-01-27,2400,Income Tax Payable,0.00,21300.31,Income tax provision recorded
+JE215,2026-01-28,5100,Salary Expense,36319.49,0.00,Salary expense paid in cash
+JE215,2026-01-28,1000,Cash,0.00,36319.49,Salary expense paid in cash
+JE216,2026-01-29,5200,Rent Expense,3757.81,0.00,Monthly rent payment
+JE216,2026-01-29,1000,Cash,0.00,3757.81,Monthly rent payment
+JE217,2026-01-30,1000,Cash,31011.40,0.00,Common stock issuance for cash
+JE217,2026-01-30,3000,Common Stock,0.00,31011.40,Common stock issuance for cash
+JE218,2026-01-31,5500,Insurance Expense,815.71,0.00,Insurance expense recognized from prepaid
+JE218,2026-01-31,1400,Prepaid Insurance,0.00,815.71,Insurance expense recognized from prepaid
+JE219,2026-01-01,5300,Utilities Expense,1806.36,0.00,Utilities accrued
+JE219,2026-01-01,2100,Accrued Liabilities,0.00,1806.36,Utilities accrued
+JE220,2026-01-02,1000,Cash,11560.34,0.00,Customer advance payment received
+JE220,2026-01-02,2300,Unearned Revenue,0.00,11560.34,Customer advance payment received
+JE221,2026-01-03,5800,Travel Expense,902.39,0.00,Travel reimbursement from petty cash
+JE221,2026-01-03,1010,Petty Cash,0.00,902.39,Travel reimbursement from petty cash
+JE222,2026-01-04,5700,Marketing Expense,4843.66,0.00,Marketing services on account
+JE222,2026-01-04,2000,Accounts Payable,0.00,4843.66,Marketing services on account
+JE223,2026-01-05,6000,Income Tax Expense,10286.71,0.00,Income tax provision recorded
+JE223,2026-01-05,2400,Income Tax Payable,0.00,10286.71,Income tax provision recorded
+JE224,2026-01-06,1400,Prepaid Insurance,6137.82,0.00,Prepaid insurance payment
+JE224,2026-01-06,1000,Cash,0.00,6137.82,Prepaid insurance payment
+JE225,2026-01-07,5200,Rent Expense,1071.04,0.00,Rent expense recognized from prepaid
+JE225,2026-01-07,1300,Prepaid Expenses,0.00,1071.04,Rent expense recognized from prepaid
+JE226,2026-01-08,5800,Travel Expense,683.93,0.00,Travel reimbursement from petty cash
+JE226,2026-01-08,1010,Petty Cash,0.00,683.93,Travel reimbursement from petty cash
+JE227,2026-01-09,1010,Petty Cash,833.55,0.00,Petty cash fund replenishment
+JE227,2026-01-09,1000,Cash,0.00,833.55,Petty cash fund replenishment
+JE228,2026-01-10,5900,Professional Fees,4288.93,0.00,Professional services on account
+JE228,2026-01-10,2000,Accounts Payable,0.00,4288.93,Professional services on account
+JE229,2026-01-11,5200,Rent Expense,4316.66,0.00,Rent expense recognized from prepaid
+JE229,2026-01-11,1300,Prepaid Expenses,0.00,4316.66,Rent expense recognized from prepaid
+JE230,2026-01-12,5500,Insurance Expense,1059.55,0.00,Insurance expense recognized from prepaid
+JE230,2026-01-12,1400,Prepaid Insurance,0.00,1059.55,Insurance expense recognized from prepaid
+JE231,2026-01-13,5700,Marketing Expense,8276.09,0.00,Marketing services on account
+JE231,2026-01-13,2000,Accounts Payable,0.00,8276.09,Marketing services on account
+JE232,2026-01-14,1000,Cash,47214.14,0.00,Common stock issuance for cash
+JE232,2026-01-14,3000,Common Stock,0.00,47214.14,Common stock issuance for cash
+JE233,2026-01-15,1400,Prepaid Insurance,4250.45,0.00,Prepaid insurance payment
+JE233,2026-01-15,1000,Cash,0.00,4250.45,Prepaid insurance payment
+JE234,2026-01-16,1100,Accounts Receivable,15524.75,0.00,Product sales on account
+JE234,2026-01-16,4000,Revenue,0.00,15524.75,Product sales on account
+JE235,2026-01-17,1000,Cash,40528.86,0.00,Common stock issuance for cash
+JE235,2026-01-17,3000,Common Stock,0.00,40528.86,Common stock issuance for cash
+JE236,2026-01-18,2300,Unearned Revenue,14384.73,0.00,Revenue recognized from customer advances
+JE236,2026-01-18,4000,Revenue,0.00,14384.73,Revenue recognized from customer advances
+JE237,2026-01-19,5700,Marketing Expense,1229.55,0.00,Marketing services on account
+JE237,2026-01-19,2000,Accounts Payable,0.00,1229.55,Marketing services on account
+JE238,2026-01-20,5600,Office Supplies Expense,162.46,0.00,Office supplies purchased with cash
+JE238,2026-01-20,1000,Cash,0.00,162.46,Office supplies purchased with cash
+JE239,2026-01-21,5700,Marketing Expense,6968.53,0.00,Marketing services on account
+JE239,2026-01-21,2000,Accounts Payable,0.00,6968.53,Marketing services on account
+JE240,2026-01-22,1100,Accounts Receivable,6320.71,0.00,Product sales on account
+JE240,2026-01-22,4000,Revenue,0.00,6320.71,Product sales on account
+JE241,2026-01-23,5400,Depreciation Expense,1392.75,0.00,Monthly depreciation on equipment
+JE241,2026-01-23,1510,Accumulated Depreciation,0.00,1392.75,Monthly depreciation on equipment
+JE242,2026-01-24,1500,Equipment,33551.89,0.00,Equipment purchase paid in cash
+JE242,2026-01-24,1000,Cash,0.00,33551.89,Equipment purchase paid in cash
+JE243,2026-01-25,1000,Cash,167.95,0.00,Interest income received
+JE243,2026-01-25,4200,Interest Income,0.00,167.95,Interest income received
+JE244,2026-01-26,5800,Travel Expense,122.47,0.00,Travel reimbursement from petty cash
+JE244,2026-01-26,1010,Petty Cash,0.00,122.47,Travel reimbursement from petty cash
+JE245,2026-01-27,2200,Notes Payable,9246.03,0.00,Note payable principal payment
+JE245,2026-01-27,1000,Cash,0.00,9246.03,Note payable principal payment
+JE246,2026-01-28,1200,Inventory,14468.82,0.00,Inventory purchased on account
+JE246,2026-01-28,2000,Accounts Payable,0.00,14468.82,Inventory purchased on account
+JE247,2026-01-29,5900,Professional Fees,4125.06,0.00,Professional services paid in cash
+JE247,2026-01-29,1000,Cash,0.00,4125.06,Professional services paid in cash
+JE248,2026-01-30,1000,Cash,15284.85,0.00,Service revenue received in cash
+JE248,2026-01-30,4100,Service Revenue,0.00,15284.85,Service revenue received in cash
+JE249,2026-01-31,1300,Prepaid Expenses,11923.37,0.00,Prepaid rent payment
+JE249,2026-01-31,1000,Cash,0.00,11923.37,Prepaid rent payment
+JE250,2026-01-01,5300,Utilities Expense,2308.14,0.00,Utilities accrued
+JE250,2026-01-01,2100,Accrued Liabilities,0.00,2308.14,Utilities accrued

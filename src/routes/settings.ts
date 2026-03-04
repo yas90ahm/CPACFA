@@ -35,6 +35,7 @@ router.get('/general', async (req: Request, res: Response) => {
       entityId: settings.entityId,
       entityName: settings.entityName,
       fiscalYearEnd: settings.fiscalYearEndMonth,
+      fiscalYearEndDay: settings.fiscalYearEndDay,
       baseCurrency: settings.baseCurrency,
       autoLockDays: settings.autoLockDays,
       varianceMaterialityDollar: settings.varianceMaterialityDollar,
@@ -62,6 +63,7 @@ router.put('/general', async (req: Request, res: Response) => {
     const body = req.body as {
       entityName?: string;
       fiscalYearEnd?: number;
+      fiscalYearEndDay?: number;
       baseCurrency?: string;
       autoLockDays?: number;
       varianceMaterialityDollar?: string | number;
@@ -74,6 +76,7 @@ router.put('/general', async (req: Request, res: Response) => {
       {
         entityName: body.entityName,
         fiscalYearEndMonth: body.fiscalYearEnd,
+        fiscalYearEndDay: body.fiscalYearEndDay,
         baseCurrency: body.baseCurrency,
         autoLockDays: body.autoLockDays,
         varianceMaterialityDollar: body.varianceMaterialityDollar,
@@ -95,6 +98,7 @@ router.put('/general', async (req: Request, res: Response) => {
       entityId: settings.entityId,
       entityName: settings.entityName,
       fiscalYearEnd: settings.fiscalYearEndMonth,
+      fiscalYearEndDay: settings.fiscalYearEndDay,
       baseCurrency: settings.baseCurrency,
       autoLockDays: settings.autoLockDays,
       varianceMaterialityDollar: settings.varianceMaterialityDollar,

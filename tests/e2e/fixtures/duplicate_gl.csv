@@ -1,0 +1,11 @@
+entry_id,entry_date,account_code,account_name,debit,credit,description
+JE001,2026-01-05,1000,Cash,50000.00,0.00,Initial cash investment
+JE001,2026-01-05,3000,Common Stock,0.00,50000.00,Initial cash investment
+JE002,2026-01-10,1100,Accounts Receivable,15000.00,0.00,Invoice to customer ABC
+JE002,2026-01-10,4000,Revenue,0.00,15000.00,Invoice to customer ABC
+JE003,2026-01-15,5000,Cost of Goods Sold,6000.00,0.00,COGS for January
+JE003,2026-01-15,1000,Cash,0.00,6000.00,COGS payment
+JE004,2026-01-20,1000,Cash,10000.00,0.00,Customer ABC partial payment
+JE004,2026-01-20,1100,Accounts Receivable,0.00,10000.00,Customer ABC partial payment
+JE005,2026-01-31,5100,Salary Expense,8000.00,0.00,January payroll
+JE005,2026-01-31,1000,Cash,0.00,8000.00,January payroll disbursement

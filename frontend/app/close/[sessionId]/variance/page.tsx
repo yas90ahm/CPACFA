@@ -5,6 +5,7 @@ import React, { useMemo, useState, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCloseSession } from '@/lib/queries/close-session';
 import { useVariances } from '@/lib/queries/variance';
+import { useCumulativeVariances } from '@/lib/queries/cumulative';
 import { useAuth } from '@/lib/auth';
 import { AISuggestionCard } from '@/components/shared/AISuggestionCard';
 import { MoneyCell } from '@/components/shared/MoneyCell';
@@ -12,7 +13,10 @@ import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import type { VarianceRecord } from '@/lib/types/variance';
 import { InvestigationPanel } from '@/components/investigation/InvestigationPanel';
-import { Check, X, ChevronDown, ChevronRight, Search, Loader2, Zap } from 'lucide-react';
+import { Check, X, ChevronDown, ChevronRight, Search, Loader2, Zap, Calendar } from 'lucide-react';
+
+type VariancePeriodView = 'current' | 'QTD' | 'YTD';
+type VarianceComparisonType = 'prior_year_same_period' | 'sequential' | 'budget';
 
 const STATEMENT_LABELS: Record<string, string> = {
   income_statement: 'IS',
@@ -58,6 +62,13 @@ export default function VariancePage() {
   const [investigatingVariance, setInvestigatingVariance] = useState<VarianceRecord | null>(null);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [draftingAll, setDraftingAll] = useState(false);
+  const [variancePeriodView, setVariancePeriodView] = useState<VariancePeriodView>('current');
+  const [comparisonType, setComparisonType] = useState<VarianceComparisonType>('prior_year_same_period');
+  const { data: cumulativeVarData } = useCumulativeVariances(
+    variancePeriodView !== 'current' ? sessionId : null,
+    variancePeriodView !== 'current' ? variancePeriodView : null,
+    comparisonType
+  );
 
   const filtered = useMemo(() => {
     let list = [...variances];
@@ -203,6 +214,82 @@ export default function VariancePage() {
           </button>
         )}
       </div>
+
+      {/* Period View Toggle */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <Calendar className="w-4 h-4 text-text-secondary" />
+          <span className="text-sm text-text-secondary">Period:</span>
+          {(['current', 'QTD', 'YTD'] as const).map((pv) => (
+            <button
+              key={pv}
+              type="button"
+              onClick={() => setVariancePeriodView(pv)}
+              className={cn(
+                'px-3 py-1 text-sm rounded-md',
+                variancePeriodView === pv ? 'bg-accent text-white' : 'border border-border text-text-secondary hover:bg-hover'
+              )}
+            >
+              {pv === 'current' ? 'Current Period' : pv === 'QTD' ? 'Quarter-to-Date' : 'Year-to-Date'}
+            </button>
+          ))}
+        </div>
+        {variancePeriodView !== 'current' && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-text-secondary">Compare:</span>
+            <select
+              value={comparisonType}
+              onChange={(e) => setComparisonType(e.target.value as VarianceComparisonType)}
+              className="text-sm border border-border rounded-input px-2 py-1"
+            >
+              <option value="prior_year_same_period">vs Prior Year</option>
+              <option value="sequential">vs Prior Quarter/Period</option>
+              <option value="budget" disabled>vs Budget (coming soon)</option>
+            </select>
+          </div>
+        )}
+      </div>
+
+      {/* Cumulative Variance Note */}
+      {variancePeriodView !== 'current' && cumulativeVarData && (
+        <div className="p-3 rounded-card border border-accent/30 bg-accent/5 text-sm text-text-secondary">
+          <span className="font-medium text-accent">{cumulativeVarData.currentPeriodLabel}</span>{' '}
+          vs <span className="font-medium">{cumulativeVarData.priorPeriodLabel || 'N/A'}</span>
+          {' '}&mdash; {cumulativeVarData.note}
+        </div>
+      )}
+
+      {/* Cumulative Variance Table */}
+      {variancePeriodView !== 'current' && cumulativeVarData && cumulativeVarData.variances.length > 0 && (
+        <div className="border border-border rounded-card bg-surface overflow-hidden">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="border-b border-border bg-elevated/50">
+                <th className="text-left py-2.5 px-3 font-medium text-text-secondary">Statement</th>
+                <th className="text-left py-2.5 px-3 font-medium text-text-secondary">Line Item</th>
+                <th className="text-right py-2.5 px-3 font-medium text-text-secondary">{cumulativeVarData.currentPeriodLabel}</th>
+                <th className="text-right py-2.5 px-3 font-medium text-text-secondary">{cumulativeVarData.priorPeriodLabel || 'Prior'}</th>
+                <th className="text-right py-2.5 px-3 font-medium text-text-secondary">Change ($)</th>
+                <th className="text-right py-2.5 px-3 font-medium text-text-secondary">Change (%)</th>
+                <th className="text-center py-2.5 px-3 font-medium text-text-secondary">Material</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cumulativeVarData.variances.map((v) => (
+                <tr key={v.fsLineId} className={cn('border-b border-border-light', v.isMaterial ? 'bg-status-amber/5' : 'opacity-60')}>
+                  <td className="py-2 px-3 text-xs uppercase text-text-muted">{v.statement.replace(/_/g, ' ')}</td>
+                  <td className="py-2 px-3">{v.label}</td>
+                  <td className="py-2 px-3 text-right font-mono">{Number(v.currentAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                  <td className="py-2 px-3 text-right font-mono">{Number(v.priorAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                  <td className="py-2 px-3 text-right font-mono">{Number(v.changeAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                  <td className="py-2 px-3 text-right font-mono">{v.changePercent != null ? `${Number(v.changePercent).toFixed(1)}%` : '\u2014'}</td>
+                  <td className="py-2 px-3 text-center">{v.isMaterial ? <span className="text-status-amber">&#x25CF;</span> : '\u2014'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Summary bar */}
       <div className="flex flex-wrap items-center gap-6 py-3 px-4 rounded-card border border-border bg-surface">

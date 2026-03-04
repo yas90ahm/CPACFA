@@ -22,6 +22,9 @@ import {
   listPeriodReconciliations,
   getPeriodReconciliation,
   listReconcilingItems,
+  updateReconNotes,
+  getPriorPeriodData,
+  copyPriorPeriod,
   PeriodReconciliationError,
 } from '../../services/period_reconciliation_service.js';
 import { checkReconCompleteness } from '../../services/recon_completeness_gate.js';
@@ -422,6 +425,80 @@ router.post('/sessions/:periodId/reconciliations/:reconId/reopen', async (req: R
       return;
     }
     send500(res, e, 'Reopen reconciliation failed');
+  }
+});
+
+/** GET /api/close/sessions/:periodId/reconciliations/prior-period — prior period recon data */
+router.get('/sessions/:periodId/reconciliations/prior-period', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    const periodId = req.params.periodId ?? '';
+    const entityId = (req.query.entityId as string) || '';
+    if (!tenantId || !pool || !periodId) {
+      res.status(400).json({ error: 'Tenant context and periodId required' });
+      return;
+    }
+    let resolvedEntityId = entityId;
+    if (!resolvedEntityId) {
+      const { getCloseSessionById } = await import('../../db/repositories/close_session_repository.js');
+      const session = await getCloseSessionById(pool, tenantId, periodId);
+      resolvedEntityId = session?.entityId ?? 'default';
+    }
+    const priorRecons = await getPriorPeriodData(pool, tenantId, resolvedEntityId, periodId);
+    res.json({ reconciliations: priorRecons });
+  } catch (e) {
+    send500(res, e, 'Get prior period recons failed');
+  }
+});
+
+/** POST /api/close/sessions/:periodId/reconciliations/:reconId/copy-prior — copy prior period data */
+router.post('/sessions/:periodId/reconciliations/:reconId/copy-prior', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    const reconId = req.params.reconId ?? '';
+    const periodId = req.params.periodId ?? '';
+    if (!tenantId || !pool || !reconId) {
+      res.status(400).json({ error: 'Tenant context and reconId required' });
+      return;
+    }
+    if (!await guardSessionWritable(res, pool, tenantId, periodId)) return;
+    const { getCloseSessionById } = await import('../../db/repositories/close_session_repository.js');
+    const session = await getCloseSessionById(pool, tenantId, periodId);
+    const entityId = session?.entityId ?? 'default';
+    const updated = await copyPriorPeriod(pool, tenantId, reconId, entityId, periodId);
+    res.json(updated);
+  } catch (e) {
+    if (e instanceof PeriodReconciliationError) {
+      if (e.code === 'NOT_FOUND') { res.status(404).json({ error: e.message }); return; }
+      if (e.code === 'VALIDATION') { res.status(400).json({ error: e.message }); return; }
+    }
+    send500(res, e, 'Copy prior period failed');
+  }
+});
+
+/** PUT /api/close/sessions/:periodId/reconciliations/:reconId/notes — update notes */
+router.put('/sessions/:periodId/reconciliations/:reconId/notes', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    const reconId = req.params.reconId ?? '';
+    const periodId = req.params.periodId ?? '';
+    const body = req.body as { notes?: string };
+    if (!tenantId || !pool || !reconId) {
+      res.status(400).json({ error: 'Tenant context and reconId required' });
+      return;
+    }
+    if (!await guardSessionWritable(res, pool, tenantId, periodId)) return;
+    const updated = await updateReconNotes(pool, tenantId, reconId, body?.notes ?? '');
+    res.json(updated);
+  } catch (e) {
+    if (e instanceof PeriodReconciliationError && e.code === 'NOT_FOUND') {
+      res.status(404).json({ error: e.message });
+      return;
+    }
+    send500(res, e, 'Update recon notes failed');
   }
 });
 

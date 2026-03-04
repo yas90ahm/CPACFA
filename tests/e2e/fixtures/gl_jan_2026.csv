@@ -1,0 +1,17 @@
+entry_id,entry_date,account_code,account_name,debit,credit,description
+JE001,2026-01-02,1000,Cash,100000.00,0.00,Opening cash balance
+JE001,2026-01-02,3000,Common Stock,0.00,100000.00,Opening equity
+JE002,2026-01-10,1100,Accounts Receivable,25000.00,0.00,January sales - Client A
+JE002,2026-01-10,4000,Revenue,0.00,25000.00,January sales - Client A
+JE003,2026-01-15,5000,Cost of Goods Sold,10000.00,0.00,January COGS
+JE003,2026-01-15,1000,Cash,0.00,10000.00,January COGS payment
+JE004,2026-01-20,1000,Cash,20000.00,0.00,Client A partial payment
+JE004,2026-01-20,1100,Accounts Receivable,0.00,20000.00,Client A partial payment
+JE005,2026-01-25,4000,Revenue,0.00,8000.00,January consulting revenue
+JE005,2026-01-25,1100,Accounts Receivable,8000.00,0.00,January consulting revenue
+JE006,2026-01-31,5100,Salary Expense,12000.00,0.00,January payroll
+JE006,2026-01-31,1000,Cash,0.00,12000.00,January payroll
+JE007,2026-01-31,5200,Rent Expense,3000.00,0.00,January office rent
+JE007,2026-01-31,1000,Cash,0.00,3000.00,January office rent
+JE008,2026-01-31,3100,Retained Earnings,0.00,1000.00,Prior retained earnings adj
+JE008,2026-01-31,1000,Cash,1000.00,0.00,Prior retained earnings adj

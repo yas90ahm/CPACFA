@@ -18,6 +18,8 @@ export interface AjeTemplate {
   lines: AjeTemplateLine[];
   frequency: 'monthly' | 'quarterly' | 'annually';
   isActive: boolean;
+  consecutiveUnchangedApplications: number;
+  autoApplyEligible: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -37,7 +39,7 @@ export interface AjeTemplateApplication {
   templateId: string;
   closeSessionId: string;
   periodLabel: string;
-  status: 'proposed' | 'applied' | 'skipped';
+  status: 'proposed' | 'applied' | 'skipped' | 'auto_applied';
   appliedJeId?: string;
   skippedAt?: string;
   /** Reason given when template was skipped. */

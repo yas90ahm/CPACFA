@@ -9,20 +9,30 @@ export interface EntitySettings {
   entityId: string;
   entityName: string;
   fiscalYearEndMonth: number;
+  fiscalYearEndDay: number;
   baseCurrency: string;
   autoLockDays: number;
   varianceMaterialityDollar: string;
   varianceMaterialityPercent: string;
+  mappingConfidenceThreshold: number;
+  mappingAutoAcceptEnabled: boolean;
+  autoApplyAfterNPeriods: number;
+  templateAutoApplyEnabled: boolean;
 }
 
 interface EntitySettingsRow {
   entity_id: string;
   entity_name: string;
   fiscal_year_end_month: number;
+  fiscal_year_end_day: number;
   base_currency: string;
   auto_lock_days: number;
   variance_materiality_dollar: string;
   variance_materiality_percent: string;
+  mapping_confidence_threshold: string | number | null;
+  mapping_auto_accept_enabled: boolean | null;
+  auto_apply_after_n_periods: number | null;
+  template_auto_apply_enabled: boolean | null;
 }
 
 function rowToSettings(row: EntitySettingsRow | null, entityId: string): EntitySettings {
@@ -31,20 +41,30 @@ function rowToSettings(row: EntitySettingsRow | null, entityId: string): EntityS
       entityId,
       entityName: '',
       fiscalYearEndMonth: 12,
+      fiscalYearEndDay: 31,
       baseCurrency: 'USD',
       autoLockDays: 0,
       varianceMaterialityDollar: '10000.00',
       varianceMaterialityPercent: '10.0',
+      mappingConfidenceThreshold: 0.95,
+      mappingAutoAcceptEnabled: false,
+      autoApplyAfterNPeriods: 3,
+      templateAutoApplyEnabled: false,
     };
   }
   return {
     entityId: row.entity_id,
     entityName: row.entity_name ?? '',
     fiscalYearEndMonth: row.fiscal_year_end_month ?? 12,
+    fiscalYearEndDay: row.fiscal_year_end_day ?? 31,
     baseCurrency: row.base_currency ?? 'USD',
     autoLockDays: row.auto_lock_days ?? 0,
     varianceMaterialityDollar: String(row.variance_materiality_dollar ?? '10000.00'),
     varianceMaterialityPercent: String(row.variance_materiality_percent ?? '10.0'),
+    mappingConfidenceThreshold: Number(row.mapping_confidence_threshold ?? 0.95),
+    mappingAutoAcceptEnabled: row.mapping_auto_accept_enabled ?? false,
+    autoApplyAfterNPeriods: row.auto_apply_after_n_periods ?? 3,
+    templateAutoApplyEnabled: row.template_auto_apply_enabled ?? false,
   };
 }
 
@@ -54,7 +74,11 @@ export async function getEntitySettings(
   entityId: string
 ): Promise<EntitySettings> {
   const r = await pool.query<EntitySettingsRow>(
-    'SELECT entity_id, entity_name, fiscal_year_end_month, base_currency, auto_lock_days, variance_materiality_dollar, variance_materiality_percent FROM tenant_entity_settings WHERE tenant_id = $1 AND entity_id = $2',
+    `SELECT entity_id, entity_name, fiscal_year_end_month, fiscal_year_end_day, base_currency, auto_lock_days,
+       variance_materiality_dollar, variance_materiality_percent,
+       mapping_confidence_threshold, mapping_auto_accept_enabled,
+       auto_apply_after_n_periods, template_auto_apply_enabled
+     FROM tenant_entity_settings WHERE tenant_id = $1 AND entity_id = $2`,
     [tenantId, entityId]
   );
   return rowToSettings(r.rows[0] ?? null, entityId);
@@ -63,10 +87,15 @@ export async function getEntitySettings(
 export interface UpsertEntitySettingsInput {
   entityName?: string;
   fiscalYearEndMonth?: number;
+  fiscalYearEndDay?: number;
   baseCurrency?: string;
   autoLockDays?: number;
   varianceMaterialityDollar?: string | number;
   varianceMaterialityPercent?: string | number;
+  mappingConfidenceThreshold?: number;
+  mappingAutoAcceptEnabled?: boolean;
+  autoApplyAfterNPeriods?: number;
+  templateAutoApplyEnabled?: boolean;
 }
 
 export async function upsertEntitySettings(
@@ -77,20 +106,48 @@ export async function upsertEntitySettings(
 ): Promise<EntitySettings> {
   const entityName = input.entityName ?? '';
   const fiscalYearEndMonth = input.fiscalYearEndMonth ?? 12;
+  const fiscalYearEndDay = input.fiscalYearEndDay ?? 31;
   const baseCurrency = input.baseCurrency ?? 'USD';
   const autoLockDays = input.autoLockDays ?? 0;
   const varianceMaterialityDollar = input.varianceMaterialityDollar != null ? String(input.varianceMaterialityDollar) : '10000.00';
   const varianceMaterialityPercent = input.varianceMaterialityPercent != null ? String(input.varianceMaterialityPercent) : '10.0';
+  const mappingConfidenceThreshold = input.mappingConfidenceThreshold ?? 0.95;
+  const mappingAutoAcceptEnabled = input.mappingAutoAcceptEnabled ?? false;
+  const autoApplyAfterNPeriods = input.autoApplyAfterNPeriods ?? 3;
+  const templateAutoApplyEnabled = input.templateAutoApplyEnabled ?? false;
 
   await pool.query(
-    `INSERT INTO tenant_entity_settings (tenant_id, entity_id, entity_name, fiscal_year_end_month, base_currency, auto_lock_days, variance_materiality_dollar, variance_materiality_percent, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric, NOW())
-     ON CONFLICT (tenant_id, entity_id) DO UPDATE SET entity_name = EXCLUDED.entity_name, fiscal_year_end_month = EXCLUDED.fiscal_year_end_month, base_currency = EXCLUDED.base_currency, auto_lock_days = EXCLUDED.auto_lock_days, variance_materiality_dollar = EXCLUDED.variance_materiality_dollar, variance_materiality_percent = EXCLUDED.variance_materiality_percent, updated_at = NOW()`,
-    [tenantId, entityId, entityName, fiscalYearEndMonth, baseCurrency, autoLockDays, varianceMaterialityDollar, varianceMaterialityPercent]
+    `INSERT INTO tenant_entity_settings (
+       tenant_id, entity_id, entity_name, fiscal_year_end_month, fiscal_year_end_day, base_currency, auto_lock_days,
+       variance_materiality_dollar, variance_materiality_percent,
+       mapping_confidence_threshold, mapping_auto_accept_enabled,
+       auto_apply_after_n_periods, template_auto_apply_enabled, updated_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9::numeric, $10, $11, $12, $13, NOW())
+     ON CONFLICT (tenant_id, entity_id) DO UPDATE SET
+       entity_name = EXCLUDED.entity_name, fiscal_year_end_month = EXCLUDED.fiscal_year_end_month,
+       fiscal_year_end_day = EXCLUDED.fiscal_year_end_day,
+       base_currency = EXCLUDED.base_currency, auto_lock_days = EXCLUDED.auto_lock_days,
+       variance_materiality_dollar = EXCLUDED.variance_materiality_dollar,
+       variance_materiality_percent = EXCLUDED.variance_materiality_percent,
+       mapping_confidence_threshold = EXCLUDED.mapping_confidence_threshold,
+       mapping_auto_accept_enabled = EXCLUDED.mapping_auto_accept_enabled,
+       auto_apply_after_n_periods = EXCLUDED.auto_apply_after_n_periods,
+       template_auto_apply_enabled = EXCLUDED.template_auto_apply_enabled,
+       updated_at = NOW()`,
+    [
+      tenantId, entityId, entityName, fiscalYearEndMonth, fiscalYearEndDay, baseCurrency, autoLockDays,
+      varianceMaterialityDollar, varianceMaterialityPercent,
+      mappingConfidenceThreshold, mappingAutoAcceptEnabled,
+      autoApplyAfterNPeriods, templateAutoApplyEnabled,
+    ]
   );
 
   const r = await pool.query<EntitySettingsRow>(
-    'SELECT entity_id, entity_name, fiscal_year_end_month, base_currency, auto_lock_days, variance_materiality_dollar, variance_materiality_percent FROM tenant_entity_settings WHERE tenant_id = $1 AND entity_id = $2',
+    `SELECT entity_id, entity_name, fiscal_year_end_month, fiscal_year_end_day, base_currency, auto_lock_days,
+       variance_materiality_dollar, variance_materiality_percent,
+       mapping_confidence_threshold, mapping_auto_accept_enabled,
+       auto_apply_after_n_periods, template_auto_apply_enabled
+     FROM tenant_entity_settings WHERE tenant_id = $1 AND entity_id = $2`,
     [tenantId, entityId]
   );
   return rowToSettings(r.rows[0], entityId);

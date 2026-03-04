@@ -126,7 +126,14 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
     }
 
     const tenantIdIngest = getTenantId(req);
-    const poolIngest = getTenantPool(req);
+    let poolIngest = getTenantPool(req);
+    // Fallback: if tenantId was injected from body but pool wasn't attached (dev/diagnostic mode)
+    if (tenantIdIngest && !poolIngest) {
+      try {
+        const { getTenantPoolWithMigrations } = await import('../../db/index.js');
+        poolIngest = await getTenantPoolWithMigrations(tenantIdIngest);
+      } catch { /* non-fatal */ }
+    }
     const poolAi: Pool = (getTenantAiPool(req) ?? poolIngest)!;
     const hasTenantContext = Boolean(tenantIdIngest && poolIngest);
     const ingestSessionId = hasTenantContext
@@ -433,8 +440,10 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
 
     let trialBalanceForBuild: import('../../types/financial.js').TrialBalanceResult = trialBalance;
     if (body.periodLabel && poolIngest && tenantIdIngest) {
+      const normalizedPeriodLabel = body.periodLabel.length > 7 ? body.periodLabel.slice(0, 7) : body.periodLabel;
       const tenantIdForSave = tenantIdIngest;
       const entriesToStore = preClassified ?? (await classifyTrialBalance(trialBalance.entries));
+      log('info', 'tb_save_attempt', { tenantId: tenantIdForSave, periodLabel: normalizedPeriodLabel, entryCount: entriesToStore.length });
       const result = await executeBridgeCommand(
         {
           pool: poolIngest,
@@ -443,7 +452,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
         },
         {
           commandType: 'SaveTrialBalance',
-          periodLabel: body.periodLabel,
+          periodLabel: normalizedPeriodLabel,
           entries: entriesToStore.map((e) => ({
             accountName: e.accountName,
             debit: e.debit ?? 0,
@@ -453,6 +462,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
           fileName: file.originalname,
         }
       );
+      log('info', 'tb_save_result', { ok: result.ok, ...(result.ok ? {} : { error: (result as any).error, code: (result as any).code }) });
       if (!result.ok) {
         if (result.code === 'PERIOD_LOCKED') {
           res.status(409).json({ error: 'Period locked', message: result.error });
@@ -462,7 +472,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
         return;
       }
       try {
-        const adjustedEntries = await getAdjustedTrialBalance(tenantIdForSave, body.periodLabel, poolIngest ?? undefined);
+        const adjustedEntries = await getAdjustedTrialBalance(tenantIdForSave, normalizedPeriodLabel, poolIngest ?? undefined);
         const totalDebits = sumRound2(adjustedEntries.map((e) => e.debit ?? 0));
         const totalCredits = sumRound2(adjustedEntries.map((e) => e.credit ?? 0));
         trialBalanceForBuild = {
@@ -475,6 +485,12 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       } catch {
         trialBalanceForBuild = trialBalance;
       }
+    } else if (body.periodLabel) {
+      log('warn', 'tb_save_skipped', {
+        hasPeriodLabel: Boolean(body.periodLabel),
+        hasPool: Boolean(poolIngest),
+        hasTenantId: Boolean(tenantIdIngest),
+      });
     }
 
     let base: Awaited<ReturnType<typeof buildValidatedStatements>> | Awaited<ReturnType<typeof generateStatements>>;

@@ -33,6 +33,12 @@ import closeIntercompanyRouter from './close_intercompany.js';
 import closeReportPackRouter from './close_report_pack.js';
 import closeInvestigationRouter from './close_investigation.js';
 import closeSuggestionsRouter from './close_suggestions.js';
+import closeFixedAssetsRouter from './close_fixed_assets.js';
+import closeDeferredTaxRouter from './close_deferred_tax.js';
+import closeStockCompensationRouter from './close_stock_compensation.js';
+import closeImpairmentRouter from './close_impairment.js';
+import closeSegmentsRouter from './close_segments.js';
+import closeBoardPackageRouter from './close_board_package.js';
 
 const router = Router();
 router.use(closeJeAccrualsRouter);
@@ -64,5 +70,11 @@ router.use(closeIntercompanyRouter);
 router.use(closeReportPackRouter);
 router.use(closeInvestigationRouter);
 router.use(closeSuggestionsRouter);
+router.use(closeFixedAssetsRouter);
+router.use(closeDeferredTaxRouter);
+router.use(closeStockCompensationRouter);
+router.use(closeImpairmentRouter);
+router.use(closeSegmentsRouter);
+router.use(closeBoardPackageRouter);
 
 export default router;

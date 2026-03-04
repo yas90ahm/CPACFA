@@ -1,0 +1,4 @@
+entry_id,entry_date,account_code,account_name,debit,credit,description
+JE001,2026-01-05,1000,Cash,50000.00,0.00,Unbalanced entry
+JE001,2026-01-05,3000,Common Stock,0.00,49000.00,Short by 1000
+JE002,2026-01-10,1100,Accounts Receivable,15000.00,0.00,Missing credit

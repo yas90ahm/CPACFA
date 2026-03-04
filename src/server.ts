@@ -53,6 +53,8 @@ import tenantsRouter from './routes/tenants.js';
 import portfolioRouter from './routes/portfolio.js';
 import cpaRouter from './routes/cpa_index.js';
 import devDiagnosticsRouter from './routes/dev_diagnostics.js';
+import fxCurrencyRouter from './routes/fx_currency.js';
+import consolidationRouter from './routes/consolidation.js';
 // QUARANTINED — Automated ingestion infrastructure not in MVP architecture
 // import { startIngestionScheduler } from './services/ingestion_scheduler.js';
 import { runWorkerLoop } from './services/job_worker.js';
@@ -216,6 +218,12 @@ app.use('/api/portfolio', portfolioRouter);
 
 // API: HITL staging and webhook
 app.use('/api/hitl', hitlRouter);
+
+// API: FX currency translation — stateless (no tenant/DB)
+app.use('/api/fx', fxCurrencyRouter);
+
+// API: Multi-entity consolidation — stateless (no tenant/DB)
+app.use('/api/consolidation', consolidationRouter);
 
 // CPA module: optional grouping under /api/cpa when CPA_ENABLED=true (same handlers as above)
 const cpaEnabled = process.env.CPA_ENABLED === 'true';

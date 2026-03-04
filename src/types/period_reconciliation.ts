@@ -76,6 +76,11 @@ export interface PeriodReconciliation {
   preparedAt: string | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
+  notes: string | null;
+  priorPeriodSessionId: string | null;
+  priorPeriodGlBalance: string | null;
+  priorPeriodSupportingBalance: string | null;
+  copiedFromPrior: boolean;
   createdAt: string;
   updatedAt: string;
 }

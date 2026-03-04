@@ -12,6 +12,7 @@ import type {
   StatementDiffJson,
   ValidationResult,
 } from '../../types/statement_package.js';
+import type { StatementPackageType, CumulativePeriod } from '../../types/statement_package.js';
 
 interface PackageRow {
   id: string;
@@ -24,6 +25,10 @@ interface PackageRow {
   engine_version: string | null;
   rule_versions_snapshot: unknown;
   validation_results?: unknown;
+  package_type?: string;
+  cumulative_period?: string | null;
+  cumulative_note?: string | null;
+  included_session_ids?: string[] | null;
 }
 
 interface LineRow {
@@ -39,7 +44,7 @@ interface LineRow {
   section_name?: string | null;
 }
 
-const PKG_COLS = `id, close_session_id, version, input_hash, generated_at, generated_by, status, engine_version, rule_versions_snapshot, validation_results`;
+const PKG_COLS = `id, close_session_id, version, input_hash, generated_at, generated_by, status, engine_version, rule_versions_snapshot, validation_results, package_type, cumulative_period, cumulative_note, included_session_ids`;
 const LINE_COLS = `package_id, fs_line_id, amount, statement, metadata, display_order, indent_level, is_subtotal, is_grand_total, section_name`;
 
 function rowToPackage(row: PackageRow): StatementPackage {
@@ -59,6 +64,10 @@ function rowToPackage(row: PackageRow): StatementPackage {
       row.validation_results != null && Array.isArray(row.validation_results)
         ? (row.validation_results as ValidationResult[])
         : undefined,
+    packageType: (row.package_type as StatementPackageType) ?? 'standard',
+    cumulativePeriod: (row.cumulative_period as CumulativePeriod) ?? undefined,
+    cumulativeNote: row.cumulative_note ?? undefined,
+    includedSessionIds: row.included_session_ids ?? undefined,
   };
 }
 
@@ -114,7 +123,7 @@ export async function insertStatementPackage(
 
 export async function getStatementPackageById(pool: Pool, tenantId: string, id: string): Promise<StatementPackage | null> {
   const r = await pool.query<PackageRow>(
-    `SELECT sp.id, sp.close_session_id, sp.version, sp.input_hash, sp.generated_at, sp.generated_by, sp.status, sp.engine_version, sp.rule_versions_snapshot, sp.validation_results
+    `SELECT sp.id, sp.close_session_id, sp.version, sp.input_hash, sp.generated_at, sp.generated_by, sp.status, sp.engine_version, sp.rule_versions_snapshot, sp.validation_results, sp.package_type, sp.cumulative_period, sp.cumulative_note, sp.included_session_ids
      FROM statement_packages sp
      JOIN close_sessions cs ON sp.close_session_id = cs.id
      WHERE cs.tenant_id = $1 AND sp.id = $2`,
@@ -143,16 +152,21 @@ export async function listStatementPackagesByCloseSessionId(
   pool: Pool,
   tenantId: string,
   closeSessionId: string,
-  limit?: number
+  limit?: number,
+  packageType?: string
 ): Promise<StatementPackage[]> {
-  let sql = `SELECT sp.id, sp.close_session_id, sp.version, sp.input_hash, sp.generated_at, sp.generated_by, sp.status, sp.engine_version, sp.rule_versions_snapshot, sp.validation_results
+  let sql = `SELECT sp.id, sp.close_session_id, sp.version, sp.input_hash, sp.generated_at, sp.generated_by, sp.status, sp.engine_version, sp.rule_versions_snapshot, sp.validation_results, sp.package_type, sp.cumulative_period, sp.cumulative_note, sp.included_session_ids
      FROM statement_packages sp
      JOIN close_sessions cs ON sp.close_session_id = cs.id
-     WHERE cs.tenant_id = $1 AND sp.close_session_id = $2
-     ORDER BY sp.version DESC`;
+     WHERE cs.tenant_id = $1 AND sp.close_session_id = $2`;
   const params: unknown[] = [tenantId, closeSessionId];
+  if (packageType) {
+    sql += ` AND COALESCE(sp.package_type, 'standard') = $${params.length + 1}`;
+    params.push(packageType);
+  }
+  sql += ` ORDER BY sp.version DESC`;
   if (limit != null && limit > 0) {
-    sql += ` LIMIT $3`;
+    sql += ` LIMIT $${params.length + 1}`;
     params.push(limit);
   }
   const r = await pool.query<PackageRow>(sql, params);

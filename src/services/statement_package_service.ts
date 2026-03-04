@@ -24,7 +24,7 @@ import { from as decimalFrom, sumRound2, normalizeMoney } from '../utils/decimal
 const ENGINE_VERSION = 'financialStatements.v1';
 const TOLERANCE = 0.01;
 
-/** Get prior period adjusted TB for the same entity (period_end < current). Returns null if first close. */
+/** Get prior period adjusted TB for the same entity (period_end < current). Returns null if first close or no prior TB data. */
 async function getPriorPeriodAdjustedTB(
   pool: Pool,
   tenantId: string,
@@ -37,7 +37,13 @@ async function getPriorPeriodAdjustedTB(
     .sort((a, b) => (b.periodEnd as string).localeCompare(a.periodEnd as string))[0];
   if (!prior) return null;
   const priorPeriodLabel = (prior.periodEnd as string).slice(0, 7);
-  const entries = await getAdjustedTrialBalance(tenantId, priorPeriodLabel, pool, prior.id);
+  let entries;
+  try {
+    entries = await getAdjustedTrialBalance(tenantId, priorPeriodLabel, pool, prior.id);
+  } catch {
+    // Prior period has no TB data — treat as first close
+    return null;
+  }
   const totalDebits = sumRound2(entries.map((e) => e.debit ?? 0));
   const totalCredits = sumRound2(entries.map((e) => e.credit ?? 0));
   return {
@@ -321,6 +327,7 @@ export async function generateStatements(
     throw new Error(`Close session not found: ${closeSessionId}`);
   }
   const periodLabel = periodLabelFromSession(session);
+  console.log(`[STMT-DEBUG] generateStatements: sessionId=${closeSessionId}, tenantId=${tenantId}, session.periodEnd=${session.periodEnd}, derived periodLabel=${periodLabel}`);
   const entries = await getAdjustedTrialBalance(tenantId, periodLabel, pool, closeSessionId);
   const totalDebits = sumRound2(entries.map((e) => e.debit ?? 0));
   const totalCredits = sumRound2(entries.map((e) => e.credit ?? 0));

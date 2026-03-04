@@ -11,6 +11,7 @@ import { useAuditTrail } from '@/lib/queries/audit-trail';
 import { useJournalEntries } from '@/lib/queries/adjustments';
 import { useReconciliations } from '@/lib/queries/reconciliations';
 import { useVariances } from '@/lib/queries/variance';
+import { useBoardPackage } from '@/lib/queries/cumulative';
 import { apiFetch } from '@/lib/api';
 import { CertificationChecklist } from './CertificationChecklist';
 import { CertificationRecord } from './CertificationRecord';
@@ -27,7 +28,9 @@ import {
   Clock,
   Hash,
   AlertCircle,
-  XCircle
+  XCircle,
+  BookOpen,
+  Download
 } from 'lucide-react';
 
 export default function ReviewPage() {
@@ -147,6 +150,12 @@ export default function ReviewPage() {
   const currentState = session?.state || 'IN_PROGRESS';
   const isReviewer = (userRole as string) === 'reviewer' || (userRole as string) === 'approver' || (userRole as string) === 'admin';
   const isPreparer = !isReviewer;
+  const isCertifiedOrLocked = currentState === 'CERTIFIED' || currentState === 'LOCKED';
+  const [boardPeriodType, setBoardPeriodType] = useState<'monthly' | 'QTD' | 'YTD'>('monthly');
+  const { data: boardPackage, isLoading: boardLoading } = useBoardPackage(
+    isCertifiedOrLocked ? sessionId : null,
+    isCertifiedOrLocked ? boardPeriodType : null
+  );
   const gatesWithTies: ReadinessGate[] = readiness?.gates ? [...readiness.gates] : [];
   const hasTiesGate = gatesWithTies.some(g => g.id === 'ties');
   if (!hasTiesGate) {
@@ -450,6 +459,97 @@ export default function ReviewPage() {
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Board Package (visible in CERTIFIED and LOCKED) */}
+      {isCertifiedOrLocked && (
+        <div className="bg-surface border border-border rounded-card p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-display text-primary flex items-center gap-2">
+              <BookOpen className="w-5 h-5" />
+              Board Package
+            </h2>
+            <div className="flex items-center gap-3">
+              <select
+                value={boardPeriodType}
+                onChange={(e) => setBoardPeriodType(e.target.value as 'monthly' | 'QTD' | 'YTD')}
+                className="text-sm border border-border rounded-input px-2 py-1"
+              >
+                <option value="monthly">Monthly</option>
+                <option value="QTD">Quarter-to-Date</option>
+                <option value="YTD">Year-to-Date</option>
+              </select>
+              <a
+                href={`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'}/api/close/sessions/${sessionId}/board-package/export/pdf?periodType=${boardPeriodType}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-input border border-border text-sm text-text-secondary hover:bg-hover flex items-center gap-1.5"
+              >
+                <Download className="w-4 h-4" />
+                Export
+              </a>
+            </div>
+          </div>
+          {boardLoading && <p className="text-sm text-text-secondary">Loading board package...</p>}
+          {boardPackage && (
+            <div className="space-y-4">
+              {/* Key Metrics */}
+              <div className="flex flex-wrap gap-3">
+                {boardPackage.keyMetrics.map((m) => (
+                  <div key={m.label} className="min-w-[140px] border border-border rounded-card p-3">
+                    <div className="text-xs text-text-secondary">{m.label}</div>
+                    <div className="text-lg font-medium text-primary">{m.value}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Validation */}
+              {boardPackage.validationResults.length > 0 && (
+                <div className="space-y-1">
+                  <div className="text-xs font-medium text-text-secondary uppercase tracking-wide">Validation</div>
+                  {boardPackage.validationResults.map((v) => (
+                    <div key={v.check} className="flex items-center gap-2 text-sm">
+                      {v.passed ? <CheckCircle2 className="w-4 h-4 text-status-green" /> : <XCircle className="w-4 h-4 text-status-red" />}
+                      <span className={v.passed ? 'text-text-secondary' : 'text-status-red'}>{v.check}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* Material Variances */}
+              {boardPackage.materialVariances.length > 0 && (
+                <div>
+                  <div className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">Material Variances ({boardPackage.materialVariances.length})</div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm border-collapse">
+                      <thead>
+                        <tr className="border-b border-border">
+                          <th className="text-left py-1.5 px-2 font-medium text-text-secondary">Line Item</th>
+                          <th className="text-right py-1.5 px-2 font-medium text-text-secondary">Current</th>
+                          <th className="text-right py-1.5 px-2 font-medium text-text-secondary">Prior</th>
+                          <th className="text-right py-1.5 px-2 font-medium text-text-secondary">Change</th>
+                          <th className="text-left py-1.5 px-2 font-medium text-text-secondary">Explanation</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {boardPackage.materialVariances.map((mv, idx) => (
+                          <tr key={idx} className="border-b border-border-light">
+                            <td className="py-1.5 px-2">{mv.lineItem}</td>
+                            <td className="py-1.5 px-2 text-right font-mono">{mv.currentAmount}</td>
+                            <td className="py-1.5 px-2 text-right font-mono">{mv.priorAmount}</td>
+                            <td className="py-1.5 px-2 text-right font-mono">{mv.changeAmount}</td>
+                            <td className="py-1.5 px-2 text-text-secondary text-xs">{mv.explanation ?? '\u2014'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+              {boardPackage.cumulativeNote && (
+                <p className="text-xs text-text-tertiary italic">{boardPackage.cumulativeNote}</p>
+              )}
+            </div>
+          )}
         </div>
       )}
 

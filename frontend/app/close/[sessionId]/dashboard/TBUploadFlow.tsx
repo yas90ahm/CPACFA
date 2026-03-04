@@ -77,12 +77,13 @@ function formatMoney(s: string): string {
 export interface TBUploadFlowProps {
   sessionId: string;
   file: File;
+  periodLabel: string;
   onBack: () => void;
 }
 
 type Step = 'parsing' | 'mapping' | 'validating' | 'preview' | 'confirm' | 'ingesting' | 'error';
 
-export function TBUploadFlow({ sessionId, file, onBack }: TBUploadFlowProps) {
+export function TBUploadFlow({ sessionId, file, periodLabel, onBack }: TBUploadFlowProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const advanceSession = useAdvanceSession(sessionId);
@@ -199,6 +200,7 @@ export function TBUploadFlow({ sessionId, file, onBack }: TBUploadFlowProps) {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('columnMapping', JSON.stringify(mappingsToBackend(mappings)));
+      formData.append('periodLabel', periodLabel);
       await apiUpload('/api/trial-balance/ingest', formData);
 
       await advanceSession.mutateAsync({});

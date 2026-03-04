@@ -66,11 +66,24 @@ export async function initializeChecklistTemplate(
  * Compute readiness for a close session: ready only when no hard blockers.
  * Hard blockers: cash rec not complete (if bank recon exists), critical issues open, draft/proposed JEs, integrity fail, required checklist incomplete.
  */
+export interface ComputeReadinessOptions {
+  /**
+   * When true, skip expensive checks that are inappropriate for cascade paths:
+   * - verifyChain (O(n) hash scan of entire audit ledger)
+   * - N+1 evidence loops for recons and JEs
+   * - checkMappingCompleteness (recomputes TB, already done in cascade step 2)
+   * These are only needed for on-demand readiness queries and certification.
+   */
+  lightweight?: boolean;
+}
+
 export async function computeReadiness(
   pool: Pool,
   tenantId: string,
-  session: CloseSession
+  session: CloseSession,
+  options?: ComputeReadinessOptions
 ): Promise<CloseReadinessResult> {
+  const lightweight = options?.lightweight ?? false;
   const closeSessionId = session.id;
   const periodLabel = periodLabelFromSession(session);
   const hardBlockers: string[] = [];
@@ -126,10 +139,13 @@ export async function computeReadiness(
   }
 
   let integrityChecksPass = true;
-  const chainResult = await verifyChain(pool, tenantId);
-  if (!chainResult.valid) {
-    integrityChecksPass = false;
-    hardBlockers.push(chainResult.message ?? 'Audit ledger chain verification failed.');
+  if (!lightweight) {
+    // verifyChain is O(n) — only run for full readiness checks, not cascade
+    const chainResult = await verifyChain(pool, tenantId);
+    if (!chainResult.valid) {
+      integrityChecksPass = false;
+      hardBlockers.push(chainResult.message ?? 'Audit ledger chain verification failed.');
+    }
   }
   const exportChecks = await getPeriodExportChecks(pool, tenantId, periodLabel);
   if (exportChecks?.roundingGapExceedsMateriality === true) {
@@ -177,61 +193,64 @@ export async function computeReadiness(
     );
   }
 
-  // Recon evidence completeness (safety net): completed recons must have attachments
-  const { listPeriodReconciliationsByPeriod } = await import('../db/repositories/period_reconciliation_repository.js');
-  const { listEvidenceForObject } = await import('../db/repositories/evidence_repository.js');
-  const reconsForPeriod = await listPeriodReconciliationsByPeriod(pool, tenantId, closeSessionId);
-  const completedRecons = reconsForPeriod.filter((r) => r.status === 'completed' || r.status === 'approved');
-  for (const recon of completedRecons) {
-    const attachments = await listEvidenceForObject(pool, tenantId, 'reconciliation', recon.reconId);
-    if (attachments.length === 0) {
-      hardBlockers.push(
-        `Reconciliation for ${recon.accountCode} is completed but missing supporting documentation. Upload the source document before close.`
-      );
+  if (!lightweight) {
+    // N+1 evidence loops — only run for full readiness checks, not cascade
+    // Recon evidence completeness (safety net): completed recons must have attachments
+    const { listPeriodReconciliationsByPeriod } = await import('../db/repositories/period_reconciliation_repository.js');
+    const { listEvidenceForObject } = await import('../db/repositories/evidence_repository.js');
+    const reconsForPeriod = await listPeriodReconciliationsByPeriod(pool, tenantId, closeSessionId);
+    const completedRecons = reconsForPeriod.filter((r) => r.status === 'completed' || r.status === 'approved');
+    for (const recon of completedRecons) {
+      const attachments = await listEvidenceForObject(pool, tenantId, 'reconciliation', recon.reconId);
+      if (attachments.length === 0) {
+        hardBlockers.push(
+          `Reconciliation for ${recon.accountCode} is completed but missing supporting documentation. Upload the source document before close.`
+        );
+      }
     }
-  }
 
-  // JE evidence completeness (soft warning): posted JEs above threshold without evidence
-  const { getEvidencePolicy } = await import('../db/repositories/evidence_policy_repository.js');
-  const { listJournalEntryLines } = await import('../db/repositories/journal_entry_repository.js');
-  const jePolicy = await getEvidencePolicy(pool, tenantId);
-  const jeThreshold = jePolicy?.materialityThreshold != null && jePolicy.materialityThreshold !== ''
-    ? Number(jePolicy.materialityThreshold)
-    : 0;
-  if (jeThreshold > 0) {
-    const postedJes = jes.filter((j) => j.status === 'posted' || j.status === 'exported');
-    for (const je of postedJes) {
-      const jeLines = await listJournalEntryLines(pool, je.id);
-      const { sumRound2 } = await import('../utils/decimal.js');
-      const totalAmount = sumRound2(jeLines.map((l) => l.debit ?? 0));
-      if (totalAmount >= jeThreshold) {
-        const jeAttachments = await listEvidenceForObject(pool, tenantId, 'journal_entry', je.id);
-        if (jeAttachments.length === 0) {
-          softWarnings.push(
-            `Posted journal entry ${je.memo ?? je.id} ($${totalAmount.toFixed(2)}) above threshold lacks supporting documentation.`
-          );
+    // JE evidence completeness (soft warning): posted JEs above threshold without evidence
+    const { getEvidencePolicy } = await import('../db/repositories/evidence_policy_repository.js');
+    const { listJournalEntryLines } = await import('../db/repositories/journal_entry_repository.js');
+    const jePolicy = await getEvidencePolicy(pool, tenantId);
+    const jeThreshold = jePolicy?.materialityThreshold != null && jePolicy.materialityThreshold !== ''
+      ? Number(jePolicy.materialityThreshold)
+      : 0;
+    if (jeThreshold > 0) {
+      const postedJes = jes.filter((j) => j.status === 'posted' || j.status === 'exported');
+      for (const je of postedJes) {
+        const jeLines = await listJournalEntryLines(pool, je.id);
+        const { sumRound2 } = await import('../utils/decimal.js');
+        const totalAmount = sumRound2(jeLines.map((l) => l.debit ?? 0));
+        if (totalAmount >= jeThreshold) {
+          const jeAttachments = await listEvidenceForObject(pool, tenantId, 'journal_entry', je.id);
+          if (jeAttachments.length === 0) {
+            softWarnings.push(
+              `Posted journal entry ${je.memo ?? je.id} ($${totalAmount.toFixed(2)}) above threshold lacks supporting documentation.`
+            );
+          }
         }
       }
     }
-  }
 
-  // Mapping completeness gate: all TB accounts must have COA mapping before UNDER_REVIEW
-  const { checkMappingCompleteness } = await import('./mapping_completeness_gate.js');
-  const mappingResult = await checkMappingCompleteness(
-    pool,
-    tenantId,
-    closeSessionId,
-    session.entityId ?? ''
-  );
-  if (!mappingResult.passes && mappingResult.unmapped_accounts.length > 0) {
-    hardBlockers.push(
-      `${mappingResult.unmapped_accounts.length} account(s) not mapped to reporting line items: ` +
-        mappingResult.unmapped_accounts
-          .slice(0, 5)
-          .map((u) => `${u.account_code || u.account_name} ($${u.balance})`)
-          .join(', ') +
-        (mappingResult.unmapped_accounts.length > 5 ? '…' : '')
+    // Mapping completeness gate: all TB accounts must have COA mapping before UNDER_REVIEW
+    const { checkMappingCompleteness } = await import('./mapping_completeness_gate.js');
+    const mappingResult = await checkMappingCompleteness(
+      pool,
+      tenantId,
+      closeSessionId,
+      session.entityId ?? ''
     );
+    if (!mappingResult.passes && mappingResult.unmapped_accounts.length > 0) {
+      hardBlockers.push(
+        `${mappingResult.unmapped_accounts.length} account(s) not mapped to reporting line items: ` +
+          mappingResult.unmapped_accounts
+            .slice(0, 5)
+            .map((u) => `${u.account_code || u.account_name} ($${u.balance})`)
+            .join(', ') +
+          (mappingResult.unmapped_accounts.length > 5 ? '…' : '')
+      );
+    }
   }
 
   const ready = hardBlockers.length === 0;

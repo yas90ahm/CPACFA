@@ -245,6 +245,24 @@ export async function listJournalEntryLines(pool: Pool, jeId: string): Promise<J
   return r.rows.map(rowToLine);
 }
 
+/** Batch fetch lines for multiple JEs in a single query. */
+export async function listJournalEntryLinesBatch(pool: Pool, jeIds: string[]): Promise<Map<string, JournalEntryLine[]>> {
+  if (jeIds.length === 0) return new Map();
+  const placeholders = jeIds.map((_, i) => `$${i + 1}`).join(', ');
+  const r = await pool.query<JournalEntryLineRow>(
+    `SELECT ${LINE_COLS} FROM journal_entry_lines WHERE je_id IN (${placeholders}) ORDER BY je_id, line_index`,
+    jeIds
+  );
+  const map = new Map<string, JournalEntryLine[]>();
+  for (const row of r.rows) {
+    const line = rowToLine(row);
+    const existing = map.get(line.jeId);
+    if (existing) existing.push(line);
+    else map.set(line.jeId, [line]);
+  }
+  return map;
+}
+
 export async function insertJEAttachment(
   pool: Pool,
   id: string,

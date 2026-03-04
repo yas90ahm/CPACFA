@@ -43,16 +43,19 @@ export async function getSessionTrialBalance(
 ): Promise<SessionTrialBalanceResult | null> {
   const periodLabel = periodLabelFromSession(session);
   const entityId = session.entityId ?? '';
+  console.log(`[TB_GET] tenantId=${tenantId}, periodLabel=${periodLabel}, sessionId=${session.id}, type=${type}, periodEnd=${session.periodEnd}`);
 
   let entries: Array<{ accountCode?: string; accountName: string; debit: number; credit: number; accountType?: string }>;
   if (type === 'adjusted') {
     try {
       entries = await getAdjustedTrialBalance(tenantId, periodLabel, pool, session.id);
-    } catch {
+    } catch (err) {
+      console.log(`[TB_GET] adjusted TB error: ${err instanceof Error ? err.message : String(err)}`);
       return null;
     }
   } else {
     const unadj = await getUnadjustedOrRollup(tenantId, periodLabel, pool);
+    console.log(`[TB_GET] unadjusted result: ${unadj ? `found ${unadj.entries.length} entries, source=${unadj.source}` : 'null'}`);
     if (!unadj) return null;
     entries = unadj.entries;
   }

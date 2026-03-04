@@ -159,7 +159,7 @@ export function runIntegrityGate(input: IntegrityGateInput): IntegrityGateResult
   const trialBalanceGapExceeds = absGt(totalDebits, totalCredits, tolerance);
   const trialBalanceBalances = !trialBalanceGapExceeds;
 
-  const rhs = totalLiabilities + totalEquity;
+  const rhs = plus(totalLiabilities, totalEquity);
   const balanceSheetGapExceeds = absGt(totalAssets, rhs, tolerance);
   const balanceSheetBalances = !balanceSheetGapExceeds;
 
@@ -198,12 +198,12 @@ export function assertIntegrityGateOrThrow(input: IntegrityGateInput): void {
     const { totalDebits, totalCredits } = getTrialBalanceTotals(input.trialBalance);
     const { totalAssets, totalLiabilities, totalEquity } = input.balanceSheet;
     if (!result.checks?.trialBalanceBalances) {
-      const imbalanceAmount = Math.abs(totalDebits - totalCredits);
+      const imbalanceAmount = from(totalDebits).minus(totalCredits).abs().toNumber();
       throw new MathematicalIntegrityError('A', imbalanceAmount, { totalDebits, totalCredits });
     }
     if (!result.checks?.balanceSheetBalances) {
-      const rhs = totalLiabilities + totalEquity;
-      const imbalanceAmount = Math.abs(totalAssets - rhs);
+      const rhs = plus(totalLiabilities, totalEquity);
+      const imbalanceAmount = from(totalAssets).minus(rhs).abs().toNumber();
       throw new MathematicalIntegrityError('B', imbalanceAmount, {
         totalAssets,
         totalLiabilities,

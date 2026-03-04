@@ -34,6 +34,11 @@ interface ReconRow {
   prepared_at: string | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
+  notes: string | null;
+  prior_period_session_id: string | null;
+  prior_period_gl_balance: string | null;
+  prior_period_supporting_balance: string | null;
+  copied_from_prior: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -53,7 +58,9 @@ interface ItemRow {
 const RECON_COLS = `recon_id, tenant_id, period_id, entity_id, requirement_id, account_code,
   gl_balance, supporting_balance, variance, tolerance_amount, is_within_tolerance, reconciling_items_total,
   unexplained_variance, supporting_source, supporting_document_refs, variance_explanation,
-  status, prepared_by, prepared_at, reviewed_by, reviewed_at, created_at, updated_at`;
+  status, prepared_by, prepared_at, reviewed_by, reviewed_at, notes,
+  prior_period_session_id, prior_period_gl_balance, prior_period_supporting_balance, copied_from_prior,
+  created_at, updated_at`;
 
 function rowToRecon(r: ReconRow): PeriodReconciliation {
   return {
@@ -79,6 +86,11 @@ function rowToRecon(r: ReconRow): PeriodReconciliation {
     preparedAt: r.prepared_at,
     reviewedBy: r.reviewed_by,
     reviewedAt: r.reviewed_at,
+    notes: r.notes ?? null,
+    priorPeriodSessionId: r.prior_period_session_id ?? null,
+    priorPeriodGlBalance: r.prior_period_gl_balance ?? null,
+    priorPeriodSupportingBalance: r.prior_period_supporting_balance ?? null,
+    copiedFromPrior: r.copied_from_prior ?? false,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -145,7 +157,8 @@ export async function getPeriodReconciliationById(
        r.gl_balance, r.supporting_balance, r.variance, r.tolerance_amount, r.is_within_tolerance,
        r.reconciling_items_total, r.unexplained_variance, r.supporting_source, r.supporting_document_refs,
        r.variance_explanation, r.status, r.prepared_by, r.prepared_at, r.reviewed_by, r.reviewed_at,
-       r.created_at, r.updated_at
+       r.notes, r.prior_period_session_id, r.prior_period_gl_balance, r.prior_period_supporting_balance,
+       r.copied_from_prior, r.created_at, r.updated_at
      FROM tenant_period_reconciliations r
      LEFT JOIN tenant_recon_requirements req ON r.requirement_id = req.requirement_id
      WHERE r.tenant_id = $1 AND r.recon_id = $2`,
@@ -166,7 +179,8 @@ export async function listPeriodReconciliationsByPeriod(
        r.gl_balance, r.supporting_balance, r.variance, r.tolerance_amount, r.is_within_tolerance,
        r.reconciling_items_total, r.unexplained_variance, r.supporting_source, r.supporting_document_refs,
        r.variance_explanation, r.status, r.prepared_by, r.prepared_at, r.reviewed_by, r.reviewed_at,
-       r.created_at, r.updated_at
+       r.notes, r.prior_period_session_id, r.prior_period_gl_balance, r.prior_period_supporting_balance,
+       r.copied_from_prior, r.created_at, r.updated_at
      FROM tenant_period_reconciliations r
      LEFT JOIN tenant_recon_requirements req ON r.requirement_id = req.requirement_id
      WHERE r.tenant_id = $1 AND r.period_id = $2
@@ -272,6 +286,94 @@ export async function updateReconStatus(
   const r = await pool.query(
     `UPDATE tenant_period_reconciliations SET ${sets.join(', ')} WHERE tenant_id = $${i} AND recon_id = $${i + 1}`,
     params
+  );
+  if ((r.rowCount ?? 0) === 0) return null;
+  return getPeriodReconciliationById(pool, tenantId, reconId);
+}
+
+/** Get recons from the most recent CERTIFIED session for the same entity (prior period). */
+export async function getPriorPeriodRecons(
+  pool: Pool,
+  tenantId: string,
+  entityId: string,
+  excludeSessionId: string
+): Promise<PeriodReconciliation[]> {
+  // Find the most recent CERTIFIED (or LOCKED) session for the same entity
+  const sessionResult = await pool.query<{ id: string }>(
+    `SELECT id FROM close_sessions
+     WHERE tenant_id = $1 AND entity_id = $2 AND id != $3
+       AND status IN ('certified', 'locked')
+     ORDER BY period_end DESC LIMIT 1`,
+    [tenantId, entityId, excludeSessionId]
+  );
+  if (sessionResult.rows.length === 0) return [];
+  const priorSessionId = sessionResult.rows[0].id;
+  return listPeriodReconciliationsByPeriod(pool, tenantId, priorSessionId);
+}
+
+/** Copy prior period data into a reconciliation record. */
+export async function copyFromPriorPeriod(
+  pool: Pool,
+  tenantId: string,
+  reconId: string,
+  priorRecon: PeriodReconciliation
+): Promise<PeriodReconciliation | null> {
+  const now = new Date().toISOString();
+  const r = await pool.query(
+    `UPDATE tenant_period_reconciliations
+     SET prior_period_session_id = $1,
+         prior_period_gl_balance = $2,
+         prior_period_supporting_balance = $3,
+         supporting_balance = $4,
+         supporting_source = $5,
+         copied_from_prior = TRUE,
+         status = CASE WHEN status = 'not_started' THEN 'in_progress' ELSE status END,
+         updated_at = $6
+     WHERE tenant_id = $7 AND recon_id = $8`,
+    [
+      priorRecon.periodId,
+      priorRecon.glBalance,
+      priorRecon.supportingBalance,
+      priorRecon.supportingBalance,
+      priorRecon.supportingSource,
+      now,
+      tenantId,
+      reconId,
+    ]
+  );
+  if ((r.rowCount ?? 0) === 0) return null;
+  return getPeriodReconciliationById(pool, tenantId, reconId);
+}
+
+/** Set prior period reference fields (without copying balances). */
+export async function setPriorPeriodRef(
+  pool: Pool,
+  tenantId: string,
+  reconId: string,
+  priorSessionId: string,
+  priorGlBalance: string | null,
+  priorSupportingBalance: string | null
+): Promise<void> {
+  await pool.query(
+    `UPDATE tenant_period_reconciliations
+     SET prior_period_session_id = $1,
+         prior_period_gl_balance = $2,
+         prior_period_supporting_balance = $3
+     WHERE tenant_id = $4 AND recon_id = $5`,
+    [priorSessionId, priorGlBalance, priorSupportingBalance, tenantId, reconId]
+  );
+}
+
+export async function updateReconNotes(
+  pool: Pool,
+  tenantId: string,
+  reconId: string,
+  notes: string | null
+): Promise<PeriodReconciliation | null> {
+  const now = new Date().toISOString();
+  const r = await pool.query(
+    `UPDATE tenant_period_reconciliations SET notes = $1, updated_at = $2 WHERE tenant_id = $3 AND recon_id = $4`,
+    [notes, now, tenantId, reconId]
   );
   if ((r.rowCount ?? 0) === 0) return null;
   return getPeriodReconciliationById(pool, tenantId, reconId);
