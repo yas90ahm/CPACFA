@@ -48,15 +48,17 @@ export default function ClosePage() {
   const createSession = useCreateSession();
   const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [entitySelect, setEntitySelect] = useState('');
-  // Default to current month
+  // Default to prior month (controllers always close last month)
   const [periodStart, setPeriodStart] = useState(() => {
     const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const prior = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return `${prior.getFullYear()}-${String(prior.getMonth() + 1).padStart(2, '0')}-01`;
   });
   const [periodEnd, setPeriodEnd] = useState(() => {
     const now = new Date();
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+    const lastDay = new Date(now.getFullYear(), now.getMonth(), 0).getDate();
+    const prior = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return `${prior.getFullYear()}-${String(prior.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
   });
 
   useEffect(() => {
@@ -79,7 +81,7 @@ export default function ClosePage() {
         periodEnd,
       });
       const id = (res as { id?: string }).id ?? (res as { closeSessionId?: string }).closeSessionId;
-      if (id) router.push(`/close/${id}/dashboard`);
+      if (id) router.push(`/close/${id}/dashboard?created=1`);
     } catch {
       // Error shown via mutation state if needed
     }

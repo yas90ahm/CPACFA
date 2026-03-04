@@ -121,13 +121,15 @@ export default function StatementsPage() {
     generateMutation.mutate();
   }, [generateMutation]);
 
+  const [exporting, setExporting] = useState(false);
+
   const handleExportPdf = useCallback(async () => {
+    setExporting(true);
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
       const token = getAuthToken();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch(`${baseUrl}/api/export/pdf`, {
+      const res = await fetch('/api/export/pdf', {
         method: 'POST',
         headers,
         body: JSON.stringify({ closeSessionId: sessionId, exportMode: 'draft' }),
@@ -140,15 +142,17 @@ export default function StatementsPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'Draft_Financials.pdf';
+      a.download = `Draft_Financials_${session?.periodLabel ?? sessionId}.pdf`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (err) {
       setToast({ type: 'warning', message: err instanceof Error ? err.message : 'Export failed' });
+    } finally {
+      setExporting(false);
     }
-  }, [sessionId, getAuthToken]);
+  }, [sessionId, getAuthToken, session?.periodLabel]);
 
   const handleRegenerate = useCallback(() => {
     if (hasStatements) {
@@ -237,11 +241,12 @@ export default function StatementsPage() {
           <button
             type="button"
             onClick={handleExportPdf}
-            className="px-3 py-1.5 rounded-input border border-border text-sm text-text-secondary hover:bg-hover print:hidden"
+            disabled={exporting}
+            className="px-3 py-1.5 rounded-input border border-border text-sm text-text-secondary hover:bg-hover print:hidden disabled:opacity-50"
             aria-label="Export PDF"
           >
-            <FileDown className="w-4 h-4 inline mr-1.5" />
-            Export PDF
+            {exporting ? <Loader2 className="w-4 h-4 inline mr-1.5 animate-spin" /> : <FileDown className="w-4 h-4 inline mr-1.5" />}
+            {exporting ? 'Exporting…' : 'Export PDF'}
           </button>
           <button
             type="button"

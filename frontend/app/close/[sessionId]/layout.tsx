@@ -61,7 +61,7 @@ function CloseSessionInner({ children }: { children: React.ReactNode }) {
         sessionId={sessionId}
         gatesRemaining={gatesRemaining}
         canAdvance={canAdvance}
-        isReviewer={false}
+        isReviewer={user?.role === 'reviewer' || user?.role === 'approver' || user?.role === 'admin'}
         isReadOnly={isReadOnly}
       />
       <Sidebar sessionId={sessionId} unmappedCount={unmappedCount} reconIncompleteCount={reconIncompleteCount} adjustmentsBadge={adjustmentsBadge} statementsStale={statementsStale} varianceUnexplainedCount={varianceUnexplainedCount} sessionState={state} />

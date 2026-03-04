@@ -347,3 +347,40 @@ export async function verifyChain(pool: Queryable, tenantId: string): Promise<Au
     ...(last ? { latestEntryHash: last.entry_hash, latestEntryId: last.id } : {}),
   };
 }
+
+/** List all audit ledger entries for a tenant (no period filter). Used as fallback for audit-log queries. */
+export async function listAllForTenant(
+  pool: Queryable,
+  tenantId: string,
+  opts?: { limit?: number }
+): Promise<Array<{
+  id: string;
+  event_type: string;
+  created_by: string | null;
+  created_at: string;
+  period_label: string | null;
+  user_prompt_rationale: string | null;
+}>> {
+  const limit = Math.min(opts?.limit ?? 100, 500);
+  const r = await pool.query<{
+    id: string;
+    event_type: string;
+    created_by: string | null;
+    created_at: string | Date;
+    period_label: string | null;
+    user_prompt_rationale: string | null;
+  }>(
+    `SELECT id, event_type, created_by, created_at, period_label, user_prompt_rationale
+     FROM audit_ledger WHERE tenant_id = $1
+     ORDER BY created_at DESC LIMIT $2`,
+    [tenantId, limit]
+  );
+  return r.rows.map((row) => ({
+    id: row.id,
+    event_type: row.event_type,
+    created_by: row.created_by,
+    created_at: typeof row.created_at === 'string' ? row.created_at : (row.created_at as Date).toISOString(),
+    period_label: row.period_label,
+    user_prompt_rationale: row.user_prompt_rationale,
+  }));
+}

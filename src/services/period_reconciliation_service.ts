@@ -154,7 +154,8 @@ export async function initializeReconciliations(
     }
   }
 
-  return created;
+  // Return all recons (idempotent — second call returns existing)
+  return allRecons;
 }
 
 /**

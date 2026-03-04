@@ -12,6 +12,8 @@ import { FilterBar } from '@/components/shared/FilterBar';
 import { cn } from '@/lib/utils';
 import { cmpMoney, moneyAbs, sumMoneyStrings } from '@/lib/money';
 import { apiFetch } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
+import { FileDown } from 'lucide-react';
 import type { TrialBalanceRow, AccountType, GLDrillDownResponse } from '@/lib/types/trial-balance';
 
 const ACCOUNT_TYPE_STYLE: Record<AccountType, string> = {
@@ -52,6 +54,8 @@ export default function TrialBalancePage() {
     enabled: !!sessionId && !!expandedId,
     staleTime: 30_000,
   });
+
+  const { getAuthToken } = useAuth();
 
   const { data, isLoading } = useTrialBalance(sessionId, adjusted);
   const { rows } = useTrialBalanceContext();
@@ -214,6 +218,27 @@ export default function TrialBalancePage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              const csvRows = [['Account Code', 'Account Name', 'Account Type', 'Debit Balance', 'Credit Balance', 'Net Balance', 'Mapping']];
+              filtered.forEach((r) => csvRows.push([r.accountCode, r.accountName, r.accountType, r.debitBalance, r.creditBalance, r.netBalance, r.mappingReportingLineName ?? '']));
+              const csv = csvRows.map((row) => row.map((c) => `"${c.replace(/"/g, '""')}"`).join(',')).join('\n');
+              const blob = new Blob([csv], { type: 'text/csv' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `trial-balance-${adjusted ? 'adjusted' : 'unadjusted'}.csv`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            }}
+            className="px-3 py-1.5 rounded-input border border-border text-sm text-text-secondary hover:bg-hover"
+          >
+            <FileDown className="w-4 h-4 inline mr-1" />
+            Export CSV
+          </button>
           <button
             type="button"
             onClick={() => setAdjusted(false)}

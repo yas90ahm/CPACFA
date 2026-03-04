@@ -56,7 +56,33 @@ router.get('/audit-log', async (req: Request, res: Response) => {
     const pool = getTenantPool(req);
     const tenantId = getTenantId(req) ?? 'default';
     const context = pool && tenantId ? { pool, tenantId } : undefined;
-    const entries = await queryAuditLog({ actor, action, resource, since, limit }, context);
+    let entries = await queryAuditLog({ actor, action, resource, since, limit }, context);
+
+    // Fallback: if audit_log table is empty, also try audit_ledger
+    if (entries.length === 0 && pool && tenantId) {
+      try {
+        const { listAllForTenant } = await import('../../db/repositories/audit_ledger_repository.js');
+        const ledgerEntries = await listAllForTenant(pool, tenantId, { limit: limit ?? 100 });
+        let mapped = ledgerEntries.map((e: any) => ({
+          id: e.id,
+          timestamp: typeof e.created_at === 'string' ? e.created_at : (e.created_at?.toISOString?.() ?? e.timestamp ?? new Date().toISOString()),
+          actor: e.created_by ?? e.userId ?? 'system',
+          action: e.event_type ?? e.eventType ?? 'unknown',
+          resource: e.period_label ?? e.periodLabel ?? undefined,
+          detail: e.user_prompt_rationale ?? e.description ?? undefined,
+        }));
+        if (actor) mapped = mapped.filter((e: any) => e.actor === actor);
+        if (action) mapped = mapped.filter((e: any) => e.action === action);
+        if (since) {
+          const sinceMs = new Date(since).getTime();
+          mapped = mapped.filter((e: any) => new Date(e.timestamp).getTime() >= sinceMs);
+        }
+        entries = mapped;
+      } catch {
+        // audit_ledger fallback failed — return empty from audit_log
+      }
+    }
+
     res.json({ entries });
   } catch (e) {
     send500(res, e, 'Audit log query failed');

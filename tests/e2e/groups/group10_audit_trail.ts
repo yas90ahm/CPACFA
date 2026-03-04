@@ -243,16 +243,23 @@ export function group10_audit_trail(): TestGroup {
             if (res.ok) {
               auditEntries = res.body?.entries ?? (Array.isArray(res.body) ? res.body : []);
             }
-            // Fallback: try session-scoped
-            if (auditEntries.length === 0) {
+            // Fallback: try session-scoped audit events (audit_ledger)
+            if (auditEntries.length === 0 && state.sessionId) {
               const res2 = await apiFetch(
                 'GET',
-                `/api/close/sessions/${state.sessionId}/audit-log?limit=50`,
+                `/api/close/sessions/${state.sessionId}/audit-events?limit=50`,
                 undefined,
                 state.preparerToken,
               );
               if (res2.ok) {
-                auditEntries = res2.body?.entries ?? (Array.isArray(res2.body) ? res2.body : []);
+                const events = res2.body?.events ?? res2.body?.entries ?? (Array.isArray(res2.body) ? res2.body : []);
+                // Normalize audit_ledger fields to match audit_log shape
+                auditEntries = events.map((e: any) => ({
+                  ...e,
+                  actor: e.actor ?? e.created_by ?? e.createdBy ?? e.userId,
+                  action: e.action ?? e.event_type ?? e.eventType,
+                  timestamp: e.timestamp ?? e.created_at ?? e.createdAt,
+                }));
               }
             }
           }
@@ -397,8 +404,21 @@ export function group10_audit_trail(): TestGroup {
           if (!allRes.ok) throw new Error('SKIP: Audit log query not available');
           let allEntries = allRes.body?.entries ?? (Array.isArray(allRes.body) ? allRes.body : []);
           if (allEntries.length === 0) {
-            // Fallback: use cached entries from 10.01
+            // Fallback: use cached entries from 10.01/10.05
             allEntries = auditEntries;
+          }
+          if (allEntries.length === 0 && state.sessionId) {
+            // Fallback: try session-scoped audit events
+            const evRes = await apiFetch('GET', `/api/close/sessions/${state.sessionId}/audit-events?limit=50`, undefined, state.preparerToken);
+            if (evRes.ok) {
+              const events = evRes.body?.events ?? evRes.body?.entries ?? (Array.isArray(evRes.body) ? evRes.body : []);
+              allEntries = events.map((e: any) => ({
+                ...e,
+                actor: e.actor ?? e.created_by ?? e.createdBy ?? e.userId,
+                action: e.action ?? e.event_type ?? e.eventType,
+                timestamp: e.timestamp ?? e.created_at ?? e.createdAt,
+              }));
+            }
           }
           if (allEntries.length === 0) throw new Error('SKIP: No audit entries');
 
@@ -441,9 +461,21 @@ export function group10_audit_trail(): TestGroup {
           if (!allRes.ok) throw new Error('SKIP: Audit log query not available');
           let allEntries = allRes.body?.entries ?? (Array.isArray(allRes.body) ? allRes.body : []);
           if (allEntries.length === 0) allEntries = auditEntries;
+          if (allEntries.length === 0 && state.sessionId) {
+            const evRes = await apiFetch('GET', `/api/close/sessions/${state.sessionId}/audit-events?limit=50`, undefined, state.preparerToken);
+            if (evRes.ok) {
+              const events = evRes.body?.events ?? evRes.body?.entries ?? (Array.isArray(evRes.body) ? evRes.body : []);
+              allEntries = events.map((e: any) => ({
+                ...e,
+                actor: e.actor ?? e.created_by ?? e.createdBy ?? e.userId,
+                action: e.action ?? e.event_type ?? e.eventType,
+                timestamp: e.timestamp ?? e.created_at ?? e.createdAt,
+              }));
+            }
+          }
           if (allEntries.length === 0) throw new Error('SKIP: No audit entries');
 
-          const knownActor = allEntries[0].actor ?? allEntries[0].userId;
+          const knownActor = allEntries[0].actor ?? allEntries[0].userId ?? allEntries[0].user_id ?? allEntries[0].userName ?? allEntries[0].created_by ?? allEntries[0].createdBy;
           if (!knownActor) throw new Error('SKIP: Entries have no actor field');
 
           // Filter by that actor

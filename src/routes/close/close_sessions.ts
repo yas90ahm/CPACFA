@@ -909,7 +909,9 @@ router.get('/statement-packages/:id/lines', async (req: Request, res: Response) 
         res.status(404).json({ error: 'Statement package not found' });
         return;
       }
-      res.json({ package: pkg, lines: comparative.lines, periods: comparative.periods, comparative: true });
+      // Map `amounts` → `periods` on each line so consumers can use either name
+      const lines = comparative.lines.map((l) => ({ ...l, periods: l.amounts }));
+      res.json({ package: pkg, lines, periods: comparative.periods, comparative: true });
       return;
     }
 

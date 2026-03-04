@@ -15,6 +15,7 @@ import {
   initializeReconciliations,
   reconcileAccount,
   createAndPostJE,
+  quickPostJE,
   generateStatements,
   explainAllVariances,
   expectStatus,
@@ -27,22 +28,33 @@ import {
 import { state } from '../run_all';
 import type { TestGroup } from '../run_all';
 
+/** Shared entity for cascade tests — created once, mapping rules reused */
+let _sharedEntityId: string | null = null;
+let _sharedEntityMapped = false;
+
+async function ensureSharedEntity(token: string): Promise<string> {
+  if (!_sharedEntityId) {
+    _sharedEntityId = `e2e-cascade-shared-${Date.now()}`;
+    await createEntity(token, _sharedEntityId);
+  }
+  return _sharedEntityId;
+}
+
 /**
- * Helper: set up a fresh session with GL uploaded, mapped, and reconciled.
- * Returns { sessionId, entityId, recons, accounts }.
+ * Fast cascade session setup: reuses shared entity+mapping, only creates
+ * a new session, uploads GL, inits recons, and reconciles.
  */
 async function setupCascadeSession(
   token: string,
   reviewerToken: string,
-  suffix: string,
+  _suffix: string,
 ): Promise<{
   sessionId: string;
   entityId: string;
   recons: any[];
   accounts: any[];
 }> {
-  const entityId = `e2e-cascade-${suffix}-${Date.now()}`;
-  await createEntity(token, entityId);
+  const entityId = await ensureSharedEntity(token);
 
   const sess = await createSession(token, entityId, '2026-01-01', '2026-01-31', '2026-01');
   const sessionId = sess.id;
@@ -51,8 +63,11 @@ async function setupCascadeSession(
   const glCsv = readFixture('minimalGL');
   await uploadGL(token, sessionId, glCsv);
 
-  // Map all accounts
-  await mapAllAccounts(token, sessionId, entityId);
+  // Map only once per entity (rules persist across sessions)
+  if (!_sharedEntityMapped) {
+    await mapAllAccounts(token, sessionId, entityId);
+    _sharedEntityMapped = true;
+  }
 
   // Initialize reconciliations
   const recons = await initializeReconciliations(token, sessionId);

@@ -157,19 +157,22 @@ async function main() {
   ];
 
   const allResults: TestResult[] = [];
-  const groupSummaries: Array<{ name: string; pass: number; fail: number; skip: number; total: number; failures: TestResult[] }> = [];
+  const groupSummaries: Array<{ name: string; pass: number; fail: number; skip: number; total: number; elapsed: number; failures: TestResult[] }> = [];
 
   for (const group of allGroups) {
     console.log(`\nGROUP: ${group.name}`);
     console.log('-'.repeat(60));
+    const groupStart = Date.now();
     const results = await runGroup(group);
+    const groupElapsed = Date.now() - groupStart;
     allResults.push(...results);
 
     const pass = results.filter((r) => r.status === 'pass').length;
     const fail = results.filter((r) => r.status === 'fail').length;
     const skip = results.filter((r) => r.status === 'skip').length;
     const failures = results.filter((r) => r.status === 'fail');
-    groupSummaries.push({ name: group.name, pass, fail, skip, total: results.length, failures });
+    console.log(`  ── group total: ${(groupElapsed / 1000).toFixed(1)}s`);
+    groupSummaries.push({ name: group.name, pass, fail, skip, total: results.length, elapsed: groupElapsed, failures });
   }
 
   // Summary
@@ -191,7 +194,8 @@ async function main() {
   for (const g of groupSummaries) {
     const statusLabel = g.fail > 0 ? 'FAIL' : 'PASS';
     const pad = 50 - g.name.length;
-    console.log(`${g.name}${' '.repeat(Math.max(1, pad))}${g.pass}/${g.total}  ${statusLabel}`);
+    const gSec = (g.elapsed / 1000).toFixed(1);
+    console.log(`${g.name}${' '.repeat(Math.max(1, pad))}${g.pass}/${g.total}  ${statusLabel}  ${gSec}s`);
     for (const f of g.failures) {
       console.log(`  \u2717 ${f.id} ${f.name} — ${f.error?.slice(0, 120)}`);
     }
@@ -229,6 +233,39 @@ async function main() {
     }
     console.log('');
   }
+
+  // ── Full timing table: every test, sorted slowest → fastest ──
+  console.log('============================================================');
+  console.log('         FULL TIMING TABLE (slowest → fastest)');
+  console.log('============================================================');
+  const sorted = [...allResults].sort((a, b) => b.elapsed - a.elapsed);
+  const idW = 6;   // e.g. "19.00"
+  const msW = 8;   // e.g. "  12345"
+  console.log(`${'ID'.padEnd(idW)}  ${'ms'.padStart(msW)}  ${'sec'.padStart(7)}  ST  Name`);
+  console.log('-'.repeat(80));
+  for (const r of sorted) {
+    const st = r.status === 'pass' ? '✓' : r.status === 'skip' ? '○' : '✗';
+    const sec = (r.elapsed / 1000).toFixed(1);
+    console.log(`${r.id.padEnd(idW)}  ${String(r.elapsed).padStart(msW)}  ${sec.padStart(7)}  ${st}   ${r.name}`);
+  }
+  console.log('-'.repeat(80));
+  console.log(`Total: ${allResults.length} tests  |  ${minutes}m ${seconds}s`);
+  console.log('');
+
+  // ── Group timing table ──
+  console.log('============================================================');
+  console.log('         GROUP TIMING (slowest → fastest)');
+  console.log('============================================================');
+  const sortedGroups = [...groupSummaries].sort((a, b) => b.elapsed - a.elapsed);
+  for (const g of sortedGroups) {
+    const sec = (g.elapsed / 1000).toFixed(1);
+    const pct = totalElapsed > 0 ? ((g.elapsed / totalElapsed) * 100).toFixed(1) : '0';
+    const pad = 50 - g.name.length;
+    console.log(`${g.name}${' '.repeat(Math.max(1, pad))}${sec.padStart(8)}s  ${pct.padStart(5)}%`);
+  }
+  console.log('-'.repeat(66));
+  console.log(`${'TOTAL'.padEnd(50)} ${(totalElapsed / 1000).toFixed(1).padStart(8)}s  100.0%`);
+  console.log('============================================================\n');
 
   process.exit(totalFail > 0 ? 1 : 0);
 }

@@ -68,6 +68,7 @@ export default function CloseDashboardPage() {
   const [ingestToast, setIngestToast] = useState<string | null>(null);
 
   const ingested = searchParams.get('ingested') === '1';
+  const justCreated = searchParams.get('created') === '1';
   const accountsParam = searchParams.get('accounts') ?? '52';
   const unmappedParam = searchParams.get('unmapped') ?? '5';
   const effectiveState = session?.state;
@@ -81,6 +82,16 @@ export default function CloseDashboardPage() {
     u.searchParams.delete('unmapped');
     window.history.replaceState({}, '', u.pathname + u.search);
   }, [ingested, accountsParam, unmappedParam]);
+
+  const [createdToast, setCreatedToast] = useState<string | null>(null);
+  useEffect(() => {
+    if (!justCreated || !session) return;
+    const periodLabel = session.periodLabel ?? 'this period';
+    setCreatedToast(`Session created for ${periodLabel}. Prior period account mappings and AJE templates will carry forward automatically.`);
+    const u = new URL(window.location.href);
+    u.searchParams.delete('created');
+    window.history.replaceState({}, '', u.pathname + u.search);
+  }, [justCreated, session]);
 
   const { data: reconciliations = [] } = useReconciliations(sessionId);
   const { data: ajeTemplates = [] } = useAjeTemplates(sessionId);
@@ -186,6 +197,13 @@ export default function CloseDashboardPage() {
         <div className="rounded-input border border-status-green bg-status-green-dim text-status-green px-4 py-3 text-sm flex items-center justify-between">
           <span>{ingestToast}</span>
           <button type="button" onClick={() => setIngestToast(null)} className="text-status-green hover:opacity-80" aria-label="Dismiss">×</button>
+        </div>
+      )}
+
+      {createdToast && (
+        <div className="rounded-input border border-accent bg-accent-dim text-accent px-4 py-3 text-sm flex items-center justify-between">
+          <span>{createdToast}</span>
+          <button type="button" onClick={() => setCreatedToast(null)} className="text-accent hover:opacity-80" aria-label="Dismiss">×</button>
         </div>
       )}
 

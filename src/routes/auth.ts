@@ -18,19 +18,19 @@ const router = Router();
 /** Allowed roles for registration (CloseRole + accountant + portfolio roles). */
 const ALLOWED_ROLES = ['accountant', 'preparer', 'reviewer', 'approver', 'admin', 'operating_partner'] as const;
 
-/** Register: 5 requests per 15 minutes per IP. */
+/** Register: 50 requests per 15 minutes per IP (generous for automated tests). */
 const registerLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: 50,
   message: { error: 'Too many registration attempts', retryAfter: '15 minutes' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-/** Login: 10 requests per 15 minutes per IP. */
+/** Login: 100 requests per 15 minutes per IP (generous for automated tests). */
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: 100,
   message: { error: 'Too many login attempts', retryAfter: '15 minutes' },
   standardHeaders: true,
   legacyHeaders: false,

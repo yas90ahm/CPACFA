@@ -27,6 +27,13 @@ interface VarianceRow {
 }
 
 function rowToVariance(row: VarianceRow): VarianceRecord {
+  const changeAmt = Number(row.change_amount);
+  const changePct = row.change_percentage != null ? Number(row.change_percentage) : null;
+  const thresholdPct = Number(row.material_threshold_pct);
+  const priorAmt = Number(row.prior_amount);
+  const isMaterial = priorAmt === 0
+    ? Math.abs(changeAmt) > 0.01
+    : changePct != null ? Math.abs(changePct) >= thresholdPct : false;
   return {
     id: row.id,
     tenantId: row.tenant_id,
@@ -36,10 +43,11 @@ function rowToVariance(row: VarianceRow): VarianceRecord {
     statement: row.statement,
     label: row.label ?? undefined,
     currentAmount: Number(row.current_amount),
-    priorAmount: Number(row.prior_amount),
-    changeAmount: Number(row.change_amount),
-    changePercentage: row.change_percentage != null ? Number(row.change_percentage) : null,
-    materialThresholdPct: Number(row.material_threshold_pct),
+    priorAmount: priorAmt,
+    changeAmount: changeAmt,
+    changePercentage: changePct,
+    materialThresholdPct: thresholdPct,
+    isMaterial,
     explanation: row.explanation ?? undefined,
     aiDraftExplanation: row.ai_draft_explanation ?? undefined,
     explanationSource: (row.explanation_source as VarianceRecord['explanationSource']) ?? undefined,

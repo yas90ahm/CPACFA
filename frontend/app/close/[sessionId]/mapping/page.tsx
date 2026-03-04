@@ -7,14 +7,14 @@ import { useTrialBalanceContext } from '../context/trial-balance-context';
 import { MoneyCell } from '@/components/shared/MoneyCell';
 import { FilterBar } from '@/components/shared/FilterBar';
 import { AISuggestionCard } from '@/components/shared/AISuggestionCard';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, apiUpload } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useCloseSession } from '@/lib/queries/close-session';
 import { useCOASuggestions, useGenerateSuggestions, useAcceptSuggestion, useRejectSuggestion } from '@/lib/queries/suggestions';
 import type { TrialBalanceRow, AccountType } from '@/lib/types/trial-balance';
 import type { COASuggestion } from '@/lib/types/suggestion';
 import { sumMoneyStrings } from '@/lib/money';
-import { Pencil, Check, X, Sparkles, Loader2 } from 'lucide-react';
+import { Pencil, Check, X, Sparkles, Loader2, Upload, Download } from 'lucide-react';
 
 /** API taxonomy line (flat). */
 interface TaxonomyLine {
@@ -147,6 +147,33 @@ export default function MappingPage() {
   const [editingSuggestionId, setEditingSuggestionId] = useState<string | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
 
+  /* ── CSV Import State ── */
+  const [csvImportResult, setCsvImportResult] = useState<{ imported: number; skipped: number; errors: { row: number; reason: string }[] } | null>(null);
+  const [csvImporting, setCsvImporting] = useState(false);
+  const [csvError, setCsvError] = useState<string | null>(null);
+
+  const handleCsvImport = async (file: File) => {
+    setCsvImporting(true);
+    setCsvError(null);
+    setCsvImportResult(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('entityId', entityId);
+      const result = await apiUpload<{ imported: number; skipped: number; errors: { row: number; reason: string }[] }>('/api/coa-mapping/import', formData);
+      setCsvImportResult(result);
+      if (result.imported > 0) {
+        queryClient.invalidateQueries({ queryKey: ['trial-balance'] });
+        queryClient.invalidateQueries({ queryKey: ['taxonomy'] });
+        queryClient.invalidateQueries({ queryKey: ['readiness'] });
+      }
+    } catch (err) {
+      setCsvError(err instanceof Error ? err.message : 'CSV import failed');
+    } finally {
+      setCsvImporting(false);
+    }
+  };
+
   /* ── Filtering ── */
   const filtered = useMemo(() => {
     let list = rows;
@@ -230,17 +257,41 @@ export default function MappingPage() {
           <h1 className="font-display text-2xl text-primary">Account Mapping</h1>
           <p className="text-text-secondary text-sm mt-0.5">Map GL accounts to reporting line items</p>
         </div>
-        {unmappedCount > 0 && (
-          <button
-            type="button"
-            disabled={generateMutation.isPending}
-            onClick={() => generateMutation.mutate(undefined)}
-            className="px-4 py-2 rounded-input bg-accent text-white text-sm font-medium hover:bg-accent/90 disabled:opacity-50 flex items-center gap-2"
+        <div className="flex items-center gap-2">
+          <a
+            href={`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'}/api/coa-mapping/import/template`}
+            className="px-3 py-2 rounded-input border border-border text-sm text-text-secondary hover:bg-hover flex items-center gap-1.5"
+            download
           >
-            {generateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            {generateMutation.isPending ? 'Generating...' : 'Auto-Map Remaining'}
-          </button>
-        )}
+            <Download className="w-4 h-4" />
+            Template
+          </a>
+          <label className={cn('px-4 py-2 rounded-input border border-border text-sm font-medium flex items-center gap-2 cursor-pointer hover:bg-hover', csvImporting && 'opacity-50 pointer-events-none')}>
+            <Upload className="w-4 h-4" />
+            {csvImporting ? 'Importing...' : 'Import CSV'}
+            <input
+              type="file"
+              accept=".csv"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleCsvImport(f);
+                e.target.value = '';
+              }}
+            />
+          </label>
+          {unmappedCount > 0 && (
+            <button
+              type="button"
+              disabled={generateMutation.isPending}
+              onClick={() => generateMutation.mutate(undefined)}
+              className="px-4 py-2 rounded-input bg-accent text-white text-sm font-medium hover:bg-accent/90 disabled:opacity-50 flex items-center gap-2"
+            >
+              {generateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              {generateMutation.isPending ? 'Generating...' : 'Auto-Map Remaining'}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-4 py-2 px-3 rounded-input bg-surface border border-border">
@@ -254,6 +305,22 @@ export default function MappingPage() {
         </div>
         <span className="font-mono text-sm text-primary">{mappedCount}/{totalAccounts} ({progressPct}%)</span>
       </div>
+
+      {csvImportResult && (
+        <div className={cn('rounded-input border px-4 py-3 text-sm flex items-center justify-between', csvImportResult.imported > 0 ? 'border-status-green bg-status-green-dim text-status-green' : 'border-status-amber bg-status-amber-dim text-status-amber')}>
+          <span>
+            Imported {csvImportResult.imported} mappings. {csvImportResult.skipped > 0 && `${csvImportResult.skipped} skipped.`}
+            {csvImportResult.errors.length > 0 && ` ${csvImportResult.errors.length} errors.`}
+          </span>
+          <button type="button" onClick={() => setCsvImportResult(null)} className="hover:opacity-80">×</button>
+        </div>
+      )}
+      {csvError && (
+        <div className="rounded-input border border-status-red bg-status-red-dim text-status-red px-4 py-3 text-sm flex items-center justify-between">
+          <span>{csvError}</span>
+          <button type="button" onClick={() => setCsvError(null)} className="hover:opacity-80">×</button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6">
         <div className="space-y-4">

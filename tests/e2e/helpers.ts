@@ -550,6 +550,19 @@ export async function createAndPostJE(
 }
 
 // ---------------------------------------------------------------------------
+/**
+ * Convenience wrapper: create \u2192 propose \u2192 approve \u2192 post in one call.
+ */
+export async function quickPostJE(
+  token: string,
+  approverToken: string,
+  sessionId: string,
+  lines: Array<{ accountRef: string; debit: string; credit: string; description?: string }>,
+  memo: string,
+): Promise<any> {
+  return createAndPostJE(token, sessionId, lines, memo, approverToken);
+}
+
 // Statement helpers
 // ---------------------------------------------------------------------------
 
@@ -609,254 +622,254 @@ export async function fullCloseToReview(
   sessionId: string,
   glCsv: string,
 ): Promise<void> {
-  // 1. Upload GL
+  const done = new Set<string>();
+  const MAX_ROUNDS = 2;
+
+  // Always upload GL first
   await uploadGL(preparer.token, sessionId, glCsv);
 
-  // 2. Map all accounts
-  await mapAllAccounts(preparer.token, sessionId);
+  for (let round = 0; round <= MAX_ROUNDS; round++) {
+    // Check which gates are failing
+    const readiness = await getReadiness(preparer.token, sessionId);
+    const gates = readiness?.gates ?? [];
+    const failing = gates.filter((g: any) => g.status === 'fail' || g.passing === false);
 
-  // 3. Init reconciliations
-  const recons = await initializeReconciliations(preparer.token, sessionId);
-
-  // 4. Get adjusted TB for reconciliation (must match glBalance which uses adjusted TB)
-  const tbRes = await apiFetch('GET', `/api/close/sessions/${sessionId}/trial-balance?type=adjusted`, undefined, preparer.token);
-  const accounts = tbRes.body?.accounts ?? tbRes.body?.entries ?? tbRes.body?.rows ?? [];
-
-  // 5. Reconcile each account — re-fetch each recon to get latest glBalance + reconcilingItemsTotal
-  //    unexplained_variance = (gl - supporting) + items, so supporting = gl + items for zero variance
-  const reconListRes = await apiFetch('GET', `/api/close/sessions/${sessionId}/reconciliations`, undefined, preparer.token);
-  const latestRecons = reconListRes.body?.reconciliations ?? recons;
-  for (const recon of latestRecons) {
-    const rid = recon.id ?? recon.recon_id ?? recon.reconId;
-    const code = recon.accountCode ?? recon.account_code;
-    const glBal = Number(recon.glBalance ?? recon.gl_balance ?? 0);
-    const itemsTotal = Number(recon.reconcilingItemsTotal ?? recon.reconciling_items_total ?? 0);
-    // supporting = gl + items => unexplained = (gl - (gl+items)) + items = 0
-    const balance = String(glBal + itemsTotal);
-    await reconcileAccount(preparer.token, sessionId, rid, balance, reviewer.token);
-  }
-
-  // 6. Propose/resolve templates
-  const tmplRes = await apiFetch('POST', '/api/close/templates/propose', { closeSessionId: sessionId }, preparer.token);
-  const proposals = tmplRes.body?.proposed ?? tmplRes.body?.proposedApplications ?? tmplRes.body?.applications ?? [];
-  for (const app of proposals) {
-    if (app.status === 'proposed') {
-      const skipRes = await apiFetch('POST', '/api/close/templates/skip', {
-        applicationId: app.applicationId ?? app.id,
-        closeSessionId: sessionId,
-        reason: 'Skipped for E2E test',
-      }, preparer.token);
-      if (!skipRes.ok) {
-        console.log(`  [tmpl-diag] Skip failed for app ${app.id}: ${skipRes.status} ${JSON.stringify(skipRes.body).slice(0, 200)}`);
+    // If no gates or all pass, attempt advance
+    if (failing.length === 0) {
+      const advRes = await apiFetch('POST', `/api/close/sessions/${sessionId}/advance`, {}, preparer.token);
+      if (advRes.ok) { await _ensureAdvanced(preparer.token, sessionId); return; }
+      // If advance failed with no failing gates on round 0, do a full pass as fallback
+      if (round === 0 && !done.has('full_fallback')) {
+        await _fullFallbackPass(preparer, reviewer, sessionId, done);
+        done.add('full_fallback');
+        const advRes2 = await apiFetch('POST', `/api/close/sessions/${sessionId}/advance`, {}, preparer.token);
+        if (advRes2.ok) { await _ensureAdvanced(preparer.token, sessionId); return; }
+        continue;
       }
     }
+
+    // If this was the last round, fail with details
+    if (round === MAX_ROUNDS) {
+      const failNames = failing.map((g: any) =>
+        `${g.name ?? g.gate}: ${g.detail ?? g.reason ?? g.status}`
+      ).join('; ');
+      throw new Error(
+        `Advance to UNDER_REVIEW failed after ${MAX_ROUNDS} rounds. ` +
+        `Failing gates (${failing.length}/${gates.length}): [${failNames}]`
+      );
+    }
+
+    // Remediate only failing gates, in dependency order
+    const failingNames = failing.map((g: any) => (g.name ?? g.gate ?? '').toLowerCase() as string);
+
+    // 1. Mapping
+    if (_gateMatch(failingNames, 'mapping', 'account', 'unmapped') && !done.has('mapping')) {
+      await mapAllAccounts(preparer.token, sessionId);
+      done.add('mapping');
+    }
+
+    // 2. Reconciliation — only non-approved accounts
+    if (_gateMatch(failingNames, 'recon', 'reconcil')) {
+      const reconList = await apiFetch('GET', `/api/close/sessions/${sessionId}/reconciliations`, undefined, preparer.token);
+      let reconArr = reconList.body?.reconciliations ?? [];
+      if (reconArr.length === 0 && !done.has('recon_init')) {
+        await initializeReconciliations(preparer.token, sessionId);
+        done.add('recon_init');
+        const reconList2 = await apiFetch('GET', `/api/close/sessions/${sessionId}/reconciliations`, undefined, preparer.token);
+        reconArr = reconList2.body?.reconciliations ?? [];
+      }
+      for (const r of reconArr) {
+        const s = (r.status ?? '').toLowerCase();
+        if (s === 'approved') continue; // skip already-approved
+        const rid = r.id ?? r.recon_id ?? r.reconId;
+        if (!rid) continue;
+        const glVal = Number(r.glBalance ?? r.gl_balance ?? 0);
+        const itemsVal = Number(r.reconcilingItemsTotal ?? r.reconciling_items_total ?? 0);
+        try {
+          await reconcileAccount(preparer.token, sessionId, rid, String(glVal + itemsVal), reviewer.token);
+        } catch { /* skip failures */ }
+      }
+    }
+
+    // 3. Templates
+    if (_gateMatch(failingNames, 'template', 'aje', 'recurring')) {
+      const tmplRes = await apiFetch('POST', '/api/close/templates/propose', { closeSessionId: sessionId }, preparer.token);
+      const proposals = tmplRes.body?.proposed ?? tmplRes.body?.proposedApplications ?? tmplRes.body?.applications ?? [];
+      for (const app of proposals) {
+        if (app.status === 'proposed') {
+          await apiFetch('POST', '/api/close/templates/skip', {
+            applicationId: app.applicationId ?? app.id, closeSessionId: sessionId, reason: 'Skipped for E2E test',
+          }, preparer.token);
+        }
+      }
+      const statusRes = await apiFetch('GET', `/api/close/sessions/${sessionId}/template-status`, undefined, preparer.token);
+      for (const a of (statusRes.body?.applications ?? [])) {
+        if (a.status === 'proposed') {
+          await apiFetch('POST', '/api/close/templates/skip', {
+            applicationId: a.applicationId ?? a.id, closeSessionId: sessionId, reason: 'Auto-skipped by E2E',
+          }, preparer.token);
+        }
+      }
+    }
+
+    // 4. Statements — only if stale or missing
+    if (_gateMatch(failingNames, 'statement', 'stale')) {
+      await generateStatements(preparer.token, sessionId);
+    }
+
+    // 5. Variances — only unexplained material ones (explainAllVariances already filters)
+    if (_gateMatch(failingNames, 'variance')) {
+      await explainAllVariances(preparer.token, sessionId);
+    }
+
+    // 6. Checklist
+    if (_gateMatch(failingNames, 'checklist')) {
+      if (!done.has('checklist_init')) {
+        await apiFetch('POST', `/api/close/sessions/${sessionId}/checklist/initialize`, {}, preparer.token);
+        done.add('checklist_init');
+      }
+      const clRes = await apiFetch('GET', `/api/close/sessions/${sessionId}/checklist`, undefined, preparer.token);
+      for (const item of (clRes.body?.items ?? [])) {
+        if (item.status === 'pending' || item.status === 'in_progress') {
+          await apiFetch('POST', `/api/close/checklist-items/${item.id}/complete`, {
+            completedBy: preparer.userId || preparer.email || 'e2e-preparer',
+            notes: 'Completed by E2E test pipeline',
+          }, preparer.token);
+        }
+      }
+    }
+
+    // 7. Issues
+    if (_gateMatch(failingNames, 'issue', 'hitl', 'blocking')) {
+      const issRes = await apiFetch('GET', `/api/close/issues?closeSessionId=${sessionId}`, undefined, preparer.token);
+      for (const issue of (issRes.body?.issues ?? [])) {
+        const iid = issue.id ?? issue.issueId;
+        const st = (issue.status ?? '').toLowerCase();
+        if (!iid || st === 'verified' || st === 'waived') continue;
+        if (st !== 'resolved') {
+          await apiFetch('POST', `/api/close/issues/${iid}/resolve`, {
+            resolutionType: 'acknowledged_with_justification',
+            resolutionDescription: 'Auto-resolved by E2E pipeline',
+          }, preparer.token);
+        }
+        await apiFetch('POST', `/api/close/issues/${iid}/verify`, { method: 'manual_review' }, preparer.token);
+      }
+    }
+
+    // 8. Evidence
+    if (_gateMatch(failingNames, 'evidence')) {
+      const reconList = await apiFetch('GET', `/api/close/sessions/${sessionId}/reconciliations`, undefined, preparer.token);
+      for (const r of (reconList.body?.reconciliations ?? [])) {
+        const rid = r.id ?? r.recon_id ?? r.reconId;
+        if (!rid) continue;
+        const evidencePath = path.join(__dirname, 'fixtures', 'sample_evidence.pdf');
+        if (fs.existsSync(evidencePath)) {
+          await apiUpload(`/api/close/sessions/${sessionId}/reconciliations/${rid}/evidence`,
+            { description: 'E2E evidence upload' }, 'file', evidencePath, preparer.token);
+        }
+      }
+    }
+
+    // 9. JEs
+    if (_gateMatch(failingNames, 'je', 'journal')) {
+      const jeRes = await apiFetch('GET', `/api/close/journal-entries?closeSessionId=${sessionId}`, undefined, preparer.token);
+      for (const je of (jeRes.body?.journalEntries ?? jeRes.body?.entries ?? jeRes.body ?? [])) {
+        const jeStatus = (je.status ?? '').toLowerCase();
+        const jeId = je.id ?? je.jeId;
+        if (!jeId) continue;
+        if (jeStatus === 'draft') {
+          await apiFetch('POST', `/api/close/journal-entries/${jeId}/propose`, {}, preparer.token);
+          await apiFetch('POST', `/api/close/journal-entries/${jeId}/approve`, {}, reviewer.token);
+        } else if (jeStatus === 'proposed') {
+          await apiFetch('POST', `/api/close/journal-entries/${jeId}/approve`, {}, reviewer.token);
+        }
+      }
+    }
+
+    // Try advance after remediation
+    const advRes = await apiFetch('POST', `/api/close/sessions/${sessionId}/advance`, {}, preparer.token);
+    if (advRes.ok) { await _ensureAdvanced(preparer.token, sessionId); return; }
   }
-  // Double-check: re-propose to catch any that weren't returned the first time
-  const tmplRes2 = await apiFetch('POST', '/api/close/templates/propose', { closeSessionId: sessionId }, preparer.token);
-  const proposals2 = tmplRes2.body?.proposed ?? [];
-  for (const app of proposals2) {
+}
+
+/** Check if any failing gate name matches any of the keywords */
+function _gateMatch(failingNames: string[], ...keywords: string[]): boolean {
+  for (let i = 0; i < failingNames.length; i++) {
+    for (const kw of keywords) {
+      if (failingNames[i].includes(kw)) return true;
+    }
+  }
+  return false;
+}
+
+/** After first advance succeeds, check if a second advance is needed */
+async function _ensureAdvanced(token: string, sessionId: string): Promise<void> {
+  const session = await getSession(token, sessionId);
+  const st = (session.status ?? session.state ?? '').toLowerCase();
+  if (st === 'in_progress') {
+    const advRes = await apiFetch('POST', `/api/close/sessions/${sessionId}/advance`, {}, token);
+    if (!advRes.ok) throw new Error(`Second advance failed (${advRes.status}): ${JSON.stringify(advRes.body).slice(0, 300)}`);
+  }
+}
+
+/** Fallback: do one full pass of all pipeline steps (used when readiness returns no gates) */
+async function _fullFallbackPass(
+  preparer: TestUser, reviewer: TestUser, sessionId: string, done: Set<string>,
+): Promise<void> {
+  if (!done.has('mapping')) { await mapAllAccounts(preparer.token, sessionId); done.add('mapping'); }
+  if (!done.has('recon_init')) {
+    await initializeReconciliations(preparer.token, sessionId);
+    done.add('recon_init');
+  }
+  const reconList = await apiFetch('GET', `/api/close/sessions/${sessionId}/reconciliations`, undefined, preparer.token);
+  for (const r of (reconList.body?.reconciliations ?? [])) {
+    const s = (r.status ?? '').toLowerCase();
+    if (s === 'approved') continue;
+    const rid = r.id ?? r.recon_id ?? r.reconId;
+    if (!rid) continue;
+    const glVal = Number(r.glBalance ?? r.gl_balance ?? 0);
+    const itemsVal = Number(r.reconcilingItemsTotal ?? r.reconciling_items_total ?? 0);
+    try { await reconcileAccount(preparer.token, sessionId, rid, String(glVal + itemsVal), reviewer.token); } catch {}
+  }
+
+  const tmplRes = await apiFetch('POST', '/api/close/templates/propose', { closeSessionId: sessionId }, preparer.token);
+  for (const app of (tmplRes.body?.proposed ?? tmplRes.body?.proposedApplications ?? tmplRes.body?.applications ?? [])) {
     if (app.status === 'proposed') {
       await apiFetch('POST', '/api/close/templates/skip', {
-        applicationId: app.applicationId ?? app.id,
-        closeSessionId: sessionId,
-        reason: 'Skipped for E2E test (retry)',
+        applicationId: app.applicationId ?? app.id, closeSessionId: sessionId, reason: 'Skipped for E2E test',
       }, preparer.token);
     }
   }
 
-  // 7. Generate statements
   await generateStatements(preparer.token, sessionId);
-
-  // 8. Explain variances
   await explainAllVariances(preparer.token, sessionId);
 
-  // 9. Initialize close checklist and complete all items
-  const checklistInitRes = await apiFetch('POST', `/api/close/sessions/${sessionId}/checklist/initialize`, {}, preparer.token);
-  if (checklistInitRes.ok || checklistInitRes.status === 200 || checklistInitRes.status === 201) {
-    const checklistRes = await apiFetch('GET', `/api/close/sessions/${sessionId}/checklist`, undefined, preparer.token);
-    const checkItems = checklistRes.body?.items ?? [];
-    for (const item of checkItems) {
-      if (item.status === 'pending' || item.status === 'in_progress') {
-        await apiFetch('POST', `/api/close/checklist-items/${item.id}/complete`, {
-          completedBy: preparer.userId ?? preparer.email ?? 'e2e-preparer',
-          notes: 'Completed by E2E test pipeline',
-        }, preparer.token);
-      }
+  if (!done.has('checklist_init')) {
+    await apiFetch('POST', `/api/close/sessions/${sessionId}/checklist/initialize`, {}, preparer.token);
+    done.add('checklist_init');
+  }
+  const clRes = await apiFetch('GET', `/api/close/sessions/${sessionId}/checklist`, undefined, preparer.token);
+  for (const item of (clRes.body?.items ?? [])) {
+    if (item.status === 'pending' || item.status === 'in_progress') {
+      await apiFetch('POST', `/api/close/checklist-items/${item.id}/complete`, {
+        completedBy: preparer.userId || preparer.email || 'e2e-preparer',
+        notes: 'Completed by E2E test pipeline',
+      }, preparer.token);
     }
   }
 
-  // 10. Resolve and verify any open blocking issues
-  const issueListRes = await apiFetch('GET', `/api/close/issues?closeSessionId=${sessionId}`, undefined, preparer.token);
-  const openIssues = issueListRes.body?.issues ?? [];
-  for (const issue of openIssues) {
+  const issRes = await apiFetch('GET', `/api/close/issues?closeSessionId=${sessionId}`, undefined, preparer.token);
+  for (const issue of (issRes.body?.issues ?? [])) {
     const iid = issue.id ?? issue.issueId;
     const st = (issue.status ?? '').toLowerCase();
     if (!iid || st === 'verified' || st === 'waived') continue;
-    // Resolve first (if not already resolved)
     if (st !== 'resolved') {
       await apiFetch('POST', `/api/close/issues/${iid}/resolve`, {
         resolutionType: 'acknowledged_with_justification',
-        resolutionDescription: 'Auto-resolved by E2E test pipeline',
+        resolutionDescription: 'Auto-resolved by E2E pipeline',
       }, preparer.token);
     }
-    // Then verify to make it terminal
-    await apiFetch('POST', `/api/close/issues/${iid}/verify`, {
-      method: 'manual_review',
-    }, preparer.token);
-  }
-
-  // 11. Advance to UNDER_REVIEW (with retry + auto-fix, up to 3 rounds)
-  let advRes1 = await apiFetch('POST', `/api/close/sessions/${sessionId}/advance`, {}, preparer.token);
-  for (let attempt = 0; attempt < 3 && !advRes1.ok; attempt++) {
-    // Diagnose failing gates and attempt to fix them
-    const readinessRes = await apiFetch('GET', `/api/close/sessions/${sessionId}/readiness?format=gates`, undefined, preparer.token);
-    const gates = readinessRes.body?.gates ?? [];
-    const failing = gates.filter((g: any) => g.status === 'fail' || g.passing === false);
-
-    for (const gate of failing) {
-      const gn = (gate.name ?? gate.gate ?? '').toLowerCase();
-      if (gn.includes('recon') || gn.includes('reconcil')) {
-        // Re-reconcile any incomplete recons — use GL balance as supporting to zero out variance
-        const reconList = await apiFetch('GET', `/api/close/sessions/${sessionId}/reconciliations`, undefined, preparer.token);
-        const reconArr = reconList.body?.reconciliations ?? [];
-        console.log(`  [recon-fix] Found ${reconArr.length} recons, statuses: ${reconArr.map((r: any) => `${r.accountCode ?? r.account_code ?? '?'}=${r.status}(gl=${r.glBalance ?? r.gl_balance ?? 'null'})`).join(', ')}`);
-        for (const r of reconArr) {
-          const s = (r.status ?? '').toLowerCase();
-          if (s === 'approved') continue;
-          const rid = r.id ?? r.recon_id ?? r.reconId;
-          if (!rid) continue;
-          // supporting = gl + reconcilingItemsTotal => unexplained_variance = (gl - supporting) + items = 0
-          const glVal = Number(r.glBalance ?? r.gl_balance ?? r.balance ?? 0);
-          const itemsVal = Number(r.reconcilingItemsTotal ?? r.reconciling_items_total ?? 0);
-          const bal = String(glVal + itemsVal);
-          console.log(`  [recon-fix] Reconciling ${r.accountCode ?? r.account_code ?? rid}: status=${s}, gl=${glVal}, items=${itemsVal}, supporting=${bal}`);
-          try {
-            await reconcileAccount(preparer.token, sessionId, rid, bal, reviewer.token);
-            console.log(`  [recon-fix] ✓ ${r.accountCode ?? rid} reconciled OK`);
-          } catch (e: any) {
-            console.log(`  [recon-fix] ✗ ${r.accountCode ?? rid} reconcileAccount failed: ${e.message?.slice(0, 200)}`);
-            // If reconcile fails, try step-by-step with better error reporting
-            try {
-              const sbRes = await apiFetch('POST', `/api/close/sessions/${sessionId}/reconciliations/${rid}/supporting-balance`,
-                { amount: bal }, preparer.token);
-              console.log(`  [recon-fix]   supporting-balance: ${sbRes.status}`);
-              const cmpRes = await apiFetch('POST', `/api/close/sessions/${sessionId}/reconciliations/${rid}/complete`,
-                { variance_explanation: 'Auto-reconciled by E2E test pipeline — amounts verified.' }, preparer.token);
-              console.log(`  [recon-fix]   complete: ${cmpRes.status} ${JSON.stringify(cmpRes.body).slice(0,150)}`);
-              const apRes = await apiFetch('POST', `/api/close/sessions/${sessionId}/reconciliations/${rid}/approve`,
-                {}, reviewer.token);
-              console.log(`  [recon-fix]   approve: ${apRes.status} ${JSON.stringify(apRes.body).slice(0,150)}`);
-            } catch (e2: any) {
-              console.log(`  [recon-fix]   fallback also failed: ${e2.message?.slice(0, 200)}`);
-            }
-          }
-        }
-      } else if (gn.includes('template') || gn.includes('aje') || gn.includes('recurring')) {
-        // First, propose any new templates
-        await apiFetch('POST', '/api/close/templates/propose', { closeSessionId: sessionId }, preparer.token);
-        // Then use template-status to find ALL pending applications and skip them
-        const statusRes = await apiFetch('GET', `/api/close/sessions/${sessionId}/template-status`, undefined, preparer.token);
-        const apps = statusRes.body?.applications ?? [];
-        for (const a of apps) {
-          if (a.status === 'proposed') {
-            const skipRes = await apiFetch('POST', '/api/close/templates/skip', {
-              applicationId: a.applicationId ?? a.id, closeSessionId: sessionId, reason: 'Auto-skipped by E2E auto-fix',
-            }, preparer.token);
-            if (!skipRes.ok) {
-              console.log(`  [tmpl-fix] Skip app ${a.id} failed: ${skipRes.status} ${JSON.stringify(skipRes.body).slice(0,150)}`);
-            }
-          }
-        }
-      } else if (gn.includes('statement') || gn.includes('stale')) {
-        await generateStatements(preparer.token, sessionId);
-        await explainAllVariances(preparer.token, sessionId);
-      } else if (gn.includes('variance')) {
-        await explainAllVariances(preparer.token, sessionId);
-      } else if (gn.includes('mapping') || gn.includes('account')) {
-        await mapAllAccounts(preparer.token, sessionId);
-      } else if (gn.includes('issue') || gn.includes('hitl') || gn.includes('blocking')) {
-        // Resolve AND verify ALL non-terminal issues
-        const issRes = await apiFetch('GET', `/api/close/issues?closeSessionId=${sessionId}`, undefined, preparer.token);
-        const issues = issRes.body?.issues ?? [];
-        for (const issue of issues) {
-          const iid = issue.id ?? issue.issueId;
-          const st = (issue.status ?? '').toLowerCase();
-          if (!iid || st === 'verified' || st === 'waived') continue;
-          if (st !== 'resolved') {
-            await apiFetch('POST', `/api/close/issues/${iid}/resolve`, {
-              resolutionType: 'acknowledged_with_justification',
-              resolutionDescription: 'Auto-resolved by E2E auto-fix',
-            }, preparer.token);
-          }
-          await apiFetch('POST', `/api/close/issues/${iid}/verify`, {
-            method: 'manual_review',
-          }, preparer.token);
-        }
-      } else if (gn.includes('checklist')) {
-        // Re-initialize and complete checklist
-        await apiFetch('POST', `/api/close/sessions/${sessionId}/checklist/initialize`, {}, preparer.token);
-        const clRes = await apiFetch('GET', `/api/close/sessions/${sessionId}/checklist`, undefined, preparer.token);
-        const items = clRes.body?.items ?? [];
-        for (const item of items) {
-          if (item.status === 'pending' || item.status === 'in_progress') {
-            await apiFetch('POST', `/api/close/checklist-items/${item.id}/complete`, {
-              completedBy: preparer.userId ?? preparer.email ?? 'e2e-preparer',
-              notes: 'Completed by E2E auto-fix',
-            }, preparer.token);
-          }
-        }
-      } else if (gn.includes('evidence')) {
-        // Re-upload evidence to any recons missing it
-        const reconList2 = await apiFetch('GET', `/api/close/sessions/${sessionId}/reconciliations`, undefined, preparer.token);
-        const reconArr2 = reconList2.body?.reconciliations ?? [];
-        for (const r of reconArr2) {
-          const rid = r.id ?? r.recon_id ?? r.reconId;
-          if (!rid) continue;
-          const evidencePath = path.join(__dirname, 'fixtures', 'sample_evidence.pdf');
-          if (fs.existsSync(evidencePath)) {
-            await apiUpload(
-              `/api/close/sessions/${sessionId}/reconciliations/${rid}/evidence`,
-              { description: 'E2E evidence upload' },
-              'file', evidencePath, preparer.token,
-            );
-          }
-        }
-      } else if (gn.includes('je') || gn.includes('journal')) {
-        // Approve/reject any draft or proposed JEs
-        const jeRes = await apiFetch('GET', `/api/close/journal-entries?closeSessionId=${sessionId}`, undefined, preparer.token);
-        const jes = jeRes.body?.journalEntries ?? jeRes.body?.entries ?? jeRes.body ?? [];
-        for (const je of jes) {
-          const jeStatus = (je.status ?? '').toLowerCase();
-          const jeId = je.id ?? je.jeId;
-          if (!jeId) continue;
-          if (jeStatus === 'draft') {
-            await apiFetch('POST', `/api/close/journal-entries/${jeId}/propose`, {}, preparer.token);
-            await apiFetch('POST', `/api/close/journal-entries/${jeId}/approve`, {}, reviewer.token);
-          } else if (jeStatus === 'proposed') {
-            await apiFetch('POST', `/api/close/journal-entries/${jeId}/approve`, {}, reviewer.token);
-          }
-        }
-      }
-    }
-
-    // Retry advance after fixes
-    advRes1 = await apiFetch('POST', `/api/close/sessions/${sessionId}/advance`, {}, preparer.token);
-  }
-  if (!advRes1.ok) {
-    // Final diagnostics
-    const r2 = await apiFetch('GET', `/api/close/sessions/${sessionId}/readiness?format=gates`, undefined, preparer.token);
-    const g2 = r2.body?.gates ?? [];
-    const f2 = g2.filter((g: any) => g.status === 'fail' || g.passing === false);
-    const failNames = f2.map((g: any) => `${g.name ?? g.gate}: ${g.detail ?? g.reason ?? g.status}`).join('; ');
-    throw new Error(`Advance to UNDER_REVIEW failed after auto-fix (${advRes1.status}): failing gates=[${failNames}]`);
-  }
-  // May need a second advance depending on current state
-  const session = await getSession(preparer.token, sessionId);
-  if (session.status === 'in_progress' || session.state === 'IN_PROGRESS') {
-    const advRes2 = await apiFetch('POST', `/api/close/sessions/${sessionId}/advance`, {}, preparer.token);
-    if (!advRes2.ok) {
-      throw new Error(`Second advance failed (${advRes2.status}): ${JSON.stringify(advRes2.body).slice(0, 500)}`);
-    }
+    await apiFetch('POST', `/api/close/issues/${iid}/verify`, { method: 'manual_review' }, preparer.token);
   }
 }
 
@@ -872,7 +885,7 @@ export async function fullCloseToCertified(
   const certifier = approver ?? reviewer;
   const res = await apiFetch('POST', `/api/close/sessions/${sessionId}/certify`, {
     confirmation: 'CERTIFY',
-    certifiedBy: certifier.userId ?? certifier.email ?? 'e2e-reviewer',
+    certifiedBy: certifier.userId || certifier.email || 'e2e-reviewer',
   }, certifier.token);
   if (!res.ok) throw new Error(`Certify failed: ${JSON.stringify(res.body)}`);
 }

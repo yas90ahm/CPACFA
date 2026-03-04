@@ -1,7 +1,7 @@
 'use client';
 
 import { useParams, useRouter } from 'next/navigation';
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useReconciliations } from '@/lib/queries/reconciliations';
 import { apiFetch } from '@/lib/api';
@@ -10,8 +10,8 @@ import { MoneyCell } from '@/components/shared/MoneyCell';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { FilterBar } from '@/components/shared/FilterBar';
 import type { Reconciliation, ReconStatus } from '@/lib/types/reconciliation';
-import { moneyAbs, cmpMoney, sumMoneyStrings } from '@/lib/money';
-import { Paperclip, Check, AlertCircle } from 'lucide-react';
+import { moneyAbs, cmpMoney, sumMoneyStrings, fmtMoney } from '@/lib/money';
+import { Paperclip, Check, AlertCircle, Layers, CheckCircle2, Loader2 } from 'lucide-react';
 
 const STATUS_ORDER: ReconStatus[] = ['not_started', 'in_progress', 'completed', 'approved'];
 const STATUS_LABEL: Record<ReconStatus, string> = {
@@ -26,6 +26,46 @@ const STATUS_BADGE: Record<ReconStatus, 'neutral' | 'info' | 'warning' | 'succes
   completed: 'warning',
   approved: 'success',
 };
+
+// ─── Batch-mode per-row state ────────────────────────────────────────────────
+type RowSaveState = 'idle' | 'saving' | 'saved' | 'error';
+
+interface BatchRowState {
+  value: string;        // raw input string the user typed
+  saveState: RowSaveState;
+  dirty: boolean;       // modified but not yet saved
+  errorMsg?: string;
+}
+
+// Compute client-side variance: glBalance - supportingBalance (display only)
+function computeVarianceDisplay(glBalance: string, supportingBalanceInput: string): string {
+  const gl = parseFloat(glBalance.replace(/[$,()]/g, '') || '0');
+  const sup = parseFloat(supportingBalanceInput.replace(/[$,()]/g, '') || '0');
+  if (!isFinite(gl) || !isFinite(sup) || supportingBalanceInput.trim() === '') return '';
+  return (gl - sup).toFixed(2);
+}
+
+// Determine if a client-side variance is over tolerance
+function isOverTolerance(variance: string, tolerance: string): boolean {
+  if (!variance) return false;
+  const v = Math.abs(parseFloat(variance) || 0);
+  const t = moneyAbs(tolerance);
+  return v > t;
+}
+
+// ─── SaveIndicator component ─────────────────────────────────────────────────
+function SaveIndicator({ state, error }: { state: RowSaveState; error?: string }) {
+  if (state === 'saving') {
+    return <Loader2 className="w-4 h-4 animate-spin text-text-muted" />;
+  }
+  if (state === 'saved') {
+    return <CheckCircle2 className="w-4 h-4 text-status-green" />;
+  }
+  if (state === 'error') {
+    return <span title={error ?? 'Save failed'}><AlertCircle className="w-4 h-4 text-status-red" /></span>;
+  }
+  return null;
+}
 
 export default function ReconciliationPage() {
   const params = useParams();
@@ -72,6 +112,33 @@ export default function ReconciliationPage() {
   const [overToleranceOnly, setOverToleranceOnly] = useState(false);
   const [sortKey, setSortKey] = useState<keyof Reconciliation | string>('status');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  // ─── Batch mode state ──────────────────────────────────────────────────────
+  const [batchMode, setBatchMode] = useState(false);
+  // Map from reconId → BatchRowState
+  const [batchRows, setBatchRows] = useState<Record<string, BatchRowState>>({});
+  // Track save-indicator timers so we can clear 'saved' after a delay
+  const savedTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const [isSavingAll, setIsSavingAll] = useState(false);
+
+  // When batch mode is enabled, seed batchRows from current server data
+  const handleToggleBatch = useCallback(() => {
+    setBatchMode((prev) => {
+      if (!prev) {
+        // Entering batch mode — seed inputs from existing supportingBalance values
+        const seed: Record<string, BatchRowState> = {};
+        for (const r of recons) {
+          seed[r.id] = {
+            value: r.supportingBalance ?? '',
+            saveState: 'idle',
+            dirty: false,
+          };
+        }
+        setBatchRows(seed);
+      }
+      return !prev;
+    });
+  }, [recons]);
 
   const filtered = useMemo(() => {
     let list = recons;
@@ -146,6 +213,18 @@ export default function ReconciliationPage() {
   };
 
   const rowClassName = (row: Reconciliation) => {
+    if (batchMode) {
+      const rowState = batchRows[row.id];
+      const inputVal = rowState?.value ?? '';
+      const variance = computeVarianceDisplay(row.glBalance, inputVal);
+      if (variance !== '' && isOverTolerance(variance, row.tolerance)) {
+        return 'border-l-4 border-l-status-red';
+      }
+      if (variance !== '' && !isOverTolerance(variance, row.tolerance) && Math.abs(parseFloat(variance) || 0) === 0) {
+        return 'border-l-4 border-l-status-green';
+      }
+      return '';
+    }
     const over = row.supportingBalance != null && moneyAbs(row.unexplainedVariance) > moneyAbs(row.tolerance);
     const completedNotApproved = row.status === 'completed' && !row.reviewer;
     if (over) return 'border-l-4 border-l-status-red';
@@ -153,7 +232,77 @@ export default function ReconciliationPage() {
     return '';
   };
 
-  const columns = [
+  // ─── Batch: save a single row ──────────────────────────────────────────────
+  const saveSingleRow = useCallback(async (reconId: string, value: string): Promise<boolean> => {
+    if (value.trim() === '') return true; // nothing to save
+
+    setBatchRows((prev) => ({
+      ...prev,
+      [reconId]: { ...prev[reconId], saveState: 'saving', errorMsg: undefined },
+    }));
+
+    try {
+      await apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/supporting-balance`, {
+        method: 'POST',
+        body: { supportingBalance: value.trim() },
+      });
+
+      setBatchRows((prev) => ({
+        ...prev,
+        [reconId]: { ...prev[reconId], saveState: 'saved', dirty: false },
+      }));
+
+      // Clear 'saved' indicator after 2.5 s
+      if (savedTimers.current[reconId]) clearTimeout(savedTimers.current[reconId]);
+      savedTimers.current[reconId] = setTimeout(() => {
+        setBatchRows((prev) => ({
+          ...prev,
+          [reconId]: { ...prev[reconId], saveState: 'idle' },
+        }));
+      }, 2500);
+
+      queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+      return true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Save failed';
+      setBatchRows((prev) => ({
+        ...prev,
+        [reconId]: { ...prev[reconId], saveState: 'error', errorMsg: msg },
+      }));
+      return false;
+    }
+  }, [sessionId, queryClient]);
+
+  const handleBatchInputChange = useCallback((reconId: string, newValue: string) => {
+    setBatchRows((prev) => ({
+      ...prev,
+      [reconId]: { ...prev[reconId], value: newValue, dirty: true, saveState: 'idle', errorMsg: undefined },
+    }));
+  }, []);
+
+  const handleBatchInputBlur = useCallback((reconId: string) => {
+    const rowState = batchRows[reconId];
+    if (!rowState || !rowState.dirty || rowState.value.trim() === '') return;
+    saveSingleRow(reconId, rowState.value);
+  }, [batchRows, saveSingleRow]);
+
+  // ─── Batch: Save All ───────────────────────────────────────────────────────
+  const handleSaveAll = useCallback(async () => {
+    const dirtyIds = Object.entries(batchRows)
+      .filter(([, s]) => s.dirty && s.value.trim() !== '')
+      .map(([id]) => id);
+
+    if (dirtyIds.length === 0) return;
+
+    setIsSavingAll(true);
+    await Promise.all(dirtyIds.map((id) => saveSingleRow(id, batchRows[id].value)));
+    setIsSavingAll(false);
+  }, [batchRows, saveSingleRow]);
+
+  const dirtyCount = Object.values(batchRows).filter((s) => s.dirty && s.value.trim() !== '').length;
+
+  // ─── Columns: normal view ──────────────────────────────────────────────────
+  const normalColumns = [
     {
       id: 'accountCode',
       header: 'Account Code',
@@ -300,7 +449,116 @@ export default function ReconciliationPage() {
     },
   ];
 
-  const footer = (
+  // ─── Columns: batch mode ───────────────────────────────────────────────────
+  const batchColumns = [
+    {
+      id: 'accountCode',
+      header: 'Account Code',
+      width: '90px',
+      align: 'left' as const,
+      sortKey: 'accountCode',
+      cell: (row: Reconciliation) => <span className="font-mono text-sm">{row.accountCode}</span>,
+    },
+    {
+      id: 'accountName',
+      header: 'Account Name',
+      width: undefined,
+      align: 'left' as const,
+      sortKey: 'accountName',
+      cell: (row: Reconciliation) => <span className="text-primary">{row.accountName}</span>,
+    },
+    {
+      id: 'glBalance',
+      header: 'GL Balance',
+      width: '140px',
+      align: 'right' as const,
+      sortKey: 'glBalance',
+      cell: (row: Reconciliation) => (
+        <span className="font-mono text-sm text-text-secondary">{fmtMoney(row.glBalance, { dollar: true })}</span>
+      ),
+    },
+    {
+      id: 'supportingBalance',
+      header: 'Supporting Balance',
+      width: '160px',
+      align: 'right' as const,
+      sortKey: 'supportingBalance',
+      cell: (row: Reconciliation) => {
+        const rowState = batchRows[row.id] ?? { value: row.supportingBalance ?? '', saveState: 'idle', dirty: false };
+        return (
+          <div
+            className="flex items-center gap-1.5 justify-end"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="text"
+              inputMode="decimal"
+              value={rowState.value}
+              onChange={(e) => handleBatchInputChange(row.id, e.target.value)}
+              onBlur={() => handleBatchInputBlur(row.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.currentTarget.blur();
+                }
+              }}
+              placeholder="0.00"
+              className={[
+                'w-28 text-right font-mono text-sm px-2 py-1 rounded-input border',
+                'bg-surface text-primary focus:outline-none focus:ring-1 focus:ring-accent',
+                rowState.saveState === 'error'
+                  ? 'border-status-red'
+                  : rowState.dirty
+                  ? 'border-accent'
+                  : 'border-border',
+              ].join(' ')}
+            />
+            <div className="w-4 flex-shrink-0">
+              <SaveIndicator state={rowState.saveState} error={rowState.errorMsg} />
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      id: 'variance',
+      header: 'Variance',
+      width: '130px',
+      align: 'right' as const,
+      sortKey: undefined,
+      cell: (row: Reconciliation) => {
+        const rowState = batchRows[row.id];
+        const inputVal = rowState?.value ?? row.supportingBalance ?? '';
+        const variance = computeVarianceDisplay(row.glBalance, inputVal);
+        if (variance === '') return <span className="text-text-muted font-mono">—</span>;
+        const over = isOverTolerance(variance, row.tolerance);
+        const zero = Math.abs(parseFloat(variance) || 0) === 0;
+        return (
+          <span
+            className={[
+              'font-mono text-sm',
+              over ? 'text-status-red' : zero ? 'text-status-green' : 'text-text-secondary',
+            ].join(' ')}
+          >
+            {fmtMoney(variance, { dollar: true })}
+          </span>
+        );
+      },
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      width: '110px',
+      align: 'left' as const,
+      sortKey: 'status',
+      cell: (row: Reconciliation) => (
+        <StatusBadge variant={STATUS_BADGE[row.status]} label={STATUS_LABEL[row.status]} />
+      ),
+    },
+  ];
+
+  const columns = batchMode ? batchColumns : normalColumns;
+
+  const footer = batchMode ? undefined : (
     <tr>
       <td colSpan={2} className="px-3 py-2.5 text-xs font-medium text-text-secondary text-left">
         Totals
@@ -356,15 +614,44 @@ export default function ReconciliationPage() {
 
   return (
     <div className="space-y-4">
+      {/* Header row */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl text-primary">Reconciliation</h1>
           <p className="text-text-secondary text-sm mt-0.5">Prove every significant balance sheet account</p>
         </div>
-        <span className="text-sm text-text-secondary">
-          {completed} of {total} complete ({progressPct}%)
-        </span>
+        <div className="flex items-center gap-3">
+          {/* Batch Entry toggle */}
+          <button
+            type="button"
+            onClick={handleToggleBatch}
+            className={[
+              'inline-flex items-center gap-2 px-3 py-1.5 rounded-input border text-sm font-medium transition-colors',
+              batchMode
+                ? 'bg-accent text-white border-accent hover:opacity-90'
+                : 'bg-surface text-text-secondary border-border hover:border-accent hover:text-accent',
+            ].join(' ')}
+            title={batchMode ? 'Exit batch entry mode' : 'Enter batch entry mode — edit supporting balances inline'}
+          >
+            <Layers className="w-4 h-4" />
+            Batch Entry
+          </button>
+          <span className="text-sm text-text-secondary">
+            {completed} of {total} complete ({progressPct}%)
+          </span>
+        </div>
       </div>
+
+      {/* Batch mode info banner */}
+      {batchMode && (
+        <div className="flex items-center gap-3 py-2.5 px-4 rounded-input bg-surface border border-accent/40 text-sm text-text-secondary">
+          <Layers className="w-4 h-4 text-accent shrink-0" />
+          <span>
+            Batch mode: type a supporting balance and press <kbd className="px-1 py-0.5 rounded bg-elevated border border-border font-mono text-xs">Tab</kbd> or <kbd className="px-1 py-0.5 rounded bg-elevated border border-border font-mono text-xs">Enter</kbd> to auto-save.
+            Click any row to open the detail view.
+          </span>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-4 py-3 px-4 rounded-input bg-surface border border-border">
         <span className="text-status-green text-sm">Completed: {completed}</span>
@@ -414,6 +701,40 @@ export default function ReconciliationPage() {
         rowClassName={rowClassName}
         emptyMessage="No reconciliations match your filters"
       />
+
+      {/* Save All footer — only shown in batch mode when there are dirty rows */}
+      {batchMode && (
+        <div className="flex items-center justify-end gap-4 pt-1">
+          {dirtyCount > 0 && (
+            <span className="text-sm text-text-secondary">
+              {dirtyCount} unsaved {dirtyCount === 1 ? 'entry' : 'entries'}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={handleSaveAll}
+            disabled={isSavingAll || dirtyCount === 0}
+            className={[
+              'inline-flex items-center gap-2 px-4 py-2 rounded-input border text-sm font-medium transition-colors',
+              dirtyCount === 0
+                ? 'bg-surface text-text-muted border-border cursor-not-allowed'
+                : 'bg-accent text-white border-accent hover:opacity-90',
+            ].join(' ')}
+          >
+            {isSavingAll ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Saving…
+              </>
+            ) : (
+              <>
+                <Check className="w-4 h-4" />
+                Save All ({dirtyCount})
+              </>
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -73,23 +73,8 @@ export default function LoginPage() {
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-primary, #E8EAF0)' }}>
-              Tenant ID (optional)
-            </label>
-            <input
-              type="text"
-              value={tenantId}
-              onChange={(e) => setTenantId(e.target.value)}
-              placeholder="tenant-xxx"
-              className="w-full px-3 py-2 rounded-lg text-sm"
-              style={{
-                backgroundColor: 'var(--bg-input, #1A1D27)',
-                border: '1px solid var(--border-default, #2A2D37)',
-                color: 'var(--text-primary, #E8EAF0)',
-              }}
-            />
-          </div>
+          {/* Tenant ID hidden by default — only needed for multi-tenant switching */}
+          <input type="hidden" value={tenantId} />
 
           {error && (
             <div className="p-3 rounded-lg text-sm" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#EF4444' }}>

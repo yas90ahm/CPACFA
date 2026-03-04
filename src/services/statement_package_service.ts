@@ -394,10 +394,10 @@ export async function generateStatements(
     const priorSession = priorSessions
       .filter((s) => (s.periodEnd as string) < session.periodEnd)
       .sort((a, b) => (b.periodEnd as string).localeCompare(a.periodEnd as string))[0];
+    let priorLinesInput: Array<{ fsLineId: string; amount: number; statement: string; label?: string }> | null = null;
     if (priorSession) {
       const priorPkgs = await repo.listStatementPackagesByCloseSessionId(tx, tenantId, priorSession.id, 1);
       const priorPkgForVariance = priorPkgs[0];
-      let priorLinesInput: Array<{ fsLineId: string; amount: number; statement: string; label?: string }> | null = null;
       if (priorPkgForVariance) {
         const priorLines = await repo.listStatementLinesByPackageId(tx, priorPkgForVariance.id);
         priorLinesInput = priorLines.map((l) => ({
@@ -419,24 +419,33 @@ export async function generateStatements(
           label: (l.metadata as { label?: string })?.label,
         }));
       }
-      if (priorLinesInput) {
-        const currentLines = lines.map((l) => ({
-          fsLineId: l.fsLineId,
-          amount: l.amount,
-          statement: l.statement,
-          label: (l.metadata as { label?: string })?.label,
-        }));
-        const entitySettings = await getEntitySettings(tx, tenantId, session.entityId);
-        const materialPct = Number(entitySettings.varianceMaterialityPercent) || 10;
-        await computeVariances(tx, {
-          tenantId,
-          closeSessionId,
-          periodLabel,
-          currentLines,
-          priorLines: priorLinesInput,
-          materialThresholdPct: materialPct,
-        });
-      }
+    }
+    // First period (no prior session): compare against zero so variances are always generated
+    if (!priorLinesInput) {
+      priorLinesInput = lines.map((l) => ({
+        fsLineId: l.fsLineId,
+        amount: 0,
+        statement: l.statement,
+        label: (l.metadata as { label?: string })?.label,
+      }));
+    }
+    {
+      const currentLines = lines.map((l) => ({
+        fsLineId: l.fsLineId,
+        amount: l.amount,
+        statement: l.statement,
+        label: (l.metadata as { label?: string })?.label,
+      }));
+      const entitySettings = await getEntitySettings(tx, tenantId, session.entityId);
+      const materialPct = Number(entitySettings.varianceMaterialityPercent) || 10;
+      await computeVariances(tx, {
+        tenantId,
+        closeSessionId,
+        periodLabel,
+        currentLines,
+        priorLines: priorLinesInput,
+        materialThresholdPct: materialPct,
+      });
     }
 
     await recordMaterialEvent(tx, {

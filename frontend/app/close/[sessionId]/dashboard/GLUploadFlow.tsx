@@ -456,15 +456,7 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
           <p className="text-xs text-text-tertiary mt-2">Showing {displayRows.length} of {tbPreview.rows.length} accounts</p>
         </div>
 
-        <div className="bg-surface-alt border border-border rounded-card p-4 text-sm">
-          <h4 className="font-medium text-primary mb-2">Compared to {periodLabel}:</h4>
-          <ul className="list-disc list-inside text-text-secondary space-y-1">
-            <li>5 new accounts: {tbPreview.newAccounts.join(', ')}</li>
-            <li>3 accounts with no activity: {tbPreview.inactiveAccounts.join(', ')}</li>
-            <li>47 accounts carried forward</li>
-            <li>Mapping status: {tbPreview.priorMappedCount} of {tbPreview.accountCount} accounts mapped (5 new accounts need mapping)</li>
-          </ul>
-        </div>
+        {/* Prior period comparison removed — real data not yet available from API */}
 
         <div className="flex gap-3">
           <button type="button" onClick={() => setStep('mapping')} className="px-4 py-2 rounded-input border border-border text-sm font-medium hover:bg-hover">
@@ -506,8 +498,7 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
             <li>Import {parseResult?.rowCount ?? 0} GL entries</li>
             <li>Create a trial balance with {tbPreview.accountCount} accounts</li>
             <li>Advance the session to IN_PROGRESS</li>
-            <li>Carry forward {tbPreview.priorMappedCount} account mappings from prior period</li>
-            <li>Flag {tbPreview.newAccounts.length} new accounts for mapping</li>
+            <li>Existing account mappings from prior period will carry forward automatically</li>
           </ul>
         </div>
         <div className="flex gap-3">

@@ -133,9 +133,21 @@ export default function PortfolioPage() {
     return (
       <div className="p-8 max-w-[1600px] mx-auto">
         <h1 className="text-2xl font-display text-primary mb-6">Portfolio Dashboard</h1>
-        <div className="bg-surface border border-border rounded-card p-8 text-center">
-          <p className="text-text-secondary">No portfolio companies yet.</p>
-          <p className="text-sm text-text-muted mt-2">Companies will appear here when close sessions are created.</p>
+        <div className="bg-surface border border-border rounded-card p-12 text-center">
+          <div className="w-16 h-16 rounded-full bg-accent/10 flex items-center justify-center mx-auto mb-4">
+            <TrendingUp className="w-8 h-8 text-accent" />
+          </div>
+          <p className="text-lg font-medium text-primary mb-2">Welcome to Sovereign CPA Engine</p>
+          <p className="text-text-secondary text-sm max-w-md mx-auto mb-6">
+            Get started by creating your first monthly close session. Your portfolio companies will appear here automatically.
+          </p>
+          <button
+            type="button"
+            onClick={() => router.push('/close')}
+            className="px-6 py-2.5 bg-accent text-white rounded-input text-sm font-medium hover:bg-accent/90"
+          >
+            Create First Close Session
+          </button>
         </div>
       </div>
     );

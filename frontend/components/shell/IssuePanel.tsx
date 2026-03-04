@@ -2,8 +2,10 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
-import { X, AlertCircle, AlertTriangle, Info } from 'lucide-react';
+import { apiFetch } from '@/lib/api';
+import { X, AlertCircle, AlertTriangle, Info, Plus } from 'lucide-react';
 import type { CloseIssue } from '@/lib/types/issues';
 
 const severityOrder: CloseIssue['severity'][] = ['CRITICAL', 'BLOCKING', 'WARNING', 'INFO'];
@@ -20,6 +22,23 @@ const severityIcons = {
   INFO: Info,
 };
 
+const ISSUE_CATEGORIES = [
+  { value: 'reconciliation', label: 'Reconciliation' },
+  { value: 'posting', label: 'Posting' },
+  { value: 'classification', label: 'Classification' },
+  { value: 'intake', label: 'Intake' },
+  { value: 'policy', label: 'Policy' },
+  { value: 'presentation', label: 'Presentation' },
+  { value: 'export_blocker', label: 'Export Blocker' },
+] as const;
+
+const ISSUE_SEVERITIES = [
+  { value: 'critical', label: 'Critical' },
+  { value: 'high', label: 'High' },
+  { value: 'med', label: 'Medium' },
+  { value: 'low', label: 'Low' },
+] as const;
+
 interface IssuePanelProps {
   issues: CloseIssue[];
   sessionId: string;
@@ -30,6 +49,43 @@ interface IssuePanelProps {
 }
 
 export function IssuePanel({ issues, sessionId, open, onClose, onOpenRequest, categoryFilter }: IssuePanelProps) {
+  const queryClient = useQueryClient();
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newDescription, setNewDescription] = useState('');
+  const [newCategory, setNewCategory] = useState('reconciliation');
+  const [newSeverity, setNewSeverity] = useState('high');
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const createIssueMutation = useMutation({
+    mutationFn: (body: { closeSessionId: string; title: string; description?: string; category: string; severity: string }) =>
+      apiFetch('/api/close/issues', { method: 'POST', body }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues', sessionId] });
+      setShowCreateForm(false);
+      setNewTitle('');
+      setNewDescription('');
+      setNewCategory('reconciliation');
+      setNewSeverity('high');
+      setCreateError(null);
+    },
+    onError: (err) => {
+      setCreateError(err instanceof Error ? err.message : 'Failed to create issue');
+    },
+  });
+
+  const handleCreateIssue = () => {
+    if (!newTitle.trim()) return;
+    setCreateError(null);
+    createIssueMutation.mutate({
+      closeSessionId: sessionId,
+      title: newTitle.trim(),
+      description: newDescription.trim() || undefined,
+      category: newCategory,
+      severity: newSeverity,
+    });
+  };
+
   const grouped = severityOrder.map((sev) => ({
     severity: sev,
     items: issues.filter((i) => i.severity === sev && (!categoryFilter || i.category === categoryFilter)),
@@ -48,17 +104,89 @@ export function IssuePanel({ issues, sessionId, open, onClose, onOpenRequest, ca
       )}
       <aside
         className={cn(
-          'fixed top-14 right-0 z-50 w-[360px] h-[calc(100vh-56px)] bg-surface border-l border-border shadow-xl transition-transform',
+          'fixed top-14 right-0 z-50 w-[360px] h-[calc(100vh-56px)] bg-surface border-l border-border shadow-xl transition-transform flex flex-col',
           open ? 'translate-x-0' : 'translate-x-full'
         )}
       >
         <div className="flex items-center justify-between p-4 border-b border-border">
           <h2 className="font-medium text-primary">Issues</h2>
-          <button type="button" onClick={onClose} className="p-2 text-text-secondary hover:text-primary">
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowCreateForm(!showCreateForm)}
+              className="p-1.5 rounded-input text-text-secondary hover:text-primary hover:bg-hover"
+              title="Flag new issue"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+            <button type="button" onClick={onClose} className="p-2 text-text-secondary hover:text-primary">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
-        <div className="overflow-y-auto p-4 space-y-4">
+
+        {showCreateForm && (
+          <div className="p-4 border-b border-border space-y-3 bg-surface-alt">
+            <div className="text-sm font-medium text-primary">Flag New Issue</div>
+            <input
+              type="text"
+              placeholder="Issue title"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              className="w-full px-3 py-1.5 rounded-input border border-border bg-input text-sm text-primary"
+            />
+            <textarea
+              placeholder="Description (optional)"
+              value={newDescription}
+              onChange={(e) => setNewDescription(e.target.value)}
+              rows={2}
+              className="w-full px-3 py-1.5 rounded-input border border-border bg-input text-sm text-primary resize-none"
+            />
+            <div className="flex gap-2">
+              <select
+                value={newCategory}
+                onChange={(e) => setNewCategory(e.target.value)}
+                className="flex-1 px-2 py-1.5 rounded-input border border-border bg-input text-sm"
+              >
+                {ISSUE_CATEGORIES.map((c) => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
+              </select>
+              <select
+                value={newSeverity}
+                onChange={(e) => setNewSeverity(e.target.value)}
+                className="flex-1 px-2 py-1.5 rounded-input border border-border bg-input text-sm"
+              >
+                {ISSUE_SEVERITIES.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+            </div>
+            {createError && <p className="text-xs text-status-red">{createError}</p>}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => { setShowCreateForm(false); setCreateError(null); }}
+                className="px-3 py-1.5 rounded-input border border-border text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateIssue}
+                disabled={!newTitle.trim() || createIssueMutation.isPending}
+                className="px-3 py-1.5 rounded-input bg-accent text-white text-xs font-medium disabled:opacity-50"
+              >
+                {createIssueMutation.isPending ? 'Creating...' : 'Create Issue'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {grouped.length === 0 && !showCreateForm && (
+            <p className="text-sm text-text-secondary text-center py-8">No issues detected</p>
+          )}
           {grouped.map(({ severity, items }) => {
             const Icon = severityIcons[severity];
             return (

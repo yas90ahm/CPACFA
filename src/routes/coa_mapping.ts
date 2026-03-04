@@ -4,6 +4,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
+import multer from 'multer';
 import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
 import { send500 } from '../lib/errorHandler.js';
 import {
@@ -16,8 +17,53 @@ import { createDecisionRecord } from '../services/decision_record_service.js';
 import { checkMappingCompleteness } from '../services/mapping_completeness_gate.js';
 import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
 import { appendEntry } from '../db/repositories/audit_ledger_repository.js';
+import { listFsTaxonomyLines } from '../db/repositories/fs_taxonomy_repository.js';
 
 const router = Router();
+
+/** Multer instance for CSV import — memory storage, 10 MB limit. */
+const csvUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const mime = file.mimetype?.toLowerCase() ?? '';
+    const name = file.originalname?.toLowerCase() ?? '';
+    const allowed = ['text/csv', 'application/csv', 'text/plain', 'application/vnd.ms-excel', 'application/octet-stream'];
+    if (allowed.includes(mime) || name.endsWith('.csv')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only CSV files are accepted'));
+    }
+  },
+});
+
+/** Wrap multer middleware so errors surface as 400 responses. */
+function handleCsvUpload(req: Request, res: Response, next: import('express').NextFunction) {
+  csvUpload.single('file')(req, res, (err: unknown) => {
+    if (err) {
+      const msg = err instanceof Error ? err.message : 'File upload failed';
+      res.status(400).json({ error: msg });
+      return;
+    }
+    next();
+  });
+}
+
+/** Parse a raw CSV buffer into an array of row objects keyed by header names. */
+function parseCsvBuffer(buf: Buffer): Array<Record<string, string>> {
+  const text = buf.toString('utf-8').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = text.split('\n').filter((l) => l.trim().length > 0);
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map((h) => h.trim().toLowerCase().replace(/^"|"$/g, ''));
+  const rows: Array<Record<string, string>> = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
+    const row: Record<string, string> = {};
+    headers.forEach((h, idx) => { row[h] = cols[idx] ?? ''; });
+    rows.push(row);
+  }
+  return rows;
+}
 
 /** GET /api/coa-mapping/suggestions — AI/deterministic suggestions for unmapped accounts. Query: sessionId (required), entityId? */
 router.get('/suggestions', async (req: Request, res: Response) => {
@@ -258,6 +304,123 @@ router.post('/map', async (req: Request, res: Response) => {
     res.json({ results, ruleVersionApplied });
   } catch (e) {
     send500(res, e, 'Apply mapping failed');
+  }
+});
+
+/** GET /api/coa-mapping/import/template — download a CSV template. */
+router.get('/import/template', (_req: Request, res: Response) => {
+  const template = 'account_code,reporting_line_code\n1000,cash_and_equivalents\n4100,revenue\n';
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename="coa_mapping_template.csv"');
+  res.send(template);
+});
+
+/**
+ * POST /api/coa-mapping/import — bulk-import mapping rules from a CSV file.
+ *
+ * Multipart body:
+ *   file     — CSV file (field name "file"). Columns: account_code, reporting_line_code | reporting_line_name
+ *   entityId — form field (required)
+ *   sessionId — form field (optional, used only for audit context)
+ *
+ * Response: { imported: N, skipped: N, errors: [{ row, reason }] }
+ */
+router.post('/import', handleCsvUpload, async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+
+    const file = req.file;
+    if (!file) {
+      res.status(400).json({ error: 'CSV file is required (field name: "file")' });
+      return;
+    }
+
+    const entityId = (req.body?.entityId as string | undefined)?.trim();
+    if (!entityId) {
+      res.status(400).json({ error: 'entityId form field is required' });
+      return;
+    }
+
+    // Load taxonomy lines once and build lookup maps (by code and by lowercased name).
+    const taxonomyLines = await listFsTaxonomyLines(pool);
+    const byCode = new Map<string, string>(); // code → id
+    const byName = new Map<string, string>(); // lowercase name → id
+    for (const line of taxonomyLines) {
+      byCode.set(line.code.toLowerCase(), line.id);
+      byName.set(line.name.toLowerCase(), line.id);
+    }
+
+    const rows = parseCsvBuffer(file.buffer);
+    if (rows.length === 0) {
+      res.status(400).json({ error: 'CSV contains no data rows' });
+      return;
+    }
+
+    type RuleInput = {
+      sourceAccountNamePattern: string;
+      sourceAccountNumberPattern: string;
+      mappedFsLineId: string;
+      confidenceDefault: number;
+      effectiveFrom: string;
+    };
+
+    const rules: RuleInput[] = [];
+    const errors: Array<{ row: number; reason: string }> = [];
+    let skipped = 0;
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rowNum = i + 2; // 1-indexed, account for header row
+
+      const accountCode = (row['account_code'] ?? '').trim();
+      if (!accountCode) {
+        errors.push({ row: rowNum, reason: 'account_code is empty' });
+        skipped++;
+        continue;
+      }
+
+      // Resolve taxonomy line: prefer reporting_line_code, fall back to reporting_line_name.
+      const lineCode = (row['reporting_line_code'] ?? '').trim().toLowerCase();
+      const lineName = (row['reporting_line_name'] ?? '').trim().toLowerCase();
+
+      let mappedFsLineId: string | undefined;
+      if (lineCode) {
+        mappedFsLineId = byCode.get(lineCode);
+      }
+      if (!mappedFsLineId && lineName) {
+        mappedFsLineId = byName.get(lineName);
+      }
+
+      if (!mappedFsLineId) {
+        const tried = lineCode || lineName || '(empty)';
+        errors.push({ row: rowNum, reason: `reporting_line not found in taxonomy: "${tried}"` });
+        skipped++;
+        continue;
+      }
+
+      rules.push({
+        sourceAccountNamePattern: '%',
+        sourceAccountNumberPattern: accountCode,
+        mappedFsLineId,
+        confidenceDefault: 1,
+        effectiveFrom: '2000-01-01',
+      });
+    }
+
+    let imported = 0;
+    if (rules.length > 0) {
+      await upsertCoaRules(pool, tenantId, entityId, rules);
+      imported = rules.length;
+    }
+
+    res.status(200).json({ imported, skipped, errors });
+  } catch (e) {
+    send500(res, e, 'CSV mapping import failed');
   }
 });
 

@@ -26,6 +26,7 @@ import {
   TrendingUp,
   Shield,
   User,
+  FileDown,
 } from 'lucide-react';
 
 // Event type labels and icons
@@ -349,7 +350,30 @@ export default function AuditTrailPage() {
             Complete record of all actions — hash-chain verified
           </p>
         </div>
-        <span className="text-sm text-text-secondary">{events.length} events</span>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              const csvRows = [['Timestamp', 'Event Type', 'Description', 'User', 'Hash', 'Chain Valid']];
+              filteredEvents.forEach((e) => csvRows.push([e.timestamp, e.eventType, e.description, e.userName, e.hash, String(e.chainValid)]));
+              const csv = csvRows.map((row) => row.map((c) => `"${c.replace(/"/g, '""')}"`).join(',')).join('\n');
+              const blob = new Blob([csv], { type: 'text/csv' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `audit-trail-${sessionId}.csv`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            }}
+            className="px-3 py-1.5 rounded-input border border-border text-sm text-text-secondary hover:bg-hover"
+          >
+            <FileDown className="w-4 h-4 inline mr-1" />
+            Export CSV
+          </button>
+          <span className="text-sm text-text-secondary">{events.length} events</span>
+        </div>
       </div>
 
       {/* Hash Chain Status Banner */}

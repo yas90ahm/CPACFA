@@ -15,6 +15,7 @@ export interface VarianceRecord {
   changeAmount: number;
   changePercentage: number | null;
   materialThresholdPct: number;
+  isMaterial: boolean;
   explanation?: string;
   /** AI-generated draft explanation (advisory; human edits and submits final). */
   aiDraftExplanation?: string;

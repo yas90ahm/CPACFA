@@ -30,7 +30,8 @@ import {
   AlertCircle,
   XCircle,
   BookOpen,
-  Download
+  Download,
+  Loader2,
 } from 'lucide-react';
 
 export default function ReviewPage() {
@@ -152,6 +153,8 @@ export default function ReviewPage() {
   const isPreparer = !isReviewer;
   const isCertifiedOrLocked = currentState === 'CERTIFIED' || currentState === 'LOCKED';
   const [boardPeriodType, setBoardPeriodType] = useState<'monthly' | 'QTD' | 'YTD'>('monthly');
+  const [boardExporting, setBoardExporting] = useState(false);
+  const { getAuthToken } = useAuth();
   const { data: boardPackage, isLoading: boardLoading } = useBoardPackage(
     isCertifiedOrLocked ? sessionId : null,
     isCertifiedOrLocked ? boardPeriodType : null
@@ -480,15 +483,37 @@ export default function ReviewPage() {
                 <option value="QTD">Quarter-to-Date</option>
                 <option value="YTD">Year-to-Date</option>
               </select>
-              <a
-                href={`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'}/api/close/sessions/${sessionId}/board-package/export/pdf?periodType=${boardPeriodType}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-3 py-1.5 rounded-input border border-border text-sm text-text-secondary hover:bg-hover flex items-center gap-1.5"
+              <button
+                type="button"
+                disabled={boardExporting}
+                onClick={async () => {
+                  setBoardExporting(true);
+                  try {
+                    const token = getAuthToken();
+                    const headers: Record<string, string> = {};
+                    if (token) headers['Authorization'] = `Bearer ${token}`;
+                    const res = await fetch(`/api/close/sessions/${sessionId}/board-package/export/pdf?periodType=${boardPeriodType}`, { headers });
+                    if (!res.ok) throw new Error('Export failed');
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `board-package-${session?.periodLabel ?? sessionId}.pdf`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                  } catch {
+                    setMutationError('Failed to export board package PDF');
+                  } finally {
+                    setBoardExporting(false);
+                  }
+                }}
+                className="px-3 py-1.5 rounded-input border border-border text-sm text-text-secondary hover:bg-hover flex items-center gap-1.5 disabled:opacity-50"
               >
-                <Download className="w-4 h-4" />
-                Export
-              </a>
+                {boardExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                {boardExporting ? 'Exporting…' : 'Export'}
+              </button>
             </div>
           </div>
           {boardLoading && <p className="text-sm text-text-secondary">Loading board package...</p>}

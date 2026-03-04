@@ -21,6 +21,7 @@ import {
   PieChart,
   Globe,
   GitMerge,
+  BookOpen,
 } from 'lucide-react';
 
 const navItems: {
@@ -47,6 +48,7 @@ const navItems: {
   { href: 'consolidation', label: 'Consolidation', icon: GitMerge },
   { href: 'statements', label: 'Statements', icon: FileText, stale: false },
   { href: 'variance', label: 'Variance', icon: TrendingUp, badge: 2 },
+  { href: 'board-package', label: 'Board Package', icon: BookOpen },
   { href: 'review', label: 'Review & Certify', icon: Award },
   { href: 'audit-trail', label: 'Audit Trail', icon: History },
   { href: '/settings', label: 'Settings', icon: Settings, external: true },

@@ -88,13 +88,14 @@ export async function insertRequirement(
   }
 ): Promise<ReconRequirement> {
   const now = new Date().toISOString();
-  await pool.query(
+  const insertResult = await pool.query<Row>(
     `INSERT INTO tenant_recon_requirements (
       requirement_id, tenant_id, entity_id, account_code, account_name, is_required,
       tolerance_amount, tolerance_type, tolerance_percentage, expected_source, requires_reviewer_approval,
       created_at, updated_at, created_by
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13)
-    ON CONFLICT (tenant_id, entity_id, account_code) DO NOTHING`,
+    ON CONFLICT (tenant_id, entity_id, account_code) DO UPDATE SET updated_at = $12
+    RETURNING ${COLS}`,
     [
       requirementId,
       input.tenantId,
@@ -111,9 +112,17 @@ export async function insertRequirement(
       input.createdBy ?? null,
     ]
   );
+  if (insertResult.rows[0]) return rowToReq(insertResult.rows[0]);
+  // Fallback: fetch by the new ID or by account code
   const req = await getRequirementById(pool, input.tenantId, requirementId);
-  if (!req) throw new Error('Failed to fetch requirement after insert');
-  return req;
+  if (req) return req;
+  // Must exist via conflict — fetch by account code
+  const r2 = await pool.query<Row>(
+    `SELECT ${COLS} FROM tenant_recon_requirements WHERE tenant_id = $1 AND entity_id = $2 AND account_code = $3`,
+    [input.tenantId, input.entityId, input.accountCode]
+  );
+  if (r2.rows[0]) return rowToReq(r2.rows[0]);
+  throw new Error('Failed to fetch requirement after insert');
 }
 
 export async function updateRequirement(
