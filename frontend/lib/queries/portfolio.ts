@@ -31,6 +31,8 @@ function toPortfolioCompany(r: Record<string, unknown>): PortfolioCompany {
     attentionReason: r.attentionReason as string | null,
     marginPercent: r.marginPercent != null ? String(r.marginPercent) : null,
     marginVsPriorPp: r.marginVsPriorPp != null ? String(r.marginVsPriorPp) : null,
+    financials: r.financials as PortfolioCompany['financials'] ?? null,
+    dataSource: (r.dataSource as string) ?? null,
   };
 }
 
@@ -64,6 +66,8 @@ export function usePortfolioSummary() {
         portfolioNetIncome: String(raw.portfolioNetIncome ?? raw.netIncome ?? '0'),
         portfolioMargin: String(raw.portfolioMargin ?? raw.margin ?? '0'),
         currentPeriod: (raw.currentPeriod ?? '') as string,
+        certifiedCount: (raw.certifiedCount ?? 0) as number,
+        totalWithData: (raw.totalWithData ?? 0) as number,
       };
     },
     staleTime: STALE_TIME,

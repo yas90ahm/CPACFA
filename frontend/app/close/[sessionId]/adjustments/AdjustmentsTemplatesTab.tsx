@@ -125,14 +125,9 @@ export function AdjustmentsTemplatesTab({
         }
         if (row.periodStatus === 'skipped') {
           return (
-            <div className="flex gap-2">
-              <span title={row.skipReason ?? ''} className="text-sm text-text-muted truncate max-w-[120px]">
-                {row.skipReason ? 'Skipped' : ''}
-              </span>
-              <button type="button" className="text-sm text-text-secondary hover:underline" onClick={() => onUndoSkip(row.id)}>
-                Undo Skip
-              </button>
-            </div>
+            <span title={row.skipReason ?? ''} className="text-sm text-text-muted truncate max-w-[160px]">
+              {row.skipReason || 'Skipped'}
+            </span>
           );
         }
         return null;

@@ -6,9 +6,55 @@ import { usePortfolioCompanies, usePortfolioSummary } from '@/lib/queries/portfo
 import type { PortfolioCompany } from '@/lib/types/portfolio';
 import type { CloseState } from '@/lib/types/close-session';
 import { cn } from '@/lib/utils';
-import { ChevronLeft, ChevronRight, Lock, AlertTriangle, TrendingDown, TrendingUp, Minus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Lock, AlertTriangle, TrendingDown, TrendingUp, Minus, ShieldCheck, FileWarning } from 'lucide-react';
 
 const MARGIN_THRESHOLD = 10;
+
+function DataSourceBadge({ source }: { source: string | null }) {
+  if (!source) return null;
+  const isCertified = source === 'certified' || source === 'locked';
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide',
+        isCertified
+          ? 'bg-status-green-dim text-status-green'
+          : 'bg-status-amber-dim text-status-amber'
+      )}
+      title={
+        isCertified
+          ? 'These figures come from a certified and signed close session'
+          : 'These figures come from a draft statement package that has not been certified'
+      }
+    >
+      {isCertified ? <ShieldCheck className="w-3 h-3" /> : <FileWarning className="w-3 h-3" />}
+      {isCertified ? 'Certified' : 'Draft'}
+    </span>
+  );
+}
+
+function PortfolioTotalsBadge({ certifiedCount, totalWithData }: { certifiedCount: number; totalWithData: number }) {
+  if (totalWithData === 0) return null;
+  const allCertified = certifiedCount === totalWithData;
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide ml-2',
+        allCertified
+          ? 'bg-status-green-dim text-status-green'
+          : 'bg-status-amber-dim text-status-amber'
+      )}
+      title={
+        allCertified
+          ? 'All financial data comes from certified close sessions'
+          : 'Some financial data comes from draft (uncertified) statement packages'
+      }
+    >
+      {allCertified ? <ShieldCheck className="w-3 h-3" /> : <FileWarning className="w-3 h-3" />}
+      {allCertified ? 'All Certified' : `${certifiedCount} of ${totalWithData} certified`}
+    </span>
+  );
+}
 
 function buildPeriods(currentPeriod: string | undefined): string[] {
   const now = currentPeriod ? new Date(currentPeriod + '-01') : new Date();
@@ -344,7 +390,12 @@ export default function PortfolioPage() {
                           <span className="text-status-green font-mono">0</span>
                         )}
                       </td>
-                      <td className="py-2.5 px-4 text-right font-mono">{formatRev(c.revenue)}</td>
+                      <td className="py-2.5 px-4 text-right">
+                        <span className="inline-flex items-center gap-1.5 justify-end">
+                          {c.revenue != null && <DataSourceBadge source={c.dataSource} />}
+                          <span className="font-mono">{formatRev(c.revenue)}</span>
+                        </span>
+                      </td>
                       <td className="py-2.5 px-4 text-right font-mono">{formatRev(c.netIncome)}</td>
                       <td className={cn('py-2.5 px-4 text-right font-mono', marginPct != null && marginPct < MARGIN_THRESHOLD && 'text-status-red', marginPct != null && marginPct >= MARGIN_THRESHOLD && 'text-status-green')}>
                         {formatMargin(c.marginPercent)}
@@ -397,7 +448,10 @@ export default function PortfolioPage() {
                 const vsPrior = c.marginVsPriorPp ? parseFloat(c.marginVsPriorPp) : null;
                 return (
                   <tr key={c.id} onClick={() => openCompany(c)} className="border-b border-border-light hover:bg-hover cursor-pointer">
-                    <td className="py-2.5 px-4 font-medium">{c.name}</td>
+                    <td className="py-2.5 px-4">
+                      <span className="font-medium">{c.name}</span>
+                      <DataSourceBadge source={c.dataSource} />
+                    </td>
                     <td className="py-2.5 px-4 text-right font-mono">{formatRev(c.revenue)}</td>
                     <td className="py-2.5 px-4 text-right font-mono">{formatRev(c.netIncome)}</td>
                     <td className={cn('py-2.5 px-4 text-right font-mono', marginPct != null && marginPct < MARGIN_THRESHOLD && 'text-status-red', marginPct != null && marginPct >= MARGIN_THRESHOLD && 'text-status-green')}>
@@ -412,7 +466,10 @@ export default function PortfolioPage() {
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-border bg-surface-alt font-medium">
-                <td className="py-3 px-4">Portfolio Total</td>
+                <td className="py-3 px-4">
+                  Portfolio Total
+                  {summary && <PortfolioTotalsBadge certifiedCount={summary.certifiedCount} totalWithData={summary.totalWithData} />}
+                </td>
                 <td className="py-3 px-4 text-right font-mono">{summary && formatRev(summary.portfolioRevenue)}</td>
                 <td className="py-3 px-4 text-right font-mono">{summary && formatRev(summary.portfolioNetIncome)}</td>
                 <td className="py-3 px-4 text-right font-mono">{summary?.portfolioMargin ?? '—'}%</td>

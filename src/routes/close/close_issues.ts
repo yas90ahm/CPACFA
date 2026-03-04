@@ -10,6 +10,7 @@ import { send500 } from '../../lib/errorHandler.js';
 import type { CreateIssueForSessionInput } from '../../services/issue_service.js';
 import * as issueService from '../../services/issue_service.js';
 import * as issueDetection from '../../services/issue_detection_service.js';
+import { notify as sendNotification } from '../../services/notification_service.js';
 
 const router = Router();
 
@@ -74,6 +75,18 @@ router.post('/issues', async (req: Request, res: Response) => {
     }
     const issue = await issueService.createIssueForSession(pool, parsed.input);
     res.status(201).json(issue);
+
+    // Fire notification for critical/blocking issues
+    const sev = String(parsed.input.severity ?? '').toLowerCase();
+    if (sev === 'critical' || sev === 'blocking') {
+      sendNotification({
+        tenantId: parsed.input.tenantId,
+        eventType: 'blocking_issue_created',
+        title: `Blocking issue: ${parsed.input.title}`,
+        body: `${parsed.input.title} — severity: ${sev}. Close session: ${parsed.input.closeSessionId}.`,
+        data: { closeSessionId: parsed.input.closeSessionId, issueId: issue.issueId, severity: sev },
+      }).catch(() => {});
+    }
   } catch (e) {
     handleIssueError(res, e, 'Create issue failed');
   }

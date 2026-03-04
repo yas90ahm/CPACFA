@@ -207,6 +207,65 @@ export default function CloseDashboardPage() {
         </div>
       )}
 
+      {/* Hero Progress Card */}
+      {(() => {
+        const progressPct = gatesTotal > 0 ? Math.round((gatesPassing / gatesTotal) * 100) : 0;
+        const startDate = session?.startedAt ?? session?.createdAt;
+        const dayElapsed = startDate ? Math.max(1, Math.ceil((Date.now() - new Date(startDate).getTime()) / 86400000)) : 1;
+        const targetDays = 10;
+        const statusLabel = dayElapsed <= targetDays * 0.7 ? 'On Track' : dayElapsed <= targetDays ? 'Behind' : 'Overdue';
+        const statusColor = statusLabel === 'On Track' ? 'text-status-green' : statusLabel === 'Behind' ? 'text-status-amber' : 'text-status-red';
+        const firstFailing = gatesWithMapping.find((g) => !g.passing);
+        const allPassing = gatesPassing === gatesTotal && gatesTotal > 0;
+        const ctaLabel = allPassing
+          ? (session?.state === 'IN_PROGRESS' ? 'Submit for Review' : 'Ready to Certify')
+          : 'Continue Close';
+        const ctaHref = allPassing
+          ? `/close/${sessionId}/review`
+          : firstFailing
+            ? firstFailing.navigateTo.replace('[sessionId]', sessionId)
+            : `/close/${sessionId}/mapping`;
+
+        return (
+          <section className="bg-[#1a1d23] border border-border/60 rounded-card p-7 shadow-lg">
+            <div className="flex items-start justify-between mb-5">
+              <div>
+                <h1 className="text-2xl font-display text-white">
+                  {session?.periodLabel ?? ''} Close
+                </h1>
+                <p className="text-sm text-gray-400 mt-0.5">{session?.entityName ?? ''}</p>
+              </div>
+              <Link
+                href={ctaHref}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-input bg-accent text-white text-sm font-medium hover:opacity-90"
+              >
+                {ctaLabel} <ArrowRight className="w-4 h-4" />
+              </Link>
+            </div>
+
+            <div className="flex items-center gap-4 mb-5">
+              <div className="flex-1 h-3.5 bg-white/10 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-accent rounded-full transition-all duration-500"
+                  style={{ width: `${progressPct}%` }}
+                />
+              </div>
+              <span className="text-2xl font-bold text-white tabular-nums">{progressPct}%</span>
+            </div>
+
+            <div className="flex items-center gap-6 text-sm">
+              <span className="text-gray-400">
+                Day <span className="text-white font-medium">{dayElapsed}</span> of {targetDays}
+              </span>
+              <span className="text-gray-400">
+                <span className="text-white font-medium">{gatesPassing}</span> of {gatesTotal} gates passing
+              </span>
+              <span className={cn('font-medium', statusColor)}>{statusLabel}</span>
+            </div>
+          </section>
+        );
+      })()}
+
       {/* Page header with Prepare Close button */}
       <div className="flex items-center justify-between">
         <div>
@@ -261,31 +320,39 @@ export default function CloseDashboardPage() {
         </div>
       </section>
 
-      {/* What Needs Attention */}
-      <section className="bg-surface border border-border rounded-card p-5">
-        <h2 className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-4">What Needs Attention</h2>
-        {attentionItems.length === 0 ? (
-          <p className="text-sm text-text-tertiary">No pending actions.</p>
+      {/* Action Items */}
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-xs font-medium text-text-secondary uppercase tracking-wide">Action Items</h2>
+          <span className="text-xs text-text-tertiary">
+            {attentionItems.filter((i) => i.icon === 'ok').length} of {attentionItems.length} complete
+          </span>
+        </div>
+        {attentionItems.filter((i) => i.icon === 'warn').length === 0 && attentionItems.length > 0 ? (
+          <div className="bg-status-green-dim border border-status-green/30 rounded-card p-4 flex items-center gap-3 text-sm text-status-green">
+            <Check className="w-5 h-5 shrink-0" />
+            <span className="font-medium">All action items resolved — ready for review.</span>
+          </div>
         ) : (
-          <ul className="space-y-2">
-            {attentionItems.map((item, i) => (
-              <li key={i} className="flex items-center justify-between py-1.5">
-                <div className="flex items-center gap-2 text-sm">
-                  {item.icon === 'warn' ? (
-                    <AlertTriangle className="w-4 h-4 text-status-amber shrink-0" />
-                  ) : (
-                    <Check className="w-4 h-4 text-status-green shrink-0" />
-                  )}
-                  <span className={item.icon === 'ok' ? 'text-text-secondary' : 'text-primary'}>{item.text}</span>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {attentionItems.filter((i) => i.icon === 'warn').map((item, i) => (
+              <Link
+                key={i}
+                href={item.link}
+                className="bg-surface border border-border rounded-card p-4 hover:border-accent transition-colors group"
+              >
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-4 h-4 text-status-amber shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-primary">{item.text}</p>
+                    <p className="text-xs text-accent mt-1 flex items-center gap-1 group-hover:underline">
+                      {item.linkLabel} <ArrowRight className="w-3 h-3" />
+                    </p>
+                  </div>
                 </div>
-                {item.link && (
-                  <Link href={item.link} className="flex items-center gap-1 text-xs text-accent hover:underline shrink-0">
-                    {item.linkLabel} <ArrowRight className="w-3 h-3" />
-                  </Link>
-                )}
-              </li>
+              </Link>
             ))}
-          </ul>
+          </div>
         )}
       </section>
 

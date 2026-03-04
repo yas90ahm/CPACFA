@@ -1,5 +1,20 @@
 import type { CloseState } from '@/lib/types/close-session';
 
+export interface PortfolioFinancials {
+  revenue: string | null;
+  netIncome: string | null;
+  grossProfit: string | null;
+  operatingIncome: string | null;
+  ebitda: string | null;
+  totalAssets: string | null;
+  totalLiabilities: string | null;
+  totalEquity: string | null;
+  cashPosition: string | null;
+  grossMarginPercent: string | null;
+  operatingMarginPercent: string | null;
+  marginPercent: string | null;
+}
+
 export interface PortfolioCompany {
   id: string;
   name: string;
@@ -22,6 +37,9 @@ export interface PortfolioCompany {
   attentionReason: string | null;
   marginPercent: string | null;
   marginVsPriorPp: string | null;
+  financials: PortfolioFinancials | null;
+  /** 'certified' | 'locked' | 'draft' | null */
+  dataSource: string | null;
 }
 
 export interface PortfolioSummary {
@@ -36,4 +54,6 @@ export interface PortfolioSummary {
   portfolioNetIncome: string;
   portfolioMargin: string;
   currentPeriod: string;
+  certifiedCount: number;
+  totalWithData: number;
 }

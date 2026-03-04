@@ -18,6 +18,14 @@ export interface GeneralLedgerLine {
   source?: string;
   created_at?: Date | string;
   created_by?: string;
+  /** ISO currency code of original transaction (null = functional currency) */
+  original_currency?: string | null;
+  /** Debit in original currency before translation */
+  original_debit?: number | null;
+  /** Credit in original currency before translation */
+  original_credit?: number | null;
+  /** Exchange rate used: 1 original = rate * functional */
+  exchange_rate?: number | null;
 }
 
 export interface JournalEntry {
@@ -37,6 +45,10 @@ export interface GLUploadRow {
   credit?: number | string;
   description?: string;
   amount_provenance?: string;
+  /** ISO currency code of original transaction */
+  currency?: string | null;
+  /** Exchange rate used for translation */
+  exchange_rate?: number | string | null;
 }
 
 export interface GLValidationResult {

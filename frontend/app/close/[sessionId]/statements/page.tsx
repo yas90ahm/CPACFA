@@ -123,6 +123,40 @@ export default function StatementsPage() {
 
   const [exporting, setExporting] = useState(false);
 
+  const handleExportCsv = useCallback(() => {
+    if (!statements) return;
+    const sections = [
+      { title: 'Income Statement', data: statements.incomeStatement },
+      { title: 'Balance Sheet', data: statements.balanceSheet },
+      { title: 'Cash Flow', data: statements.cashFlow },
+      { title: "Stockholders' Equity", data: statements.equityStatement },
+    ];
+    const rows: string[][] = [['Statement', 'Section', 'Line Item', 'Amount', 'Prior Amount', 'Change', 'Change %']];
+    for (const sec of sections) {
+      for (const line of sec.data.lines) {
+        rows.push([
+          sec.title,
+          line.sectionName || '',
+          (line.isGrandTotal ? '*** ' : line.isSubtotal ? '** ' : '  '.repeat(line.indentLevel)) + line.lineItemName,
+          line.amount,
+          line.priorAmount ?? '',
+          line.changeAmount ?? '',
+          line.changePercent != null ? `${line.changePercent}%` : '',
+        ]);
+      }
+    }
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Financial_Statements_${session?.periodLabel ?? sessionId}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [statements, session?.periodLabel, sessionId]);
+
   const handleExportPdf = useCallback(async () => {
     setExporting(true);
     try {
@@ -238,6 +272,16 @@ export default function StatementsPage() {
             <input type="checkbox" checked={showChanges} onChange={(e) => setShowChanges(e.target.checked)} />
             Show changes
           </label>
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            disabled={!hasStatements}
+            className="px-3 py-1.5 rounded-input border border-border text-sm text-text-secondary hover:bg-hover print:hidden disabled:opacity-50"
+            aria-label="Export CSV"
+          >
+            <FileDown className="w-4 h-4 inline mr-1.5" />
+            Export CSV
+          </button>
           <button
             type="button"
             onClick={handleExportPdf}

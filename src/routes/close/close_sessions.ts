@@ -26,6 +26,7 @@ import { getCloseRoleFromReq } from '../../lib/closeRole.js';
 import { effectiveAllowLegacyCertifiedSource } from '../../lib/runtime_mode.js';
 import type { AuthRequest } from '../../auth/middleware.js';
 import * as issueService from '../../services/issue_service.js';
+import { notify as sendNotification } from '../../services/notification_service.js';
 import {
   computeReadiness,
   initializeChecklistTemplate,
@@ -329,7 +330,8 @@ router.get('/sessions/:id/trial-balance', async (req: Request, res: Response) =>
       return;
     }
     const type = ((req.query.type as string) || 'adjusted') === 'unadjusted' ? 'unadjusted' : 'adjusted';
-    const result = await getSessionTrialBalance(pool, tenantId, session, type);
+    const includePrior = req.query.includePrior === 'true';
+    const result = await getSessionTrialBalance(pool, tenantId, session, type, includePrior);
     if (!result) {
       res.status(404).json({ error: 'No trial balance for this period' });
       return;
@@ -526,6 +528,19 @@ router.post('/sessions/:id/certify', async (req: Request, res: Response) => {
     }
     res.status(200).json(payload);
     criticalLog(req, ROUTE_CERTIFY, 'ok', { closeSessionId: id, startMs });
+
+    // Fire notification (after response sent, fire-and-forget)
+    const entityName = session.entityId ?? tenantId;
+    const periodLabel = session.periodStart && session.periodEnd
+      ? new Date(session.periodEnd + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+      : 'current period';
+    sendNotification({
+      tenantId,
+      eventType: 'company_certified',
+      title: `${entityName} certified`,
+      body: `${entityName} has certified ${periodLabel}. Certified by ${body.certifiedBy.trim()} at ${new Date().toISOString()}.`,
+      data: { closeSessionId: id, certifiedBy: body.certifiedBy.trim() },
+    }).catch(() => {});
   } catch (e) {
     criticalLog(req, ROUTE_CERTIFY, 'error', { closeSessionId: id, startMs });
     handleSessionError(res, e, 'Certify close failed');

@@ -54,6 +54,8 @@ const GL_COLUMN_MAP: Record<string, readonly string[]> = {
   credit: ['credit', 'credits', 'cr', 'credit_amount', 'credit amount'],
   account_name: ['accountname', 'account_name', 'account name'],
   description: ['description', 'desc', 'memo', 'notes', 'narrative'],
+  currency: ['currency', 'currency_code', 'currencycode', 'ccy', 'curr', 'transaction_currency', 'txn_currency'],
+  exchange_rate: ['exchange_rate', 'exchangerate', 'fx_rate', 'fxrate', 'rate', 'exrate', 'ex_rate'],
 };
 
 function normalizeHeader(h: string): string {
@@ -70,6 +72,8 @@ export type GLColumnMapping = {
   description?: string | null;
   reference?: string | null;
   entryId?: string | null;
+  currency?: string | null;
+  exchangeRate?: string | null;
 };
 
 /** Auto-detect column mapping from CSV headers. */
@@ -100,8 +104,10 @@ export function autoDetectColumnMapping(headers: string[]): GLColumnMapping {
     find((h) => h === 'name' || h === 'account name');
   const description = find((h) => h === 'description' || h === 'desc' || h.includes('memo') || h.includes('narration') || h === 'notes');
   const reference = find((h) => h.includes('ref') || h.includes('doc') || h.includes('voucher'));
+  const currency = find((h) => h === 'currency' || h === 'currency code' || h === 'ccy' || h === 'curr' || h.includes('currency'));
+  const exchangeRate = find((h) => h === 'exchange rate' || h === 'fx rate' || h === 'rate' || h.includes('exchange') && h.includes('rate'));
 
-  return { accountCode, accountName, debit, credit, date, description, reference, entryId };
+  return { accountCode, accountName, debit, credit, date, description, reference, entryId, currency, exchangeRate };
 }
 
 function mapHeaderToCanonical(rawHeader: string): string | null {
@@ -362,6 +368,8 @@ export function parseGLCsvWithMapping(
       entry_date: columnMapping.date ?? columnMapping.entryId ?? '',
       entry_id: columnMapping.entryId ?? '',
       description: columnMapping.description ?? '',
+      currency: columnMapping.currency ?? '',
+      exchange_rate: columnMapping.exchangeRate ?? '',
     };
     for (const [canon, header] of Object.entries(map)) {
       if (header && rawHeaders.includes(header)) headerToCanonical[header] = canon;
@@ -408,6 +416,9 @@ export function parseGLCsvWithMapping(
     const accountName = mapped.account_name ? String(mapped.account_name).trim() : undefined;
     const description = mapped.description ? String(mapped.description).trim() : undefined;
 
+    const currencyVal = mapped.currency ? String(mapped.currency).trim().toUpperCase() : null;
+    const exchangeRateVal = mapped.exchange_rate ? String(mapped.exchange_rate).trim() : null;
+
     rows.push({
       entry_id: entryId || `ENTRY-${i + 1}`,
       entry_date: typeof entryDate === 'string' ? entryDate : String(entryDate),
@@ -416,6 +427,8 @@ export function parseGLCsvWithMapping(
       debit,
       credit,
       description,
+      currency: currencyVal || null,
+      exchange_rate: exchangeRateVal || null,
     });
   }
   return { rows, hasEntryId };
@@ -487,6 +500,9 @@ export function parseGLCsv(fileBuffer: Buffer): { rows: GLUploadRow[]; hasEntryI
       ? String(mapped.description).trim()
       : undefined;
 
+    const currencyVal = mapped.currency ? String(mapped.currency).trim().toUpperCase() : null;
+    const exchangeRateVal = mapped.exchange_rate ? String(mapped.exchange_rate).trim() : null;
+
     rows.push({
       entry_id: entryId || `ENTRY-${i + 1}`,
       entry_date: typeof entryDate === 'string' ? entryDate : String(entryDate),
@@ -495,6 +511,8 @@ export function parseGLCsv(fileBuffer: Buffer): { rows: GLUploadRow[]; hasEntryI
       debit,
       credit,
       description,
+      currency: currencyVal || null,
+      exchange_rate: exchangeRateVal || null,
     });
   }
   return { rows, hasEntryId };
@@ -517,21 +535,129 @@ export function groupAndNumberLines(rows: GLUploadRow[]): GeneralLedgerLine[] {
     entryRows.forEach((row, idx) => {
       const debit = typeof row.debit === 'number' ? row.debit : parseGlAmount(row.debit);
       const credit = typeof row.credit === 'number' ? row.credit : parseGlAmount(row.credit);
+      // Multi-currency: if row has a currency and exchange_rate, store originals and translate
+      const rowCurrency = row.currency ? String(row.currency).trim().toUpperCase() : null;
+      const rowRate = row.exchange_rate != null && String(row.exchange_rate).trim() !== ''
+        ? parseDecimalSafe(row.exchange_rate) : null;
+
+      let finalDebit = debit;
+      let finalCredit = credit;
+      let originalCurrency: string | null = null;
+      let originalDebit: number | null = null;
+      let originalCredit: number | null = null;
+      let exchangeRate: number | null = null;
+
+      if (rowCurrency && rowRate && rowRate > 0) {
+        // Store originals and translate to functional currency
+        originalCurrency = rowCurrency;
+        originalDebit = debit;
+        originalCredit = credit;
+        exchangeRate = rowRate;
+        finalDebit = round2(from(debit).times(from(rowRate)).toNumber());
+        finalCredit = round2(from(credit).times(from(rowRate)).toNumber());
+      }
+
       lines.push({
         entry_id: entryId,
         line_number: idx + 1,
         entry_date: row.entry_date,
         account_code: row.account_code,
         account_name: row.account_name,
-        debit,
-        credit,
+        debit: finalDebit,
+        credit: finalCredit,
         description: row.description,
         tenant_id: '',
         period_label: '',
+        original_currency: originalCurrency,
+        original_debit: originalDebit,
+        original_credit: originalCredit,
+        exchange_rate: exchangeRate,
       });
     });
   });
   return lines;
+}
+
+/**
+ * Validate multi-currency GL rows: detect missing exchange rates, mixed currencies without rates.
+ * Returns warnings (non-blocking) and errors (blocking) arrays.
+ */
+export function validateMultiCurrency(rows: GLUploadRow[]): { warnings: string[]; errors: string[] } {
+  const warnings: string[] = [];
+  const errors: string[] = [];
+  const currencies = new Set<string>();
+  let missingRateCount = 0;
+  const missingRateCurrencies = new Set<string>();
+
+  for (const row of rows) {
+    const currency = row.currency ? String(row.currency).trim().toUpperCase() : null;
+    if (currency) {
+      currencies.add(currency);
+      const rate = row.exchange_rate != null && String(row.exchange_rate).trim() !== ''
+        ? parseDecimalSafe(row.exchange_rate) : null;
+      if (!rate || rate <= 0) {
+        missingRateCount++;
+        missingRateCurrencies.add(currency);
+      }
+    }
+  }
+
+  if (currencies.size > 1) {
+    warnings.push(`Multi-currency GL detected: ${Array.from(currencies).sort().join(', ')}. Amounts will be translated using the exchange rates provided.`);
+  }
+
+  if (missingRateCount > 0) {
+    errors.push(
+      `${missingRateCount} row(s) have a currency (${Array.from(missingRateCurrencies).join(', ')}) but missing or invalid exchange rate. ` +
+      `Every row with a non-functional currency must include a positive exchange rate.`
+    );
+  }
+
+  return { warnings, errors };
+}
+
+/**
+ * Check post-translation balance and apply $0.01 auto-adjust if needed.
+ * Returns the adjusted lines (if rounding caused an imbalance) and warnings.
+ */
+export function autoAdjustTranslationRounding(lines: GeneralLedgerLine[]): { lines: GeneralLedgerLine[]; warnings: string[] } {
+  const warnings: string[] = [];
+  const hasTranslated = lines.some((l) => l.original_currency != null);
+  if (!hasTranslated) return { lines, warnings };
+
+  // Group by entry_id and check balance
+  const entries = new Map<string, GeneralLedgerLine[]>();
+  for (const line of lines) {
+    const arr = entries.get(line.entry_id) ?? [];
+    arr.push(line);
+    entries.set(line.entry_id, arr);
+  }
+
+  const adjustedLines = [...lines];
+  for (const [entryId, entryLines] of entries) {
+    const totalDebits = entryLines.reduce((sum, l) => sum + (l.debit ?? 0), 0);
+    const totalCredits = entryLines.reduce((sum, l) => sum + (l.credit ?? 0), 0);
+    const diff = round2(totalDebits - totalCredits);
+    const absDiff = Math.abs(diff);
+
+    if (absDiff > 0 && absDiff <= 0.01) {
+      // Auto-adjust the last line
+      const lastLine = entryLines[entryLines.length - 1]!;
+      const idx = adjustedLines.indexOf(lastLine);
+      if (idx >= 0) {
+        if (diff > 0) {
+          // Debits exceed credits — add to last line's credit
+          adjustedLines[idx] = { ...lastLine, credit: round2((lastLine.credit ?? 0) + absDiff) };
+        } else {
+          // Credits exceed debits — add to last line's debit
+          adjustedLines[idx] = { ...lastLine, debit: round2((lastLine.debit ?? 0) + absDiff) };
+        }
+        warnings.push(`Entry ${entryId}: $${absDiff.toFixed(2)} translation rounding auto-adjusted.`);
+      }
+    }
+  }
+
+  return { lines: adjustedLines, warnings };
 }
 
 /**
@@ -729,6 +855,19 @@ export async function uploadGLForPeriod(
       };
     }
 
+    // Multi-currency validation: block if currency present without exchange rate
+    const mcResult = validateMultiCurrency(rows);
+    if (mcResult.errors.length > 0) {
+      perfMetrics.total_ms = Date.now() - startTime;
+      return {
+        success: false,
+        balancedCount: 0,
+        imbalancedCount: 0,
+        errors: mcResult.errors,
+        perfMetrics,
+      };
+    }
+
     // Account register format (no entry_id): each row is a standalone GL line.
     // JE format (has entry_id): rows are grouped by entry_id and each group must balance.
     const isRegisterFormat = !hasEntryId;
@@ -741,6 +880,14 @@ export async function uploadGLForPeriod(
       period_label: periodLabel,
       created_by: uploadedBy,
     }));
+
+    // Post-translation rounding auto-adjust ($0.01 tolerance)
+    const roundingResult = autoAdjustTranslationRounding(lines);
+    lines = roundingResult.lines;
+    if (roundingResult.warnings.length > 0) {
+      console.log(`[GL_UPLOAD] Translation rounding: ${roundingResult.warnings.join('; ')}`);
+    }
+
     perfMetrics.group_ms = Date.now() - groupStart;
 
     // Duplicate detection: hash the file and compare against last upload

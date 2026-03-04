@@ -39,6 +39,9 @@ import closeStockCompensationRouter from './close_stock_compensation.js';
 import closeImpairmentRouter from './close_impairment.js';
 import closeSegmentsRouter from './close_segments.js';
 import closeBoardPackageRouter from './close_board_package.js';
+import closeExchangeRatesRouter from './close_exchange_rates.js';
+import closeConsolidationConfigRouter from './close_consolidation_config.js';
+import closeFxTranslationConfigRouter from './close_fx_translation_config.js';
 
 const router = Router();
 router.use(closeJeAccrualsRouter);
@@ -76,5 +79,8 @@ router.use(closeStockCompensationRouter);
 router.use(closeImpairmentRouter);
 router.use(closeSegmentsRouter);
 router.use(closeBoardPackageRouter);
+router.use(closeExchangeRatesRouter);
+router.use(closeConsolidationConfigRouter);
+router.use(closeFxTranslationConfigRouter);
 
 export default router;

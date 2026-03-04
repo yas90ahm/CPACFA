@@ -1,25 +1,55 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { useState } from 'react';
-import { useBuildConsolidation } from '@/lib/queries/consolidation';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useBuildConsolidation, useConsolidationConfig, useSaveConsolidationConfig } from '@/lib/queries/consolidation';
 import { DataTable } from '@/components/shared/DataTable';
 import type { ConsolidationEntity, EliminationRule, ConsolidationResult, ConsolidatedLine } from '@/lib/types/consolidation';
-import { Plus, Play, GitMerge, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Plus, Play, GitMerge, CheckCircle, AlertTriangle, Check, Loader2, X } from 'lucide-react';
 
 export default function ConsolidationPage() {
   const params = useParams();
+  const sessionId = params.sessionId as string;
 
   const buildConsolidation = useBuildConsolidation();
+  const { data: configData, isLoading: configLoading } = useConsolidationConfig(sessionId);
+  const saveConfig = useSaveConsolidationConfig(sessionId);
 
   const [entities, setEntities] = useState<ConsolidationEntity[]>([]);
   const [rules, setRules] = useState<EliminationRule[]>([]);
   const [reportingCurrency, setReportingCurrency] = useState('USD');
   const [periodLabel, setPeriodLabel] = useState('');
   const [result, setResult] = useState<ConsolidationResult | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   const [entityForm, setEntityForm] = useState({ name: '', currency: 'USD' });
   const [ruleForm, setRuleForm] = useState<{ name: string; debitAccount: string; creditAccount: string; amountType: 'balance' | 'fixed' | 'formula'; amount: string }>({ name: '', debitAccount: '', creditAccount: '', amountType: 'balance', amount: '' });
+
+  // Load saved config on mount
+  useEffect(() => {
+    if (configData?.config && !loaded) {
+      setEntities(configData.config.entities ?? []);
+      setRules(configData.config.eliminationRules ?? []);
+      setReportingCurrency(configData.config.reportingCurrency ?? 'USD');
+      setPeriodLabel(configData.config.periodLabel ?? '');
+      setLoaded(true);
+    } else if (configData && !configData.config && !loaded) {
+      setLoaded(true);
+    }
+  }, [configData, loaded]);
+
+  // Debounced auto-save
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const doSave = useCallback(() => {
+    saveConfig.mutate({ entities, eliminationRules: rules, reportingCurrency, periodLabel });
+  }, [entities, rules, reportingCurrency, periodLabel, saveConfig]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(doSave, 800);
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+  }, [entities, rules, reportingCurrency, periodLabel, loaded, doSave]);
 
   const addEntity = () => {
     const id = `entity-${Date.now()}`;
@@ -52,11 +82,19 @@ export default function ConsolidationPage() {
 
   type EliminationJE = ConsolidationResult['eliminationJournalEntries'][number];
 
+  if (configLoading) return <div className="text-text-secondary">Loading...</div>;
+
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold flex items-center gap-2">
-        <GitMerge className="w-5 h-5" /> Consolidation
-      </h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold flex items-center gap-2">
+          <GitMerge className="w-5 h-5" /> Consolidation
+        </h1>
+        <span className="text-xs text-text-secondary flex items-center gap-1">
+          {saveConfig.isPending && <><Loader2 className="w-3 h-3 animate-spin" /> Saving...</>}
+          {saveConfig.isSuccess && !saveConfig.isPending && <><Check className="w-3 h-3 text-green-600" /> Saved</>}
+        </span>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="p-4 border rounded-lg bg-surface space-y-3">
@@ -69,9 +107,14 @@ export default function ConsolidationPage() {
             </button>
           </div>
           {entities.map((e) => (
-            <div key={e.id} className="flex items-center justify-between p-2 bg-hover rounded text-sm">
+            <div key={e.id} className="flex items-center justify-between p-2 bg-hover rounded text-sm group">
               <span>{e.name}</span>
-              <span className="text-text-secondary">{e.currency}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-text-secondary">{e.currency}</span>
+                <button type="button" onClick={() => setEntities(entities.filter((x) => x.id !== e.id))} className="text-text-tertiary hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity" title="Remove entity">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -95,9 +138,14 @@ export default function ConsolidationPage() {
             <Plus className="w-4 h-4 inline mr-1" /> Add Rule
           </button>
           {rules.map((r) => (
-            <div key={r.id} className="flex items-center justify-between p-2 bg-hover rounded text-sm">
+            <div key={r.id} className="flex items-center justify-between p-2 bg-hover rounded text-sm group">
               <span>{r.name}</span>
-              <span className="text-text-secondary">{r.debitAccount} / {r.creditAccount} ({r.amountType})</span>
+              <div className="flex items-center gap-2">
+                <span className="text-text-secondary">{r.debitAccount} / {r.creditAccount} ({r.amountType})</span>
+                <button type="button" onClick={() => setRules(rules.filter((x) => x.id !== r.id))} className="text-text-tertiary hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity" title="Remove rule">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -130,13 +178,13 @@ export default function ConsolidationPage() {
             </div>
             {result.nciShareOfEquity != null && (
               <div className="p-4 border rounded-lg bg-surface">
-                <div className="text-sm text-text-secondary">NCI \u2014 Equity</div>
+                <div className="text-sm text-text-secondary">NCI — Equity</div>
                 <div className="text-lg font-semibold">{fmtNum(result.nciShareOfEquity)}</div>
               </div>
             )}
             {result.nciShareOfNetIncome != null && (
               <div className="p-4 border rounded-lg bg-surface">
-                <div className="text-sm text-text-secondary">NCI \u2014 Net Income</div>
+                <div className="text-sm text-text-secondary">NCI — Net Income</div>
                 <div className="text-lg font-semibold">{fmtNum(result.nciShareOfNetIncome)}</div>
               </div>
             )}

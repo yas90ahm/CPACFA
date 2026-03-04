@@ -7,7 +7,27 @@ import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 const FISCAL_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const CURRENCIES = [{ value: 'USD', label: 'USD — US Dollar' }];
+const CURRENCIES = [
+  { value: 'USD', label: 'USD — US Dollar' },
+  { value: 'EUR', label: 'EUR — Euro' },
+  { value: 'GBP', label: 'GBP — British Pound' },
+  { value: 'CAD', label: 'CAD — Canadian Dollar' },
+  { value: 'AUD', label: 'AUD — Australian Dollar' },
+  { value: 'JPY', label: 'JPY — Japanese Yen' },
+  { value: 'CHF', label: 'CHF — Swiss Franc' },
+  { value: 'CNY', label: 'CNY — Chinese Yuan' },
+  { value: 'INR', label: 'INR — Indian Rupee' },
+  { value: 'MXN', label: 'MXN — Mexican Peso' },
+  { value: 'BRL', label: 'BRL — Brazilian Real' },
+  { value: 'SGD', label: 'SGD — Singapore Dollar' },
+  { value: 'HKD', label: 'HKD — Hong Kong Dollar' },
+  { value: 'KRW', label: 'KRW — South Korean Won' },
+  { value: 'SEK', label: 'SEK — Swedish Krona' },
+  { value: 'NOK', label: 'NOK — Norwegian Krone' },
+  { value: 'DKK', label: 'DKK — Danish Krone' },
+  { value: 'NZD', label: 'NZD — New Zealand Dollar' },
+  { value: 'ZAR', label: 'ZAR — South African Rand' },
+];
 
 export default function GeneralSettingsPage() {
   const queryClient = useQueryClient();
@@ -19,14 +39,14 @@ export default function GeneralSettingsPage() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['settings-general', entityId],
-    queryFn: () => apiFetch<{ entityName?: string; fiscalYearEnd?: number; fiscalYearEndDay?: number; baseCurrency?: string; autoLockDays?: number; varianceMaterialityDollar?: string; varianceMaterialityPercent?: string }>(`/api/settings/general?entityId=${entityId}`),
+    queryFn: () => apiFetch<{ entityName?: string; fiscalYearEnd?: number; fiscalYearEndDay?: number; baseCurrency?: string; functionalCurrency?: string; autoLockDays?: number; varianceMaterialityDollar?: string; varianceMaterialityPercent?: string }>(`/api/settings/general?entityId=${entityId}`),
     enabled: !!entityId,
   });
 
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const updateMutation = useMutation({
-    mutationFn: (payload: { entityName?: string; fiscalYearEnd?: number; fiscalYearEndDay?: number; baseCurrency?: string; autoLockDays?: number; varianceMaterialityDollar?: string; varianceMaterialityPercent?: string }) =>
+    mutationFn: (payload: { entityName?: string; fiscalYearEnd?: number; fiscalYearEndDay?: number; baseCurrency?: string; functionalCurrency?: string; autoLockDays?: number; varianceMaterialityDollar?: string; varianceMaterialityPercent?: string }) =>
       apiFetch(`/api/settings/general?entityId=${entityId}`, { method: 'PUT', body: payload }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings-general', entityId] });
@@ -45,6 +65,7 @@ export default function GeneralSettingsPage() {
   const [fiscalYearEnd, setFiscalYearEnd] = useState('December');
   const [fiscalYearEndDay, setFiscalYearEndDay] = useState('31');
   const [baseCurrency, setBaseCurrency] = useState('USD');
+  const [functionalCurrency, setFunctionalCurrency] = useState('USD');
   const [autoLockDays, setAutoLockDays] = useState('0');
   const [varianceDollar, setVarianceDollar] = useState('');
   const [variancePercent, setVariancePercent] = useState('');
@@ -55,6 +76,7 @@ export default function GeneralSettingsPage() {
     setFiscalYearEnd(data.fiscalYearEnd != null ? (FISCAL_MONTHS[data.fiscalYearEnd - 1] ?? 'December') : 'December');
     setFiscalYearEndDay(String(data.fiscalYearEndDay ?? 31));
     setBaseCurrency(data.baseCurrency ?? 'USD');
+    setFunctionalCurrency(data.functionalCurrency ?? 'USD');
     setAutoLockDays(String(data.autoLockDays ?? 0));
     setVarianceDollar(data.varianceMaterialityDollar ?? '');
     setVariancePercent(data.varianceMaterialityPercent ?? '');
@@ -67,6 +89,7 @@ export default function GeneralSettingsPage() {
       fiscalYearEnd: monthIndex || undefined,
       fiscalYearEndDay: fiscalYearEndDay ? Number(fiscalYearEndDay) : undefined,
       baseCurrency: baseCurrency || undefined,
+      functionalCurrency: functionalCurrency || undefined,
       autoLockDays: autoLockDays ? Number(autoLockDays) : undefined,
       varianceMaterialityDollar: varianceDollar || undefined,
       varianceMaterialityPercent: variancePercent || undefined,
@@ -131,6 +154,19 @@ export default function GeneralSettingsPage() {
                 <option key={c.value} value={c.value}>{c.label}</option>
               ))}
             </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-text-secondary mb-1">Functional (Reporting) Currency</label>
+            <select
+              value={functionalCurrency}
+              onChange={(e) => setFunctionalCurrency(e.target.value)}
+              className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm text-primary"
+            >
+              {CURRENCIES.map((c) => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </select>
+            <p className="text-xs text-text-tertiary mt-1">Currency used for financial statements. GL amounts in other currencies are translated at upload using their exchange rate.</p>
           </div>
         </div>
       </section>

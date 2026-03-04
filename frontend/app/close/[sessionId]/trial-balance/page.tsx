@@ -34,10 +34,21 @@ function isContraAccount(r: TrialBalanceRow): boolean {
   return debit > credit;
 }
 
+/** Check if a change is material based on dollar and percent thresholds */
+function isMaterialChange(changeAmt: string | null | undefined, changePct: string | null | undefined): boolean {
+  if (!changeAmt && !changePct) return false;
+  const absAmt = Math.abs(parseFloat(changeAmt ?? '0') || 0);
+  const absPct = Math.abs(parseFloat(changePct ?? '0') || 0);
+  // Use reasonable defaults — real thresholds come from entity settings
+  return absAmt >= 10000 || absPct >= 10;
+}
+
 export default function TrialBalancePage() {
   const p = useParams();
   const sessionId = p.sessionId as string;
   const [adjusted, setAdjusted] = useState(false);
+  const [showPriorPeriod, setShowPriorPeriod] = useState(false);
+  const [showOriginalCurrency, setShowOriginalCurrency] = useState(false);
   const [search, setSearch] = useState('');
   const [typeFilters, setTypeFilters] = useState<Set<AccountType>>(new Set());
   const [mappingFilter, setMappingFilter] = useState<'all' | 'mapped' | 'unmapped'>('all');
@@ -57,16 +68,21 @@ export default function TrialBalancePage() {
 
   const { getAuthToken } = useAuth();
 
-  const { data, isLoading } = useTrialBalance(sessionId, adjusted);
-  const { rows } = useTrialBalanceContext();
+  const { data, isLoading } = useTrialBalance(sessionId, adjusted, showPriorPeriod);
+  const { rows: contextRows } = useTrialBalanceContext();
+
+  // When showing prior period, use the enriched rows from the prior-enabled query.
+  // Otherwise use context rows (which include mapping overrides).
+  const baseRows = showPriorPeriod ? (data?.rows ?? []) : contextRows;
   const totalDebits = data?.totalDebits ?? '0.00';
   const totalCredits = data?.totalCredits ?? '0.00';
   const difference = sumMoneyStrings([totalDebits, `-${totalCredits.replace(/^-/, '')}`]);
   const balanced = moneyAbs(difference) < 0.02;
-  const unmappedCount = rows.filter((r) => !r.mappingReportingLineId).length;
+  const unmappedCount = baseRows.filter((r) => !r.mappingReportingLineId).length;
+  const hasMultiCurrencyData = baseRows.some((r) => r.originalCurrency != null);
 
   const filtered = useMemo(() => {
-    let list = rows;
+    let list = baseRows;
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter(
@@ -75,13 +91,13 @@ export default function TrialBalancePage() {
       );
     }
     if (typeFilters.size > 0) {
-      list = list.filter((r) => typeFilters.has(r.accountType));
+      list = list.filter((r) => typeFilters.has(r.accountType as AccountType));
     }
     if (mappingFilter === 'mapped') list = list.filter((r) => r.mappingReportingLineId != null);
     if (mappingFilter === 'unmapped') list = list.filter((r) => r.mappingStatus === 'unmapped');
 
     const key = sortKey as keyof TrialBalanceRow;
-    const moneyKeys = new Set(['debitBalance', 'creditBalance', 'netBalance']);
+    const moneyKeys = new Set(['debitBalance', 'creditBalance', 'netBalance', 'priorNetBalance', 'changeAmount']);
     if (key) {
       list = [...list].sort((a, b) => {
         if (moneyKeys.has(key)) {
@@ -94,7 +110,7 @@ export default function TrialBalancePage() {
       });
     }
     return list;
-  }, [rows, search, typeFilters, mappingFilter, sortKey, sortDir]);
+  }, [baseRows, search, typeFilters, mappingFilter, sortKey, sortDir]);
 
   const typePills = (['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'] as const).map(
     (t) => ({
@@ -118,14 +134,20 @@ export default function TrialBalancePage() {
     { id: 'unmapped', label: 'Unmapped', active: mappingFilter === 'unmapped', toggle: () => setMappingFilter('unmapped') },
   ];
 
-  const columns = [
+  const baseColumns = [
     {
       id: 'code',
       header: 'Account Code',
       width: '100px',
       align: 'left' as const,
       sortKey: 'accountCode',
-      cell: (r: TrialBalanceRow) => <span className="font-mono text-primary">{r.accountCode}</span>,
+      cell: (r: TrialBalanceRow) => (
+        <span className="font-mono text-primary">
+          {r.accountCode}
+          {r.isNew && <span className="ml-1.5 px-1 py-0.5 rounded text-[10px] font-semibold bg-status-green-dim text-status-green">NEW</span>}
+          {r.isInactive && <span className="ml-1.5 px-1 py-0.5 rounded text-[10px] font-semibold bg-surface-alt text-text-tertiary">INACTIVE</span>}
+        </span>
+      ),
     },
     {
       id: 'name',
@@ -148,7 +170,7 @@ export default function TrialBalancePage() {
       align: 'left' as const,
       sortKey: 'accountType',
       cell: (r: TrialBalanceRow) => (
-        <span className={cn('px-2 py-0.5 rounded text-xs', ACCOUNT_TYPE_STYLE[r.accountType])}>
+        <span className={cn('px-2 py-0.5 rounded text-xs', ACCOUNT_TYPE_STYLE[r.accountType as AccountType] ?? 'bg-surface-alt text-text-tertiary')}>
           {r.accountType}
         </span>
       ),
@@ -156,7 +178,7 @@ export default function TrialBalancePage() {
     {
       id: 'debit',
       header: 'Debit Balance',
-      width: '140px',
+      width: '130px',
       align: 'right' as const,
       sortKey: 'debitBalance',
       cell: (r: TrialBalanceRow) => <MoneyCell value={r.debitBalance} />,
@@ -164,7 +186,7 @@ export default function TrialBalancePage() {
     {
       id: 'credit',
       header: 'Credit Balance',
-      width: '140px',
+      width: '130px',
       align: 'right' as const,
       sortKey: 'creditBalance',
       cell: (r: TrialBalanceRow) => <MoneyCell value={r.creditBalance} />,
@@ -172,15 +194,120 @@ export default function TrialBalancePage() {
     {
       id: 'net',
       header: 'Net Balance',
-      width: '140px',
+      width: '130px',
       align: 'right' as const,
       sortKey: 'netBalance',
       cell: (r: TrialBalanceRow) => <MoneyCell value={r.netBalance} />,
     },
+  ];
+
+  const priorColumns = showPriorPeriod
+    ? [
+        {
+          id: 'priorNet',
+          header: `Prior (${data?.priorPeriodLabel ?? '—'})`,
+          width: '130px',
+          align: 'right' as const,
+          sortKey: 'priorNetBalance',
+          cell: (r: TrialBalanceRow) =>
+            r.priorNetBalance != null ? (
+              <span className="font-mono text-text-secondary"><MoneyCell value={r.priorNetBalance} /></span>
+            ) : (
+              <span className="text-text-tertiary">—</span>
+            ),
+        },
+        {
+          id: 'change',
+          header: 'Change',
+          width: '120px',
+          align: 'right' as const,
+          sortKey: 'changeAmount',
+          cell: (r: TrialBalanceRow) => {
+            if (r.changeAmount == null) return <span className="text-text-tertiary">—</span>;
+            const material = isMaterialChange(r.changeAmount, r.changePercent);
+            return (
+              <span className={cn('font-mono', material ? 'text-status-amber font-medium' : 'text-text-secondary')}>
+                <MoneyCell value={r.changeAmount} />
+              </span>
+            );
+          },
+        },
+        {
+          id: 'changePct',
+          header: 'Change %',
+          width: '80px',
+          align: 'right' as const,
+          cell: (r: TrialBalanceRow) => {
+            if (r.changePercent == null) return <span className="text-text-tertiary">—</span>;
+            const material = isMaterialChange(r.changeAmount, r.changePercent);
+            return (
+              <span className={cn('font-mono text-xs', material ? 'text-status-amber font-medium' : 'text-text-secondary')}>
+                {r.changePercent}%
+              </span>
+            );
+          },
+        },
+      ]
+    : [];
+
+  const originalCurrencyColumns = showOriginalCurrency && hasMultiCurrencyData
+    ? [
+        {
+          id: 'origCurrency',
+          header: 'Orig Currency',
+          width: '80px',
+          align: 'center' as const,
+          cell: (r: TrialBalanceRow) =>
+            r.originalCurrency ? (
+              <span className="font-mono text-xs text-accent">{r.originalCurrency}</span>
+            ) : (
+              <span className="text-text-tertiary text-xs">—</span>
+            ),
+        },
+        {
+          id: 'origDebit',
+          header: 'Orig Debit',
+          width: '120px',
+          align: 'right' as const,
+          cell: (r: TrialBalanceRow) =>
+            r.originalDebit != null ? (
+              <span className="font-mono text-text-secondary"><MoneyCell value={r.originalDebit} /></span>
+            ) : (
+              <span className="text-text-tertiary">—</span>
+            ),
+        },
+        {
+          id: 'origCredit',
+          header: 'Orig Credit',
+          width: '120px',
+          align: 'right' as const,
+          cell: (r: TrialBalanceRow) =>
+            r.originalCredit != null ? (
+              <span className="font-mono text-text-secondary"><MoneyCell value={r.originalCredit} /></span>
+            ) : (
+              <span className="text-text-tertiary">—</span>
+            ),
+        },
+        {
+          id: 'fxRate',
+          header: 'FX Rate',
+          width: '90px',
+          align: 'right' as const,
+          cell: (r: TrialBalanceRow) =>
+            r.exchangeRate != null ? (
+              <span className="font-mono text-xs text-text-secondary">{r.exchangeRate}</span>
+            ) : (
+              <span className="text-text-tertiary">—</span>
+            ),
+        },
+      ]
+    : [];
+
+  const mappingColumns = [
     {
       id: 'mapping',
       header: 'Mapping',
-      width: '180px',
+      width: '160px',
       align: 'left' as const,
       cell: (r: TrialBalanceRow) =>
         r.mappingReportingLineName ? (
@@ -192,7 +319,7 @@ export default function TrialBalancePage() {
     {
       id: 'status',
       header: 'Status',
-      width: '80px',
+      width: '60px',
       align: 'center' as const,
       cell: (r: TrialBalanceRow) => (
         <span
@@ -208,6 +335,8 @@ export default function TrialBalancePage() {
     },
   ];
 
+  const columns = [...baseColumns, ...priorColumns, ...originalCurrencyColumns, ...mappingColumns];
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -215,14 +344,37 @@ export default function TrialBalancePage() {
           <h1 className="font-display text-2xl text-primary">Trial Balance</h1>
           <p className="text-text-secondary text-sm mt-0.5">
             {data?.periodLabel ?? '—'} — {adjusted ? 'Adjusted' : 'Unadjusted'}
+            {showPriorPeriod && data?.priorPeriodLabel && (
+              <span className="ml-2 text-text-tertiary">vs {data.priorPeriodLabel}</span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <label className="flex items-center gap-1.5 text-sm text-text-secondary cursor-pointer">
+            <input type="checkbox" checked={showPriorPeriod} onChange={(e) => setShowPriorPeriod(e.target.checked)} />
+            Show prior period
+          </label>
+          {hasMultiCurrencyData && (
+            <label className="flex items-center gap-1.5 text-sm text-text-secondary cursor-pointer">
+              <input type="checkbox" checked={showOriginalCurrency} onChange={(e) => setShowOriginalCurrency(e.target.checked)} />
+              Show original currency
+            </label>
+          )}
           <button
             type="button"
             onClick={() => {
-              const csvRows = [['Account Code', 'Account Name', 'Account Type', 'Debit Balance', 'Credit Balance', 'Net Balance', 'Mapping']];
-              filtered.forEach((r) => csvRows.push([r.accountCode, r.accountName, r.accountType, r.debitBalance, r.creditBalance, r.netBalance, r.mappingReportingLineName ?? '']));
+              const headers = ['Account Code', 'Account Name', 'Account Type', 'Debit Balance', 'Credit Balance', 'Net Balance'];
+              if (showPriorPeriod) headers.push('Prior Net Balance', 'Change', 'Change %', 'New', 'Inactive');
+              if (showOriginalCurrency && hasMultiCurrencyData) headers.push('Orig Currency', 'Orig Debit', 'Orig Credit', 'FX Rate');
+              headers.push('Mapping');
+              const csvRows = [headers];
+              filtered.forEach((r) => {
+                const row = [r.accountCode, r.accountName, r.accountType, r.debitBalance, r.creditBalance, r.netBalance];
+                if (showPriorPeriod) row.push(r.priorNetBalance ?? '', r.changeAmount ?? '', r.changePercent != null ? `${r.changePercent}%` : '', r.isNew ? 'NEW' : '', r.isInactive ? 'INACTIVE' : '');
+                if (showOriginalCurrency && hasMultiCurrencyData) row.push(r.originalCurrency ?? '', r.originalDebit ?? '', r.originalCredit ?? '', r.exchangeRate ?? '');
+                row.push(r.mappingReportingLineName ?? '');
+                csvRows.push(row);
+              });
               const csv = csvRows.map((row) => row.map((c) => `"${c.replace(/"/g, '""')}"`).join(',')).join('\n');
               const blob = new Blob([csv], { type: 'text/csv' });
               const url = URL.createObjectURL(blob);
@@ -270,7 +422,7 @@ export default function TrialBalancePage() {
           Difference: <MoneyCell value={difference} showDollar />
         </span>
         <span className="text-text-secondary text-sm">Account Count: {filtered.length}</span>
-        {rows.length === 0 ? (
+        {baseRows.length === 0 ? (
           <span className="text-text-tertiary text-sm">No accounts loaded</span>
         ) : unmappedCount > 0 ? (
           <span className="px-2 py-0.5 rounded text-xs bg-status-amber-dim text-status-amber">Unmapped: {unmappedCount}</span>
@@ -360,13 +512,19 @@ export default function TrialBalancePage() {
             <td colSpan={3} className="px-3 py-2.5 text-right font-medium text-primary">Total</td>
             <td className="px-3 py-2.5 text-right font-mono text-primary"><MoneyCell value={totalDebits} showDollar /></td>
             <td className="px-3 py-2.5 text-right font-mono text-primary"><MoneyCell value={totalCredits} showDollar /></td>
-            <td colSpan={3} />
+            <td colSpan={showPriorPeriod ? 6 : 3} />
           </tr>
           ) : undefined
         }
-        emptyMessage={rows.length === 0 ? 'No trial balance data yet. Upload a GL or trial balance from the dashboard.' : undefined}
+        emptyMessage={baseRows.length === 0 ? 'No trial balance data yet. Upload a GL or trial balance from the dashboard.' : undefined}
         loading={isLoading}
-        rowClassName={(r) => (r.mappingStatus === 'unmapped' ? 'border-l-4 border-l-status-amber bg-status-amber/5' : '')}
+        rowClassName={(r) => {
+          const classes: string[] = [];
+          if (r.mappingStatus === 'unmapped') classes.push('border-l-4 border-l-status-amber bg-status-amber/5');
+          if (showPriorPeriod && isMaterialChange(r.changeAmount, r.changePercent)) classes.push('bg-status-amber/5');
+          if (r.isInactive) classes.push('opacity-60');
+          return classes.join(' ');
+        }}
       />
     </div>
   );

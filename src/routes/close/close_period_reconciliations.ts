@@ -25,6 +25,7 @@ import {
   updateReconNotes,
   getPriorPeriodData,
   copyPriorPeriod,
+  carryForwardReconItems,
   PeriodReconciliationError,
 } from '../../services/period_reconciliation_service.js';
 import { checkReconCompleteness } from '../../services/recon_completeness_gate.js';
@@ -475,6 +476,33 @@ router.post('/sessions/:periodId/reconciliations/:reconId/copy-prior', async (re
       if (e.code === 'VALIDATION') { res.status(400).json({ error: e.message }); return; }
     }
     send500(res, e, 'Copy prior period failed');
+  }
+});
+
+/** POST /api/close/sessions/:periodId/reconciliations/:reconId/carry-forward-items — carry forward reconciling items from prior period */
+router.post('/sessions/:periodId/reconciliations/:reconId/carry-forward-items', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    const reconId = req.params.reconId ?? '';
+    const periodId = req.params.periodId ?? '';
+    if (!tenantId || !pool || !reconId) {
+      res.status(400).json({ error: 'Tenant context and reconId required' });
+      return;
+    }
+    if (!await guardSessionWritable(res, pool, tenantId, periodId)) return;
+    const { getCloseSessionById } = await import('../../db/repositories/close_session_repository.js');
+    const session = await getCloseSessionById(pool, tenantId, periodId);
+    const entityId = session?.entityId ?? 'default';
+    const userId = getUserId(req);
+    const items = await carryForwardReconItems(pool, tenantId, reconId, entityId, periodId, userId);
+    res.json({ items, count: items.length });
+  } catch (e) {
+    if (e instanceof PeriodReconciliationError) {
+      if (e.code === 'NOT_FOUND') { res.status(404).json({ error: e.message }); return; }
+      if (e.code === 'VALIDATION') { res.status(400).json({ error: e.message }); return; }
+    }
+    send500(res, e, 'Carry forward items failed');
   }
 });
 

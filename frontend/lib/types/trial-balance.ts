@@ -15,6 +15,24 @@ export interface TrialBalanceRow {
   mappingReportingLineId: string | null;
   mappingReportingLineName: string | null;
   mappingStatus: MappingStatus;
+  /** Prior period net balance */
+  priorNetBalance?: string | null;
+  /** Change = current net - prior net */
+  changeAmount?: string | null;
+  /** Change percentage */
+  changePercent?: string | null;
+  /** Account exists only in current period */
+  isNew?: boolean;
+  /** Account had balance in prior but zero in current */
+  isInactive?: boolean;
+  /** Original currency if all GL lines for this account share the same currency */
+  originalCurrency?: string | null;
+  /** Original debit in original currency */
+  originalDebit?: string | null;
+  /** Original credit in original currency */
+  originalCredit?: string | null;
+  /** Exchange rate used for translation */
+  exchangeRate?: string | null;
 }
 
 export interface GLEntry {
@@ -38,6 +56,7 @@ export interface GLDrillDownResponse {
 
 export interface TrialBalanceData {
   periodLabel: string;
+  priorPeriodLabel?: string | null;
   isAdjusted: boolean;
   rows: TrialBalanceRow[];
   /** Decimal string from backend — never convert to JS number */

@@ -24,7 +24,7 @@ export default function EvidencePolicyPage() {
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const updateMutation = useMutation({
-    mutationFn: (payload: { enforcementMode: 'off' | 'warn_only' | 'hard_block'; materialityThreshold?: string; maxFileSizeMB?: number; sha256Enabled?: boolean }) =>
+    mutationFn: (payload: { enforcementMode: 'off' | 'warn_only' | 'hard_block'; materialityThreshold?: string }) =>
       apiFetch('/api/close/evidence-policy', { method: 'PUT', body: payload }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['evidence-policy'] });
@@ -41,8 +41,6 @@ export default function EvidencePolicyPage() {
   const [jeThreshold, setJeThreshold] = useState(data?.materialityThreshold ?? '');
   const [enforcementMode, setEnforcementMode] = useState<'off' | 'warn_only' | 'hard_block'>(data?.enforcementMode ?? 'off');
   const [reconEvidenceRequired, setReconEvidenceRequired] = useState(true);
-  const [maxFileSizeMB, setMaxFileSizeMB] = useState('10');
-  const [sha256Enabled, setSha256Enabled] = useState(true);
   const saved = updateMutation.isSuccess;
 
   useEffect(() => {
@@ -57,8 +55,6 @@ export default function EvidencePolicyPage() {
     updateMutation.mutate({
       enforcementMode: mode,
       materialityThreshold: jeThreshold || undefined,
-      maxFileSizeMB: parseInt(maxFileSizeMB, 10) || 10,
-      sha256Enabled,
     });
   };
 
@@ -89,18 +85,6 @@ export default function EvidencePolicyPage() {
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={reconEvidenceRequired} onChange={(e) => setReconEvidenceRequired(e.target.checked)} />
           Always require at least one supporting document for reconciliation completion
-        </label>
-      </section>
-
-      <section className="space-y-6">
-        <h2 className="text-sm font-medium text-text-secondary uppercase tracking-wide">Evidence File Settings</h2>
-        <div>
-          <label className="block text-xs font-medium text-text-secondary mb-1">Maximum file size (MB)</label>
-          <input type="number" min={1} value={maxFileSizeMB} onChange={(e) => setMaxFileSizeMB(e.target.value)} className="w-24 rounded-input border border-border bg-input px-3 py-2 text-sm" />
-        </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={sha256Enabled} onChange={(e) => setSha256Enabled(e.target.checked)} />
-          Compute and store SHA-256 hash for every uploaded file
         </label>
       </section>
 

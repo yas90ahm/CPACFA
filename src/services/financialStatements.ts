@@ -35,6 +35,10 @@ export { MathematicalIntegrityError };
 /** Credit-positive fs line ids (positive = credit); others are debit-positive. */
 const CREDIT_POSITIVE_FS_LINES = new Set([
   'fs_liability', 'fs_equity', 'fs_revenue',
+  'fs_liability_current', 'fs_liability_ap', 'fs_liability_accrued', 'fs_liability_current_debt', 'fs_liability_other_current',
+  'fs_liability_noncurrent', 'fs_liability_lt_debt', 'fs_liability_deferred_tax', 'fs_liability_other_noncurrent',
+  'fs_equity_common', 'fs_equity_retained', 'fs_equity_other',
+  'fs_other_income', 'fs_interest_income', 'fs_other_other',
   'fs_oci', 'fs_oci_unrealized_gains', 'fs_oci_fx_translation', 'fs_oci_hedge',
   'fs_discontinued_ops', 'fs_discontinued_disposal',
 ]);
@@ -85,9 +89,34 @@ function sumLines(lines: FinancialStatementLine[]): number {
 
 const DEFAULT_MATERIALITY = 0.01;
 
+/** FS line IDs that route to BS current assets. */
+const BS_CURRENT_ASSET_FS_LINES = new Set([
+  'fs_asset_current', 'fs_asset_cash', 'fs_asset_ar', 'fs_asset_inventory', 'fs_asset_prepaid', 'fs_asset_other_current',
+]);
+/** FS line IDs that route to BS non-current assets. */
+const BS_NONCURRENT_ASSET_FS_LINES = new Set([
+  'fs_asset_noncurrent', 'fs_asset_ppe', 'fs_asset_intangible', 'fs_asset_goodwill', 'fs_asset_other_noncurrent',
+]);
+/** FS line IDs that route to BS current liabilities. */
+const BS_CURRENT_LIAB_FS_LINES = new Set([
+  'fs_liability_current', 'fs_liability_ap', 'fs_liability_accrued', 'fs_liability_current_debt', 'fs_liability_other_current',
+]);
+/** FS line IDs that route to BS non-current liabilities. */
+const BS_NONCURRENT_LIAB_FS_LINES = new Set([
+  'fs_liability_noncurrent', 'fs_liability_lt_debt', 'fs_liability_deferred_tax', 'fs_liability_other_noncurrent',
+]);
+/** FS line IDs for equity sub-lines */
+const BS_EQUITY_FS_LINES = new Set([
+  'fs_equity', 'fs_equity_common', 'fs_equity_retained', 'fs_equity_other',
+]);
+
 /** Bucket entries by fsLineId (data-driven) with accountType fallback. Supports OCI and Discontinued Ops. */
 function bucketBsByFsLine(entries: TrialBalanceEntry[]): {
+  currentAssets: TrialBalanceEntry[];
+  noncurrentAssets: TrialBalanceEntry[];
   assets: TrialBalanceEntry[];
+  currentLiabilities: TrialBalanceEntry[];
+  noncurrentLiabilities: TrialBalanceEntry[];
   liabilities: TrialBalanceEntry[];
   equity: TrialBalanceEntry[];
   revenue: TrialBalanceEntry[];
@@ -95,7 +124,11 @@ function bucketBsByFsLine(entries: TrialBalanceEntry[]): {
   oci: TrialBalanceEntry[];
   discontinued: TrialBalanceEntry[];
 } {
+  const currentAssets: TrialBalanceEntry[] = [];
+  const noncurrentAssets: TrialBalanceEntry[] = [];
   const assets: TrialBalanceEntry[] = [];
+  const currentLiabilities: TrialBalanceEntry[] = [];
+  const noncurrentLiabilities: TrialBalanceEntry[] = [];
   const liabilities: TrialBalanceEntry[] = [];
   const equity: TrialBalanceEntry[] = [];
   const revenue: TrialBalanceEntry[] = [];
@@ -107,9 +140,13 @@ function bucketBsByFsLine(entries: TrialBalanceEntry[]): {
     // Data-driven routing by fsLineId
     if (e.fsLineId && OCI_FS_LINES.has(e.fsLineId)) oci.push(e);
     else if (e.fsLineId && DISCONTINUED_FS_LINES.has(e.fsLineId)) discontinued.push(e);
+    else if (e.fsLineId && BS_CURRENT_ASSET_FS_LINES.has(e.fsLineId)) currentAssets.push(e);
+    else if (e.fsLineId && BS_NONCURRENT_ASSET_FS_LINES.has(e.fsLineId)) noncurrentAssets.push(e);
     else if (e.fsLineId === 'fs_asset') assets.push(e);
+    else if (e.fsLineId && BS_CURRENT_LIAB_FS_LINES.has(e.fsLineId)) currentLiabilities.push(e);
+    else if (e.fsLineId && BS_NONCURRENT_LIAB_FS_LINES.has(e.fsLineId)) noncurrentLiabilities.push(e);
     else if (e.fsLineId === 'fs_liability') liabilities.push(e);
-    else if (e.fsLineId === 'fs_equity') equity.push(e);
+    else if (e.fsLineId && BS_EQUITY_FS_LINES.has(e.fsLineId)) equity.push(e);
     else if (e.fsLineId === 'fs_revenue') revenue.push(e);
     else if (e.fsLineId === 'fs_expense') expenses.push(e);
     // Fallback by accountType
@@ -119,7 +156,7 @@ function bucketBsByFsLine(entries: TrialBalanceEntry[]): {
     else if (isType(e.accountType, 'REVENUE')) revenue.push(e);
     else if (isType(e.accountType, 'EXPENSE')) expenses.push(e);
   }
-  return { assets, liabilities, equity, revenue, expenses, oci, discontinued };
+  return { currentAssets, noncurrentAssets, assets, currentLiabilities, noncurrentLiabilities, liabilities, equity, revenue, expenses, oci, discontinued };
 }
 
 /**
@@ -132,11 +169,24 @@ export function buildBalanceSheet(
   options?: { materiality?: number }
 ): BalanceSheet {
   const materiality = options?.materiality ?? DEFAULT_MATERIALITY;
-  const { assets: assetEntries, liabilities: liabilityEntries, equity: equityEntries, revenue: revenueEntries, expenses: expenseEntries, oci: ociEntries } =
-    bucketBsByFsLine(entries);
+  const {
+    currentAssets: currentAssetEntries, noncurrentAssets: noncurrentAssetEntries, assets: assetEntries,
+    currentLiabilities: currentLiabEntries, noncurrentLiabilities: noncurrentLiabEntries, liabilities: liabilityEntries,
+    equity: equityEntries, revenue: revenueEntries, expenses: expenseEntries, oci: ociEntries,
+  } = bucketBsByFsLine(entries);
 
-  const assets = assetEntries.map(toLine);
-  const liabilities = liabilityEntries.map(toLine);
+  // Combine classified + unclassified assets/liabilities into the main arrays
+  const currentAssetLines = currentAssetEntries.map(toLine);
+  const noncurrentAssetLines = noncurrentAssetEntries.map(toLine);
+  const unclassifiedAssetLines = assetEntries.map(toLine);
+  // All assets combined for total computation
+  const assets = [...currentAssetLines, ...noncurrentAssetLines, ...unclassifiedAssetLines];
+
+  const currentLiabLines = currentLiabEntries.map(toLine);
+  const noncurrentLiabLines = noncurrentLiabEntries.map(toLine);
+  const unclassifiedLiabLines = liabilityEntries.map(toLine);
+  const liabilities = [...currentLiabLines, ...noncurrentLiabLines, ...unclassifiedLiabLines];
+
   const equity = equityEntries.map(toLine);
   const revenueLines = revenueEntries.map(toLine);
   const expenseLines = expenseEntries.map(toLine);
@@ -172,6 +222,11 @@ export function buildBalanceSheet(
   });
   const balances = gateResult.checks?.balanceSheetBalances ?? false;
 
+  const totalCurrentAssets = sumLines(currentAssetLines);
+  const totalNoncurrentAssets = sumLines(noncurrentAssetLines);
+  const totalCurrentLiabilities = sumLines(currentLiabLines);
+  const totalNoncurrentLiabilities = sumLines(noncurrentLiabLines);
+
   return {
     assets,
     liabilities,
@@ -179,15 +234,46 @@ export function buildBalanceSheet(
     totalAssets,
     totalLiabilities,
     totalEquity,
+    currentAssets: currentAssetLines,
+    noncurrentAssets: noncurrentAssetLines,
+    unclassifiedAssets: unclassifiedAssetLines,
+    currentLiabilities: currentLiabLines,
+    noncurrentLiabilities: noncurrentLiabLines,
+    unclassifiedLiabilities: unclassifiedLiabLines,
+    totalCurrentAssets,
+    totalNoncurrentAssets,
+    totalCurrentLiabilities,
+    totalNoncurrentLiabilities,
     ...(ociLines.length > 0 ? { oci: { items: ociLines, total: totalOci } } : {}),
     balances,
     codificationRef: BALANCE_SHEET,
   };
 }
 
-/** Bucket PL by taxonomy. Supports discontinued operations (ASC 205-20). */
-function bucketPlByFsLine(entries: TrialBalanceEntry[]): { revenue: TrialBalanceEntry[]; expenses: TrialBalanceEntry[]; discontinued: TrialBalanceEntry[] } {
+/** FS line IDs for COGS */
+const COGS_FS_LINES = new Set(['fs_cogs']);
+/** FS line IDs for Operating Expenses */
+const OPEX_FS_LINES = new Set(['fs_opex', 'fs_opex_sga', 'fs_opex_rd', 'fs_opex_da', 'fs_opex_other']);
+/** FS line IDs for Other Income / (Expense) */
+const OTHER_INCOME_FS_LINES = new Set(['fs_other_income', 'fs_interest_income', 'fs_interest_expense', 'fs_other_other']);
+/** FS line IDs for Tax */
+const TAX_FS_LINES = new Set(['fs_tax_expense']);
+
+/** Bucket PL by taxonomy with PE-standard categories. Supports discontinued operations (ASC 205-20). */
+function bucketPlByFsLine(entries: TrialBalanceEntry[]): {
+  revenue: TrialBalanceEntry[];
+  cogs: TrialBalanceEntry[];
+  operatingExpenses: TrialBalanceEntry[];
+  otherIncomeExpense: TrialBalanceEntry[];
+  taxExpense: TrialBalanceEntry[];
+  expenses: TrialBalanceEntry[];
+  discontinued: TrialBalanceEntry[];
+} {
   const revenue: TrialBalanceEntry[] = [];
+  const cogs: TrialBalanceEntry[] = [];
+  const operatingExpenses: TrialBalanceEntry[] = [];
+  const otherIncomeExpense: TrialBalanceEntry[] = [];
+  const taxExpense: TrialBalanceEntry[] = [];
   const expenses: TrialBalanceEntry[] = [];
   const discontinued: TrialBalanceEntry[] = [];
   const rev = (t?: string) => t != null && String(t).toUpperCase() === 'REVENUE';
@@ -195,11 +281,15 @@ function bucketPlByFsLine(entries: TrialBalanceEntry[]): { revenue: TrialBalance
   for (const e of entries) {
     if (e.fsLineId && DISCONTINUED_FS_LINES.has(e.fsLineId)) discontinued.push(e);
     else if (e.fsLineId === 'fs_revenue') revenue.push(e);
+    else if (e.fsLineId && COGS_FS_LINES.has(e.fsLineId)) cogs.push(e);
+    else if (e.fsLineId && OPEX_FS_LINES.has(e.fsLineId)) operatingExpenses.push(e);
+    else if (e.fsLineId && OTHER_INCOME_FS_LINES.has(e.fsLineId)) otherIncomeExpense.push(e);
+    else if (e.fsLineId && TAX_FS_LINES.has(e.fsLineId)) taxExpense.push(e);
     else if (e.fsLineId === 'fs_expense') expenses.push(e);
     else if (rev(e.accountType)) revenue.push(e);
     else if (exp(e.accountType)) expenses.push(e);
   }
-  return { revenue, expenses, discontinued };
+  return { revenue, cogs, operatingExpenses, otherIncomeExpense, taxExpense, expenses, discontinued };
 }
 
 /**
@@ -211,23 +301,76 @@ export function buildProfitAndLoss(
   entries: TrialBalanceEntry[],
   options?: { materiality?: number }
 ): ProfitAndLoss {
-  const { revenue: revenueEntries, expenses: expenseEntries, discontinued: discontinuedEntries } = bucketPlByFsLine(entries);
+  const {
+    revenue: revenueEntries,
+    cogs: cogsEntries,
+    operatingExpenses: opexEntries,
+    otherIncomeExpense: otherEntries,
+    taxExpense: taxEntries,
+    expenses: expenseEntries,
+    discontinued: discontinuedEntries,
+  } = bucketPlByFsLine(entries);
 
   const revenue = revenueEntries.map(toLine);
-  const expenses = expenseEntries.map(toLine);
+  const cogsLines = cogsEntries.map(toLine);
+  const opexLines = opexEntries.map(toLine);
+  const otherLines = otherEntries.map(toLine);
+  const taxLines = taxEntries.map(toLine);
+  const unclassifiedExpenses = expenseEntries.map(toLine);
   const discontinuedLines = discontinuedEntries.map(toLine);
 
   const totalRevenue = sumLines(revenue);
-  const totalExpenses = sumLines(expenses);
-  const netIncome = round2(minus(totalRevenue, totalExpenses));
+  const totalCogs = sumLines(cogsLines);
+  const totalOpex = sumLines(opexLines);
+  const totalOther = sumLines(otherLines);
+  const totalTax = sumLines(taxLines);
+  const totalUnclassifiedExpenses = sumLines(unclassifiedExpenses);
   const totalDiscontinued = sumLines(discontinuedLines);
+
+  // All classified detail-expense lines combined (for the flat "expenses" array)
+  const allExpenseLines = [...cogsLines, ...opexLines, ...otherLines, ...taxLines, ...unclassifiedExpenses];
+  const totalExpenses = sumRound2(allExpenseLines.map((l) => l.amount));
+
+  // PE-standard intermediate subtotals (using Decimal.js arithmetic)
+  const hasDetailedPL = cogsLines.length > 0 || opexLines.length > 0 || otherLines.length > 0 || taxLines.length > 0;
+  const grossProfit = round2(minus(totalRevenue, totalCogs));
+  const operatingIncome = round2(minus(grossProfit, plus(totalOpex, totalUnclassifiedExpenses)));
+  const incomeBeforeTax = round2(plus(operatingIncome, totalOther));
+  const netIncome = round2(minus(incomeBeforeTax, totalTax));
+
+  // EBITDA = Net Income + Tax + Interest Expense + D&A
+  const interestExpenseAmount = sumRound2(
+    otherEntries
+      .filter((e) => e.fsLineId === 'fs_interest_expense')
+      .map((e) => netAmount(e))
+  );
+  const daAmount = sumRound2(
+    opexEntries
+      .filter((e) => e.fsLineId === 'fs_opex_da')
+      .map((e) => netAmount(e))
+  );
+  const ebitda = round2(plus(plus(plus(netIncome, totalTax), interestExpenseAmount), daAmount));
 
   return {
     revenue,
-    expenses,
+    expenses: allExpenseLines,
     totalRevenue,
     totalExpenses,
     netIncome,
+    ...(hasDetailedPL ? {
+      cogs: cogsLines,
+      totalCogs,
+      grossProfit,
+      operatingExpenses: opexLines.length > 0 ? opexLines : unclassifiedExpenses.length > 0 ? unclassifiedExpenses : undefined,
+      totalOperatingExpenses: round2(plus(totalOpex, totalUnclassifiedExpenses)),
+      operatingIncome,
+      otherIncomeExpense: otherLines,
+      totalOtherIncomeExpense: totalOther,
+      incomeBeforeTax,
+      taxExpense: taxLines,
+      totalTaxExpense: totalTax,
+      ebitda,
+    } : {}),
     ...(discontinuedLines.length > 0 ? { discontinuedOperations: { items: discontinuedLines, total: totalDiscontinued } } : {}),
     codificationRef: COMPREHENSIVE_INCOME,
   };

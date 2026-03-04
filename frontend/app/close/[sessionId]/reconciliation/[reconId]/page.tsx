@@ -207,6 +207,22 @@ export default function ReconDetailPage() {
     },
   });
 
+  /* ── Carry Forward Items Mutation ── */
+  const carryForwardMutation = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/carry-forward-items`, {
+        method: 'POST',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reconciliation', sessionId, reconId] });
+      queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+    },
+  });
+  const carryForwardPending = carryForwardMutation.isPending;
+  const handleCarryForward = useCallback(() => {
+    carryForwardMutation.mutate();
+  }, [carryForwardMutation]);
+
   /* ── Activity Log (audit log) ── */
   const { data: activityData } = useQuery({
     queryKey: ['recon-activity', reconId],
@@ -694,13 +710,25 @@ export default function ReconDetailPage() {
             {(recon.status === 'not_started' || recon.status === 'in_progress') && (
               <>
                 {!showAddItem ? (
-                  <button
-                    type="button"
-                    className="mt-4 px-4 py-2 rounded-input border border-border text-sm font-medium hover:bg-hover"
-                    onClick={() => setShowAddItem(true)}
-                  >
-                    Add Item
-                  </button>
+                  <div className="mt-4 flex gap-2">
+                    <button
+                      type="button"
+                      className="px-4 py-2 rounded-input border border-border text-sm font-medium hover:bg-hover"
+                      onClick={() => setShowAddItem(true)}
+                    >
+                      Add Item
+                    </button>
+                    {recon.priorPeriodGlBalance != null && !items.some((i) => i.description.startsWith('[Carried forward]')) && (
+                      <button
+                        type="button"
+                        className="px-4 py-2 rounded-input border border-accent/40 text-sm font-medium text-accent hover:bg-accent/10"
+                        onClick={handleCarryForward}
+                        disabled={carryForwardPending}
+                      >
+                        {carryForwardPending ? 'Carrying forward...' : 'Carry Forward from Prior Period'}
+                      </button>
+                    )}
+                  </div>
                 ) : (
                   <div className="mt-4 p-4 rounded-input border border-border bg-elevated space-y-3">
                     <input

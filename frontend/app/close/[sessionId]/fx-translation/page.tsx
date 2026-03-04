@@ -1,17 +1,20 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { useState } from 'react';
-import { useTranslate, useRemeasure } from '@/lib/queries/fx-translation';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useTranslate, useRemeasure, useFxTranslationConfig, useSaveFxTranslationConfig } from '@/lib/queries/fx-translation';
 import { DataTable } from '@/components/shared/DataTable';
 import type { TranslationResult, RemeasurementResult, TranslationLine, TranslationResultLine } from '@/lib/types/fx-translation';
-import { Globe, ArrowRightLeft } from 'lucide-react';
+import { Globe, ArrowRightLeft, Check, Loader2, X } from 'lucide-react';
 
 export default function FxTranslationPage() {
   const params = useParams();
+  const sessionId = params.sessionId as string;
 
   const translate = useTranslate();
   const remeasure = useRemeasure();
+  const { data: configData, isLoading: configLoading } = useFxTranslationConfig(sessionId);
+  const saveConfig = useSaveFxTranslationConfig(sessionId);
 
   const [tab, setTab] = useState<'translate' | 'remeasure'>('translate');
   const [reportingCurrency, setReportingCurrency] = useState('USD');
@@ -21,10 +24,49 @@ export default function FxTranslationPage() {
   const [sourceCurrency, setSourceCurrency] = useState('EUR');
   const [translationResult, setTranslationResult] = useState<TranslationResult | null>(null);
   const [remeasurementResult, setRemeasurementResult] = useState<RemeasurementResult | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   const [lines, setLines] = useState<TranslationLine[]>([
     { label: '', amount: 0, currency: 'EUR', balanceType: 'monetary' },
   ]);
+
+  // Load saved config on mount
+  useEffect(() => {
+    if (configData?.config && !loaded) {
+      const c = configData.config;
+      setTab((c.mode === 'remeasure' ? 'remeasure' : 'translate') as 'translate' | 'remeasure');
+      setSourceCurrency(c.sourceCurrency ?? 'EUR');
+      setReportingCurrency(c.reportingCurrency ?? 'USD');
+      setClosingRate(c.closingRate ?? '');
+      setAverageRate(c.averageRate ?? '');
+      setHistoricRate(c.historicalRate ?? '');
+      if (c.balanceLines && c.balanceLines.length > 0) setLines(c.balanceLines);
+      setLoaded(true);
+    } else if (configData && !configData.config && !loaded) {
+      setLoaded(true);
+    }
+  }, [configData, loaded]);
+
+  // Debounced auto-save
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const doSave = useCallback(() => {
+    saveConfig.mutate({
+      mode: tab,
+      sourceCurrency,
+      reportingCurrency,
+      closingRate: closingRate || null,
+      averageRate: averageRate || null,
+      historicalRate: historicRate || null,
+      balanceLines: lines,
+    });
+  }, [tab, sourceCurrency, reportingCurrency, closingRate, averageRate, historicRate, lines, saveConfig]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(doSave, 800);
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+  }, [tab, sourceCurrency, reportingCurrency, closingRate, averageRate, historicRate, lines, loaded, doSave]);
 
   const addLine = () => {
     setLines([...lines, { label: '', amount: 0, currency: sourceCurrency, balanceType: 'monetary' }]);
@@ -65,11 +107,19 @@ export default function FxTranslationPage() {
 
   const fmtNum = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2 });
 
+  if (configLoading) return <div className="text-text-secondary">Loading...</div>;
+
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold flex items-center gap-2">
-        <Globe className="w-5 h-5" /> FX Translation
-      </h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold flex items-center gap-2">
+          <Globe className="w-5 h-5" /> FX Translation
+        </h1>
+        <span className="text-xs text-text-secondary flex items-center gap-1">
+          {saveConfig.isPending && <><Loader2 className="w-3 h-3 animate-spin" /> Saving...</>}
+          {saveConfig.isSuccess && !saveConfig.isPending && <><Check className="w-3 h-3 text-green-600" /> Saved</>}
+        </span>
+      </div>
 
       <div className="flex gap-2">
         <button onClick={() => setTab('translate')} className={`px-3 py-1.5 text-sm rounded-md ${tab === 'translate' ? 'bg-accent text-white' : 'border hover:bg-hover'}`}>
@@ -112,17 +162,24 @@ export default function FxTranslationPage() {
           <button onClick={addLine} className="text-sm text-accent hover:underline">+ Add Line</button>
         </div>
         {lines.map((line, idx) => (
-          <div key={idx} className="grid grid-cols-4 gap-2">
-            <input placeholder="Label" value={line.label} onChange={(e) => updateLine(idx, 'label', e.target.value)} className="border rounded px-2 py-1.5 text-sm" />
-            <input type="number" placeholder="Amount" value={line.amount || ''} onChange={(e) => updateLine(idx, 'amount', Number(e.target.value))} className="border rounded px-2 py-1.5 text-sm" />
-            <input placeholder="Currency" value={line.currency} onChange={(e) => updateLine(idx, 'currency', e.target.value)} className="border rounded px-2 py-1.5 text-sm" />
-            <select value={line.balanceType ?? 'monetary'} onChange={(e) => updateLine(idx, 'balanceType', e.target.value)} className="border rounded px-2 py-1.5 text-sm">
-              <option value="monetary">Monetary</option>
-              <option value="nonmonetary">Non-monetary</option>
-              <option value="equity">Equity</option>
-              <option value="income">Income</option>
-              <option value="expense">Expense</option>
-            </select>
+          <div key={idx} className="flex items-center gap-2">
+            <div className="grid grid-cols-4 gap-2 flex-1">
+              <input placeholder="Label" value={line.label} onChange={(e) => updateLine(idx, 'label', e.target.value)} className="border rounded px-2 py-1.5 text-sm" />
+              <input type="number" placeholder="Amount" value={line.amount || ''} onChange={(e) => updateLine(idx, 'amount', Number(e.target.value))} className="border rounded px-2 py-1.5 text-sm" />
+              <input placeholder="Currency" value={line.currency} onChange={(e) => updateLine(idx, 'currency', e.target.value)} className="border rounded px-2 py-1.5 text-sm" />
+              <select value={line.balanceType ?? 'monetary'} onChange={(e) => updateLine(idx, 'balanceType', e.target.value)} className="border rounded px-2 py-1.5 text-sm">
+                <option value="monetary">Monetary</option>
+                <option value="nonmonetary">Non-monetary</option>
+                <option value="equity">Equity</option>
+                <option value="income">Income</option>
+                <option value="expense">Expense</option>
+              </select>
+            </div>
+            {lines.length > 1 && (
+              <button type="button" onClick={() => setLines(lines.filter((_, i) => i !== idx))} className="text-text-tertiary hover:text-red-600 shrink-0" title="Remove line">
+                <X className="w-4 h-4" />
+              </button>
+            )}
           </div>
         ))}
       </div>

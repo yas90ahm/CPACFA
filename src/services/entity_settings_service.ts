@@ -18,6 +18,8 @@ export interface EntitySettings {
   mappingAutoAcceptEnabled: boolean;
   autoApplyAfterNPeriods: number;
   templateAutoApplyEnabled: boolean;
+  /** Functional (reporting) currency — defaults to USD */
+  functionalCurrency: string;
 }
 
 interface EntitySettingsRow {
@@ -33,6 +35,7 @@ interface EntitySettingsRow {
   mapping_auto_accept_enabled: boolean | null;
   auto_apply_after_n_periods: number | null;
   template_auto_apply_enabled: boolean | null;
+  functional_currency: string | null;
 }
 
 function rowToSettings(row: EntitySettingsRow | null, entityId: string): EntitySettings {
@@ -50,6 +53,7 @@ function rowToSettings(row: EntitySettingsRow | null, entityId: string): EntityS
       mappingAutoAcceptEnabled: false,
       autoApplyAfterNPeriods: 3,
       templateAutoApplyEnabled: false,
+      functionalCurrency: 'USD',
     };
   }
   return {
@@ -65,6 +69,7 @@ function rowToSettings(row: EntitySettingsRow | null, entityId: string): EntityS
     mappingAutoAcceptEnabled: row.mapping_auto_accept_enabled ?? false,
     autoApplyAfterNPeriods: row.auto_apply_after_n_periods ?? 3,
     templateAutoApplyEnabled: row.template_auto_apply_enabled ?? false,
+    functionalCurrency: row.functional_currency ?? 'USD',
   };
 }
 
@@ -77,7 +82,7 @@ export async function getEntitySettings(
     `SELECT entity_id, entity_name, fiscal_year_end_month, fiscal_year_end_day, base_currency, auto_lock_days,
        variance_materiality_dollar, variance_materiality_percent,
        mapping_confidence_threshold, mapping_auto_accept_enabled,
-       auto_apply_after_n_periods, template_auto_apply_enabled
+       auto_apply_after_n_periods, template_auto_apply_enabled, functional_currency
      FROM tenant_entity_settings WHERE tenant_id = $1 AND entity_id = $2`,
     [tenantId, entityId]
   );
@@ -96,6 +101,7 @@ export interface UpsertEntitySettingsInput {
   mappingAutoAcceptEnabled?: boolean;
   autoApplyAfterNPeriods?: number;
   templateAutoApplyEnabled?: boolean;
+  functionalCurrency?: string;
 }
 
 export async function upsertEntitySettings(
@@ -115,14 +121,15 @@ export async function upsertEntitySettings(
   const mappingAutoAcceptEnabled = input.mappingAutoAcceptEnabled ?? false;
   const autoApplyAfterNPeriods = input.autoApplyAfterNPeriods ?? 3;
   const templateAutoApplyEnabled = input.templateAutoApplyEnabled ?? false;
+  const functionalCurrency = input.functionalCurrency ?? 'USD';
 
   await pool.query(
     `INSERT INTO tenant_entity_settings (
        tenant_id, entity_id, entity_name, fiscal_year_end_month, fiscal_year_end_day, base_currency, auto_lock_days,
        variance_materiality_dollar, variance_materiality_percent,
        mapping_confidence_threshold, mapping_auto_accept_enabled,
-       auto_apply_after_n_periods, template_auto_apply_enabled, updated_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9::numeric, $10, $11, $12, $13, NOW())
+       auto_apply_after_n_periods, template_auto_apply_enabled, functional_currency, updated_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9::numeric, $10, $11, $12, $13, $14, NOW())
      ON CONFLICT (tenant_id, entity_id) DO UPDATE SET
        entity_name = EXCLUDED.entity_name, fiscal_year_end_month = EXCLUDED.fiscal_year_end_month,
        fiscal_year_end_day = EXCLUDED.fiscal_year_end_day,
@@ -133,12 +140,14 @@ export async function upsertEntitySettings(
        mapping_auto_accept_enabled = EXCLUDED.mapping_auto_accept_enabled,
        auto_apply_after_n_periods = EXCLUDED.auto_apply_after_n_periods,
        template_auto_apply_enabled = EXCLUDED.template_auto_apply_enabled,
+       functional_currency = EXCLUDED.functional_currency,
        updated_at = NOW()`,
     [
       tenantId, entityId, entityName, fiscalYearEndMonth, fiscalYearEndDay, baseCurrency, autoLockDays,
       varianceMaterialityDollar, varianceMaterialityPercent,
       mappingConfidenceThreshold, mappingAutoAcceptEnabled,
       autoApplyAfterNPeriods, templateAutoApplyEnabled,
+      functionalCurrency,
     ]
   );
 
@@ -146,7 +155,7 @@ export async function upsertEntitySettings(
     `SELECT entity_id, entity_name, fiscal_year_end_month, fiscal_year_end_day, base_currency, auto_lock_days,
        variance_materiality_dollar, variance_materiality_percent,
        mapping_confidence_threshold, mapping_auto_accept_enabled,
-       auto_apply_after_n_periods, template_auto_apply_enabled
+       auto_apply_after_n_periods, template_auto_apply_enabled, functional_currency
      FROM tenant_entity_settings WHERE tenant_id = $1 AND entity_id = $2`,
     [tenantId, entityId]
   );

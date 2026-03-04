@@ -233,6 +233,46 @@ export default function BoardPackagePage() {
     }
   }, [sessionId, periodType, session?.periodLabel, getAuthToken]);
 
+  const handleDownloadCsv = useCallback(() => {
+    const stmts = boardPackage?.statements;
+    if (!stmts) return;
+    const sections: Array<{ title: string; lines: Array<{ name: string; amount: string; isSubtotal?: boolean; isGrandTotal?: boolean; indentLevel?: number; sectionName?: string | null }> }> = [
+      { title: 'Income Statement', lines: stmts.incomeStatement ?? [] },
+      { title: 'Balance Sheet', lines: stmts.balanceSheet ?? [] },
+      { title: 'Cash Flow', lines: stmts.cashFlow ?? [] },
+      { title: "Stockholders' Equity", lines: stmts.equity ?? [] },
+    ];
+    const rows: string[][] = [['Statement', 'Section', 'Line Item', 'Amount']];
+    for (const sec of sections) {
+      for (const l of sec.lines) {
+        rows.push([
+          sec.title,
+          l.sectionName ?? '',
+          (l.isGrandTotal ? '*** ' : l.isSubtotal ? '** ' : '  '.repeat(l.indentLevel ?? 0)) + l.name,
+          l.amount,
+        ]);
+      }
+    }
+    if (materialVariances.length) {
+      rows.push([]);
+      rows.push(['Material Variances']);
+      rows.push(['Line Item', 'Statement', 'Current', 'Prior', 'Change', 'Change %', 'Explanation']);
+      for (const v of materialVariances) {
+        rows.push([v.lineItem, v.statement, v.currentAmount, v.priorAmount, v.changeAmount, v.changePercent ? `${v.changePercent}%` : '', v.explanation ?? '']);
+      }
+    }
+    const csv = rows.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `board-package-${session?.periodLabel ?? sessionId}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [boardPackage, materialVariances, session?.periodLabel, sessionId]);
+
   // Determine status badge appearance
   const statusBadge = useMemo(() => {
     switch (currentState) {
@@ -344,7 +384,16 @@ export default function BoardPackagePage() {
               <option value="YTD">Year-to-Date</option>
             </select>
 
-            {/* Download PDF button */}
+            {/* Download buttons */}
+            <button
+              type="button"
+              onClick={handleDownloadCsv}
+              disabled={!boardPackage?.statements}
+              className="flex items-center gap-2 px-4 py-1.5 rounded-input border border-border text-sm text-text-secondary hover:bg-hover hover:text-primary transition-colors disabled:opacity-50"
+            >
+              <Download className="w-4 h-4" />
+              Export CSV
+            </button>
             <button
               type="button"
               onClick={handleDownloadPdf}

@@ -61,6 +61,17 @@ export interface BalanceSheet {
   totalAssets: number;
   totalLiabilities: number;
   totalEquity: number;
+  /** Current/Non-Current classified sub-arrays (when accounts use detailed taxonomy). */
+  currentAssets?: FinancialStatementLine[];
+  noncurrentAssets?: FinancialStatementLine[];
+  unclassifiedAssets?: FinancialStatementLine[];
+  currentLiabilities?: FinancialStatementLine[];
+  noncurrentLiabilities?: FinancialStatementLine[];
+  unclassifiedLiabilities?: FinancialStatementLine[];
+  totalCurrentAssets?: number;
+  totalNoncurrentAssets?: number;
+  totalCurrentLiabilities?: number;
+  totalNoncurrentLiabilities?: number;
   /** Accumulated Other Comprehensive Income (ASC 220). Included in totalEquity when present. */
   oci?: { items: FinancialStatementLine[]; total: number };
   /** Verification: Assets = Liabilities + Equity */
@@ -76,6 +87,20 @@ export interface ProfitAndLoss {
   totalRevenue: number;
   totalExpenses: number;
   netIncome: number;
+  /** PE-standard subtotal hierarchy (populated when detailed taxonomy used). */
+  cogs?: FinancialStatementLine[];
+  totalCogs?: number;
+  grossProfit?: number;
+  operatingExpenses?: FinancialStatementLine[];
+  totalOperatingExpenses?: number;
+  operatingIncome?: number;
+  otherIncomeExpense?: FinancialStatementLine[];
+  totalOtherIncomeExpense?: number;
+  incomeBeforeTax?: number;
+  taxExpense?: FinancialStatementLine[];
+  totalTaxExpense?: number;
+  /** EBITDA = Net Income + Tax + Interest Expense + D&A */
+  ebitda?: number;
   /** Discontinued operations (ASC 205-20). When present, netIncome is from continuing operations only. */
   discontinuedOperations?: { items: FinancialStatementLine[]; total: number };
   codificationRef: CodificationRef;

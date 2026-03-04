@@ -123,7 +123,13 @@ interface LineItem {
 function flattenToLines(
   packageId: string,
   balanceSheet: BalanceSheet,
-  profitAndLoss: { revenue: LineItem[]; expenses: LineItem[]; totalRevenue: number; totalExpenses: number; netIncome: number },
+  profitAndLoss: {
+    revenue: LineItem[]; expenses: LineItem[]; totalRevenue: number; totalExpenses: number; netIncome: number;
+    cogs?: LineItem[]; totalCogs?: number; grossProfit?: number;
+    operatingExpenses?: LineItem[]; totalOperatingExpenses?: number; operatingIncome?: number;
+    otherIncomeExpense?: LineItem[]; totalOtherIncomeExpense?: number; incomeBeforeTax?: number;
+    taxExpense?: LineItem[]; totalTaxExpense?: number; ebitda?: number;
+  },
   cashFlowStatement?: CashFlowStatement,
   equityStatement?: EquityChangesStatement
 ): StatementLine[] {
@@ -155,121 +161,184 @@ function flattenToLines(
     });
   };
 
-  // Balance Sheet: Assets
-  pushLine('bs_header_assets', 0, 'balance_sheet', { label: 'ASSETS', section: 'Assets', indentLevel: 0 });
-  balanceSheet.assets.forEach((item, i) => {
-    pushLine(`bs_assets_${i}`, item.amount, 'balance_sheet', {
-      label: item.label,
-      section: 'Current Assets',
-      accountCode: item.accountCode,
-    });
-  });
-  pushLine('bs_total_assets', balanceSheet.totalAssets, 'balance_sheet', {
-    label: 'TOTAL ASSETS',
-    section: 'Assets',
-    indentLevel: 0,
-    isSubtotal: false,
-    isGrandTotal: true,
-  });
-
-  // Balance Sheet: Liabilities & Equity
-  pushLine('bs_header_libe', 0, 'balance_sheet', { label: 'LIABILITIES & EQUITY', section: 'Liabilities & Equity', indentLevel: 0 });
-  balanceSheet.liabilities.forEach((item, i) => {
-    pushLine(`bs_liabilities_${i}`, item.amount, 'balance_sheet', {
-      label: item.label,
-      section: 'Liabilities',
-      accountCode: item.accountCode,
-    });
-  });
-  pushLine('bs_total_liabilities', balanceSheet.totalLiabilities, 'balance_sheet', {
-    label: 'Total Liabilities',
-    section: 'Liabilities',
-    indentLevel: 0,
-    isSubtotal: true,
-  });
-  balanceSheet.equity.forEach((item, i) => {
-    pushLine(`bs_equity_${i}`, item.amount, 'balance_sheet', {
-      label: item.label,
-      section: 'Equity',
-      accountCode: item.accountCode,
-    });
-  });
-  // Balance Sheet: OCI (sub-section of equity, ASC 220)
-  if (balanceSheet.oci && balanceSheet.oci.items.length > 0) {
-    balanceSheet.oci.items.forEach((item, i) => {
-      pushLine(`bs_oci_${i}`, item.amount, 'balance_sheet', {
+  // Helper to emit a section of line items
+  const pushItems = (items: LineItem[], prefix: string, section: string, stmt: StatementLine['statement'], indent = 1) => {
+    items.forEach((item, i) => {
+      pushLine(`${prefix}_${i}`, item.amount, stmt, {
         label: item.label,
-        section: 'Accumulated Other Comprehensive Income',
+        section,
         accountCode: item.accountCode,
+        indentLevel: indent,
       });
     });
+  };
+
+  // -----------------------------------------------------------------------
+  // Balance Sheet — Current / Non-Current classification
+  // -----------------------------------------------------------------------
+  const hasClassifiedBS = (balanceSheet.currentAssets && balanceSheet.currentAssets.length > 0) ||
+    (balanceSheet.noncurrentAssets && balanceSheet.noncurrentAssets.length > 0);
+
+  pushLine('bs_header_assets', 0, 'balance_sheet', { label: 'ASSETS', section: 'Assets', indentLevel: 0 });
+
+  if (hasClassifiedBS) {
+    // Current Assets
+    if (balanceSheet.currentAssets && balanceSheet.currentAssets.length > 0) {
+      pushLine('bs_header_current_assets', 0, 'balance_sheet', { label: 'Current Assets', section: 'Current Assets', indentLevel: 0 });
+      pushItems(balanceSheet.currentAssets, 'bs_current_assets', 'Current Assets', 'balance_sheet', 2);
+      pushLine('bs_total_current_assets', balanceSheet.totalCurrentAssets ?? 0, 'balance_sheet', {
+        label: 'Total Current Assets', section: 'Current Assets', indentLevel: 1, isSubtotal: true,
+      });
+    }
+    // Non-Current Assets
+    if (balanceSheet.noncurrentAssets && balanceSheet.noncurrentAssets.length > 0) {
+      pushLine('bs_header_noncurrent_assets', 0, 'balance_sheet', { label: 'Non-Current Assets', section: 'Non-Current Assets', indentLevel: 0 });
+      pushItems(balanceSheet.noncurrentAssets, 'bs_noncurrent_assets', 'Non-Current Assets', 'balance_sheet', 2);
+      pushLine('bs_total_noncurrent_assets', balanceSheet.totalNoncurrentAssets ?? 0, 'balance_sheet', {
+        label: 'Total Non-Current Assets', section: 'Non-Current Assets', indentLevel: 1, isSubtotal: true,
+      });
+    }
+    // Unclassified assets (mapped to fs_asset without current/non-current detail)
+    if (balanceSheet.unclassifiedAssets && balanceSheet.unclassifiedAssets.length > 0) {
+      pushItems(balanceSheet.unclassifiedAssets, 'bs_assets', 'Assets', 'balance_sheet');
+    }
+  } else {
+    // Flat asset list (legacy/fallback)
+    pushItems(balanceSheet.assets, 'bs_assets', 'Assets', 'balance_sheet');
+  }
+  pushLine('bs_total_assets', balanceSheet.totalAssets, 'balance_sheet', {
+    label: 'TOTAL ASSETS', section: 'Assets', indentLevel: 0, isGrandTotal: true,
+  });
+
+  // Liabilities & Equity
+  pushLine('bs_header_libe', 0, 'balance_sheet', { label: 'LIABILITIES & EQUITY', section: 'Liabilities & Equity', indentLevel: 0 });
+
+  const hasClassifiedLiab = (balanceSheet.currentLiabilities && balanceSheet.currentLiabilities.length > 0) ||
+    (balanceSheet.noncurrentLiabilities && balanceSheet.noncurrentLiabilities.length > 0);
+
+  if (hasClassifiedLiab) {
+    if (balanceSheet.currentLiabilities && balanceSheet.currentLiabilities.length > 0) {
+      pushLine('bs_header_current_liabilities', 0, 'balance_sheet', { label: 'Current Liabilities', section: 'Current Liabilities', indentLevel: 0 });
+      pushItems(balanceSheet.currentLiabilities, 'bs_current_liabilities', 'Current Liabilities', 'balance_sheet', 2);
+      pushLine('bs_total_current_liabilities', balanceSheet.totalCurrentLiabilities ?? 0, 'balance_sheet', {
+        label: 'Total Current Liabilities', section: 'Current Liabilities', indentLevel: 1, isSubtotal: true,
+      });
+    }
+    if (balanceSheet.noncurrentLiabilities && balanceSheet.noncurrentLiabilities.length > 0) {
+      pushLine('bs_header_noncurrent_liabilities', 0, 'balance_sheet', { label: 'Non-Current Liabilities', section: 'Non-Current Liabilities', indentLevel: 0 });
+      pushItems(balanceSheet.noncurrentLiabilities, 'bs_noncurrent_liabilities', 'Non-Current Liabilities', 'balance_sheet', 2);
+      pushLine('bs_total_noncurrent_liabilities', balanceSheet.totalNoncurrentLiabilities ?? 0, 'balance_sheet', {
+        label: 'Total Non-Current Liabilities', section: 'Non-Current Liabilities', indentLevel: 1, isSubtotal: true,
+      });
+    }
+    if (balanceSheet.unclassifiedLiabilities && balanceSheet.unclassifiedLiabilities.length > 0) {
+      pushItems(balanceSheet.unclassifiedLiabilities, 'bs_liabilities', 'Liabilities', 'balance_sheet');
+    }
+  } else {
+    pushItems(balanceSheet.liabilities, 'bs_liabilities', 'Liabilities', 'balance_sheet');
+  }
+  pushLine('bs_total_liabilities', balanceSheet.totalLiabilities, 'balance_sheet', {
+    label: 'Total Liabilities', section: 'Liabilities', indentLevel: 0, isSubtotal: true,
+  });
+
+  // Equity
+  pushLine('bs_header_equity', 0, 'balance_sheet', { label: "Stockholders' Equity", section: 'Equity', indentLevel: 0 });
+  pushItems(balanceSheet.equity, 'bs_equity', 'Equity', 'balance_sheet');
+  // OCI (sub-section of equity, ASC 220)
+  if (balanceSheet.oci && balanceSheet.oci.items.length > 0) {
+    pushItems(balanceSheet.oci.items, 'bs_oci', 'Accumulated Other Comprehensive Income', 'balance_sheet');
     pushLine('bs_total_oci', balanceSheet.oci.total, 'balance_sheet', {
-      label: 'Total Accumulated OCI',
-      section: 'Accumulated Other Comprehensive Income',
-      indentLevel: 0,
-      isSubtotal: true,
+      label: 'Total Accumulated OCI', section: 'Accumulated Other Comprehensive Income', indentLevel: 1, isSubtotal: true,
     });
   }
   pushLine('bs_total_equity', balanceSheet.totalEquity, 'balance_sheet', {
-    label: 'TOTAL LIABILITIES & EQUITY',
-    section: 'Equity',
-    indentLevel: 0,
-    isGrandTotal: true,
+    label: "TOTAL STOCKHOLDERS' EQUITY", section: 'Equity', indentLevel: 0, isSubtotal: true,
+  });
+  pushLine('bs_total_libe', sumRound2([balanceSheet.totalLiabilities, balanceSheet.totalEquity]), 'balance_sheet', {
+    label: 'TOTAL LIABILITIES & EQUITY', section: 'Liabilities & Equity', indentLevel: 0, isGrandTotal: true,
   });
 
-  // P&L: Revenue
-  profitAndLoss.revenue.forEach((item, i) => {
-    pushLine(`pl_revenue_${i}`, item.amount, 'profit_and_loss', {
-      label: item.label,
-      section: 'Revenue',
-      accountCode: item.accountCode,
-    });
-  });
+  // -----------------------------------------------------------------------
+  // P&L — PE-standard subtotal hierarchy
+  // -----------------------------------------------------------------------
+  const hasDetailedPL = profitAndLoss.cogs != null || profitAndLoss.operatingExpenses != null;
+
+  // Revenue
+  pushItems(profitAndLoss.revenue, 'pl_revenue', 'Revenue', 'profit_and_loss');
   pushLine('pl_total_revenue', profitAndLoss.totalRevenue, 'profit_and_loss', {
-    label: 'Total Revenue',
-    section: 'Revenue',
-    indentLevel: 0,
-    isSubtotal: true,
+    label: 'Total Revenue', section: 'Revenue', indentLevel: 0, isSubtotal: true,
   });
 
-  // P&L: Expenses
-  profitAndLoss.expenses.forEach((item, i) => {
-    pushLine(`pl_expenses_${i}`, item.amount, 'profit_and_loss', {
-      label: item.label,
-      section: 'Expenses',
-      accountCode: item.accountCode,
+  if (hasDetailedPL) {
+    // COGS
+    if (profitAndLoss.cogs && profitAndLoss.cogs.length > 0) {
+      pushItems(profitAndLoss.cogs, 'pl_cogs', 'Cost of Goods Sold', 'profit_and_loss');
+      pushLine('pl_total_cogs', profitAndLoss.totalCogs ?? 0, 'profit_and_loss', {
+        label: 'Total Cost of Goods Sold', section: 'Cost of Goods Sold', indentLevel: 0, isSubtotal: true,
+      });
+    }
+    // Gross Profit
+    pushLine('pl_gross_profit', profitAndLoss.grossProfit ?? 0, 'profit_and_loss', {
+      label: 'GROSS PROFIT', section: 'Gross Profit', indentLevel: 0, isSubtotal: true,
     });
-  });
-  pushLine('pl_total_expenses', profitAndLoss.totalExpenses, 'profit_and_loss', {
-    label: 'Total Expenses',
-    section: 'Expenses',
-    indentLevel: 0,
-    isSubtotal: true,
-  });
+    // Operating Expenses
+    if (profitAndLoss.operatingExpenses && profitAndLoss.operatingExpenses.length > 0) {
+      pushLine('pl_header_opex', 0, 'profit_and_loss', { label: 'Operating Expenses', section: 'Operating Expenses', indentLevel: 0 });
+      pushItems(profitAndLoss.operatingExpenses, 'pl_opex', 'Operating Expenses', 'profit_and_loss');
+      pushLine('pl_total_opex', profitAndLoss.totalOperatingExpenses ?? 0, 'profit_and_loss', {
+        label: 'Total Operating Expenses', section: 'Operating Expenses', indentLevel: 0, isSubtotal: true,
+      });
+    }
+    // Operating Income
+    pushLine('pl_operating_income', profitAndLoss.operatingIncome ?? 0, 'profit_and_loss', {
+      label: 'OPERATING INCOME', section: 'Operating Income', indentLevel: 0, isSubtotal: true,
+    });
+    // Other Income / (Expense)
+    if (profitAndLoss.otherIncomeExpense && profitAndLoss.otherIncomeExpense.length > 0) {
+      pushLine('pl_header_other', 0, 'profit_and_loss', { label: 'Other Income / (Expense)', section: 'Other Income / (Expense)', indentLevel: 0 });
+      pushItems(profitAndLoss.otherIncomeExpense, 'pl_other', 'Other Income / (Expense)', 'profit_and_loss');
+      pushLine('pl_total_other', profitAndLoss.totalOtherIncomeExpense ?? 0, 'profit_and_loss', {
+        label: 'Total Other Income / (Expense)', section: 'Other Income / (Expense)', indentLevel: 0, isSubtotal: true,
+      });
+    }
+    // Income Before Tax
+    pushLine('pl_income_before_tax', profitAndLoss.incomeBeforeTax ?? 0, 'profit_and_loss', {
+      label: 'INCOME BEFORE TAX', section: 'Income Before Tax', indentLevel: 0, isSubtotal: true,
+    });
+    // Tax
+    if (profitAndLoss.taxExpense && profitAndLoss.taxExpense.length > 0) {
+      pushItems(profitAndLoss.taxExpense, 'pl_tax', 'Income Tax Expense', 'profit_and_loss');
+    }
+  } else {
+    // Flat expense list (legacy/fallback)
+    pushItems(profitAndLoss.expenses, 'pl_expenses', 'Expenses', 'profit_and_loss');
+    pushLine('pl_total_expenses', profitAndLoss.totalExpenses, 'profit_and_loss', {
+      label: 'Total Expenses', section: 'Expenses', indentLevel: 0, isSubtotal: true,
+    });
+  }
 
-  // P&L: Net Income (grand total for continuing operations)
+  // Net Income
   pushLine('pl_net_income', profitAndLoss.netIncome, 'profit_and_loss', {
-    label: 'Net Income',
-    section: 'Net Income',
-    indentLevel: 0,
-    isGrandTotal: true,
+    label: 'NET INCOME', section: 'Net Income', indentLevel: 0, isGrandTotal: true,
   });
 
-  // P&L: Discontinued Operations (ASC 205-20)
+  // EBITDA (non-GAAP supplemental)
+  if (hasDetailedPL && profitAndLoss.ebitda != null) {
+    pushLine('pl_ebitda', profitAndLoss.ebitda, 'profit_and_loss', {
+      label: 'EBITDA', section: 'EBITDA', indentLevel: 0, isSubtotal: true,
+    });
+  }
+
+  // Discontinued Operations (ASC 205-20)
   if ('discontinuedOperations' in profitAndLoss && (profitAndLoss as any).discontinuedOperations) {
     const discOps = (profitAndLoss as any).discontinuedOperations as { items: Array<{ label: string; amount: number; accountCode?: string }>; total: number };
     discOps.items.forEach((item: { label: string; amount: number; accountCode?: string }, i: number) => {
       pushLine(`pl_discontinued_${i}`, item.amount, 'profit_and_loss', {
-        label: item.label,
-        section: 'Discontinued Operations',
-        accountCode: item.accountCode,
+        label: item.label, section: 'Discontinued Operations', accountCode: item.accountCode,
       });
     });
     pushLine('pl_total_discontinued', discOps.total, 'profit_and_loss', {
-      label: 'Total Discontinued Operations',
-      section: 'Discontinued Operations',
-      indentLevel: 0,
-      isSubtotal: true,
+      label: 'Total Discontinued Operations', section: 'Discontinued Operations', indentLevel: 0, isSubtotal: true,
     });
   }
 

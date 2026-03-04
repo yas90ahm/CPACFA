@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
+import Link from 'next/link';
 import { useCloseSession, useCloseReadiness, useAdvanceSession, useCertifySession, useLockSession, useReopenSession } from '@/lib/queries/close-session';
 import { useCertification } from '@/lib/queries/certification';
 import { useAuth } from '@/lib/auth';
@@ -32,6 +33,11 @@ import {
   BookOpen,
   Download,
   Loader2,
+  Copy,
+  Check,
+  ExternalLink,
+  X,
+  Shield,
 } from 'lucide-react';
 
 export default function ReviewPage() {
@@ -147,6 +153,7 @@ export default function ReviewPage() {
   const [reopenReason, setReopenReason] = useState('');
   const [certifyStep, setCertifyStep] = useState<'input' | 'progress' | 'complete' | 'error'>('input');
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   const currentState = session?.state || 'IN_PROGRESS';
   const isReviewer = (userRole as string) === 'reviewer' || (userRole as string) === 'approver' || (userRole as string) === 'admin';
@@ -244,11 +251,6 @@ export default function ReviewPage() {
     certifyMutation.mutate({ confirmation: 'CERTIFY' }, {
       onSuccess: () => {
         setCertifyStep('complete');
-        setTimeout(() => {
-          setShowCertifyDialog(false);
-          setCertifyInput('');
-          setCertifyStep('input');
-        }, 1500);
       },
       onError: (err) => {
         setCertifyStep('error');
@@ -618,7 +620,10 @@ export default function ReviewPage() {
           <div
             role="dialog"
             aria-modal="true"
-            className="relative bg-surface border border-border rounded-card shadow-xl max-w-md w-full p-6"
+            className={cn(
+              'relative bg-surface border border-border rounded-card shadow-xl w-full p-6',
+              certifyStep === 'complete' ? 'max-w-2xl' : 'max-w-md'
+            )}
             onClick={(e) => e.stopPropagation()}
           >
             {certifyStep === 'input' && (
@@ -681,12 +686,146 @@ export default function ReviewPage() {
                 <p className="text-sm text-text-tertiary mt-2">Validating ties and generating certification artifact</p>
               </div>
             )}
-            {certifyStep === 'complete' && (
-              <div className="text-center py-8">
-                <CheckCircle2 className="w-12 h-12 text-status-green mx-auto mb-4" />
-                <p className="text-status-green font-medium">Period certified successfully</p>
-              </div>
-            )}
+            {certifyStep === 'complete' && (() => {
+              const copyToClipboard = (text: string, field: string) => {
+                navigator.clipboard.writeText(text).then(() => {
+                  setCopiedField(field);
+                  setTimeout(() => setCopiedField(null), 2000);
+                });
+              };
+              const closeCertifyOverlay = () => {
+                setShowCertifyDialog(false);
+                setCertifyInput('');
+                setCertifyStep('input');
+                setCopiedField(null);
+              };
+              const certArtifact = certification;
+              const sig = certArtifact?.signature ?? '';
+              const hash = certArtifact?.snapshotHash ?? '';
+              const certifier = certArtifact?.certifiedBy ?? userName;
+              const certifiedAt = certArtifact?.certifiedAt ? new Date(certArtifact.certifiedAt).toLocaleString() : new Date().toLocaleString();
+              const reconsDone = reconciliations.filter((r) => r.status === 'completed' || r.status === 'approved').length;
+              const variancesExplained = variances.filter((v) => (v as { explanationStatus?: string }).explanationStatus === 'explained' || (v as { explanationStatus?: string }).explanationStatus === 'approved').length;
+
+              return (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={closeCertifyOverlay}
+                    className="absolute top-0 right-0 p-1 text-text-tertiary hover:text-primary"
+                    aria-label="Close"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+
+                  <div className="text-center pt-4 pb-6">
+                    <div className="w-20 h-20 rounded-full bg-status-green/15 flex items-center justify-center mx-auto mb-4">
+                      <CheckCircle2 className="w-16 h-16 text-status-green" />
+                    </div>
+                    <h2 className="text-3xl font-display font-bold text-status-green mb-1">CERTIFIED</h2>
+                    <p className="text-primary font-medium">{session?.entityName ?? ''}</p>
+                    <p className="text-text-secondary text-sm">{session?.periodLabel ?? ''}</p>
+                    <p className="text-text-tertiary text-xs mt-1">{certifier} &middot; {certifiedAt}</p>
+                  </div>
+
+                  <div className="border-t border-border pt-4 pb-4 space-y-3">
+                    <h3 className="text-xs font-medium text-text-secondary uppercase tracking-wide flex items-center gap-1.5">
+                      <Shield className="w-3.5 h-3.5" /> Digital Signatures
+                    </h3>
+                    <div className="flex items-center justify-between bg-elevated rounded-input px-3 py-2">
+                      <div className="min-w-0">
+                        <span className="text-xs text-text-tertiary">ed25519:</span>
+                        <span className="text-sm font-mono text-primary ml-1.5">{sig.slice(0, 16)}...</span>
+                      </div>
+                      <button type="button" onClick={() => copyToClipboard(sig, 'sig')} className="shrink-0 p-1 text-text-tertiary hover:text-accent" title="Copy signature">
+                        {copiedField === 'sig' ? <Check className="w-4 h-4 text-status-green" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between bg-elevated rounded-input px-3 py-2">
+                      <div className="min-w-0">
+                        <span className="text-xs text-text-tertiary">sha256:</span>
+                        <span className="text-sm font-mono text-primary ml-1.5">{hash.slice(0, 16)}...</span>
+                      </div>
+                      <button type="button" onClick={() => copyToClipboard(hash, 'hash')} className="shrink-0 p-1 text-text-tertiary hover:text-accent" title="Copy hash">
+                        {copiedField === 'hash' ? <Check className="w-4 h-4 text-status-green" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    {certArtifact?.id && (
+                      <p className="text-xs text-text-tertiary">Artifact ID: <span className="font-mono">{certArtifact.id}</span></p>
+                    )}
+                  </div>
+
+                  <div className="border-t border-border pt-4 pb-4">
+                    <h3 className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-3">Summary</h3>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="text-center p-2 bg-elevated rounded-input">
+                        <div className="text-lg font-bold text-primary">{gatesWithTies.filter((g) => g.passing).length}/{gatesWithTies.length}</div>
+                        <div className="text-[10px] text-text-tertiary uppercase">Gates</div>
+                      </div>
+                      <div className="text-center p-2 bg-elevated rounded-input">
+                        <div className="text-lg font-bold text-primary">4</div>
+                        <div className="text-[10px] text-text-tertiary uppercase">Statements</div>
+                      </div>
+                      <div className="text-center p-2 bg-elevated rounded-input">
+                        <div className="text-lg font-bold text-primary">{reconsDone}/{reconciliations.length}</div>
+                        <div className="text-[10px] text-text-tertiary uppercase">Recons</div>
+                      </div>
+                      <div className="text-center p-2 bg-elevated rounded-input">
+                        <div className="text-lg font-bold text-primary">{journalEntries.length}</div>
+                        <div className="text-[10px] text-text-tertiary uppercase">AJEs</div>
+                      </div>
+                      <div className="text-center p-2 bg-elevated rounded-input">
+                        <div className="text-lg font-bold text-primary">{variancesExplained}/{variances.filter((v) => (v as { isMaterial?: boolean }).isMaterial).length}</div>
+                        <div className="text-[10px] text-text-tertiary uppercase">Variances</div>
+                      </div>
+                      <div className="text-center p-2 bg-elevated rounded-input">
+                        <div className="text-lg font-bold text-primary">{manifestData?.totalFiles ?? 0}</div>
+                        <div className="text-[10px] text-text-tertiary uppercase">Evidence</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-border pt-4 space-y-3">
+                    <div className="flex gap-3">
+                      {certArtifact?.id && (
+                        <a
+                          href={`/api/verification/certification/artifacts/${certArtifact.id}`}
+                          download
+                          className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-input border border-border text-sm font-medium hover:bg-hover"
+                        >
+                          <Download className="w-4 h-4" /> Download Certificate
+                        </a>
+                      )}
+                      <Link
+                        href={`/close/${sessionId}/board-package`}
+                        className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-input bg-accent text-white text-sm font-medium hover:opacity-90"
+                        onClick={closeCertifyOverlay}
+                      >
+                        <BookOpen className="w-4 h-4" /> View Board Package
+                      </Link>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { closeCertifyOverlay(); setShowLockDialog(true); }}
+                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-input border border-status-amber text-status-amber text-sm font-medium hover:bg-status-amber-dim"
+                    >
+                      <Lock className="w-4 h-4" /> Lock Period
+                    </button>
+                    {certArtifact?.id && (
+                      <p className="text-center">
+                        <a
+                          href={`/close/${sessionId}/review`}
+                          onClick={closeCertifyOverlay}
+                          className="text-xs text-accent hover:underline inline-flex items-center gap-1"
+                        >
+                          <ExternalLink className="w-3 h-3" /> Verify certification
+                        </a>
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
             {certifyStep === 'error' && (
               <div className="py-6">
                 <XCircle className="w-12 h-12 text-status-red mx-auto mb-4" />

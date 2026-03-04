@@ -17,7 +17,7 @@ import { createDecisionRecord } from '../services/decision_record_service.js';
 import { checkMappingCompleteness } from '../services/mapping_completeness_gate.js';
 import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
 import { appendEntry } from '../db/repositories/audit_ledger_repository.js';
-import { listFsTaxonomyLines } from '../db/repositories/fs_taxonomy_repository.js';
+import { listFsTaxonomyLines, upsertFsTaxonomyLine } from '../db/repositories/fs_taxonomy_repository.js';
 
 const router = Router();
 
@@ -145,6 +145,73 @@ router.get('/taxonomy', async (req: Request, res: Response) => {
     res.json({ lines });
   } catch (e) {
     send500(res, e, 'List taxonomy failed');
+  }
+});
+
+/** POST /api/coa-mapping/taxonomy — create or update a custom taxonomy line */
+router.post('/taxonomy', async (req: Request, res: Response) => {
+  try {
+    const pool = getTenantPool(req);
+    if (!pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const { id, code, name, statement, parentId, normalBalance } = req.body;
+    if (!id || !code || !name || !statement) {
+      res.status(400).json({ error: 'id, code, name, and statement are required' });
+      return;
+    }
+    if (!['PL', 'BS', 'CF', 'OCI'].includes(statement)) {
+      res.status(400).json({ error: 'statement must be PL, BS, CF, or OCI' });
+      return;
+    }
+    const line = await upsertFsTaxonomyLine(pool, {
+      id,
+      code,
+      name,
+      statement,
+      parentId: parentId ?? null,
+      normalBalance: normalBalance ?? 'debit',
+    });
+    res.status(201).json(line);
+  } catch (e) {
+    send500(res, e, 'Create taxonomy line failed');
+  }
+});
+
+/** DELETE /api/coa-mapping/taxonomy/:id — delete a custom taxonomy line */
+router.delete('/taxonomy/:id', async (req: Request, res: Response) => {
+  try {
+    const pool = getTenantPool(req);
+    if (!pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const { id } = req.params;
+    if (!id.startsWith('fs_custom_')) {
+      res.status(400).json({ error: 'Only custom taxonomy lines (fs_custom_*) can be deleted' });
+      return;
+    }
+    // Check no mapping rules reference this line
+    const refs = await pool.query(
+      'SELECT COUNT(*)::int AS cnt FROM coa_mapping_rules WHERE mapped_fs_line_id = $1',
+      [id]
+    );
+    if (refs.rows[0]?.cnt > 0) {
+      res.status(409).json({ error: 'Cannot delete: mapping rules reference this taxonomy line' });
+      return;
+    }
+    const del = await pool.query(
+      "DELETE FROM fs_taxonomy_lines WHERE id = $1 AND id LIKE 'fs_custom_%' RETURNING id",
+      [id]
+    );
+    if (del.rowCount === 0) {
+      res.status(404).json({ error: 'Taxonomy line not found' });
+      return;
+    }
+    res.json({ success: true });
+  } catch (e) {
+    send500(res, e, 'Delete taxonomy line failed');
   }
 });
 

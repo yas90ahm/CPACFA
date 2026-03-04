@@ -51,6 +51,7 @@ import accountingIntegrationRouter from './routes/accounting_integration.js';
 import onboardingRouter from './routes/onboarding.js';
 import tenantsRouter from './routes/tenants.js';
 import portfolioRouter from './routes/portfolio.js';
+import notificationsRouter, { webhookRouter, preferencesRouter } from './routes/notifications.js';
 import cpaRouter from './routes/cpa_index.js';
 import devDiagnosticsRouter from './routes/dev_diagnostics.js';
 import fxCurrencyRouter from './routes/fx_currency.js';
@@ -215,6 +216,11 @@ app.use('/api/tenants', tenantsRouter);
 
 // API: Portfolio — cross-tenant dashboard (operating_partner / admin)
 app.use('/api/portfolio', portfolioRouter);
+
+// API: Notifications — in-app, webhook, preferences
+app.use('/api/notifications', notificationsRouter);
+app.use('/api/settings/webhooks', webhookRouter);
+app.use('/api/settings/notification-preferences', preferencesRouter);
 
 // API: HITL staging and webhook
 app.use('/api/hitl', hitlRouter);

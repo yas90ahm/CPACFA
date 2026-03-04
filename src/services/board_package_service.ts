@@ -126,26 +126,33 @@ export async function buildBoardPackage(
   // Key metrics
   const revenue = is.find((l) => l.isSubtotal && /total revenue/i.test((l.metadata as { label?: string })?.label ?? ''));
   const netIncome = is.find((l) => l.isGrandTotal && /net income/i.test((l.metadata as { label?: string })?.label ?? ''));
-  const totalAssets = bs.find((l) => l.isGrandTotal && l.fsLineId === 'bs_total_assets');
-  const totalExpenses = is.find((l) => l.isSubtotal && /total expenses/i.test((l.metadata as { label?: string })?.label ?? ''));
+  const grossProfit = is.find((l) => l.fsLineId === 'pl_gross_profit');
+  const operatingIncome = is.find((l) => l.fsLineId === 'pl_operating_income');
+  const ebitda = is.find((l) => l.fsLineId === 'pl_ebitda');
   const endingCash = cf.find((l) => l.fsLineId === 'cf_ending_cash');
 
   const revenueAmt = revenue?.amount ?? 0;
-  const expensesAmt = totalExpenses?.amount ?? 0;
   const netIncomeAmt = netIncome?.amount ?? 0;
+  const grossProfitAmt = grossProfit?.amount;
+  const operatingIncomeAmt = operatingIncome?.amount;
 
-  const grossMarginPct = revenueAmt !== 0
-    ? decimalFrom(revenueAmt).minus(expensesAmt).div(decimalFrom(revenueAmt)).times(100).toDecimalPlaces(1).toString()
-    : '0.0';
-  const operatingMarginPct = revenueAmt !== 0
-    ? decimalFrom(netIncomeAmt).div(decimalFrom(revenueAmt)).times(100).toDecimalPlaces(1).toString()
-    : '0.0';
+  const grossMarginPct = revenueAmt !== 0 && grossProfitAmt != null
+    ? decimalFrom(grossProfitAmt).div(decimalFrom(revenueAmt)).times(100).toDecimalPlaces(1).toString()
+    : revenueAmt !== 0
+      ? decimalFrom(netIncomeAmt).div(decimalFrom(revenueAmt)).times(100).toDecimalPlaces(1).toString()
+      : '0.0';
+  const operatingMarginPct = revenueAmt !== 0 && operatingIncomeAmt != null
+    ? decimalFrom(operatingIncomeAmt).div(decimalFrom(revenueAmt)).times(100).toDecimalPlaces(1).toString()
+    : revenueAmt !== 0
+      ? decimalFrom(netIncomeAmt).div(decimalFrom(revenueAmt)).times(100).toDecimalPlaces(1).toString()
+      : '0.0';
 
   const keyMetrics: BoardPackageMetric[] = [
     { label: 'Revenue', value: normalizeMoney(revenueAmt), format: 'money' },
     { label: 'Net Income', value: normalizeMoney(netIncomeAmt), format: 'money' },
     { label: 'Gross Margin %', value: `${grossMarginPct}%`, format: 'percent' },
     { label: 'Operating Margin %', value: `${operatingMarginPct}%`, format: 'percent' },
+    ...(ebitda != null ? [{ label: 'EBITDA', value: normalizeMoney(ebitda.amount), format: 'money' as const }] : []),
     { label: 'Cash Position', value: normalizeMoney(endingCash?.amount ?? 0), format: 'money' },
   ];
 

@@ -40,6 +40,7 @@ router.get('/general', async (req: Request, res: Response) => {
       autoLockDays: settings.autoLockDays,
       varianceMaterialityDollar: settings.varianceMaterialityDollar,
       varianceMaterialityPercent: settings.varianceMaterialityPercent,
+      functionalCurrency: settings.functionalCurrency,
     });
   } catch (e) {
     send500(res, e, 'Get entity settings failed');
@@ -68,6 +69,7 @@ router.put('/general', async (req: Request, res: Response) => {
       autoLockDays?: number;
       varianceMaterialityDollar?: string | number;
       varianceMaterialityPercent?: string | number;
+      functionalCurrency?: string;
     };
     const settings = await entitySettingsService.upsertEntitySettings(
       pool,
@@ -81,6 +83,7 @@ router.put('/general', async (req: Request, res: Response) => {
         autoLockDays: body.autoLockDays,
         varianceMaterialityDollar: body.varianceMaterialityDollar,
         varianceMaterialityPercent: body.varianceMaterialityPercent,
+        functionalCurrency: body.functionalCurrency,
       }
     );
     await recordMaterialEvent(pool, {
@@ -100,6 +103,7 @@ router.put('/general', async (req: Request, res: Response) => {
       fiscalYearEnd: settings.fiscalYearEndMonth,
       fiscalYearEndDay: settings.fiscalYearEndDay,
       baseCurrency: settings.baseCurrency,
+      functionalCurrency: settings.functionalCurrency,
       autoLockDays: settings.autoLockDays,
       varianceMaterialityDollar: settings.varianceMaterialityDollar,
       varianceMaterialityPercent: settings.varianceMaterialityPercent,

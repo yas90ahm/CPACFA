@@ -1,13 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { FileUploadZone } from '@/components/shared/FileUploadZone';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { GLUploadFlow } from './GLUploadFlow';
 import { TBUploadFlow } from './TBUploadFlow';
-import { apiFetch } from '@/lib/api';
 import { useSessions } from '@/lib/queries/sessions';
 import { useEntities } from '@/lib/queries/entities';
 
@@ -25,11 +23,6 @@ export function OpenStateDashboard({ sessionId, periodLabel, entityName }: OpenS
     .filter((s) => s.id !== sessionId && (s.state === 'CERTIFIED' || s.state === 'LOCKED'))
     .sort((a, b) => new Date(b.periodStart).getTime() - new Date(a.periodStart).getTime())[0] ?? null;
 
-  const { data: connections } = useQuery({
-    queryKey: ['erp-connections'],
-    queryFn: () => apiFetch<Array<{ id: string; name?: string }>>('/api/accounting-integration/connections'),
-  });
-  const erpConnected = (connections?.length ?? 0) > 0;
   const [glFile, setGlFile] = useState<File | null>(null);
   const [tbFile, setTbFile] = useState<File | null>(null);
   const [showTBUpload, setShowTBUpload] = useState(false);
@@ -126,20 +119,7 @@ export function OpenStateDashboard({ sessionId, periodLabel, entityName }: OpenS
           <div className="flex-1 border-t border-border" />
         </div>
 
-        {erpConnected ? (
-          <button type="button" className="w-full py-3 rounded-input border border-border text-sm font-medium hover:bg-hover">
-            Sync from ERP
-          </button>
-        ) : (
-          <div className="p-4 rounded-input border border-border bg-surface-alt text-sm text-text-secondary">
-            No ERP connection configured. Connect your accounting system in Settings to enable direct sync.
-            <Link href="/settings" className="block mt-2 text-accent hover:underline">
-              Go to Settings →
-            </Link>
-          </div>
-        )}
-
-        <button type="button" onClick={() => setShowTBUpload(true)} className="w-full mt-3 py-3 rounded-input border border-border text-sm font-medium hover:bg-hover">
+        <button type="button" onClick={() => setShowTBUpload(true)} className="w-full py-3 rounded-input border border-border text-sm font-medium hover:bg-hover">
           Upload Trial Balance Directly
         </button>
       </div>

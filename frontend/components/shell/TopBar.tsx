@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { Settings, ChevronDown, ArrowLeft } from 'lucide-react';
+import { NotificationBell } from './NotificationBell';
 import type { CloseState } from '@/lib/types/close-session';
 
 function stateClass(s: CloseState): string {
@@ -73,6 +74,7 @@ export function TopBar(p: TopBarProps) {
           <div className="w-8 h-8 rounded-full bg-accent-dim flex items-center justify-center text-accent text-sm font-medium">{userInitials || '?'}</div>
           <span className="text-sm text-primary">{userName || 'User'}</span>
         </div>
+        <NotificationBell />
         <Link href="/settings" className="p-2 rounded-input text-text-secondary hover:text-primary hover:bg-hover" aria-label="Settings">
           <Settings className="w-5 h-5" />
         </Link>

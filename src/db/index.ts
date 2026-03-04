@@ -298,6 +298,11 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 139, file: '139_fiscal_year_end_day.sql' },
   { version: 140, file: '140_cumulative_statement_packages.sql' },
   { version: 141, file: '141_cascade_performance_indexes.sql' },
+  { version: 142, file: '142_is_subtotal_hierarchy.sql' },
+  { version: 143, file: '143_bs_current_noncurrent.sql' },
+  { version: 144, file: '144_multi_currency_gl.sql' },
+  { version: 145, file: '145_notifications.sql' },
+  { version: 146, file: '146_consolidation_fx_configs.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 

@@ -56,27 +56,33 @@ export function StateMachineBanner({
   return (
     <>
       <div className="fixed top-14 left-0 right-0 z-30 h-10 flex items-center justify-between px-6 bg-surface border-b border-border-light print:hidden">
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
           {states.map((s, i) => {
             const isPast = i < idx;
             const isCurrent = i === idx;
+            const label = s === 'UNDER_REVIEW' ? 'REVIEW' : s;
             return (
               <div key={s} className="flex items-center">
                 <div
                   className={cn(
-                    'flex items-center gap-1.5 px-2 py-1 rounded text-xs',
+                    'flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition-colors',
                     isPast && 'text-status-green',
-                    isCurrent && 'text-accent font-medium bg-accent-dim',
+                    isCurrent && 'text-accent font-semibold bg-accent-dim',
                     i > idx && 'text-text-muted'
                   )}
                 >
-                  {isPast ? <Check className="w-3.5 h-3.5" /> : <span className={cn('w-2 h-2 rounded-full', isCurrent ? 'bg-accent' : 'bg-text-muted')} />}
-                  {s.replace('_', ' ')}
+                  {isPast ? <Check className="w-3.5 h-3.5" /> : <span className={cn('w-2 h-2 rounded-full border-2', isCurrent ? 'bg-accent border-accent' : 'border-text-muted bg-transparent')} />}
+                  {label.replace('_', ' ')}
                 </div>
-                {i < states.length - 1 && <div className="w-4 h-px bg-border mx-0.5" />}
+                {i < states.length - 1 && (
+                  <div className={cn('w-6 h-px mx-0.5', isPast ? 'bg-status-green' : 'bg-border')} />
+                )}
               </div>
             );
           })}
+          {gatesRemaining > 0 && currentState === 'IN_PROGRESS' && (
+            <span className="ml-3 text-[10px] font-mono text-text-tertiary">{gatesRemaining} gates remaining</span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {!isReadOnly && currentState === 'IN_PROGRESS' && (

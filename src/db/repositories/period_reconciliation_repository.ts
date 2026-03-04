@@ -444,3 +444,32 @@ export async function updateReconItemAjeId(
   );
   return (r.rowCount ?? 0) > 0;
 }
+
+/**
+ * Copy reconciling items from a prior-period recon to the current recon.
+ * AJE links are cleared since AJEs are period-specific.
+ */
+export async function copyReconItemsFromPrior(
+  pool: Pool,
+  currentReconId: string,
+  priorReconId: string,
+  createdBy: string | null
+): Promise<ReconItem[]> {
+  const priorItems = await listReconItemsByReconId(pool, priorReconId);
+  if (priorItems.length === 0) return [];
+
+  const created: ReconItem[] = [];
+  for (const item of priorItems) {
+    const newId = crypto.randomUUID();
+    const newItem = await insertReconItem(pool, newId, {
+      reconId: currentReconId,
+      description: `[Carried forward] ${item.description}`,
+      amount: item.amount,
+      itemType: item.itemType,
+      needsAje: item.needsAje,
+      createdBy,
+    });
+    created.push(newItem);
+  }
+  return created;
+}

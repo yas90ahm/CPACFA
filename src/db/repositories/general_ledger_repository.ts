@@ -22,6 +22,10 @@ interface GLLineRow {
   source: string;
   created_at: string;
   created_by: string | null;
+  original_currency: string | null;
+  original_debit: string | null;
+  original_credit: string | null;
+  exchange_rate: string | null;
 }
 
 function rowToLine(row: GLLineRow): GeneralLedgerLine {
@@ -41,6 +45,10 @@ function rowToLine(row: GLLineRow): GeneralLedgerLine {
     source: row.source,
     created_at: row.created_at,
     created_by: row.created_by ?? undefined,
+    original_currency: row.original_currency ?? null,
+    original_debit: row.original_debit != null ? Number(row.original_debit) : null,
+    original_credit: row.original_credit != null ? Number(row.original_credit) : null,
+    exchange_rate: row.exchange_rate != null ? Number(row.exchange_rate) : null,
   };
 }
 
@@ -86,9 +94,13 @@ export async function upsertGLForPeriod(
               : String(line.entry_date ?? '').slice(0, 10);
 
           const acctName = line.account_name?.trim() || null;
-          const offset = idx * 13;
+          const origCurrency = line.original_currency ?? null;
+          const origDebit = line.original_debit != null ? String(line.original_debit) : null;
+          const origCredit = line.original_credit != null ? String(line.original_credit) : null;
+          const xRate = line.exchange_rate != null ? String(line.exchange_rate) : null;
+          const offset = idx * 17;
           valuesClauses.push(
-            `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, $${offset + 11}, $${offset + 12}, $${offset + 13})`
+            `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, $${offset + 11}, $${offset + 12}, $${offset + 13}, $${offset + 14}, $${offset + 15}, $${offset + 16}, $${offset + 17})`
           );
           params.push(
             tenantId,
@@ -103,14 +115,19 @@ export async function upsertGLForPeriod(
             desc,
             prov,
             source,
-            createdBy
+            createdBy,
+            origCurrency,
+            origDebit,
+            origCredit,
+            xRate
           );
         });
 
         await client.query(
           `INSERT INTO core.general_ledger (
             tenant_id, period_label, entry_id, line_number, entry_date,
-            account_code, account_name, debit, credit, description, amount_provenance, source, created_by
+            account_code, account_name, debit, credit, description, amount_provenance, source, created_by,
+            original_currency, original_debit, original_credit, exchange_rate
           ) VALUES ${valuesClauses.join(', ')}`,
           params
         );
@@ -137,7 +154,8 @@ export async function getGLForPeriod(
   const r = await pool.query<GLLineRow>(
     `SELECT id, tenant_id, period_label, entry_id, line_number, entry_date::text,
             account_code, account_name, debit::text, credit::text, description, amount_provenance,
-            source, created_at::text, created_by
+            source, created_at::text, created_by,
+            original_currency, original_debit::text, original_credit::text, exchange_rate::text
      FROM core.general_ledger
      WHERE tenant_id = $1 AND period_label = $2
      ORDER BY entry_id, line_number`,
@@ -158,7 +176,8 @@ export async function getGLEntry(
   const r = await pool.query<GLLineRow>(
     `SELECT id, tenant_id, period_label, entry_id, line_number, entry_date::text,
             account_code, account_name, debit::text, credit::text, description, amount_provenance,
-            source, created_at::text, created_by
+            source, created_at::text, created_by,
+            original_currency, original_debit::text, original_credit::text, exchange_rate::text
      FROM core.general_ledger
      WHERE tenant_id = $1 AND period_label = $2 AND entry_id = $3
      ORDER BY line_number`,

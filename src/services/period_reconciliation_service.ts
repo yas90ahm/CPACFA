@@ -540,6 +540,46 @@ export async function copyPriorPeriod(
   return updated;
 }
 
+/**
+ * Carry forward reconciling items from the prior period's recon for the same account.
+ * AJE links are cleared since journal entries are period-specific.
+ * Returns the newly created items.
+ */
+export async function carryForwardReconItems(
+  pool: Pool,
+  tenantId: string,
+  reconId: string,
+  entityId: string,
+  currentSessionId: string,
+  userId: string | null
+): Promise<ReconItem[]> {
+  const recon = await reconRepo.getPeriodReconciliationById(pool, tenantId, reconId);
+  if (!recon) throw new PeriodReconciliationError('Reconciliation not found', 'NOT_FOUND');
+
+  // Check if items already exist — avoid double carry-forward
+  const existingItems = await reconRepo.listReconItemsByReconId(pool, reconId);
+  if (existingItems.some((i) => i.description.startsWith('[Carried forward]'))) {
+    throw new PeriodReconciliationError('Items already carried forward for this reconciliation', 'VALIDATION');
+  }
+
+  const priorRecons = await reconRepo.getPriorPeriodRecons(pool, tenantId, entityId, currentSessionId);
+  const priorRecon = priorRecons.find((p) => p.accountCode === recon.accountCode);
+  if (!priorRecon) {
+    throw new PeriodReconciliationError('No prior period data found for this account', 'NOT_FOUND');
+  }
+
+  const created = await reconRepo.copyReconItemsFromPrior(pool, reconId, priorRecon.reconId, userId);
+
+  // Recalculate the reconciling items total
+  if (created.length > 0) {
+    const allItems = await reconRepo.listReconItemsByReconId(pool, reconId);
+    const total = sumRound2(allItems.map((i) => Number(i.amount)));
+    await reconRepo.updateReconReconcilingItemsTotal(pool, tenantId, reconId, total.toFixed(2));
+  }
+
+  return created;
+}
+
 /** Update notes on a reconciliation. */
 export async function updateReconNotes(
   pool: Pool,
