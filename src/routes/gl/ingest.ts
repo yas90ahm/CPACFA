@@ -14,6 +14,7 @@ import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { requireValidTenantId } from '../../middleware/validationMiddleware.js';
 import { send500 } from '../../lib/errorHandler.js';
 import { sumRound2 } from '../../utils/decimal.js';
+import { runGLHealthAnalysis } from '../../services/gl_health_analysis_service.js';
 
 const router = Router();
 
@@ -148,6 +149,16 @@ router.post(
           });
         }
         return res.status(400).json(result);
+      }
+
+      // Auto-trigger GL health analysis if sessionId provided
+      const sessionId = req.query.sessionId as string | undefined;
+      if (sessionId && pool) {
+        try {
+          await runGLHealthAnalysis(pool, tenantId!, sessionId, periodLabel);
+        } catch (healthErr) {
+          console.error('GL health analysis failed (non-blocking):', healthErr);
+        }
       }
 
       res.status(200).json({

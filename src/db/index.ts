@@ -303,6 +303,7 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 144, file: '144_multi_currency_gl.sql' },
   { version: 145, file: '145_notifications.sql' },
   { version: 146, file: '146_consolidation_fx_configs.sql' },
+  { version: 147, file: '147_gl_health_analysis.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 

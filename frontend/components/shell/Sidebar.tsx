@@ -22,6 +22,7 @@ import {
   Globe,
   GitMerge,
   BookOpen,
+  HeartPulse,
 } from 'lucide-react';
 
 const navItems: {
@@ -36,6 +37,7 @@ const navItems: {
 }[] = [
   { href: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: 'trial-balance', label: 'Trial Balance', icon: Table },
+  { href: 'gl-health', label: 'GL Health', icon: HeartPulse },
   { href: 'mapping', label: 'Mapping', icon: ArrowRightLeft },
   { href: 'reconciliation', label: 'Reconciliation', icon: ShieldCheck, badgeProp: 'recon' },
   { href: 'adjustments', label: 'Adjustments', icon: PenLine, badgeProp: 'adjustments' },
