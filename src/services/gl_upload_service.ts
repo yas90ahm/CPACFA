@@ -23,17 +23,77 @@ import type { TrialBalanceEntry } from '../types/financial.js';
 import Decimal from 'decimal.js';
 import { round2, from, sumRound2, minus, absGt } from '../utils/decimal.js';
 
+/** All known GL header names for scoring rows to find the real header. */
+const KNOWN_HEADERS = new Set([
+  'line', 'date', 'ref', 'reference', 'account', 'account code', 'account name',
+  'gl account', 'description', 'desc', 'memo', 'debit', 'credit', 'dr', 'cr',
+  'debits', 'credits', 'entry id', 'je #', 'journal entry', 'entry date',
+  'posting date', 'transaction date', 'amount', 'currency', 'exchange rate',
+  'notes', 'narrative', 'voucher', 'doc', 'account number', 'account #',
+  'account id', 'debit amount', 'credit amount', 'posted', 'period',
+  'glaccount', 'accountcode', 'accountname', 'entryid', 'entrydate',
+]);
+
 /**
- * Detect Excel files and convert to CSV buffer. Returns original buffer for CSV files.
+ * Score a row of cell values: how many look like recognized column headers?
+ */
+function scoreHeaderRow(cells: unknown[]): number {
+  let score = 0;
+  for (const cell of cells) {
+    if (cell == null || String(cell).trim() === '') continue;
+    const norm = String(cell).trim().toLowerCase().replace(/[_\-#]+/g, ' ').replace(/\s+/g, ' ');
+    if (KNOWN_HEADERS.has(norm)) { score += 2; continue; }
+    // Partial match — cell contains a known keyword
+    for (const kh of KNOWN_HEADERS) {
+      if (kh.length >= 4 && (norm.includes(kh) || kh.includes(norm))) { score += 1; break; }
+    }
+  }
+  return score;
+}
+
+/**
+ * From raw rows (array of arrays), find the header row index.
+ * Returns the index with the highest score, or 0 if nothing scores well.
+ */
+function findHeaderRowIndex(rows: unknown[][]): number {
+  const scanLimit = Math.min(rows.length, 20);
+  let bestIdx = 0;
+  let bestScore = 0;
+  for (let i = 0; i < scanLimit; i++) {
+    const row = rows[i];
+    // Skip blank rows
+    if (!row || row.every(c => c == null || String(c).trim() === '')) continue;
+    const s = scoreHeaderRow(row);
+    if (s > bestScore) { bestScore = s; bestIdx = i; }
+  }
+  // Require at least 3 points (~ 2 exact matches) to be confident
+  return bestScore >= 3 ? bestIdx : 0;
+}
+
+/**
+ * Read file buffer (Excel or CSV) into a clean CSV buffer with junk rows stripped.
+ * For Excel: reads sheets directly into arrays, finds header row, rebuilds CSV.
+ * For CSV: detects header row among first 20 rows and strips junk prefix.
  */
 function ensureCsvBuffer(fileBuffer: Buffer): Buffer {
-  const isExcel = (fileBuffer[0] === 0x50 && fileBuffer[1] === 0x4B) // PK zip header (.xlsx)
-    || (fileBuffer[0] === 0xD0 && fileBuffer[1] === 0xCF); // OLE2 header (.xls)
-  if (!isExcel) return fileBuffer;
+  const isExcel = (fileBuffer[0] === 0x50 && fileBuffer[1] === 0x4B)
+    || (fileBuffer[0] === 0xD0 && fileBuffer[1] === 0xCF);
 
+  if (isExcel) {
+    return excelToCsvBuffer(fileBuffer);
+  }
+
+  // For CSV, check if there are junk rows before the header
+  return csvWithHeaderDetection(fileBuffer);
+}
+
+/**
+ * Convert Excel buffer to CSV, detecting the real header row.
+ */
+function excelToCsvBuffer(fileBuffer: Buffer): Buffer {
   let workbook: XLSX.WorkBook;
   try {
-    workbook = XLSX.read(fileBuffer, { type: 'buffer', cellText: true });
+    workbook = XLSX.read(fileBuffer, { type: 'buffer', cellDates: true, cellText: false });
   } catch (e) {
     const msg = e instanceof Error ? e.message : '';
     if (msg.includes('password')) {
@@ -51,12 +111,88 @@ function ensureCsvBuffer(fileBuffer: Buffer): Buffer {
   }
 
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const csv = XLSX.utils.sheet_to_csv(sheet);
-  if (!csv.trim()) {
+  const rawRows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', rawNumbers: true });
+
+  if (!rawRows.length) {
     throw new Error('The uploaded Excel file contains no data');
   }
 
-  return Buffer.from(csv, 'utf8');
+  const headerIdx = findHeaderRowIndex(rawRows);
+  const headerRow = rawRows[headerIdx] as unknown[];
+
+  // Build headers — convert all to strings, trim
+  const headers = headerRow.map(c => String(c ?? '').trim()).filter(h => h !== '');
+  if (headers.length === 0) {
+    throw new Error('The uploaded Excel file contains no recognizable column headers');
+  }
+
+  // Data rows start after header, skip blank rows
+  const dataRows: string[][] = [];
+  const colCount = headerRow.length;
+  for (let i = headerIdx + 1; i < rawRows.length; i++) {
+    const row = rawRows[i] as unknown[];
+    if (!row || row.every(c => c == null || String(c).trim() === '')) continue;
+    const cells: string[] = [];
+    for (let j = 0; j < colCount; j++) {
+      const v = row[j];
+      if (v instanceof Date) {
+        cells.push(v.toISOString().slice(0, 10));
+      } else {
+        cells.push(String(v ?? '').trim());
+      }
+    }
+    dataRows.push(cells);
+  }
+
+  if (dataRows.length === 0) {
+    throw new Error('The uploaded Excel file contains no data rows after the header');
+  }
+
+  // Build CSV manually — proper quoting
+  const escapeCsv = (s: string) => s.includes(',') || s.includes('"') || s.includes('\n')
+    ? '"' + s.replace(/"/g, '""') + '"' : s;
+  const lines = [headers.map(escapeCsv).join(',')];
+  for (const row of dataRows) {
+    lines.push(row.slice(0, headers.length).map(escapeCsv).join(','));
+  }
+
+  if (headerIdx > 0) {
+    console.warn(`GL upload: Skipped ${headerIdx} junk row(s) before header in Excel file`);
+  }
+
+  return Buffer.from(lines.join('\n'), 'utf8');
+}
+
+/**
+ * For CSV buffers, detect if the header row isn't row 1 and strip junk rows.
+ */
+function csvWithHeaderDetection(fileBuffer: Buffer): Buffer {
+  const text = fileBuffer.toString('utf8');
+  // Quick check: parse all rows as raw arrays first
+  let rawRows: string[][];
+  try {
+    rawRows = parse(text, {
+      skip_empty_lines: false,
+      trim: true,
+      relax_column_count: true,
+      bom: true,
+    }) as string[][];
+  } catch {
+    return fileBuffer; // Let the downstream parser handle errors
+  }
+
+  if (rawRows.length < 2) return fileBuffer;
+
+  const headerIdx = findHeaderRowIndex(rawRows);
+  if (headerIdx === 0) return fileBuffer; // Header is already row 1, no change needed
+
+  // Rebuild CSV starting from the header row
+  console.warn(`GL upload: Skipped ${headerIdx} junk row(s) before header in CSV file`);
+  const escapeCsv = (s: string) => s.includes(',') || s.includes('"') || s.includes('\n')
+    ? '"' + s.replace(/"/g, '""') + '"' : s;
+  const filtered = rawRows.slice(headerIdx).filter(row => row.some(c => c.trim() !== ''));
+  const lines = filtered.map(row => row.map(escapeCsv).join(','));
+  return Buffer.from(lines.join('\n'), 'utf8');
 }
 
 /** GL column mappings: raw header variants → canonical key */
@@ -173,10 +309,11 @@ function parseGlAmount(value: unknown): number {
     }
     return round2(value);
   }
-  const s = String(value)
-    .replace(/[$,\s]/g, '')
-    .replace(/[()]/g, '-')
-    .trim();
+  let s = String(value).replace(/[\u00A0]/g, ' ').replace(/[$,\s]/g, '').trim();
+  // Parenthetical negatives: (500.00) → -500.00
+  if (s.startsWith('(') && s.endsWith(')')) {
+    s = '-' + s.slice(1, -1);
+  }
   if (s === '' || s === '-') return 0;
   try {
     const d = from(s);
@@ -364,7 +501,10 @@ export function parseGLPreview(
 function parseDecimalSafe(value: unknown): number {
   if (value == null || value === '') return 0;
   if (typeof value === 'number') return Number.isFinite(value) ? round2(value) : 0;
-  const s = String(value).replace(/[$,\s]/g, '').replace(/[()]/g, '-').trim();
+  let s = String(value).replace(/[\u00A0]/g, ' ').replace(/[$,\s]/g, '').trim();
+  if (s.startsWith('(') && s.endsWith(')')) {
+    s = '-' + s.slice(1, -1);
+  }
   if (s === '' || s === '-') return 0;
   try {
     const d = from(s);
