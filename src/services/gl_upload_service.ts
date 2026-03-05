@@ -6,6 +6,7 @@
 import { parse } from 'csv-parse/sync';
 import { createHash } from 'crypto';
 import type { Pool } from 'pg';
+import * as XLSX from 'xlsx';
 import type {
   GeneralLedgerLine,
   JournalEntry,
@@ -21,6 +22,42 @@ import { detectPatterns, getSummary } from './deterministic_pattern_detector.js'
 import type { TrialBalanceEntry } from '../types/financial.js';
 import Decimal from 'decimal.js';
 import { round2, from, sumRound2, minus, absGt } from '../utils/decimal.js';
+
+/**
+ * Detect Excel files and convert to CSV buffer. Returns original buffer for CSV files.
+ */
+function ensureCsvBuffer(fileBuffer: Buffer): Buffer {
+  const isExcel = (fileBuffer[0] === 0x50 && fileBuffer[1] === 0x4B) // PK zip header (.xlsx)
+    || (fileBuffer[0] === 0xD0 && fileBuffer[1] === 0xCF); // OLE2 header (.xls)
+  if (!isExcel) return fileBuffer;
+
+  let workbook: XLSX.WorkBook;
+  try {
+    workbook = XLSX.read(fileBuffer, { type: 'buffer', cellText: true });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '';
+    if (msg.includes('password')) {
+      throw new Error('Password-protected Excel files are not supported. Please export as CSV.');
+    }
+    throw new Error(`Failed to read Excel file: ${msg}`);
+  }
+
+  if (!workbook.SheetNames.length) {
+    throw new Error('The uploaded Excel file contains no data');
+  }
+
+  if (workbook.SheetNames.length > 1) {
+    console.warn(`GL upload: Multiple sheets detected (${workbook.SheetNames.join(', ')}), using first sheet "${workbook.SheetNames[0]}"`);
+  }
+
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const csv = XLSX.utils.sheet_to_csv(sheet);
+  if (!csv.trim()) {
+    throw new Error('The uploaded Excel file contains no data');
+  }
+
+  return Buffer.from(csv, 'utf8');
+}
 
 /** GL column mappings: raw header variants → canonical key */
 const GL_COLUMN_MAP: Record<string, readonly string[]> = {
@@ -180,7 +217,8 @@ export function parseGLPreview(
     }>;
   } | null;
 } {
-  const records = parse(fileBuffer.toString('utf8'), {
+  const csvBuffer = ensureCsvBuffer(fileBuffer);
+  const records = parse(csvBuffer.toString('utf8'), {
     columns: true,
     skip_empty_lines: true,
     trim: true,
@@ -838,9 +876,10 @@ export async function uploadGLForPeriod(
 
   try {
     const parseStart = Date.now();
+    const csvBuffer = ensureCsvBuffer(fileBuffer);
     const parsed = columnMapping
-      ? parseGLCsvWithMapping(fileBuffer, columnMapping)
-      : parseGLCsv(fileBuffer);
+      ? parseGLCsvWithMapping(csvBuffer, columnMapping)
+      : parseGLCsv(csvBuffer);
     const { rows, hasEntryId } = parsed;
     perfMetrics.parse_ms = Date.now() - parseStart;
 

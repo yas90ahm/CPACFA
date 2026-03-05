@@ -80,7 +80,7 @@ router.post(
       res.json(result);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Parse failed';
-      res.status(400).json({ success: false, error: `Failed to parse CSV: ${msg}` });
+      res.status(400).json({ success: false, error: `Failed to parse file: ${msg}` });
     }
   }
 );
