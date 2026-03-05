@@ -372,6 +372,7 @@ export function parseGLPreview(
     totalDebits: string;
     totalCredits: string;
     balanced: boolean;
+    dateRange: { earliest: string; latest: string; totalWithDates: number } | null;
     accounts: Array<{
       accountCode: string;
       accountName: string;
@@ -506,6 +507,31 @@ export function parseGLPreview(
 
   accounts.sort((a, b) => a.accountCode.localeCompare(b.accountCode));
 
+  // Extract date range from parsed rows
+  let dateRange: { earliest: string; latest: string; totalWithDates: number } | null = null;
+  if (mapping.date) {
+    const dates: string[] = [];
+    for (const row of records) {
+      const raw = row[mapping.date as string];
+      if (raw != null && String(raw).trim()) {
+        const s = String(raw).trim();
+        // Try to parse as date
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) {
+          dates.push(d.toISOString().slice(0, 10));
+        }
+      }
+    }
+    if (dates.length > 0) {
+      dates.sort();
+      dateRange = {
+        earliest: dates[0]!,
+        latest: dates[dates.length - 1]!,
+        totalWithDates: dates.length,
+      };
+    }
+  }
+
   return {
     success: errors.length === 0,
     headers,
@@ -520,6 +546,7 @@ export function parseGLPreview(
       totalDebits: totalDebits.toString(),
       totalCredits: totalCredits.toString(),
       balanced,
+      dateRange,
       accounts,
     },
   };

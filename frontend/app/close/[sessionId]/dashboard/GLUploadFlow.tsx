@@ -40,6 +40,7 @@ interface ParsePreviewResponse {
     totalDebits: string;
     totalCredits: string;
     balanced: boolean;
+    dateRange: { earliest: string; latest: string; totalWithDates: number } | null;
     accounts: Array<{
       accountCode: string;
       accountName: string;
@@ -124,11 +125,41 @@ export interface GLUploadFlowProps {
   periodLabel: string;
   file: File;
   onBack: () => void;
+  /** If true, skip session advance after ingest (used for GL replacement in IN_PROGRESS state) */
+  skipAdvance?: boolean;
 }
 
 type Step = 'parsing' | 'mapping' | 'validating' | 'preview' | 'confirm' | 'ingesting' | 'error';
 
-export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadFlowProps) {
+/** Parse period bounds from a label like "February 2026" or "2026-02" */
+function parsePeriodBounds(periodLabel: string): { start: Date; end: Date } | null {
+  const months: Record<string, number> = {
+    January: 0, February: 1, March: 2, April: 3, May: 4, June: 5,
+    July: 6, August: 7, September: 8, October: 9, November: 10, December: 11,
+  };
+  const namedMatch = periodLabel.trim().match(/^(\w+)\s+(\d{4})$/);
+  if (namedMatch && months[namedMatch[1]!] !== undefined) {
+    const month = months[namedMatch[1]!]!;
+    const year = parseInt(namedMatch[2]!, 10);
+    return { start: new Date(year, month, 1), end: new Date(year, month + 1, 0) };
+  }
+  const isoMatch = periodLabel.trim().match(/^(\d{4})-(\d{2})$/);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1]!, 10);
+    const month = parseInt(isoMatch[2]!, 10) - 1;
+    return { start: new Date(year, month, 1), end: new Date(year, month + 1, 0) };
+  }
+  const qMatch = periodLabel.trim().match(/^(\d{4})-Q(\d)$/i);
+  if (qMatch) {
+    const year = parseInt(qMatch[1]!, 10);
+    const q = parseInt(qMatch[2]!, 10);
+    const startMonth = (q - 1) * 3;
+    return { start: new Date(year, startMonth, 1), end: new Date(year, startMonth + 3, 0) };
+  }
+  return null;
+}
+
+export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance }: GLUploadFlowProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const advanceSession = useAdvanceSession(sessionId);
@@ -142,6 +173,8 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
   const [parseError, setParseError] = useState<string | null>(null);
   const [ingestResult, setIngestResult] = useState<IngestResponse | null>(null);
   const [rawParseErrors, setRawParseErrors] = useState<string[]>([]);
+  const [dateRange, setDateRange] = useState<{ earliest: string; latest: string; totalWithDates: number } | null>(null);
+  const [importMode, setImportMode] = useState<'all' | 'period_only'>('all');
 
   useEffect(() => {
     setStep('parsing');
@@ -228,6 +261,7 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
           inactiveAccounts: [],
           priorMappedCount: 0,
         });
+        setDateRange(prev.dateRange ?? null);
         setStep('preview');
       })
       .catch((err) => {
@@ -248,17 +282,30 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
       const period = periodLabelToParam(periodLabel);
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('columnMapping', JSON.stringify(mappingsToBackend(mappings)));
-      const result = await apiUpload<IngestResponse>(`/api/gl/ingest?period=${encodeURIComponent(period)}`, formData);
+      const backendMapping = mappingsToBackend(mappings);
+      if (importMode === 'period_only') {
+        const bounds = parsePeriodBounds(periodLabel);
+        if (bounds) {
+          (backendMapping as Record<string, string>).filterDateStart = bounds.start.toISOString().slice(0, 10);
+          (backendMapping as Record<string, string>).filterDateEnd = bounds.end.toISOString().slice(0, 10);
+        }
+      }
+      formData.append('columnMapping', JSON.stringify(backendMapping));
+      const url = `/api/gl/ingest?period=${encodeURIComponent(period)}&sessionId=${encodeURIComponent(sessionId)}`;
+      const result = await apiUpload<IngestResponse>(url, formData);
       if (result.status === 'partial' && result.imbalancedCount && result.imbalancedCount > 0) {
         setIngestResult(result);
         setAdvanceError(`Partial import: ${result.balancedCount ?? 0} entries imported, ${result.imbalancedCount} entries imbalanced. ${result.message ?? ''}`);
         setStep('confirm');
         return;
       }
-      await advanceSession.mutateAsync({});
+      if (!skipAdvance) {
+        await advanceSession.mutateAsync({});
+      }
       queryClient.invalidateQueries({ queryKey: ['trial-balance', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      queryClient.invalidateQueries({ queryKey: ['gl-health', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['close-session', sessionId] });
       router.push(`/close/${sessionId}/dashboard`);
     } catch (err) {
       setStep('confirm');
@@ -396,6 +443,35 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
 
   if (step === 'preview' && validation && tbPreview) {
     const displayRows = tbPreview.rows.slice(0, 10);
+    const isBalanced = tbPreview.balanced;
+    const diff = Math.abs(parseFloat(tbPreview.totalDebits) - parseFloat(tbPreview.totalCredits));
+
+    // Date analysis
+    const bounds = parsePeriodBounds(periodLabel);
+    let dateStatus: 'all_in' | 'some_out' | 'all_out' | 'unknown' = 'unknown';
+    let inPeriodCount = 0;
+    let outOfPeriodCount = 0;
+    if (dateRange && bounds) {
+      const earliest = new Date(dateRange.earliest);
+      const latest = new Date(dateRange.latest);
+      const allIn = earliest >= bounds.start && latest <= bounds.end;
+      const allOut = latest < bounds.start || earliest > bounds.end;
+      if (allIn) {
+        dateStatus = 'all_in';
+        inPeriodCount = dateRange.totalWithDates;
+      } else if (allOut) {
+        dateStatus = 'all_out';
+        outOfPeriodCount = dateRange.totalWithDates;
+      } else {
+        dateStatus = 'some_out';
+        // Estimate counts: we know earliest/latest span the period boundary
+        inPeriodCount = dateRange.totalWithDates; // Approximation — we show the range info
+        outOfPeriodCount = dateRange.totalWithDates; // Will be clarified by the message
+      }
+    }
+
+    const canProceed = isBalanced;
+
     return (
       <div className="max-w-4xl space-y-8">
         <h2 className="text-lg font-display text-primary">Validation Results</h2>
@@ -406,23 +482,67 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
           <p className="flex items-center gap-2 text-sm text-status-green">
             <Check className="w-4 h-4 shrink-0" /> {tbPreview.accountCount} unique accounts identified
           </p>
-          <p className="flex items-center gap-2 text-sm text-status-green">
-            <Check className="w-4 h-4 shrink-0" /> All entries have valid dates within period
-          </p>
-          <p className="flex items-center gap-2 text-sm text-status-green">
-            <Check className="w-4 h-4 shrink-0" /> Trial balance balances: Debits = Credits
-          </p>
-          {validation.warnings.map((w, i) => (
-            <p key={i} className="flex items-center gap-2 text-sm text-status-amber">
-              <AlertTriangle className="w-4 h-4 shrink-0" /> {w.message}
-              {w.detail && <span className="text-text-secondary"> — {w.detail}</span>}
+
+          {/* Date validation */}
+          {dateStatus === 'all_in' && (
+            <p className="flex items-center gap-2 text-sm text-status-green">
+              <Check className="w-4 h-4 shrink-0" /> All {dateRange?.totalWithDates} entries are within {periodLabel}
             </p>
-          ))}
+          )}
+          {dateStatus === 'some_out' && (
+            <div className="space-y-2">
+              <p className="flex items-start gap-2 text-sm text-status-amber">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>
+                  Entries have dates outside {periodLabel} (earliest: {dateRange?.earliest}, latest: {dateRange?.latest}).
+                  You can import all entries or filter to {periodLabel} only.
+                </span>
+              </p>
+              <div className="ml-6 flex gap-3">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="radio" name="importMode" checked={importMode === 'all'} onChange={() => setImportMode('all')} className="accent-accent" />
+                  Import All Entries
+                </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="radio" name="importMode" checked={importMode === 'period_only'} onChange={() => setImportMode('period_only')} className="accent-accent" />
+                  Import {periodLabel} Only
+                </label>
+              </div>
+            </div>
+          )}
+          {dateStatus === 'all_out' && (
+            <p className="flex items-start gap-2 text-sm text-status-red">
+              <X className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                No entries found within {periodLabel}. All dates range from {dateRange?.earliest} to {dateRange?.latest}.
+                Are you uploading the correct file?
+              </span>
+            </p>
+          )}
+          {dateStatus === 'unknown' && (
+            <p className="flex items-center gap-2 text-sm text-text-secondary">
+              <AlertTriangle className="w-4 h-4 shrink-0" /> Date validation not available (no date column mapped or period not recognized)
+            </p>
+          )}
+
+          {/* Balance check */}
+          {isBalanced ? (
+            <p className="flex items-center gap-2 text-sm text-status-green">
+              <Check className="w-4 h-4 shrink-0" /> Trial balance balances: Debits = Credits
+            </p>
+          ) : (
+            <p className="flex items-start gap-2 text-sm text-status-red">
+              <X className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                Trial balance is NOT balanced. Debits: {formatMoney(tbPreview.totalDebits)}, Credits: {formatMoney(tbPreview.totalCredits)}, Difference: {formatMoney(diff.toFixed(2))}
+              </span>
+            </p>
+          )}
         </div>
 
         <div>
           <h3 className="text-sm font-medium text-primary mb-2">
-            Trial Balance Preview — {tbPreview.accountCount} accounts | Total Debits: {formatMoney(tbPreview.totalDebits)} | Total Credits: {formatMoney(tbPreview.totalCredits)} | Balanced ✓
+            Trial Balance Preview — {tbPreview.accountCount} accounts | Total Debits: {formatMoney(tbPreview.totalDebits)} | Total Credits: {formatMoney(tbPreview.totalCredits)} | {isBalanced ? 'Balanced \u2713' : 'NOT Balanced \u2717'}
           </h3>
           <div className="overflow-x-auto rounded-input border border-border">
             <table className="w-full text-sm border-collapse">
@@ -456,15 +576,24 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
           <p className="text-xs text-text-tertiary mt-2">Showing {displayRows.length} of {tbPreview.rows.length} accounts</p>
         </div>
 
-        {/* Prior period comparison removed — real data not yet available from API */}
-
-        <div className="flex gap-3">
+        <div className="flex gap-3 items-start">
           <button type="button" onClick={() => setStep('mapping')} className="px-4 py-2 rounded-input border border-border text-sm font-medium hover:bg-hover">
             Back
           </button>
-          <button type="button" onClick={() => setStep('confirm')} className="px-4 py-2 rounded-input bg-accent text-accent-contrast text-sm font-medium hover:opacity-90">
-            Continue to Confirm →
-          </button>
+          {canProceed ? (
+            <button type="button" onClick={() => setStep('confirm')} className="px-4 py-2 rounded-input bg-accent text-accent-contrast text-sm font-medium hover:opacity-90">
+              Continue to Confirm →
+            </button>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <button type="button" disabled className="px-4 py-2 rounded-input bg-elevated text-text-tertiary text-sm font-medium cursor-not-allowed">
+                Cannot proceed — trial balance must be balanced
+              </button>
+              <button type="button" onClick={onBack} className="px-4 py-2 rounded-input border border-border text-sm font-medium hover:bg-hover text-accent">
+                Upload New File
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -495,10 +624,14 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
         <div className="bg-surface border border-border rounded-card p-6 space-y-4">
           <p className="text-sm text-text-secondary">This will:</p>
           <ul className="list-disc list-inside text-sm text-primary space-y-1">
-            <li>Import {parseResult?.rowCount ?? 0} GL entries</li>
-            <li>Create a trial balance with {tbPreview.accountCount} accounts</li>
-            <li>Advance the session to IN_PROGRESS</li>
-            <li>Existing account mappings from prior period will carry forward automatically</li>
+            <li>{skipAdvance ? 'Replace existing GL data with' : 'Import'} {parseResult?.rowCount ?? 0} GL entries{importMode === 'period_only' ? ` (filtered to ${periodLabel})` : ''}</li>
+            <li>{skipAdvance ? 'Re-derive' : 'Create'} a trial balance with {tbPreview.accountCount} accounts</li>
+            {!skipAdvance && <li>Advance the session to IN_PROGRESS</li>}
+            {skipAdvance ? (
+              <li>Account mappings will be preserved. Reconciliations may need re-verification.</li>
+            ) : (
+              <li>Existing account mappings from prior period will carry forward automatically</li>
+            )}
           </ul>
         </div>
         <div className="flex gap-3">
@@ -506,7 +639,7 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack }: GLUploadF
             Back to Preview
           </button>
           <button type="button" onClick={ingest} className="px-4 py-2 rounded-input bg-accent text-accent-contrast text-sm font-medium hover:opacity-90">
-            Import & Begin Close
+            {skipAdvance ? 'Replace GL & Re-derive TB' : 'Import & Begin Close'}
           </button>
         </div>
       </div>

@@ -11,8 +11,10 @@ import { useStatements, useValidation } from '@/lib/queries/statements';
 import { useAuditTrail } from '@/lib/queries/audit-trail';
 import { useTrialBalanceContext } from '../context/trial-balance-context';
 import { cn } from '@/lib/utils';
-import { Check, Circle, ArrowRight, Zap, AlertTriangle, ChevronRight } from 'lucide-react';
+import { Check, Circle, ArrowRight, Zap, AlertTriangle, ChevronRight, RefreshCw } from 'lucide-react';
 import { OpenStateDashboard } from './OpenStateDashboard';
+import { FileUploadZone } from '@/components/shared/FileUploadZone';
+import { GLUploadFlow } from './GLUploadFlow';
 
 function formatMoney(v: string | null | undefined): string {
   if (!v) return '$0';
@@ -66,6 +68,9 @@ export default function CloseDashboardPage() {
   const { data: readiness } = useCloseReadiness(sessionId);
   const { data: issues = [] } = useCloseIssues(sessionId);
   const [ingestToast, setIngestToast] = useState<string | null>(null);
+  const [showReplaceConfirm, setShowReplaceConfirm] = useState(false);
+  const [showReplaceUpload, setShowReplaceUpload] = useState(false);
+  const [replaceFile, setReplaceFile] = useState<File | null>(null);
 
   const ingested = searchParams.get('ingested') === '1';
   const justCreated = searchParams.get('created') === '1';
@@ -127,6 +132,25 @@ export default function CloseDashboardPage() {
         periodLabel={session?.periodLabel ?? ''}
         entityName={session?.entityName ?? ''}
       />
+    );
+  }
+
+  // GL Replace flow: show upload flow when a replacement file has been selected
+  if (replaceFile) {
+    return (
+      <div className="max-w-2xl space-y-8">
+        <div>
+          <h1 className="text-2xl font-display text-primary">Replace GL Data — {session?.periodLabel ?? ''}</h1>
+          <p className="text-text-secondary text-sm mt-1">Uploading a new GL will replace existing data. Account mappings will be preserved.</p>
+        </div>
+        <GLUploadFlow
+          sessionId={sessionId}
+          periodLabel={session?.periodLabel ?? ''}
+          file={replaceFile}
+          onBack={() => setReplaceFile(null)}
+          skipAdvance
+        />
+      </div>
     );
   }
 
@@ -225,6 +249,59 @@ export default function CloseDashboardPage() {
         </div>
       )}
 
+      {/* Replace GL confirmation dialog */}
+      {showReplaceConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-surface border border-border rounded-card p-6 max-w-md w-full mx-4 space-y-4 shadow-lg">
+            <h3 className="text-lg font-display text-primary">Replace GL Data?</h3>
+            <p className="text-sm text-text-secondary">
+              Replacing the GL will reset your trial balance. Account mappings will be preserved. Any reconciliations in progress may need to be re-verified.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => setShowReplaceConfirm(false)}
+                className="px-4 py-2 rounded-input border border-border text-sm font-medium hover:bg-hover"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowReplaceConfirm(false);
+                  // Show file upload zone inline — we use a temporary state
+                  setReplaceFile(null);
+                  // We need to show the upload zone; set a flag
+                  setShowReplaceUpload(true);
+                }}
+                className="px-4 py-2 rounded-input bg-accent text-accent-contrast text-sm font-medium hover:opacity-90"
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Replace GL file upload zone */}
+      {showReplaceUpload && !replaceFile && (
+        <div className="bg-surface border border-border rounded-card p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium text-primary">Upload Replacement GL File</h3>
+            <button type="button" onClick={() => setShowReplaceUpload(false)} className="text-sm text-text-secondary hover:text-primary">Cancel</button>
+          </div>
+          <FileUploadZone
+            onFile={(f) => {
+              setReplaceFile(f);
+              setShowReplaceUpload(false);
+            }}
+            title="Drop your new GL export here"
+            subtitle="or click to browse"
+            hint="This will replace existing GL data for this period"
+          />
+        </div>
+      )}
+
       {/* Hero Progress Card */}
       {(() => {
         const progressPct = gatesTotal > 0 ? Math.round((gatesPassing / gatesTotal) * 100) : 0;
@@ -290,21 +367,31 @@ export default function CloseDashboardPage() {
           <h1 className="text-2xl font-display text-primary">{session?.periodLabel ?? ''} Close</h1>
           <p className="text-sm text-text-secondary mt-0.5">Status: {session?.state?.replace('_', ' ') ?? 'IN PROGRESS'}</p>
         </div>
-        {(session?.state === 'IN_PROGRESS' || session?.state === 'OPEN') && (
-          <button
-            type="button"
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-input bg-accent text-white text-sm font-medium hover:opacity-90"
-            onClick={() => {
-              // Navigate to the first incomplete pipeline step
-              const firstIncomplete = PIPELINE_STEPS.find((s) => pipelineStatus[s.id] !== 'complete');
-              if (firstIncomplete) {
-                window.location.href = `/close/${sessionId}/${firstIncomplete.path}`;
-              }
-            }}
-          >
-            <Zap className="w-4 h-4" /> Prepare Close
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {session?.state === 'IN_PROGRESS' && (
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-input border border-border text-xs font-medium text-text-secondary hover:bg-hover hover:text-primary"
+              onClick={() => setShowReplaceConfirm(true)}
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Replace GL Data
+            </button>
+          )}
+          {(session?.state === 'IN_PROGRESS' || session?.state === 'OPEN') && (
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-input bg-accent text-white text-sm font-medium hover:opacity-90"
+              onClick={() => {
+                const firstIncomplete = PIPELINE_STEPS.find((s) => pipelineStatus[s.id] !== 'complete');
+                if (firstIncomplete) {
+                  window.location.href = `/close/${sessionId}/${firstIncomplete.path}`;
+                }
+              }}
+            >
+              <Zap className="w-4 h-4" /> Prepare Close
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Pipeline visualization */}
