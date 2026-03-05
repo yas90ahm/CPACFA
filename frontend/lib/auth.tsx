@@ -58,10 +58,20 @@ function saveToStorage(token: string | null, user: AuthUser | null) {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(() => loadFromStorage().token);
-  const [user, setUser] = useState<AuthUser | null>(() => loadFromStorage().user);
-  const [isLoading, setIsLoading] = useState(false);
+  const [token, setToken] = useState<string | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
+
+  // Hydrate auth state from localStorage on client mount
+  useEffect(() => {
+    const stored = loadFromStorage();
+    if (stored.token) {
+      setToken(stored.token);
+      setUser(stored.user);
+    }
+    setIsLoading(false);
+  }, []);
 
   const getAuthToken = useCallback(() => token, [token]);
 
