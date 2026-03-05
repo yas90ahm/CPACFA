@@ -102,6 +102,24 @@ export default function CloseDashboardPage() {
   const { data: auditTrail } = useAuditTrail(sessionId, { limit: 8 });
   const { mappedCount, unmappedCount, rows: tbRows } = useTrialBalanceContext();
 
+  // Wait for session to load before rendering anything
+  if (!session) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-surface border border-border rounded-card p-7 animate-pulse">
+          <div className="h-6 w-48 bg-elevated rounded mb-2" />
+          <div className="h-4 w-32 bg-elevated rounded mb-5" />
+          <div className="h-3.5 bg-elevated rounded-full mb-5" />
+          <div className="flex gap-6">
+            <div className="h-4 w-24 bg-elevated rounded" />
+            <div className="h-4 w-32 bg-elevated rounded" />
+            <div className="h-4 w-20 bg-elevated rounded" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (effectiveState === 'OPEN') {
     return (
       <OpenStateDashboard
