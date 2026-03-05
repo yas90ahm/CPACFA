@@ -317,7 +317,7 @@ export default function CloseDashboardPage() {
           : 'Continue Close';
         const ctaHref = allPassing
           ? `/close/${sessionId}/review`
-          : firstFailing
+          : firstFailing?.navigateTo
             ? firstFailing.navigateTo.replace('[sessionId]', sessionId)
             : `/close/${sessionId}/mapping`;
 
@@ -476,7 +476,7 @@ export default function CloseDashboardPage() {
             {gatesWithMapping.map((gate) => (
               <li key={gate.id}>
                 <Link
-                  href={gate.navigateTo.replace('[sessionId]', sessionId)}
+                  href={(gate.navigateTo ?? '').replace('[sessionId]', sessionId)}
                   className="flex items-center gap-2.5 py-1.5 px-2 rounded-input hover:bg-hover text-sm"
                 >
                   {gate.passing ? (

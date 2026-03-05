@@ -144,7 +144,7 @@ export default function ReconciliationPage() {
     let list = recons;
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      list = list.filter((r) => r.accountCode.toLowerCase().includes(q) || r.accountName.toLowerCase().includes(q));
+      list = list.filter((r) => (r.accountCode ?? '').toLowerCase().includes(q) || (r.accountName ?? '').toLowerCase().includes(q));
     }
     if (statusFilter !== 'all') list = list.filter((r) => r.status === statusFilter);
     if (overToleranceOnly) {

@@ -14,7 +14,7 @@ export function EquityTable({ columns, rows }: EquityColumnarProps) {
         <thead>
           <tr className="border-b border-border">
             <th className="text-left font-medium text-text-secondary py-2 pr-4 w-48"></th>
-            {columns.map((col) => (
+            {(columns ?? []).map((col) => (
               <th key={col} className="text-right font-medium text-text-secondary py-2 px-2">
                 {col}
               </th>
@@ -22,7 +22,7 @@ export function EquityTable({ columns, rows }: EquityColumnarProps) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, i) => (
+          {(rows ?? []).map((row, i) => (
             <tr
               key={row.label}
               className={
@@ -30,7 +30,7 @@ export function EquityTable({ columns, rows }: EquityColumnarProps) {
               }
             >
               <td className="py-1.5 pr-4 font-medium">{row.label}</td>
-              {row.values.map((val, j) => (
+              {(row.values ?? []).map((val, j) => (
                 <td key={j} className="text-right font-mono tabular-nums text-sm py-1.5 px-2">
                   {val === '—' ? <span className="text-text-muted">—</span> : <MoneyCell value={val} showDollar />}
                 </td>

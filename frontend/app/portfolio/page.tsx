@@ -374,7 +374,7 @@ export default function PortfolioPage() {
                       <td className="py-2.5 px-4 text-center">
                         <div className="flex items-center justify-center gap-2">
                           <div className="h-1.5 w-12 bg-elevated rounded-full overflow-hidden">
-                            <div className="h-full bg-status-green rounded-full" style={{ width: `${(c.gatesPassing / c.gatesTotal) * 100}%` }} />
+                            <div className="h-full bg-status-green rounded-full" style={{ width: `${c.gatesTotal > 0 ? (c.gatesPassing / c.gatesTotal) * 100 : 0}%` }} />
                           </div>
                           <span className="font-mono text-xs">{c.gatesPassing}/{c.gatesTotal}</span>
                         </div>
@@ -484,7 +484,7 @@ export default function PortfolioPage() {
         <h2 className="text-lg font-display text-primary mb-4">Close Duration Trend (days)</h2>
         <div className="bg-surface border border-border rounded-card p-4 space-y-3">
           {companies.slice(0, 6).map((c) => {
-            const vals = c.closeDurationHistory.filter((h): h is number => h != null);
+            const vals = (c.closeDurationHistory ?? []).filter((h): h is number => h != null);
             const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
             const last = vals[vals.length - 1];
             const improving = vals.length >= 2 && last != null && vals[vals.length - 2] != null && last < vals[vals.length - 2];

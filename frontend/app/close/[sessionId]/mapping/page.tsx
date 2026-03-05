@@ -621,9 +621,9 @@ export default function MappingPage() {
                             </span>
                           )}
                         </div>
-                        {s.alternatives.length > 0 && (
+                        {(s.alternatives ?? []).length > 0 && (
                           <div className="mt-1 text-[10px] text-text-tertiary">
-                            Alt: {s.alternatives.slice(0, 2).map((a) => a.label).join(', ')}
+                            Alt: {(s.alternatives ?? []).slice(0, 2).map((a) => a.label).join(', ')}
                           </div>
                         )}
                       </div>

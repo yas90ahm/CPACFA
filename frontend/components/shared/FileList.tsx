@@ -40,7 +40,7 @@ export function FileList(p: FileListProps) {
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-primary text-sm truncate">{f.fileName}</div>
                 <div className="text-xs text-text-secondary mt-0.5">
-                  {formatSize(f.fileSize)} · {f.uploadedBy} · {new Date(f.uploadedAt).toLocaleString()}
+                  {formatSize(f.fileSize)} · {f.uploadedBy} · {f.uploadedAt ? new Date(f.uploadedAt).toLocaleString() : '—'}
                 </div>
                 {p.showHash && (
                   <button
@@ -48,7 +48,7 @@ export function FileList(p: FileListProps) {
                     onClick={() => setExpandedId(expanded ? null : f.id)}
                     className="flex items-center gap-1 mt-1 text-xs text-text-tertiary hover:text-primary"
                   >
-                    SHA-256: {expanded ? f.sha256Hash : `${f.sha256Hash.slice(0, 16)}...`}
+                    SHA-256: {expanded ? f.sha256Hash : `${(f.sha256Hash ?? '').slice(0, 16)}...`}
                     {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                   </button>
                 )}

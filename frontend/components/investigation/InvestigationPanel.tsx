@@ -107,17 +107,17 @@ export function InvestigationPanel({
     if (!result) return '';
     const parts: string[] = [];
     parts.push(`${result.line_item_label}: ${result.delta} (${result.delta_pct}) period-over-period change.`);
-    if (result.top_accounts.length > 0) {
+    if ((result.top_accounts ?? []).length > 0) {
       parts.push('Key drivers:');
-      result.top_accounts.slice(0, 3).forEach((a) => {
+      (result.top_accounts ?? []).slice(0, 3).forEach((a) => {
         parts.push(`- ${a.account_name} (${a.account_code}): ${a.delta} (${a.contribution_pct} of total change)`);
       });
     }
-    if (result.new_accounts.length > 0) {
-      parts.push(`New accounts: ${result.new_accounts.map((a) => a.account_name).join(', ')}`);
+    if ((result.new_accounts ?? []).length > 0) {
+      parts.push(`New accounts: ${(result.new_accounts ?? []).map((a) => a.account_name).join(', ')}`);
     }
-    if (result.eliminated_accounts.length > 0) {
-      parts.push(`Eliminated accounts: ${result.eliminated_accounts.map((a) => a.account_name).join(', ')}`);
+    if ((result.eliminated_accounts ?? []).length > 0) {
+      parts.push(`Eliminated accounts: ${(result.eliminated_accounts ?? []).map((a) => a.account_name).join(', ')}`);
     }
     return parts.join('\n');
   };
@@ -197,11 +197,11 @@ export function InvestigationPanel({
           </div>
 
           {/* Top contributing accounts */}
-          {result.top_accounts.length > 0 && (
+          {(result.top_accounts ?? []).length > 0 && (
             <section>
               <h3 className="text-sm font-medium text-text-secondary mb-2">Top Contributing Accounts</h3>
               <div className="space-y-1">
-                {result.top_accounts.map((a) => (
+                {(result.top_accounts ?? []).map((a) => (
                   <button
                     key={a.account_code}
                     type="button"
@@ -226,11 +226,11 @@ export function InvestigationPanel({
           )}
 
           {/* New accounts */}
-          {result.new_accounts.length > 0 && (
+          {(result.new_accounts ?? []).length > 0 && (
             <section>
               <h3 className="text-sm font-medium text-status-green mb-2">New Accounts (this period)</h3>
               <div className="space-y-1">
-                {result.new_accounts.map((a) => (
+                {(result.new_accounts ?? []).map((a) => (
                   <button
                     key={a.account_code}
                     type="button"
@@ -252,11 +252,11 @@ export function InvestigationPanel({
           )}
 
           {/* Eliminated accounts */}
-          {result.eliminated_accounts.length > 0 && (
+          {(result.eliminated_accounts ?? []).length > 0 && (
             <section>
               <h3 className="text-sm font-medium text-status-red mb-2">Eliminated Accounts</h3>
               <div className="space-y-1">
-                {result.eliminated_accounts.map((a) => (
+                {(result.eliminated_accounts ?? []).map((a) => (
                   <div key={a.account_code} className="flex items-center justify-between px-3 py-2 text-text-secondary">
                     <div>
                       <span className="font-mono text-xs mr-2">{a.account_code}</span>
@@ -270,11 +270,11 @@ export function InvestigationPanel({
           )}
 
           {/* Top memos */}
-          {result.top_memos.length > 0 && (
+          {(result.top_memos ?? []).length > 0 && (
             <section>
               <h3 className="text-sm font-medium text-text-secondary mb-2">Common Transaction Memos</h3>
               <ul className="space-y-1 text-sm text-text-secondary">
-                {result.top_memos.map((m, i) => (
+                {(result.top_memos ?? []).map((m, i) => (
                   <li key={i} className="px-3 py-1 rounded bg-elevated">"{m}"</li>
                 ))}
               </ul>

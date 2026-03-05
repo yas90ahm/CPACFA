@@ -175,7 +175,7 @@ export function CertificationRecord({ artifact, entityName, periodLabel }: Certi
           <div>
             <div className="text-xs font-medium text-text-secondary mb-1">Snapshot Hash (SHA-256)</div>
             <div className="font-mono text-xs text-text-tertiary break-all bg-surface-alt p-2 rounded">
-              {expandedHash ? artifact.snapshotHash : `${artifact.snapshotHash.slice(0, 16)}...`}
+              {expandedHash ? artifact.snapshotHash : `${(artifact.snapshotHash ?? '').slice(0, 16)}...`}
               <button
                 type="button"
                 onClick={() => setExpandedHash(!expandedHash)}
@@ -188,14 +188,14 @@ export function CertificationRecord({ artifact, entityName, periodLabel }: Certi
           <div>
             <div className="text-xs font-medium text-text-secondary mb-1">Ed25519 Signature</div>
             <div className="font-mono text-xs text-text-tertiary break-all bg-surface-alt p-2 rounded">
-              {artifact.signature.slice(0, 64)}<br />
-              {artifact.signature.slice(64)}
+              {(artifact.signature ?? '').slice(0, 64)}<br />
+              {(artifact.signature ?? '').slice(64)}
             </div>
           </div>
           <div>
             <div className="text-xs font-medium text-text-secondary mb-1">Public Key</div>
             <div className="font-mono text-xs text-text-tertiary break-all bg-surface-alt p-2 rounded">
-              {expandedKey ? artifact.publicKey : `${artifact.publicKey.slice(0, 20)}...`}
+              {expandedKey ? artifact.publicKey : `${(artifact.publicKey ?? '').slice(0, 20)}...`}
               <button
                 type="button"
                 onClick={() => setExpandedKey(!expandedKey)}
@@ -251,7 +251,7 @@ export function CertificationRecord({ artifact, entityName, periodLabel }: Certi
       <div className="border-t border-border-light pt-4">
         <h3 className="text-sm font-medium text-text-secondary mb-3">Cross-Statement Validation at Certification</h3>
         <div className="space-y-2">
-          {artifact.validationResults.map((r) => (
+          {(artifact.validationResults ?? []).map((r) => (
             <div key={r.check} className="flex items-center justify-between text-sm">
               <span className={r.passed ? 'text-status-green' : 'text-status-red'}>
                 {r.passed ? '✓' : '✗'} {r.check}

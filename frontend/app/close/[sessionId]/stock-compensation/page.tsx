@@ -73,7 +73,7 @@ export default function StockCompensationPage() {
             <div className="text-xs text-text-tertiary uppercase tracking-wider mb-1">Active Grants</div>
             <div className="text-lg font-medium text-primary">{summary.grantCount}</div>
           </div>
-          {Object.entries(summary.byGrantType).map(([type, amount]) => (
+          {Object.entries(summary.byGrantType ?? {}).map(([type, amount]) => (
             <div key={type} className="p-4 border border-border rounded-card bg-surface">
               <div className="text-xs text-text-tertiary uppercase tracking-wider mb-1">{TYPE_LABEL[type] ?? type}</div>
               <div className="text-lg font-medium text-primary">{fmtMoney(amount)}</div>

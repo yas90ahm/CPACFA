@@ -88,7 +88,7 @@ export function AdjustmentsEntriesTab({
     if (statusFilter !== 'all') list = list.filter((e) => e.status === statusFilter);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      list = list.filter((e) => String(e.jeNumber).includes(q) || e.memo.toLowerCase().includes(q));
+      list = list.filter((e) => String(e.jeNumber).includes(q) || (e.memo ?? '').toLowerCase().includes(q));
     }
     return list;
   }, [entries, statusFilter, search]);
@@ -104,14 +104,14 @@ export function AdjustmentsEntriesTab({
       header: 'Debit Total',
       width: '130px',
       align: 'right' as const,
-      cell: (row: JournalEntry) => <MoneyCell value={sumMoneyStrings(row.lines.map(l => l.debit))} showDollar />,
+      cell: (row: JournalEntry) => <MoneyCell value={sumMoneyStrings((row.lines ?? []).map(l => l.debit))} showDollar />,
     },
     {
       id: 'creditTotal',
       header: 'Credit Total',
       width: '130px',
       align: 'right' as const,
-      cell: (row: JournalEntry) => <MoneyCell value={sumMoneyStrings(row.lines.map(l => l.credit))} showDollar />,
+      cell: (row: JournalEntry) => <MoneyCell value={sumMoneyStrings((row.lines ?? []).map(l => l.credit))} showDollar />,
     },
     { id: 'status', header: 'Status', width: '130px', cell: (row: JournalEntry) => (
       <div className="flex items-center gap-1.5">
@@ -127,7 +127,7 @@ export function AdjustmentsEntriesTab({
       align: 'center' as const,
       cell: (row: JournalEntry) => {
         const count = row.evidenceCount;
-        const required = moneyAbs(sumMoneyStrings(row.lines.map(l => l.debit))) >= 10_000;
+        const required = moneyAbs(sumMoneyStrings((row.lines ?? []).map(l => l.debit))) >= 10_000;
         const missing = required && count === 0;
         return (
           <div className="flex justify-center">
@@ -163,8 +163,8 @@ export function AdjustmentsEntriesTab({
   ];
 
   const renderExpanded = (row: JournalEntry) => {
-    const debitTotal = sumMoneyStrings(row.lines.map(l => l.debit));
-    const creditTotal = sumMoneyStrings(row.lines.map(l => l.credit));
+    const debitTotal = sumMoneyStrings((row.lines ?? []).map(l => l.debit));
+    const creditTotal = sumMoneyStrings((row.lines ?? []).map(l => l.credit));
     const evidence = evidenceByJeId[row.id] ?? [];
     return (
       <div className="py-4 space-y-4">
@@ -183,7 +183,7 @@ export function AdjustmentsEntriesTab({
               </tr>
             </thead>
             <tbody>
-              {row.lines.map((l) => (
+              {(row.lines ?? []).map((l) => (
                 <tr key={l.id} className="border-b border-border-light">
                   <td className="py-2 font-mono">{l.accountCode}</td>
                   <td className="py-2">{l.accountName}</td>

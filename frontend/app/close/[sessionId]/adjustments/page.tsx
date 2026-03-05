@@ -140,7 +140,7 @@ export default function AdjustmentsPage() {
   const approvedCount = allEntries.filter((e) => e.status === 'approved').length;
   const postedCount = allEntries.filter((e) => e.status === 'posted').length;
   const totalDebitImpact = useMemo(
-    () => sumMoneyStrings(allEntries.filter((e) => e.status === 'posted').flatMap((e) => e.lines.map((l) => l.debit))),
+    () => sumMoneyStrings(allEntries.filter((e) => e.status === 'posted').flatMap((e) => (e.lines ?? []).map((l) => l.debit))),
     [allEntries]
   );
   const pendingTemplatesCount = templates.filter((t) => t.periodStatus === 'pending').length;

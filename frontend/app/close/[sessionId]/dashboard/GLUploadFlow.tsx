@@ -247,7 +247,7 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
         });
         setValidationError(null);
         setTBPreview({
-          rows: prev.accounts.map((a) => ({
+          rows: (prev.accounts ?? []).map((a) => ({
             accountCode: a.accountCode,
             accountName: a.accountName,
             debit: a.totalDebit,

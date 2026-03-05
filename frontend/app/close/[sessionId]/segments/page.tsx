@@ -85,7 +85,7 @@ export default function SegmentsPage() {
               { id: 'profitLossPercent', header: 'P&L %', cell: (r) => `${r.profitLossPercent}%` },
               { id: 'assetsPercent', header: 'Assets %', cell: (r) => `${r.assetsPercent}%` },
               { id: 'isReportable', header: 'Reportable', cell: (r) => r.isReportable ? <CheckCircle className="w-4 h-4 text-green-600" /> : <XCircle className="w-4 h-4 text-gray-400" /> },
-              { id: 'thresholdsMet', header: 'Thresholds Met', cell: (r) => r.thresholdsMet.join(', ') || '\u2014' },
+              { id: 'thresholdsMet', header: 'Thresholds Met', cell: (r) => (r.thresholdsMet ?? []).join(', ') || '\u2014' },
             ]}
           />
         </div>

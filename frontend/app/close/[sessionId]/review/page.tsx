@@ -523,7 +523,7 @@ export default function ReviewPage() {
             <div className="space-y-4">
               {/* Key Metrics */}
               <div className="flex flex-wrap gap-3">
-                {boardPackage.keyMetrics.map((m) => (
+                {(boardPackage.keyMetrics ?? []).map((m) => (
                   <div key={m.label} className="min-w-[140px] border border-border rounded-card p-3">
                     <div className="text-xs text-text-secondary">{m.label}</div>
                     <div className="text-lg font-medium text-primary">{m.value}</div>
@@ -531,10 +531,10 @@ export default function ReviewPage() {
                 ))}
               </div>
               {/* Validation */}
-              {boardPackage.validationResults.length > 0 && (
+              {(boardPackage.validationResults ?? []).length > 0 && (
                 <div className="space-y-1">
                   <div className="text-xs font-medium text-text-secondary uppercase tracking-wide">Validation</div>
-                  {boardPackage.validationResults.map((v) => (
+                  {(boardPackage.validationResults ?? []).map((v) => (
                     <div key={v.check} className="flex items-center gap-2 text-sm">
                       {v.passed ? <CheckCircle2 className="w-4 h-4 text-status-green" /> : <XCircle className="w-4 h-4 text-status-red" />}
                       <span className={v.passed ? 'text-text-secondary' : 'text-status-red'}>{v.check}</span>
@@ -543,9 +543,9 @@ export default function ReviewPage() {
                 </div>
               )}
               {/* Material Variances */}
-              {boardPackage.materialVariances.length > 0 && (
+              {(boardPackage.materialVariances ?? []).length > 0 && (
                 <div>
-                  <div className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">Material Variances ({boardPackage.materialVariances.length})</div>
+                  <div className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">Material Variances ({(boardPackage.materialVariances ?? []).length})</div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm border-collapse">
                       <thead>
@@ -558,7 +558,7 @@ export default function ReviewPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {boardPackage.materialVariances.map((mv, idx) => (
+                        {(boardPackage.materialVariances ?? []).map((mv, idx) => (
                           <tr key={idx} className="border-b border-border-light">
                             <td className="py-1.5 px-2">{mv.lineItem}</td>
                             <td className="py-1.5 px-2 text-right font-mono">{mv.currentAmount}</td>

@@ -171,7 +171,7 @@ export default function TemplatesSettingsPage() {
                   <td className="py-2.5 px-4 font-mono">{formatMoney(amount)}</td>
                   <td className="py-2.5 px-4"><span className="px-1.5 py-0.5 rounded text-xs bg-surface-alt border border-border">{t.frequency}</span></td>
                   <td className="py-2.5 px-4">{t.isActive ? 'Yes' : 'No'}</td>
-                  <td className="py-2.5 px-4 text-text-secondary">{new Date(t.createdAt).toLocaleDateString()}</td>
+                  <td className="py-2.5 px-4 text-text-secondary">{t.createdAt ? new Date(t.createdAt).toLocaleDateString() : '—'}</td>
                   <td className="py-2.5 px-4 flex items-center gap-1">
                     <button type="button" onClick={() => openEditTemplate(t)} className="p-1.5 rounded-input text-text-secondary hover:bg-hover" aria-label="Edit"><Pencil className="w-4 h-4" /></button>
                     <button type="button" onClick={() => updateMutation.mutate({ id: t.id, body: { isActive: !t.isActive } })} className="p-1.5 rounded-input text-text-secondary hover:bg-hover" aria-label="Toggle active"><Power className="w-4 h-4" /></button>

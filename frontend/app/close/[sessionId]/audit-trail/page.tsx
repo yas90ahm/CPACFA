@@ -127,7 +127,7 @@ interface EventCardProps {
 }
 
 function EventCard({ event, isExpanded, onToggle }: EventCardProps) {
-  const config = EVENT_TYPE_CONFIG[event.eventType];
+  const config = EVENT_TYPE_CONFIG[event.eventType] ?? { icon: AlertCircle, color: 'text-text-secondary', label: event.eventType };
   const Icon = config.icon;
   const diff = useMemo(
     () => computeDiff(event.beforeState, event.afterState),

@@ -81,10 +81,10 @@ function CheckCard({ check }: { check: GLHealthCheck }) {
         ) : null}
       </button>
 
-      {expanded && check.findings.length > 0 && (
+      {expanded && (check.findings ?? []).length > 0 && (
         <div className="border-t border-border px-4 py-2 space-y-1 max-h-64 overflow-y-auto">
           <p className="text-xs text-text-secondary mb-2">{check.description}</p>
-          {check.findings.map((f: GLHealthFinding, i: number) => {
+          {(check.findings ?? []).map((f: GLHealthFinding, i: number) => {
             const SevIcon = severityIcons[f.severity] ?? Info;
             return (
               <div key={i} className="flex items-start gap-2 py-1 text-xs">
@@ -151,7 +151,7 @@ export default function GLHealthPage() {
             </span>
           </div>
           <p className="text-text-secondary text-sm mt-0.5">
-            {session?.periodLabel ?? analysis.periodLabel} — {analysis.findingCount} finding{analysis.findingCount !== 1 ? 's' : ''} across {analysis.checks.length} checks
+            {session?.periodLabel ?? analysis.periodLabel} — {analysis.findingCount} finding{analysis.findingCount !== 1 ? 's' : ''} across {(analysis.checks ?? []).length} checks
           </p>
         </div>
         <button
@@ -177,7 +177,7 @@ export default function GLHealthPage() {
 
       {/* Check Cards Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        {analysis.checks.map((check: GLHealthCheck) => (
+        {(analysis.checks ?? []).map((check: GLHealthCheck) => (
           <CheckCard key={check.id} check={check} />
         ))}
       </div>

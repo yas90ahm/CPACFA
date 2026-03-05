@@ -91,7 +91,7 @@ export default function FixedAssetsPage() {
             <div className="text-xs text-text-tertiary uppercase tracking-wider mb-1">Total Depreciation</div>
             <div className="text-lg font-medium text-primary">{fmtMoney(summary.totalDepreciation)}</div>
           </div>
-          {Object.entries(summary.byType).map(([type, amount]) => (
+          {Object.entries(summary.byType ?? {}).map(([type, amount]) => (
             <div key={type} className="p-4 border border-border rounded-card bg-surface">
               <div className="text-xs text-text-tertiary uppercase tracking-wider mb-1">{type}</div>
               <div className="text-lg font-medium text-primary">{fmtMoney(amount)}</div>

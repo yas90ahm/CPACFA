@@ -26,7 +26,7 @@ export function CertificationChecklist({ gates, sessionId }: CertificationCheckl
       <div className="w-full bg-surface-alt rounded-input h-2 overflow-hidden">
         <div
           className={cn('h-full transition-all', allPassing ? 'bg-status-green' : 'bg-status-amber')}
-          style={{ width: `${(passingCount / totalCount) * 100}%` }}
+          style={{ width: `${totalCount > 0 ? (passingCount / totalCount) * 100 : 0}%` }}
         />
       </div>
       {allPassing ? (
@@ -40,7 +40,7 @@ export function CertificationChecklist({ gates, sessionId }: CertificationCheckl
       )}
       <div className="space-y-2">
         {gates.map((gate) => {
-          const href = gate.navigateTo.replace('[sessionId]', sessionId);
+          const href = (gate.navigateTo ?? '').replace('[sessionId]', sessionId);
           const Icon = gate.passing ? Check : gate.id === 'ties' ? Circle : X;
           const iconColor = gate.passing ? 'text-status-green' : gate.id === 'ties' ? 'text-text-muted' : 'text-status-red';
           const borderColor = gate.passing ? 'border-status-green' : gate.id === 'ties' ? 'border-border-light' : 'border-status-red';

@@ -193,7 +193,7 @@ export default function ConsolidationPage() {
           <div>
             <h2 className="text-lg font-semibold mb-2">Consolidated Trial Balance</h2>
             <DataTable<ConsolidatedLine>
-              rows={result.consolidatedLines}
+              rows={result.consolidatedLines ?? []}
               getRowId={(r) => `${r.accountName}-${r.side}`}
               columns={[
                 { id: 'accountName', header: 'Account', cell: (r) => r.accountName },
@@ -204,11 +204,11 @@ export default function ConsolidationPage() {
             />
           </div>
 
-          {result.eliminationJournalEntries.length > 0 && (
+          {(result.eliminationJournalEntries ?? []).length > 0 && (
             <div>
               <h2 className="text-lg font-semibold mb-2">Elimination Journal Entries</h2>
               <DataTable<EliminationJE>
-                rows={result.eliminationJournalEntries}
+                rows={result.eliminationJournalEntries ?? []}
                 getRowId={(r) => `${r.ruleId}-${r.debitAccount}`}
                 columns={[
                   { id: 'debitAccount', header: 'Debit', cell: (r) => r.debitAccount },

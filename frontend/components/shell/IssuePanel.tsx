@@ -201,7 +201,7 @@ export function IssuePanel({ issues, sessionId, open, onClose, onOpenRequest, ca
                       <div className="font-medium text-sm text-primary">{issue.title}</div>
                       <div className="text-xs text-text-secondary mt-1">{issue.description}</div>
                       <Link
-                        href={issue.navigateTo.replace('[sessionId]', sessionId)}
+                        href={(issue.navigateTo ?? '').replace('[sessionId]', sessionId)}
                         className="mt-2 inline-block text-xs text-accent hover:underline"
                       >
                         Go to →

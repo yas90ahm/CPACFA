@@ -133,7 +133,7 @@ export default function StatementsPage() {
     ];
     const rows: string[][] = [['Statement', 'Section', 'Line Item', 'Amount', 'Prior Amount', 'Change', 'Change %']];
     for (const sec of sections) {
-      for (const line of sec.data.lines) {
+      for (const line of (sec.data?.lines ?? [])) {
         rows.push([
           sec.title,
           line.sectionName || '',

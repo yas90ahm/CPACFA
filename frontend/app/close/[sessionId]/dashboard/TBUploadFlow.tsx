@@ -166,7 +166,7 @@ export function TBUploadFlow({ sessionId, file, periodLabel, onBack }: TBUploadF
         });
         setValidationError(null);
         setTBPreview({
-          rows: prev.accounts.map((a) => ({
+          rows: (prev.accounts ?? []).map((a) => ({
             accountCode: a.accountCode,
             accountName: a.accountName,
             debit: a.totalDebit,
