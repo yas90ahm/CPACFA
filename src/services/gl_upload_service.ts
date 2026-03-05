@@ -111,10 +111,38 @@ function excelToCsvBuffer(fileBuffer: Buffer): Buffer {
   }
 
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rawRows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', rawNumbers: true });
+  let rawRows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', rawNumbers: true });
 
   if (!rawRows.length) {
     throw new Error('The uploaded Excel file contains no data');
+  }
+
+  // Detect single-column CSV-pasted-into-Excel: all data in column A as comma-separated strings
+  const maxCols = Math.max(...rawRows.slice(0, 10).map(r => (r as unknown[]).filter(c => c != null && String(c).trim() !== '').length));
+  if (maxCols === 1) {
+    const firstNonEmpty = rawRows.find(r => {
+      const cells = r as unknown[];
+      return cells.length > 0 && cells[0] != null && String(cells[0]).includes(',');
+    });
+    if (firstNonEmpty) {
+      console.warn('GL upload: Single-column Excel detected (CSV pasted into Excel), splitting by comma');
+      rawRows = rawRows.map(r => {
+        const cells = r as unknown[];
+        const val = cells.length > 0 ? String(cells[0] ?? '') : '';
+        if (!val.trim()) return [''];
+        // Split respecting quoted fields
+        const parts: string[] = [];
+        let current = '';
+        let inQuotes = false;
+        for (const ch of val) {
+          if (ch === '"') { inQuotes = !inQuotes; continue; }
+          if (ch === ',' && !inQuotes) { parts.push(current.trim()); current = ''; continue; }
+          current += ch;
+        }
+        parts.push(current.trim());
+        return parts;
+      });
+    }
   }
 
   const headerIdx = findHeaderRowIndex(rawRows);
