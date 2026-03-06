@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { setAuthTokenGetter, setAuthExpiredHandler } from '@/lib/api';
+import { normalizeRole } from '@/lib/permissions';
 
 export interface AuthUser {
   userId: string;
@@ -42,7 +43,10 @@ function loadFromStorage(): { token: string | null; user: AuthUser | null } {
   try {
     const t = localStorage.getItem(STORAGE_KEY_TOKEN);
     const u = localStorage.getItem(STORAGE_KEY_USER);
-    return { token: t, user: u ? JSON.parse(u) : null };
+    const parsed = u ? JSON.parse(u) as AuthUser : null;
+    // Normalize backend role names (e.g. "preparer" → "controller") when loading from storage
+    if (parsed) parsed.role = normalizeRole(parsed.role);
+    return { token: t, user: parsed };
   } catch {
     return { token: null, user: null };
   }
@@ -129,12 +133,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!res.ok) {
           throw new Error((data as { error?: string }).error ?? 'Login failed');
         }
-        const { token: t, userId, tenantId: tid, role } = data as {
+        const { token: t, userId, tenantId: tid, role: rawRole } = data as {
           token: string;
           userId: string;
           tenantId: string;
           role: string;
         };
+        const role = normalizeRole(rawRole);
         const authUser: AuthUser = { userId, tenantId: tid, role, email: data.email ?? email, name: data.name ?? undefined };
         setToken(t);
         setUser(authUser);

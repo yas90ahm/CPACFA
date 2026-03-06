@@ -7,6 +7,32 @@
 
 export type Role = 'admin' | 'controller' | 'reviewer' | 'operating_partner' | 'auditor';
 
+/**
+ * Normalize backend role names to frontend role names.
+ * Backend uses: accountant, preparer, reviewer, approver, certifier, admin, operating_partner
+ * Frontend uses: admin, controller, reviewer, operating_partner, auditor
+ */
+export function normalizeRole(backendRole: string | undefined): Role {
+  switch (backendRole) {
+    case 'admin':
+      return 'admin';
+    case 'accountant':
+    case 'preparer':
+      return 'controller';
+    case 'reviewer':
+      return 'reviewer';
+    case 'approver':
+    case 'certifier':
+      return 'reviewer';
+    case 'operating_partner':
+      return 'operating_partner';
+    case 'auditor':
+      return 'auditor';
+    default:
+      return 'controller';
+  }
+}
+
 // ── Capabilities ──────────────────────────────────────────────────────────────
 
 export function canUploadGL(role: string): boolean {
@@ -159,6 +185,11 @@ const ROLE_LABELS: Record<string, string> = {
   reviewer: 'Reviewer',
   operating_partner: 'Operating Partner',
   auditor: 'Auditor',
+  // Backend role names (fallback if normalizeRole wasn't called)
+  accountant: 'Controller',
+  preparer: 'Controller',
+  approver: 'Reviewer',
+  certifier: 'Reviewer',
 };
 
 export function getRoleLabel(role: string): string {
