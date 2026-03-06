@@ -43,6 +43,7 @@ import closeExchangeRatesRouter from './close_exchange_rates.js';
 import closeConsolidationConfigRouter from './close_consolidation_config.js';
 import closeFxTranslationConfigRouter from './close_fx_translation_config.js';
 import closeGlHealthRouter from './close_gl_health.js';
+import closeGlReplaceRouter from './close_gl_replace.js';
 
 const router = Router();
 router.use(closeJeAccrualsRouter);
@@ -84,5 +85,6 @@ router.use(closeExchangeRatesRouter);
 router.use(closeConsolidationConfigRouter);
 router.use(closeFxTranslationConfigRouter);
 router.use(closeGlHealthRouter);
+router.use(closeGlReplaceRouter);
 
 export default router;

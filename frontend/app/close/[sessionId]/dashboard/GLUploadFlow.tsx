@@ -127,6 +127,10 @@ export interface GLUploadFlowProps {
   onBack: () => void;
   /** If true, skip session advance after ingest (used for GL replacement in IN_PROGRESS state) */
   skipAdvance?: boolean;
+  /** If true, uses the dedicated replace endpoint that resets downstream data */
+  replaceMode?: boolean;
+  /** Called after a successful replace (instead of navigating away) */
+  onComplete?: () => void;
 }
 
 type Step = 'parsing' | 'mapping' | 'validating' | 'preview' | 'confirm' | 'ingesting' | 'error';
@@ -159,7 +163,7 @@ function parsePeriodBounds(periodLabel: string): { start: Date; end: Date } | nu
   return null;
 }
 
-export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance }: GLUploadFlowProps) {
+export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance, replaceMode, onComplete }: GLUploadFlowProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const advanceSession = useAdvanceSession(sessionId);
@@ -291,7 +295,9 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
         }
       }
       formData.append('columnMapping', JSON.stringify(backendMapping));
-      const url = `/api/gl/ingest?period=${encodeURIComponent(period)}&sessionId=${encodeURIComponent(sessionId)}`;
+      const url = replaceMode
+        ? `/api/close/sessions/${encodeURIComponent(sessionId)}/gl/replace?period=${encodeURIComponent(period)}`
+        : `/api/gl/ingest?period=${encodeURIComponent(period)}&sessionId=${encodeURIComponent(sessionId)}`;
       const result = await apiUpload<IngestResponse>(url, formData);
       if (result.status === 'partial' && result.imbalancedCount && result.imbalancedCount > 0) {
         setIngestResult(result);
@@ -299,14 +305,21 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
         setStep('confirm');
         return;
       }
-      if (!skipAdvance) {
+      if (!skipAdvance && !replaceMode) {
         await advanceSession.mutateAsync({});
       }
       queryClient.invalidateQueries({ queryKey: ['trial-balance', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       queryClient.invalidateQueries({ queryKey: ['gl-health', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['close-session', sessionId] });
-      router.push(`/close/${sessionId}/dashboard`);
+      queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['variances', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['statement-packages', sessionId] });
+      if (replaceMode && onComplete) {
+        onComplete();
+      } else {
+        router.push(`/close/${sessionId}/dashboard`);
+      }
     } catch (err) {
       setStep('confirm');
       setAdvanceError(err instanceof Error ? err.message : 'Failed to ingest or advance. Try again.');
@@ -602,7 +615,13 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
   if (step === 'confirm' && tbPreview) {
     return (
       <div className="max-w-2xl space-y-6">
-        <h2 className="text-lg font-display text-primary">Ready to import</h2>
+        <h2 className="text-lg font-display text-primary">{replaceMode ? 'Ready to replace GL data' : 'Ready to import'}</h2>
+        {replaceMode && !advanceError && (
+          <div className="bg-status-amber/10 border border-status-amber rounded-card p-4 flex items-start gap-2 text-sm text-status-amber">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>This will reset your trial balance, reconciliations, and statements. Account mappings and templates will be preserved.</span>
+          </div>
+        )}
         {advanceError && (
           <div className="bg-status-red/10 border border-status-red rounded-card p-4 space-y-3">
             <div className="flex items-start gap-2 text-sm text-status-red">
@@ -639,7 +658,7 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
             Back to Preview
           </button>
           <button type="button" onClick={ingest} className="px-4 py-2 rounded-input bg-accent text-accent-contrast text-sm font-medium hover:opacity-90">
-            {skipAdvance ? 'Replace GL & Re-derive TB' : 'Import & Begin Close'}
+            {replaceMode ? 'Replace GL Data' : skipAdvance ? 'Replace GL & Re-derive TB' : 'Import & Begin Close'}
           </button>
         </div>
       </div>

@@ -12,6 +12,7 @@ import { useAjeTemplates, useJournalEntries } from '@/lib/queries/adjustments';
 import { useVariances } from '@/lib/queries/variance';
 import { useAuth } from '@/lib/auth';
 import { getUserDisplay } from '@/lib/utils';
+import { ErrorBoundary } from '@/components/shared/ErrorBoundary';
 import { TrialBalanceProvider, useTrialBalanceContext } from './context/trial-balance-context';
 
 function CloseSessionInner({ children }: { children: React.ReactNode }) {
@@ -83,8 +84,10 @@ export default function CloseSessionLayout({ children }: { children: React.React
   const params = useParams();
   const sessionId = (params?.sessionId as string) ?? '';
   return (
-    <TrialBalanceProvider sessionId={sessionId}>
-      <CloseSessionInner>{children}</CloseSessionInner>
-    </TrialBalanceProvider>
+    <ErrorBoundary>
+      <TrialBalanceProvider sessionId={sessionId}>
+        <CloseSessionInner>{children}</CloseSessionInner>
+      </TrialBalanceProvider>
+    </ErrorBoundary>
   );
 }

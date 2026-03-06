@@ -149,6 +149,10 @@ export default function CloseDashboardPage() {
           file={replaceFile}
           onBack={() => setReplaceFile(null)}
           skipAdvance
+          replaceMode
+          onComplete={() => {
+            setReplaceFile(null);
+          }}
         />
       </div>
     );
@@ -174,11 +178,15 @@ export default function CloseDashboardPage() {
   // Derive gate data
   const gatesBase = readiness?.gates ?? [];
   const gatesWithMapping = gatesBase.map((g) => {
-    if (g.id === 'map') return { ...g, passing: mappingGatePassing, detail: `${mappedCount}/${totalAccounts} mapped` };
-    if (g.id === 'recon') return { ...g, passing: reconTotal > 0 && reconComplete === reconTotal, detail: `${reconComplete}/${reconTotal} complete` };
-    if (g.id === 'aje') return { ...g, passing: ajeTemplateTotal > 0 && ajeTemplatePending === 0, detail: `${ajeTemplateResolved}/${ajeTemplateTotal} resolved` };
-    if (g.id === 'stmt') return { ...g, passing: statementsGenerated && !statementsStale, detail: statementsStale ? 'Stale — regenerate' : statementsGenerated ? 'Generated' : 'Not generated' };
-    if (g.id === 'var') return { ...g, passing: varianceMaterialTotal === 0 || varianceUnexplained.length === 0, detail: `${varianceExplainedCount}/${varianceMaterialTotal} explained` };
+    if (g.id === 'all_accounts_mapped') return { ...g, passing: mappingGatePassing, detail: `${mappedCount}/${totalAccounts} mapped` };
+    if (g.id === 'recons_complete') return { ...g, passing: reconTotal > 0 && reconComplete === reconTotal, detail: `${reconComplete}/${reconTotal} complete` };
+    if (g.id === 'templates_resolved') return { ...g, passing: ajeTemplatePending === 0, detail: ajeTemplateTotal === 0 ? 'No templates' : `${ajeTemplateResolved}/${ajeTemplateTotal} resolved` };
+    if (g.id === 'statements_current') return { ...g, passing: statementsGenerated && !statementsStale, detail: statementsStale ? 'Stale — regenerate' : statementsGenerated ? 'Generated' : 'Not generated' };
+    if (g.id === 'variances_explained') {
+      const varPassing = statementsGenerated ? (varianceMaterialTotal === 0 || varianceUnexplained.length === 0) : false;
+      const varDetail = !statementsGenerated ? 'Generate statements first' : `${varianceExplainedCount}/${varianceMaterialTotal} explained`;
+      return { ...g, passing: varPassing, detail: varDetail };
+    }
     return g;
   });
   const gatesPassing = gatesWithMapping.filter((g) => g.passing).length;

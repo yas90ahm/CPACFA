@@ -121,14 +121,18 @@ export async function getReadinessGates(
 
   // 6. Material Variances Explained
   const varianceResult = await checkVarianceCompleteness(pool, tenantId, closeSessionId);
+  const variancePassing = statementsExist ? varianceResult.passes : false;
+  const varianceDetail = !statementsExist
+    ? 'Generate statements first'
+    : varianceResult.passes
+      ? `${varianceResult.totalMaterial} material variance(s) explained`
+      : `${varianceResult.unexplained.length} material variance(s) need explanation`;
   gates.push({
     id: 'variances_explained',
     name: 'Material Variances Explained',
     description: 'All material period-over-period changes must have documented explanations',
-    passing: varianceResult.passes,
-    detail: varianceResult.passes
-      ? `${varianceResult.totalMaterial} material variance(s) explained`
-      : `${varianceResult.unexplained.length} material variance(s) need explanation`,
+    passing: variancePassing,
+    detail: varianceDetail,
     category: 'hard',
     navigateTo: '/variance',
   });
@@ -184,12 +188,18 @@ export async function getReadinessGates(
   });
 
   // 11. Material JEs Approved
+  const jesApproved = readiness.materialJesApproved !== false;
+  const jesDetail = !jesApproved
+    ? 'Draft or proposed JEs pending'
+    : readiness.jeTotal === 0
+      ? 'No journal entries posted'
+      : 'All JEs approved or rejected';
   gates.push({
     id: 'material_jes_approved',
     name: 'Material JEs Approved',
     description: 'All journal entries must be approved or rejected (no draft/proposed)',
-    passing: readiness.materialJesApproved !== false,
-    detail: readiness.materialJesApproved !== false ? 'All JEs approved or rejected' : 'Draft or proposed JEs pending',
+    passing: jesApproved,
+    detail: jesDetail,
     category: 'hard',
     navigateTo: '/adjustments',
   });

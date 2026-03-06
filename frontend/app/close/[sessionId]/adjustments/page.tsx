@@ -202,10 +202,17 @@ export default function AdjustmentsPage() {
     skipTemplateMutation.mutate({ applicationId: templateId, closeSessionId: sessionId, reason });
   }, [skipTemplateMutation, sessionId]);
 
-  const handleUndoSkip = useCallback((_templateId: string) => {
-    // Backend does not support undo skip — re-fetch to get latest status
-    queryClient.invalidateQueries({ queryKey: ['templates'] });
-  }, [queryClient]);
+  const handleUndoSkip = useCallback(async (templateId: string) => {
+    try {
+      await apiFetch('/api/close/templates/undo-skip', {
+        method: 'POST',
+        body: { applicationId: templateId, closeSessionId: sessionId },
+      });
+      queryClient.invalidateQueries({ queryKey: ['templates'] });
+    } catch (err) {
+      console.error('Undo skip failed:', err);
+    }
+  }, [queryClient, sessionId]);
 
   const handleBulkApply = useCallback(async () => {
     const pending = templates.filter((t) => t.periodStatus === 'pending');

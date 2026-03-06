@@ -50,8 +50,46 @@ export function parseCsvToTrialBalance(buffer: Buffer): IngestTrialBalanceResult
   return { rows, headers, needsAgenticMapping };
 }
 
+/** Known TB / GL header names for scoring rows to find the real header. */
+const KNOWN_TB_HEADERS = new Set([
+  'account', 'account code', 'account name', 'account number', 'account #',
+  'account id', 'gl account', 'description', 'debit', 'credit', 'dr', 'cr',
+  'debits', 'credits', 'debit amount', 'credit amount', 'balance', 'amount',
+  'ending balance', 'beginning balance', 'net balance', 'period', 'date',
+  'accountcode', 'accountname', 'glaccount',
+]);
+
+/** Score a row: how many cells look like recognized column headers? */
+function scoreTBHeaderRow(cells: unknown[]): number {
+  let score = 0;
+  for (const cell of cells) {
+    if (cell == null || String(cell).trim() === '') continue;
+    const norm = String(cell).trim().toLowerCase().replace(/[_\-#]+/g, ' ').replace(/\s+/g, ' ');
+    if (KNOWN_TB_HEADERS.has(norm)) { score += 2; continue; }
+    for (const kh of KNOWN_TB_HEADERS) {
+      if (kh.length >= 4 && (norm.includes(kh) || kh.includes(norm))) { score += 1; break; }
+    }
+  }
+  return score;
+}
+
+/** Find the header row index among the first 20 rows by scoring header keyword matches. */
+function findTBHeaderRowIndex(rows: unknown[][]): number {
+  const scanLimit = Math.min(rows.length, 20);
+  let bestIdx = 0;
+  let bestScore = 0;
+  for (let i = 0; i < scanLimit; i++) {
+    const row = rows[i];
+    if (!row || row.every(c => c == null || String(c).trim() === '')) continue;
+    const s = scoreTBHeaderRow(row);
+    if (s > bestScore) { bestScore = s; bestIdx = i; }
+  }
+  return bestScore >= 3 ? bestIdx : 0;
+}
+
 /**
- * Parse XLSX buffer — first sheet, header row 0.
+ * Parse XLSX buffer — first sheet, auto-detect header row.
+ * Handles junk rows above headers and single-column CSV-pasted-into-Excel.
  * Standardizes column names via parser_utils for messy bank/export formats.
  * Sets needsAgenticMapping when no canonical debit/credit or amount column was found.
  */
@@ -61,17 +99,46 @@ export function parseXlsxToTrialBalance(buffer: Buffer): IngestTrialBalanceResul
   if (!sheetName) return { rows: [], headers: [], needsAgenticMapping: false };
 
   const sheet = workbook.Sheets[sheetName];
-  const data = XLSX.utils.sheet_to_json(sheet, {
+  let data = XLSX.utils.sheet_to_json(sheet, {
     header: 1,
     defval: '',
   }) as unknown[][];
 
   if (data.length < 2) return { rows: [], headers: [], needsAgenticMapping: false };
 
-  const headerRow = data[0].map((c) => String(c ?? '').trim());
+  // Detect single-column CSV-pasted-into-Excel
+  const maxCols = Math.max(...data.slice(0, 10).map(r => (r as unknown[]).filter(c => c != null && String(c).trim() !== '').length));
+  if (maxCols === 1) {
+    const hasComma = data.find(r => {
+      const cells = r as unknown[];
+      return cells.length > 0 && cells[0] != null && String(cells[0]).includes(',');
+    });
+    if (hasComma) {
+      data = data.map(r => {
+        const cells = r as unknown[];
+        const val = cells.length > 0 ? String(cells[0] ?? '') : '';
+        if (!val.trim()) return [''];
+        const parts: string[] = [];
+        let current = '';
+        let inQuotes = false;
+        for (const ch of val) {
+          if (ch === '"') { inQuotes = !inQuotes; continue; }
+          if (ch === ',' && !inQuotes) { parts.push(current.trim()); current = ''; continue; }
+          current += ch;
+        }
+        parts.push(current.trim());
+        return parts;
+      });
+    }
+  }
+
+  // Find the real header row (skip junk rows like company name, report title, blanks)
+  const headerIdx = findTBHeaderRowIndex(data);
+  const headerRow = (data[headerIdx] as unknown[]).map((c) => String(c ?? '').trim());
   const records: Record<string, unknown>[] = [];
-  for (let i = 1; i < data.length; i++) {
+  for (let i = headerIdx + 1; i < data.length; i++) {
     const row = data[i] as unknown[] | undefined;
+    if (!row || row.every(c => c == null || String(c).trim() === '')) continue;
     const obj: Record<string, unknown> = {};
     for (let j = 0; j < headerRow.length; j++) {
       const key = headerRow[j] || `Col${j}`;

@@ -263,6 +263,7 @@ export async function computeReadiness(
     noCriticalIssues,
     materialJesApproved,
     integrityChecksPass,
+    jeTotal: jes.length,
   };
 }
 

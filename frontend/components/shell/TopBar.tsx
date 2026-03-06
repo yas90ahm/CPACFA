@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { Settings, ChevronDown, ArrowLeft } from 'lucide-react';
+import { Settings, ArrowLeft } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import type { CloseState } from '@/lib/types/close-session';
 
@@ -51,15 +51,13 @@ export function TopBar(p: TopBarProps) {
                 Back to Portfolio
               </Link>
             )}
-            <button type="button" className="flex items-center gap-2 px-3 py-1.5 rounded-input bg-hover border border-border-light text-primary text-sm">
+            <span className="flex items-center gap-2 px-3 py-1.5 rounded-input bg-hover border border-border-light text-primary text-sm">
               {entityName}
-              <ChevronDown className="w-4 h-4 text-text-secondary" />
-            </button>
+            </span>
             {showPeriod && periodLabel && (
-              <button type="button" className="flex items-center gap-2 px-3 py-1.5 rounded-input bg-hover border border-border-light text-primary text-sm">
+              <span className="flex items-center gap-2 px-3 py-1.5 rounded-input bg-hover border border-border-light text-primary text-sm">
                 {periodLabel}
-                <ChevronDown className="w-4 h-4 text-text-secondary" />
-              </button>
+              </span>
             )}
           </>
         )}

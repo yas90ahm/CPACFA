@@ -34,4 +34,6 @@ export interface CloseReadinessResult {
   noCriticalIssues: boolean;
   materialJesApproved: boolean;
   integrityChecksPass: boolean;
+  /** Total journal entries count (0 means none posted) */
+  jeTotal: number;
 }

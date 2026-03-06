@@ -249,6 +249,32 @@ router.post('/templates/skip', async (req: Request, res: Response) => {
   }
 });
 
+/** POST /api/close/templates/undo-skip — revert skipped template back to proposed */
+router.post('/templates/undo-skip', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const body = req.body as { applicationId: string; closeSessionId: string };
+    if (!body.applicationId || !body.closeSessionId) {
+      res.status(400).json({ error: 'applicationId and closeSessionId required' });
+      return;
+    }
+    await pool.query(
+      `UPDATE tenant_aje_template_applications
+       SET status = 'proposed', skip_reason = NULL, skipped_at = NULL
+       WHERE id = $1 AND tenant_id = $2 AND status = 'skipped'`,
+      [body.applicationId, tenantId],
+    );
+    res.json({ success: true });
+  } catch (e) {
+    send500(res, e, 'Undo skip failed');
+  }
+});
+
 /** GET /api/close/sessions/:closeSessionId/template-status — get template status for period */
 router.get('/sessions/:closeSessionId/template-status', async (req: Request, res: Response) => {
   try {
