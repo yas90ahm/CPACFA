@@ -2,15 +2,31 @@
 
 import { useState, FormEvent } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, token, user, isLoading: authLoading } = useAuth();
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [tenantId, setTenantId] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Already authenticated — redirect away from login
+  if (!authLoading && token) {
+    if (user?.role === 'operating_partner' || user?.role === 'admin') {
+      router.replace('/portfolio');
+    } else {
+      router.replace('/close');
+    }
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg-primary, #0C0E13)' }}>
+        <div className="animate-spin h-8 w-8 border-2 border-t-transparent rounded-full" style={{ borderColor: 'var(--accent, #6366F1)', borderTopColor: 'transparent' }} />
+      </div>
+    );
+  }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();

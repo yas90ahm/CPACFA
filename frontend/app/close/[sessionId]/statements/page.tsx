@@ -17,6 +17,7 @@ import { SlideOverPanel } from '@/components/shared/SlideOverPanel';
 import { cn } from '@/lib/utils';
 import type { JournalEntry } from '@/lib/types/journal-entry';
 import { Check, X, AlertTriangle, Loader2, FileDown, Calendar } from 'lucide-react';
+import { canGenerateStatements } from '@/lib/permissions';
 
 type PeriodView = 'current' | 'QTD' | 'YTD';
 
@@ -95,7 +96,8 @@ export default function StatementsPage() {
   );
 
   const queryClient = useQueryClient();
-  const { getAuthToken } = useAuth();
+  const { getAuthToken, user } = useAuth();
+  const canGenerate = canGenerateStatements(user?.role ?? 'controller');
 
   const generateMutation = useMutation({
     mutationFn: () =>
@@ -292,21 +294,23 @@ export default function StatementsPage() {
             {exporting ? <Loader2 className="w-4 h-4 inline mr-1.5 animate-spin" /> : <FileDown className="w-4 h-4 inline mr-1.5" />}
             {exporting ? 'Exporting…' : 'Export PDF'}
           </button>
-          <button
-            type="button"
-            onClick={handleRegenerate}
-            disabled={generating}
-            className={cn(
-              'px-4 py-2 rounded-input text-sm font-medium flex items-center gap-2',
-              !hasStatements || isStale
-                ? 'bg-accent text-white hover:opacity-90'
-                : 'border border-border text-primary hover:bg-hover',
-              generating && 'opacity-70'
-            )}
-          >
-            {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            {!hasStatements ? 'Prepare Statements' : isStale ? 'Update Statements' : 'Reprepare'}
-          </button>
+          {canGenerate && (
+            <button
+              type="button"
+              onClick={handleRegenerate}
+              disabled={generating}
+              className={cn(
+                'px-4 py-2 rounded-input text-sm font-medium flex items-center gap-2',
+                !hasStatements || isStale
+                  ? 'bg-accent text-white hover:opacity-90'
+                  : 'border border-border text-primary hover:bg-hover',
+                generating && 'opacity-70'
+              )}
+            >
+              {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              {!hasStatements ? 'Prepare Statements' : isStale ? 'Update Statements' : 'Reprepare'}
+            </button>
+          )}
         </div>
       </div>
 

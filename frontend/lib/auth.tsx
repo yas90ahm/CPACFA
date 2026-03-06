@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -63,17 +64,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
 
-  // Hydrate auth state from localStorage on client mount
+  // Ref holds the token synchronously — no closure staleness.
+  // Initialize from localStorage during render (before any effects).
+  const tokenRef = useRef<string | null>(null);
+  const isLoadingRef = useRef(true);
+  if (tokenRef.current === null && typeof window !== 'undefined') {
+    const stored = loadFromStorage();
+    if (stored.token) tokenRef.current = stored.token;
+  }
+
+  // Hydrate React state from localStorage on client mount
   useEffect(() => {
     const stored = loadFromStorage();
     if (stored.token) {
       setToken(stored.token);
       setUser(stored.user);
+      tokenRef.current = stored.token;
     }
     setIsLoading(false);
+    isLoadingRef.current = false;
   }, []);
 
-  const getAuthToken = useCallback(() => token, [token]);
+  // Keep ref in sync with state changes (login, logout, token refresh)
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
+
+  // Stable callback — reads from ref, never stale
+  const getAuthToken = useCallback(() => tokenRef.current, []);
 
   useEffect(() => {
     setAuthTokenGetter(getAuthToken);
@@ -81,8 +99,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setAuthExpiredHandler(() => {
+      // Don't wipe credentials during hydration — a 401 from a stale
+      // getter is a race condition, not a real auth expiry.
+      if (isLoadingRef.current) return;
       setToken(null);
       setUser(null);
+      tokenRef.current = null;
       saveToStorage(null, null);
       router.replace('/login');
     });

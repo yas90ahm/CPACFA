@@ -17,6 +17,10 @@ export interface StateMachineBannerProps {
   isReviewer?: boolean;
   /** When true (e.g. operating partner), hide advance/approve/lock buttons. */
   isReadOnly?: boolean;
+  /** Whether user can lock periods (admin only). */
+  canLock?: boolean;
+  /** Whether user can submit for review (admin, controller). */
+  canSubmit?: boolean;
 }
 
 export function StateMachineBanner({
@@ -26,6 +30,8 @@ export function StateMachineBanner({
   canAdvance = false,
   isReviewer = false,
   isReadOnly = false,
+  canLock = false,
+  canSubmit = true,
 }: StateMachineBannerProps) {
   const idx = states.indexOf(currentState);
   const advanceMutation = useAdvanceSession(sessionId);
@@ -85,7 +91,7 @@ export function StateMachineBanner({
           )}
         </div>
         <div className="flex items-center gap-2">
-          {!isReadOnly && currentState === 'IN_PROGRESS' && (
+          {!isReadOnly && canSubmit && currentState === 'IN_PROGRESS' && (
             <button
               type="button"
               disabled={!canAdvance || advanceMutation.isPending}
@@ -119,7 +125,7 @@ export function StateMachineBanner({
               </button>
             </>
           )}
-          {!isReadOnly && currentState === 'CERTIFIED' && (
+          {!isReadOnly && canLock && currentState === 'CERTIFIED' && (
             <button
               type="button"
               onClick={() => setShowLockConfirm(true)}

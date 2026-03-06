@@ -15,6 +15,8 @@ import type { TrialBalanceRow, AccountType } from '@/lib/types/trial-balance';
 import type { COASuggestion } from '@/lib/types/suggestion';
 import { sumMoneyStrings } from '@/lib/money';
 import { Pencil, Check, X, Sparkles, Loader2, Upload, Download } from 'lucide-react';
+import { canMapAccounts, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
+import { useAuth } from '@/lib/auth';
 
 /** API taxonomy line (flat). */
 interface TaxonomyLine {
@@ -87,6 +89,10 @@ export default function MappingPage() {
   const searchParams = useSearchParams();
   const unmappedOnlyDefault = searchParams.get('unmapped') === '1';
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const role = user?.role ?? 'controller';
+  const canMap = canMapAccounts(role);
+  const readOnly = isRoleReadOnly(role);
 
   const { data: session } = useCloseSession(sessionId);
   const entityId = session?.entityId ?? '';
@@ -257,41 +263,43 @@ export default function MappingPage() {
           <h1 className="font-display text-2xl text-primary">Account Mapping</h1>
           <p className="text-text-secondary text-sm mt-0.5">Map GL accounts to reporting line items</p>
         </div>
-        <div className="flex items-center gap-2">
-          <a
-            href={`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'}/api/coa-mapping/import/template`}
-            className="px-3 py-2 rounded-input border border-border text-sm text-text-secondary hover:bg-hover flex items-center gap-1.5"
-            download
-          >
-            <Download className="w-4 h-4" />
-            Template
-          </a>
-          <label className={cn('px-4 py-2 rounded-input border border-border text-sm font-medium flex items-center gap-2 cursor-pointer hover:bg-hover', csvImporting && 'opacity-50 pointer-events-none')}>
-            <Upload className="w-4 h-4" />
-            {csvImporting ? 'Importing...' : 'Import CSV'}
-            <input
-              type="file"
-              accept=".csv"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) handleCsvImport(f);
-                e.target.value = '';
-              }}
-            />
-          </label>
-          {unmappedCount > 0 && (
-            <button
-              type="button"
-              disabled={generateMutation.isPending}
-              onClick={() => generateMutation.mutate(undefined)}
-              className="px-4 py-2 rounded-input bg-accent text-white text-sm font-medium hover:bg-accent/90 disabled:opacity-50 flex items-center gap-2"
+        {canMap && (
+          <div className="flex items-center gap-2">
+            <a
+              href={`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'}/api/coa-mapping/import/template`}
+              className="px-3 py-2 rounded-input border border-border text-sm text-text-secondary hover:bg-hover flex items-center gap-1.5"
+              download
             >
-              {generateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              {generateMutation.isPending ? 'Generating...' : 'Auto-Map Remaining'}
-            </button>
-          )}
-        </div>
+              <Download className="w-4 h-4" />
+              Template
+            </a>
+            <label className={cn('px-4 py-2 rounded-input border border-border text-sm font-medium flex items-center gap-2 cursor-pointer hover:bg-hover', csvImporting && 'opacity-50 pointer-events-none')}>
+              <Upload className="w-4 h-4" />
+              {csvImporting ? 'Importing...' : 'Import CSV'}
+              <input
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleCsvImport(f);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+            {unmappedCount > 0 && (
+              <button
+                type="button"
+                disabled={generateMutation.isPending}
+                onClick={() => generateMutation.mutate(undefined)}
+                className="px-4 py-2 rounded-input bg-accent text-white text-sm font-medium hover:bg-accent/90 disabled:opacity-50 flex items-center gap-2"
+              >
+                {generateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {generateMutation.isPending ? 'Generating...' : 'Auto-Map Remaining'}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-4 py-2 px-3 rounded-input bg-surface border border-border">
@@ -358,7 +366,7 @@ export default function MappingPage() {
                     <th className="px-3 py-2.5 text-left text-xs font-medium text-text-secondary w-[90px]">Type</th>
                     <th className="px-3 py-2.5 text-right text-xs font-medium text-text-secondary w-[120px]">Balance</th>
                     <th className="px-3 py-2.5 text-left text-xs font-medium text-text-secondary min-w-[180px]">Mapping</th>
-                    <th className="px-3 py-2.5 text-left text-xs font-medium text-text-secondary w-[200px]">Action</th>
+                    {canMap && <th className="px-3 py-2.5 text-left text-xs font-medium text-text-secondary w-[200px]">Action</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -398,7 +406,7 @@ export default function MappingPage() {
                           <span className="text-status-amber">⚠ Unmapped</span>
                         )}
                       </td>
-                      <td className="px-3 py-2">
+                      {canMap && <td className="px-3 py-2">
                         {/* Unmapped row WITH a suggestion: Accept / Edit / Reject */}
                         {!r.mappingReportingLineId && suggestion && editingSuggestionId !== suggestion.id ? (
                           <div className="flex items-center gap-1">
@@ -504,7 +512,7 @@ export default function MappingPage() {
                             <Pencil className="w-4 h-4" />
                           </button>
                         )}
-                      </td>
+                      </td>}
                     </tr>
                     );
                   })}

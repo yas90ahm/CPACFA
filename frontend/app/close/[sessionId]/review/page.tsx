@@ -39,6 +39,7 @@ import {
   X,
   Shield,
 } from 'lucide-react';
+import { canSubmitForReview, canCertify, canLockPeriod, canReopenPeriod, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
 export default function ReviewPage() {
   const params = useParams();
@@ -48,8 +49,13 @@ export default function ReviewPage() {
   const { data: readiness } = useCloseReadiness(sessionId);
   const { data: certification } = useCertification(sessionId);
 
-  const userRole = (user?.role ?? 'preparer') as 'preparer' | 'reviewer';
+  const role = user?.role ?? 'controller';
   const userName = user?.email ?? user?.userId ?? 'Unknown';
+  const roleCanSubmit = canSubmitForReview(role);
+  const roleCanCertify = canCertify(role);
+  const roleCanLock = canLockPeriod(role);
+  const roleCanReopen = canReopenPeriod(role);
+  const readOnly = isRoleReadOnly(role);
 
   const { data: teamData } = useQuery({
     queryKey: ['team'],
@@ -156,7 +162,7 @@ export default function ReviewPage() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   const currentState = session?.state || 'IN_PROGRESS';
-  const isReviewer = (userRole as string) === 'reviewer' || (userRole as string) === 'approver' || (userRole as string) === 'admin';
+  const isReviewer = roleCanCertify;
   const isPreparer = !isReviewer;
   const isCertifiedOrLocked = currentState === 'CERTIFIED' || currentState === 'LOCKED';
   const [boardPeriodType, setBoardPeriodType] = useState<'monthly' | 'QTD' | 'YTD'>('monthly');
@@ -203,7 +209,7 @@ export default function ReviewPage() {
 
   // Get primary action button config
   const getPrimaryAction = () => {
-    if (currentState === 'IN_PROGRESS') {
+    if (currentState === 'IN_PROGRESS' && roleCanSubmit) {
       return {
         label: 'Submit for Review',
         enabled: canSubmit,
@@ -211,23 +217,23 @@ export default function ReviewPage() {
       };
     }
     if (currentState === 'UNDER_REVIEW') {
-      if (isReviewer) {
+      if (roleCanCertify) {
         return {
           label: 'Certify Period',
           enabled: true,
           onClick: () => setShowCertifyDialog(true),
         };
       }
-      return null; // Preparer sees read-only banner
+      return null;
     }
-    if (currentState === 'CERTIFIED') {
+    if (currentState === 'CERTIFIED' && roleCanLock) {
       return {
         label: 'Lock Period',
         enabled: true,
         onClick: () => setShowLockDialog(true),
       };
     }
-    return null; // LOCKED has no action
+    return null;
   };
 
   const primaryAction = getPrimaryAction();
@@ -584,7 +590,7 @@ export default function ReviewPage() {
       {(currentState === 'CERTIFIED' || currentState === 'LOCKED') && certification && (
         <div className="space-y-4">
           <CertificationRecord artifact={certification} entityName={session?.entityName} periodLabel={session?.periodLabel} />
-          {currentState === 'CERTIFIED' && isReviewer && (
+          {currentState === 'CERTIFIED' && roleCanReopen && (
             <div className="flex gap-3">
               <button
                 type="button"
@@ -804,13 +810,13 @@ export default function ReviewPage() {
                         <BookOpen className="w-4 h-4" /> View Board Package
                       </Link>
                     </div>
-                    <button
+                    {roleCanLock && <button
                       type="button"
                       onClick={() => { closeCertifyOverlay(); setShowLockDialog(true); }}
                       className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-input border border-status-amber text-status-amber text-sm font-medium hover:bg-status-amber-dim"
                     >
                       <Lock className="w-4 h-4" /> Lock Period
-                    </button>
+                    </button>}
                     {certArtifact?.id && (
                       <p className="text-center">
                         <a
@@ -976,7 +982,7 @@ export default function ReviewPage() {
       )}
 
       {/* Reviewer actions in UNDER_REVIEW */}
-      {currentState === 'UNDER_REVIEW' && isReviewer && (
+      {currentState === 'UNDER_REVIEW' && roleCanCertify && (
         <div className="bg-surface border border-border rounded-card p-4">
           <div className="flex items-center justify-between">
             <div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useParams } from 'next/navigation';
+import { useParams, usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { TopBar } from '@/components/shell/TopBar';
 import { Sidebar } from '@/components/shell/Sidebar';
@@ -12,17 +12,36 @@ import { useAjeTemplates, useJournalEntries } from '@/lib/queries/adjustments';
 import { useVariances } from '@/lib/queries/variance';
 import { useAuth } from '@/lib/auth';
 import { getUserDisplay } from '@/lib/utils';
+import { isReadOnly, canCertify, canLockPeriod, canSubmitForReview, isSidebarItemVisible } from '@/lib/permissions';
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary';
 import { TrialBalanceProvider, useTrialBalanceContext } from './context/trial-balance-context';
 
 function CloseSessionInner({ children }: { children: React.ReactNode }) {
   const params = useParams();
+  const pathname = usePathname();
+  const router = useRouter();
   const sessionId = params.sessionId as string;
   const { user } = useAuth();
   const [issuePanelOpen, setIssuePanelOpen] = useState(false);
   const { unmappedCount } = useTrialBalanceContext();
-  const showBackToPortfolio = user?.role === 'operating_partner' || user?.role === 'admin';
-  const isReadOnly = user?.role === 'operating_partner';
+  const role = user?.role ?? 'controller';
+  const showBackToPortfolio = role === 'operating_partner' || role === 'admin';
+  const readOnly = isReadOnly(role);
+
+  // URL-level route protection: redirect restricted roles away from pages they can't access
+  useEffect(() => {
+    if (!pathname || !sessionId) return;
+    // Extract the page segment from the pathname (e.g., /close/123/mapping → mapping)
+    const segments = pathname.split('/').filter(Boolean);
+    const sessionIdx = segments.indexOf(sessionId);
+    const pageSegment = sessionIdx >= 0 && segments.length > sessionIdx + 1 ? segments[sessionIdx + 1] : 'dashboard';
+    // Build a fake href to check against sidebar visibility
+    const testHref = `/close/${sessionId}/${pageSegment}`;
+    if (!isSidebarItemVisible(role, testHref)) {
+      router.replace(`/close/${sessionId}/dashboard`);
+    }
+  }, [pathname, sessionId, role, router]);
+
   useEffect(() => {
     const handler = () => setIssuePanelOpen(true);
     window.addEventListener('open-issue-panel', handler);
@@ -62,11 +81,18 @@ function CloseSessionInner({ children }: { children: React.ReactNode }) {
         sessionId={sessionId}
         gatesRemaining={gatesRemaining}
         canAdvance={canAdvance}
-        isReviewer={user?.role === 'reviewer' || user?.role === 'approver' || user?.role === 'admin'}
-        isReadOnly={isReadOnly}
+        isReviewer={canCertify(role)}
+        isReadOnly={readOnly}
+        canLock={canLockPeriod(role)}
+        canSubmit={canSubmitForReview(role)}
       />
-      <Sidebar sessionId={sessionId} unmappedCount={unmappedCount} reconIncompleteCount={reconIncompleteCount} adjustmentsBadge={adjustmentsBadge} statementsStale={statementsStale} varianceUnexplainedCount={varianceUnexplainedCount} sessionState={state} />
-      <main className="pl-[240px] pt-[56px] pb-6 print:pl-0 print:pt-6" style={{ paddingTop: 'calc(56px + 40px)' }}>
+      {readOnly && (
+        <div className="fixed top-[96px] left-0 right-0 z-25 h-8 flex items-center justify-center bg-status-blue-dim border-b border-status-blue/30 text-status-blue text-xs font-medium print:hidden">
+          You are viewing this close session in read-only mode
+        </div>
+      )}
+      <Sidebar sessionId={sessionId} unmappedCount={unmappedCount} reconIncompleteCount={reconIncompleteCount} adjustmentsBadge={adjustmentsBadge} statementsStale={statementsStale} varianceUnexplainedCount={varianceUnexplainedCount} sessionState={state} userRole={role} />
+      <main className="pl-[240px] pt-[56px] pb-6 print:pl-0 print:pt-6" style={{ paddingTop: readOnly ? 'calc(56px + 40px + 32px)' : 'calc(56px + 40px)' }}>
         <div className="p-6">{children}</div>
       </main>
       <IssuePanel

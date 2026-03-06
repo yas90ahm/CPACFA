@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 import type { VarianceRecord } from '@/lib/types/variance';
 import { InvestigationPanel } from '@/components/investigation/InvestigationPanel';
 import { Check, X, ChevronDown, ChevronRight, Search, Loader2, Zap, Calendar } from 'lucide-react';
+import { canExplainVariance, canApproveVariance, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
 type VariancePeriodView = 'current' | 'QTD' | 'YTD';
 type VarianceComparisonType = 'prior_year_same_period' | 'sequential' | 'budget';
@@ -53,6 +54,10 @@ export default function VariancePage() {
   const [sortBy, setSortBy] = useState<'changeAbs' | 'lineItem' | 'statement'>('changeAbs');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const { user } = useAuth();
+  const role = user?.role ?? 'controller';
+  const readOnly = isRoleReadOnly(role);
+  const canExplain = canExplainVariance(role);
+  const canApprove = canApproveVariance(role);
   const queryClient = useQueryClient();
   const [localExplanations, setLocalExplanations] = useState<Record<string, string>>({});
   const [localDismissedAi, setLocalDismissedAi] = useState<Record<string, boolean>>({});
@@ -202,7 +207,7 @@ export default function VariancePage() {
             {periodLabel} vs Prior Period
           </p>
         </div>
-        {materialUnexplained.length > 0 && (
+        {canExplain && materialUnexplained.length > 0 && (
           <button
             type="button"
             onClick={handleDraftAll}
@@ -486,9 +491,9 @@ export default function VariancePage() {
                                     />
                                   )}
                                 </div>
-                                {displayStatus !== 'approved' && (
+                                {displayStatus !== 'approved' && !readOnly && (
                                   <div className="flex gap-2">
-                                    {displayStatus === 'pending' && (
+                                    {canExplain && displayStatus === 'pending' && (
                                       <button
                                         type="button"
                                         className="px-4 py-2 rounded-input bg-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-50"
@@ -498,7 +503,7 @@ export default function VariancePage() {
                                         {savingIds.has(v.id) ? 'Saving...' : 'Save Explanation'}
                                       </button>
                                     )}
-                                    {displayStatus === 'explained' && (
+                                    {canApprove && displayStatus === 'explained' && (
                                       <button
                                         type="button"
                                         className="px-4 py-2 rounded-input border border-status-green text-status-green text-sm font-medium hover:bg-status-green-dim disabled:opacity-50"
@@ -508,13 +513,15 @@ export default function VariancePage() {
                                         {approvingIds.has(v.id) ? 'Approving...' : 'Approve Explanation'}
                                       </button>
                                     )}
-                                    <button
-                                      type="button"
-                                      className="px-4 py-2 rounded-input border border-border text-text-secondary text-sm font-medium hover:bg-hover flex items-center gap-1.5"
-                                      onClick={() => setInvestigatingVariance(v)}
-                                    >
-                                      <Search className="w-3.5 h-3.5" /> Investigate
-                                    </button>
+                                    {canExplain && (
+                                      <button
+                                        type="button"
+                                        className="px-4 py-2 rounded-input border border-border text-text-secondary text-sm font-medium hover:bg-hover flex items-center gap-1.5"
+                                        onClick={() => setInvestigatingVariance(v)}
+                                      >
+                                        <Search className="w-3.5 h-3.5" /> Investigate
+                                      </button>
+                                    )}
                                   </div>
                                 )}
                               </>

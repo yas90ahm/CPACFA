@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { isSidebarItemVisible } from '@/lib/permissions';
 import {
   LayoutDashboard,
   Table,
@@ -64,6 +65,7 @@ export function Sidebar({
   statementsStale = false,
   varianceUnexplainedCount = 0,
   sessionState,
+  userRole,
 }: {
   sessionId: string;
   unmappedCount?: number;
@@ -72,15 +74,22 @@ export function Sidebar({
   statementsStale?: boolean;
   varianceUnexplainedCount?: number;
   sessionState?: string;
+  userRole?: string;
 }) {
   const pathname = usePathname();
   const base = `/close/${sessionId}`;
   const isUnderReview = sessionState === 'UNDER_REVIEW';
+  const role = userRole ?? 'controller';
 
   return (
     <aside className="fixed left-0 top-[56px] w-[240px] h-[calc(100vh-56px)] bg-surface border-r border-border flex flex-col z-30 print:hidden">
       <nav className="flex-1 py-4 overflow-y-auto">
-        {navItems.map((item, idx) => {
+        {navItems.filter((item) => {
+          if (item.external && item.href === '/settings') {
+            return role !== 'operating_partner' && role !== 'auditor';
+          }
+          return isSidebarItemVisible(role, item.href);
+        }).map((item, idx) => {
           const href = item.external ? item.href : `${base}/${item.href}`;
           const isActive = pathname === href || (item.href !== 'dashboard' && pathname?.startsWith(href));
           const isSeparator = item.label === 'Audit Trail' || item.label === 'Fixed Assets' || item.label === 'Statements';

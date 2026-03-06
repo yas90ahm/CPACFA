@@ -15,6 +15,8 @@ import { Check, Circle, ArrowRight, Zap, AlertTriangle, ChevronRight, RefreshCw 
 import { OpenStateDashboard } from './OpenStateDashboard';
 import { FileUploadZone } from '@/components/shared/FileUploadZone';
 import { GLUploadFlow } from './GLUploadFlow';
+import { useAuth } from '@/lib/auth';
+import { canReplaceGL, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
 function formatMoney(v: string | null | undefined): string {
   if (!v) return '$0';
@@ -64,6 +66,9 @@ export default function CloseDashboardPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const sessionId = params.sessionId as string;
+  const { user } = useAuth();
+  const role = user?.role ?? 'controller';
+  const readOnly = isRoleReadOnly(role);
   const { data: session } = useCloseSession(sessionId);
   const { data: readiness } = useCloseReadiness(sessionId);
   const { data: issues = [] } = useCloseIssues(sessionId);
@@ -376,7 +381,7 @@ export default function CloseDashboardPage() {
           <p className="text-sm text-text-secondary mt-0.5">Status: {session?.state?.replace('_', ' ') ?? 'IN PROGRESS'}</p>
         </div>
         <div className="flex items-center gap-3">
-          {session?.state === 'IN_PROGRESS' && (
+          {canReplaceGL(role) && session?.state === 'IN_PROGRESS' && (
             <button
               type="button"
               className="inline-flex items-center gap-2 px-3 py-2 rounded-input border border-border text-xs font-medium text-text-secondary hover:bg-hover hover:text-primary"
@@ -385,7 +390,7 @@ export default function CloseDashboardPage() {
               <RefreshCw className="w-3.5 h-3.5" /> Replace GL Data
             </button>
           )}
-          {(session?.state === 'IN_PROGRESS' || session?.state === 'OPEN') && (
+          {!readOnly && (session?.state === 'IN_PROGRESS' || session?.state === 'OPEN') && (
             <button
               type="button"
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-input bg-accent text-white text-sm font-medium hover:opacity-90"

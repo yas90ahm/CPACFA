@@ -7,6 +7,8 @@ import { useGLHealth, useRunGLHealth } from '@/lib/queries/gl-health';
 import type { GLHealthCheck, GLHealthFinding } from '@/lib/queries/gl-health';
 import { cn } from '@/lib/utils';
 import { RefreshCw, ChevronDown, ChevronRight, AlertTriangle, AlertCircle, Info, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { useAuth } from '@/lib/auth';
+import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
 const gradeColors: Record<string, string> = {
   A: 'bg-status-green-dim text-status-green',
@@ -102,6 +104,8 @@ function CheckCard({ check }: { check: GLHealthCheck }) {
 export default function GLHealthPage() {
   const params = useParams();
   const sessionId = params.sessionId as string;
+  const { user } = useAuth();
+  const readOnly = isRoleReadOnly(user?.role ?? 'controller');
   const { data: session } = useCloseSession(sessionId);
   const { data: analysis, isLoading } = useGLHealth(sessionId);
   const runMutation = useRunGLHealth(sessionId);
@@ -122,14 +126,14 @@ export default function GLHealthPage() {
           <p className="text-text-secondary mb-4">
             Upload a General Ledger to see health analysis, or run it manually.
           </p>
-          <button
+          {!readOnly && <button
             onClick={() => runMutation.mutate()}
             disabled={runMutation.isPending}
             className="inline-flex items-center gap-2 px-4 py-2 bg-accent text-white rounded-input hover:bg-accent/90 transition-colors disabled:opacity-50"
           >
             {runMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
             Run Analysis
-          </button>
+          </button>}
         </div>
       </div>
     );
@@ -154,14 +158,14 @@ export default function GLHealthPage() {
             {session?.periodLabel ?? analysis.periodLabel} — {analysis.findingCount} finding{analysis.findingCount !== 1 ? 's' : ''} across {(analysis.checks ?? []).length} checks
           </p>
         </div>
-        <button
+        {!readOnly && <button
           onClick={() => runMutation.mutate()}
           disabled={runMutation.isPending}
           className="inline-flex items-center gap-2 px-3 py-1.5 text-sm border border-border rounded-input hover:bg-hover transition-colors disabled:opacity-50"
         >
           {runMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
           Re-run Analysis
-        </button>
+        </button>}
       </div>
 
       {/* Overall Score Bar */}

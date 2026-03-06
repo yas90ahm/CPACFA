@@ -23,6 +23,7 @@ import type {
 } from '@/lib/types/reconciliation';
 import type { EvidenceFile } from '@/lib/types/evidence';
 import { ChevronLeft, ChevronRight, Pencil, Check, Paperclip, Edit2, Trash2 } from 'lucide-react';
+import { canCompleteRecon, canApproveRecon, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
 const STATUS_LABEL: Record<ReconStatus, string> = {
   not_started: 'Not Started',
@@ -296,12 +297,16 @@ export default function ReconDetailPage() {
   const hasSupportingBalance = recon?.supportingBalance != null;
   const supportingDisplay = supportingBalanceLocal ?? (recon?.supportingBalance ?? null);
   const notesDisplay = notesLocal !== '' ? notesLocal : (recon?.notes ?? '');
+  const role = user?.role ?? 'controller';
+  const userId = user?.userId ?? '';
+  const readOnly = isRoleReadOnly(role);
+  const roleCanComplete = canCompleteRecon(role);
   const isCompleted = recon?.status === 'completed' || recon?.status === 'approved';
   const isApproved = recon?.status === 'approved';
   const isPreparer = recon?.preparer != null && (user?.userId === recon.preparer || user?.email === recon.preparer);
-  // SoD: A user is only a valid reviewer if a preparer exists AND current user is NOT that preparer.
-  // If preparer is null (nobody has completed it yet), nobody can approve.
+  // SoD: A user is only a valid reviewer if a preparer exists AND current user is NOT that preparer AND role permits.
   const isReviewer = recon?.preparer != null && !isPreparer;
+  const roleCanApprove = canApproveRecon(role, recon?.preparer ?? '', userId);
   // Defense-in-depth: disable approve button for the preparer even if UI logic shows it
   const canApproveOwn = isPreparer;
   const periodEnd = session?.periodEnd ?? session?.createdAt ?? null;
@@ -463,7 +468,7 @@ export default function ReconDetailPage() {
               Next <ChevronRight className="w-4 h-4" />
             </Link>
           )}
-          {(recon.status === 'not_started' || recon.status === 'in_progress') && (
+          {(recon.status === 'not_started' || recon.status === 'in_progress') && roleCanComplete && (
             <>
               <button
                 type="button"
@@ -488,7 +493,7 @@ export default function ReconDetailPage() {
               </button>
             </>
           )}
-          {recon.status === 'completed' && isReviewer && (
+          {recon.status === 'completed' && isReviewer && roleCanApprove && (
             <>
               <button
                 type="button"
@@ -554,7 +559,7 @@ export default function ReconDetailPage() {
               </div>
               <div>
                 <div className="text-xs text-text-secondary mb-1">Supporting Balance</div>
-                {(recon.status === 'not_started' || recon.status === 'in_progress') && (editingSupporting || (!hasSupportingBalance && supportingBalanceLocal == null)) ? (
+                {!readOnly && (recon.status === 'not_started' || recon.status === 'in_progress') && (editingSupporting || (!hasSupportingBalance && supportingBalanceLocal == null)) ? (
                   <div>
                     <MoneyInput
                       value={supportingBalanceLocal ?? (recon.supportingBalance ?? null)}
@@ -578,7 +583,7 @@ export default function ReconDetailPage() {
                       {hasSupportingBalance || supportingDisplay != null ? <MoneyCell value={supportingDisplay} showDollar /> : <span className="text-text-muted">—</span>}
                     </div>
                     <div className="text-xs text-text-muted mt-1">from {recon.sourceDocumentType}</div>
-                    {(recon.status === 'not_started' || recon.status === 'in_progress') && (hasSupportingBalance || supportingBalanceLocal != null) && (
+                    {!readOnly && (recon.status === 'not_started' || recon.status === 'in_progress') && (hasSupportingBalance || supportingBalanceLocal != null) && (
                       <button
                         type="button"
                         className="mt-2 text-xs text-accent hover:underline inline-flex items-center gap-1"
@@ -662,7 +667,7 @@ export default function ReconDetailPage() {
                     <th className="text-right py-2 font-medium text-text-secondary w-28">Amount</th>
                     <th className="text-left py-2 font-medium text-text-secondary w-36">Type</th>
                     <th className="text-left py-2 font-medium text-text-secondary w-28">Date</th>
-                    {(recon.status === 'not_started' || recon.status === 'in_progress') && <th className="w-20" />}
+                    {!readOnly && (recon.status === 'not_started' || recon.status === 'in_progress') && <th className="w-20" />}
                   </tr>
                 </thead>
                 <tbody>
@@ -676,7 +681,7 @@ export default function ReconDetailPage() {
                         <span className="px-2 py-0.5 rounded text-xs bg-elevated">{item.type}</span>
                       </td>
                       <td className="py-2">{formatDate(item.date)}</td>
-                      {(recon.status === 'not_started' || recon.status === 'in_progress') && (
+                      {!readOnly && (recon.status === 'not_started' || recon.status === 'in_progress') && (
                         <td className="py-2">
                           <button
                             type="button"
@@ -707,7 +712,7 @@ export default function ReconDetailPage() {
                 {overTolerance && ' — add reconciling items or investigate'}
               </div>
             </div>
-            {(recon.status === 'not_started' || recon.status === 'in_progress') && (
+            {!readOnly && (recon.status === 'not_started' || recon.status === 'in_progress') && (
               <>
                 {!showAddItem ? (
                   <div className="mt-4 flex gap-2">
@@ -781,7 +786,7 @@ export default function ReconDetailPage() {
               value={notesDisplay}
               onChange={(e) => setNotesLocal(e.target.value)}
               onBlur={handleNotesBlur}
-              disabled={isApproved}
+              disabled={isApproved || readOnly}
               placeholder="Add notes about this reconciliation..."
               className="w-full px-3 py-2 rounded-input border border-border bg-input text-sm min-h-[80px]"
             />
@@ -797,7 +802,7 @@ export default function ReconDetailPage() {
             {evidence.length < 1 && (recon.status === 'not_started' || recon.status === 'in_progress') && (
               <p className="text-status-amber text-sm mb-3">At least one supporting document is required to complete this reconciliation</p>
             )}
-            {(recon.status === 'not_started' || recon.status === 'in_progress') && (
+            {!readOnly && (recon.status === 'not_started' || recon.status === 'in_progress') && (
               <FileUpload
                 onUpload={handleUpload}
                 acceptedTypes={['application/pdf', 'image/png', 'image/jpeg', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'text/csv']}

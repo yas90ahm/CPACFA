@@ -10,6 +10,8 @@ import { cn } from '@/lib/utils';
 import type { FixedAsset } from '@/lib/types/fixed-assets';
 import type { DepreciationRun } from '@/lib/types/fixed-assets';
 import { Plus, Play, Trash2, Loader2, Package } from 'lucide-react';
+import { useAuth } from '@/lib/auth';
+import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
 const METHOD_LABEL: Record<string, string> = { straight_line: 'Straight Line', declining_balance: 'Declining Balance', units_of_production: 'Units of Prod.' };
 
@@ -23,6 +25,9 @@ export default function FixedAssetsPage() {
   const createAsset = useCreateFixedAsset(sessionId);
   const deleteAsset = useDeleteFixedAsset(sessionId);
   const runDepreciation = useRunDepreciation(sessionId);
+
+  const { user } = useAuth();
+  const readOnly = isRoleReadOnly(user?.role ?? 'controller');
 
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
@@ -49,18 +54,20 @@ export default function FixedAssetsPage() {
           <h1 className="text-2xl font-display text-primary">Fixed Assets</h1>
           <p className="text-text-secondary text-sm mt-0.5">Track assets and compute depreciation for the period</p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-border rounded-input hover:bg-hover text-text-secondary">
-            <Plus className="w-4 h-4" /> Add Asset
-          </button>
-          <button onClick={() => runDepreciation.mutate()} disabled={runDepreciation.isPending} className="flex items-center gap-1.5 px-4 py-1.5 text-sm bg-accent text-white rounded-input hover:bg-accent/90 disabled:opacity-50 font-medium">
-            {runDepreciation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-            {runDepreciation.isPending ? 'Running…' : 'Run Depreciation'}
-          </button>
-        </div>
+        {!readOnly && (
+          <div className="flex gap-2">
+            <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-border rounded-input hover:bg-hover text-text-secondary">
+              <Plus className="w-4 h-4" /> Add Asset
+            </button>
+            <button onClick={() => runDepreciation.mutate()} disabled={runDepreciation.isPending} className="flex items-center gap-1.5 px-4 py-1.5 text-sm bg-accent text-white rounded-input hover:bg-accent/90 disabled:opacity-50 font-medium">
+              {runDepreciation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+              {runDepreciation.isPending ? 'Running…' : 'Run Depreciation'}
+            </button>
+          </div>
+        )}
       </div>
 
-      {showForm && (
+      {!readOnly && showForm && (
         <div className="p-5 border border-border rounded-card bg-surface space-y-4">
           <h3 className="font-medium text-primary">New Fixed Asset</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -107,9 +114,11 @@ export default function FixedAssetsPage() {
           <p className="text-text-secondary text-sm max-w-md mx-auto mb-4">
             Add your company's fixed assets to compute periodic depreciation expense automatically.
           </p>
-          <button onClick={() => setShowForm(true)} className="px-4 py-2 text-sm bg-accent text-white rounded-input font-medium hover:bg-accent/90">
-            <Plus className="w-4 h-4 inline mr-1.5" /> Add First Asset
-          </button>
+          {!readOnly && (
+            <button onClick={() => setShowForm(true)} className="px-4 py-2 text-sm bg-accent text-white rounded-input font-medium hover:bg-accent/90">
+              <Plus className="w-4 h-4 inline mr-1.5" /> Add First Asset
+            </button>
+          )}
         </div>
       ) : (
         <DataTable<FixedAsset>
@@ -126,7 +135,7 @@ export default function FixedAssetsPage() {
             { id: 'method', header: 'Method', cell: (r) => METHOD_LABEL[r.method] ?? r.method },
             { id: 'status', header: 'Status', cell: (r) => <span className={cn('px-2 py-0.5 rounded text-xs font-medium', r.status === 'active' ? 'bg-status-green-dim text-status-green' : 'bg-surface-alt text-text-secondary')}>{r.status}</span> },
             { id: 'actions', header: '', cell: (r) => (
-              <button onClick={() => deleteAsset.mutate(r.id)} className="text-status-red hover:opacity-70"><Trash2 className="w-4 h-4" /></button>
+              !readOnly ? <button onClick={() => deleteAsset.mutate(r.id)} className="text-status-red hover:opacity-70"><Trash2 className="w-4 h-4" /></button> : null
             )},
           ]}
         />

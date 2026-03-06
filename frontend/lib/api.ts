@@ -10,7 +10,13 @@ export function setAuthTokenGetter(getter: () => string | null): void {
 }
 
 function getAuthToken(): string | null {
-  return authTokenGetter?.() ?? null;
+  const fromGetter = authTokenGetter?.() ?? null;
+  if (fromGetter) return fromGetter;
+  // Fallback: read localStorage directly during hydration race window
+  if (typeof window !== 'undefined') {
+    try { return localStorage.getItem('cpa_auth_token'); } catch { return null; }
+  }
+  return null;
 }
 
 export class ApiError extends Error {

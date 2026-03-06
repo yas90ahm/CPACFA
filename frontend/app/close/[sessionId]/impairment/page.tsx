@@ -8,6 +8,8 @@ import { MoneyCell } from '@/components/shared/MoneyCell';
 import { fmtMoney } from '@/lib/money';
 import type { CashGeneratingUnit, ImpairmentTest } from '@/lib/types/impairment';
 import { Plus, Play } from 'lucide-react';
+import { useAuth } from '@/lib/auth';
+import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 import { apiFetch } from '@/lib/api';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -31,6 +33,9 @@ export default function ImpairmentPage() {
       queryClient.invalidateQueries({ queryKey: ['impairment-tests', sessionId] });
     },
   });
+
+  const { user } = useAuth();
+  const readOnly = isRoleReadOnly(user?.role ?? 'controller');
 
   const [showCGUForm, setShowCGUForm] = useState(false);
   const [showTestForm, setShowTestForm] = useState(false);
@@ -62,14 +67,16 @@ export default function ImpairmentPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Impairment Testing</h1>
-        <div className="flex gap-2">
-          <button onClick={() => setShowCGUForm(!showCGUForm)} className="flex items-center gap-1 px-3 py-1.5 text-sm border rounded-md hover:bg-hover">
-            <Plus className="w-4 h-4" /> Add CGU
-          </button>
-          <button onClick={() => setShowTestForm(!showTestForm)} className="flex items-center gap-1 px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent/90">
-            <Plus className="w-4 h-4" /> New Test
-          </button>
-        </div>
+        {!readOnly && (
+          <div className="flex gap-2">
+            <button onClick={() => setShowCGUForm(!showCGUForm)} className="flex items-center gap-1 px-3 py-1.5 text-sm border rounded-md hover:bg-hover">
+              <Plus className="w-4 h-4" /> Add CGU
+            </button>
+            <button onClick={() => setShowTestForm(!showTestForm)} className="flex items-center gap-1 px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent/90">
+              <Plus className="w-4 h-4" /> New Test
+            </button>
+          </div>
+        )}
       </div>
 
       {summary && (
@@ -89,7 +96,7 @@ export default function ImpairmentPage() {
         </div>
       )}
 
-      {showCGUForm && (
+      {!readOnly && showCGUForm && (
         <div className="p-4 border rounded-lg bg-surface space-y-3">
           <h3 className="font-medium">New Cash Generating Unit</h3>
           <div className="grid grid-cols-2 gap-3">
@@ -103,7 +110,7 @@ export default function ImpairmentPage() {
         </div>
       )}
 
-      {showTestForm && (
+      {!readOnly && showTestForm && (
         <div className="p-4 border rounded-lg bg-surface space-y-3">
           <h3 className="font-medium">New Impairment Test</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -160,9 +167,9 @@ export default function ImpairmentPage() {
             { id: 'impairmentLoss', header: 'Loss', cell: (r) => r.impairmentLoss ? <MoneyCell value={r.impairmentLoss} /> : '\u2014' },
             { id: 'method', header: 'Method', cell: (r) => METHOD_LABEL[r.method] ?? r.method },
             { id: 'evaluate', header: '', cell: (r) => (
-              <button onClick={() => evaluateImpairment.mutate(r.id)} className="text-accent hover:underline text-xs">
+              !readOnly ? <button onClick={() => evaluateImpairment.mutate(r.id)} className="text-accent hover:underline text-xs">
                 <Play className="w-3 h-3 inline mr-1" />Evaluate
-              </button>
+              </button> : null
             )},
           ]}
         />

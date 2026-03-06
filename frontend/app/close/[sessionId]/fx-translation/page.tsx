@@ -6,6 +6,8 @@ import { useTranslate, useRemeasure, useFxTranslationConfig, useSaveFxTranslatio
 import { DataTable } from '@/components/shared/DataTable';
 import type { TranslationResult, RemeasurementResult, TranslationLine, TranslationResultLine } from '@/lib/types/fx-translation';
 import { Globe, ArrowRightLeft, Check, Loader2, X } from 'lucide-react';
+import { useAuth } from '@/lib/auth';
+import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
 export default function FxTranslationPage() {
   const params = useParams();
@@ -15,6 +17,9 @@ export default function FxTranslationPage() {
   const remeasure = useRemeasure();
   const { data: configData, isLoading: configLoading } = useFxTranslationConfig(sessionId);
   const saveConfig = useSaveFxTranslationConfig(sessionId);
+
+  const { user } = useAuth();
+  const readOnly = isRoleReadOnly(user?.role ?? 'controller');
 
   const [tab, setTab] = useState<'translate' | 'remeasure'>('translate');
   const [reportingCurrency, setReportingCurrency] = useState('USD');
@@ -159,7 +164,7 @@ export default function FxTranslationPage() {
       <div className="p-4 border rounded-lg bg-surface space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="font-medium">Balance Lines</h3>
-          <button onClick={addLine} className="text-sm text-accent hover:underline">+ Add Line</button>
+          {!readOnly && <button onClick={addLine} className="text-sm text-accent hover:underline">+ Add Line</button>}
         </div>
         {lines.map((line, idx) => (
           <div key={idx} className="flex items-center gap-2">
@@ -175,7 +180,7 @@ export default function FxTranslationPage() {
                 <option value="expense">Expense</option>
               </select>
             </div>
-            {lines.length > 1 && (
+            {!readOnly && lines.length > 1 && (
               <button type="button" onClick={() => setLines(lines.filter((_, i) => i !== idx))} className="text-text-tertiary hover:text-red-600 shrink-0" title="Remove line">
                 <X className="w-4 h-4" />
               </button>
@@ -184,13 +189,15 @@ export default function FxTranslationPage() {
         ))}
       </div>
 
-      <button
-        onClick={tab === 'translate' ? handleTranslate : handleRemeasure}
-        disabled={translate.isPending || remeasure.isPending}
-        className="flex items-center gap-1 px-4 py-2 bg-accent text-white rounded-md hover:bg-accent/90 disabled:opacity-50"
-      >
-        <ArrowRightLeft className="w-4 h-4" /> {tab === 'translate' ? 'Translate' : 'Remeasure'}
-      </button>
+      {!readOnly && (
+        <button
+          onClick={tab === 'translate' ? handleTranslate : handleRemeasure}
+          disabled={translate.isPending || remeasure.isPending}
+          className="flex items-center gap-1 px-4 py-2 bg-accent text-white rounded-md hover:bg-accent/90 disabled:opacity-50"
+        >
+          <ArrowRightLeft className="w-4 h-4" /> {tab === 'translate' ? 'Translate' : 'Remeasure'}
+        </button>
+      )}
 
       {tab === 'translate' && translationResult && (
         <div className="space-y-3">

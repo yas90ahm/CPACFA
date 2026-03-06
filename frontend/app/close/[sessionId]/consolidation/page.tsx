@@ -6,6 +6,8 @@ import { useBuildConsolidation, useConsolidationConfig, useSaveConsolidationConf
 import { DataTable } from '@/components/shared/DataTable';
 import type { ConsolidationEntity, EliminationRule, ConsolidationResult, ConsolidatedLine } from '@/lib/types/consolidation';
 import { Plus, Play, GitMerge, CheckCircle, AlertTriangle, Check, Loader2, X } from 'lucide-react';
+import { useAuth } from '@/lib/auth';
+import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
 export default function ConsolidationPage() {
   const params = useParams();
@@ -14,6 +16,9 @@ export default function ConsolidationPage() {
   const buildConsolidation = useBuildConsolidation();
   const { data: configData, isLoading: configLoading } = useConsolidationConfig(sessionId);
   const saveConfig = useSaveConsolidationConfig(sessionId);
+
+  const { user } = useAuth();
+  const readOnly = isRoleReadOnly(user?.role ?? 'controller');
 
   const [entities, setEntities] = useState<ConsolidationEntity[]>([]);
   const [rules, setRules] = useState<EliminationRule[]>([]);
@@ -102,18 +107,22 @@ export default function ConsolidationPage() {
           <div className="flex gap-2">
             <input placeholder="Entity Name" value={entityForm.name} onChange={(e) => setEntityForm({ ...entityForm, name: e.target.value })} className="border rounded px-2 py-1.5 text-sm flex-1" />
             <input placeholder="Currency" value={entityForm.currency} onChange={(e) => setEntityForm({ ...entityForm, currency: e.target.value })} className="border rounded px-2 py-1.5 text-sm w-20" />
-            <button onClick={addEntity} disabled={!entityForm.name} className="px-3 py-1.5 text-sm border rounded-md hover:bg-hover disabled:opacity-50">
-              <Plus className="w-4 h-4" />
-            </button>
+            {!readOnly && (
+              <button onClick={addEntity} disabled={!entityForm.name} className="px-3 py-1.5 text-sm border rounded-md hover:bg-hover disabled:opacity-50">
+                <Plus className="w-4 h-4" />
+              </button>
+            )}
           </div>
           {entities.map((e) => (
             <div key={e.id} className="flex items-center justify-between p-2 bg-hover rounded text-sm group">
               <span>{e.name}</span>
               <div className="flex items-center gap-2">
                 <span className="text-text-secondary">{e.currency}</span>
-                <button type="button" onClick={() => setEntities(entities.filter((x) => x.id !== e.id))} className="text-text-tertiary hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity" title="Remove entity">
-                  <X className="w-3.5 h-3.5" />
-                </button>
+                {!readOnly && (
+                  <button type="button" onClick={() => setEntities(entities.filter((x) => x.id !== e.id))} className="text-text-tertiary hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity" title="Remove entity">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -134,17 +143,21 @@ export default function ConsolidationPage() {
               <input placeholder="Amount" type="number" value={ruleForm.amount} onChange={(e) => setRuleForm({ ...ruleForm, amount: e.target.value })} className="border rounded px-2 py-1.5 text-sm" />
             )}
           </div>
-          <button onClick={addRule} disabled={!ruleForm.name || !ruleForm.debitAccount || !ruleForm.creditAccount} className="px-3 py-1.5 text-sm border rounded-md hover:bg-hover disabled:opacity-50">
-            <Plus className="w-4 h-4 inline mr-1" /> Add Rule
-          </button>
+          {!readOnly && (
+            <button onClick={addRule} disabled={!ruleForm.name || !ruleForm.debitAccount || !ruleForm.creditAccount} className="px-3 py-1.5 text-sm border rounded-md hover:bg-hover disabled:opacity-50">
+              <Plus className="w-4 h-4 inline mr-1" /> Add Rule
+            </button>
+          )}
           {rules.map((r) => (
             <div key={r.id} className="flex items-center justify-between p-2 bg-hover rounded text-sm group">
               <span>{r.name}</span>
               <div className="flex items-center gap-2">
                 <span className="text-text-secondary">{r.debitAccount} / {r.creditAccount} ({r.amountType})</span>
-                <button type="button" onClick={() => setRules(rules.filter((x) => x.id !== r.id))} className="text-text-tertiary hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity" title="Remove rule">
-                  <X className="w-3.5 h-3.5" />
-                </button>
+                {!readOnly && (
+                  <button type="button" onClick={() => setRules(rules.filter((x) => x.id !== r.id))} className="text-text-tertiary hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity" title="Remove rule">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -160,9 +173,11 @@ export default function ConsolidationPage() {
           <label className="block text-sm text-text-secondary mb-1">Period Label</label>
           <input value={periodLabel} onChange={(e) => setPeriodLabel(e.target.value)} placeholder="2026-01-01..2026-01-31" className="border rounded px-2 py-1.5 text-sm w-56" />
         </div>
-        <button onClick={handleBuild} disabled={buildConsolidation.isPending || entities.length === 0} className="flex items-center gap-1 px-4 py-2 bg-accent text-white rounded-md hover:bg-accent/90 disabled:opacity-50">
-          <Play className="w-4 h-4" /> {buildConsolidation.isPending ? 'Building...' : 'Run Consolidation'}
-        </button>
+        {!readOnly && (
+          <button onClick={handleBuild} disabled={buildConsolidation.isPending || entities.length === 0} className="flex items-center gap-1 px-4 py-2 bg-accent text-white rounded-md hover:bg-accent/90 disabled:opacity-50">
+            <Play className="w-4 h-4" /> {buildConsolidation.isPending ? 'Building...' : 'Run Consolidation'}
+          </button>
+        )}
       </div>
 
       {result && (

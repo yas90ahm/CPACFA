@@ -12,6 +12,8 @@ import { FilterBar } from '@/components/shared/FilterBar';
 import type { Reconciliation, ReconStatus } from '@/lib/types/reconciliation';
 import { moneyAbs, cmpMoney, sumMoneyStrings, fmtMoney } from '@/lib/money';
 import { Paperclip, Check, AlertCircle, Layers, CheckCircle2, Loader2 } from 'lucide-react';
+import { canCompleteRecon, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
+import { useAuth } from '@/lib/auth';
 
 const STATUS_ORDER: ReconStatus[] = ['not_started', 'in_progress', 'completed', 'approved'];
 const STATUS_LABEL: Record<ReconStatus, string> = {
@@ -71,6 +73,10 @@ export default function ReconciliationPage() {
   const params = useParams();
   const router = useRouter();
   const sessionId = params.sessionId as string;
+  const { user } = useAuth();
+  const role = user?.role ?? 'controller';
+  const canRecon = canCompleteRecon(role);
+  const readOnly = isRoleReadOnly(role);
 
   const queryClient = useQueryClient();
   const { data: reconciliations, isLoading } = useReconciliations(sessionId);
@@ -622,7 +628,7 @@ export default function ReconciliationPage() {
         </div>
         <div className="flex items-center gap-3">
           {/* Batch Entry toggle */}
-          <button
+          {canRecon && <button
             type="button"
             onClick={handleToggleBatch}
             className={[
@@ -635,7 +641,7 @@ export default function ReconciliationPage() {
           >
             <Layers className="w-4 h-4" />
             Batch Entry
-          </button>
+          </button>}
           <span className="text-sm text-text-secondary">
             {completed} of {total} complete ({progressPct}%)
           </span>

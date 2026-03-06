@@ -7,6 +7,8 @@ import { DataTable } from '@/components/shared/DataTable';
 import { MoneyCell } from '@/components/shared/MoneyCell';
 import type { OperatingSegment, SegmentFinancials, ReportabilityResult } from '@/lib/types/segments';
 import { Plus, Play, CheckCircle, XCircle } from 'lucide-react';
+import { useAuth } from '@/lib/auth';
+import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
 export default function SegmentsPage() {
   const params = useParams();
@@ -16,6 +18,9 @@ export default function SegmentsPage() {
   const { data: financials } = useSegmentFinancials(sessionId);
   const createSegment = useCreateSegment(sessionId);
   const reportabilityCheck = useReportabilityCheck(sessionId);
+
+  const { user } = useAuth();
+  const readOnly = isRoleReadOnly(user?.role ?? 'controller');
 
   const [showForm, setShowForm] = useState(false);
   const [reportability, setReportability] = useState<ReportabilityResult | null>(null);
@@ -37,17 +42,19 @@ export default function SegmentsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Segment Reporting</h1>
-        <div className="flex gap-2">
-          <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1 px-3 py-1.5 text-sm border rounded-md hover:bg-hover">
-            <Plus className="w-4 h-4" /> Add Segment
-          </button>
-          <button onClick={handleReportabilityCheck} disabled={reportabilityCheck.isPending} className="flex items-center gap-1 px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent/90 disabled:opacity-50">
-            <Play className="w-4 h-4" /> {reportabilityCheck.isPending ? 'Checking...' : 'Run Reportability Check'}
-          </button>
-        </div>
+        {!readOnly && (
+          <div className="flex gap-2">
+            <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1 px-3 py-1.5 text-sm border rounded-md hover:bg-hover">
+              <Plus className="w-4 h-4" /> Add Segment
+            </button>
+            <button onClick={handleReportabilityCheck} disabled={reportabilityCheck.isPending} className="flex items-center gap-1 px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent/90 disabled:opacity-50">
+              <Play className="w-4 h-4" /> {reportabilityCheck.isPending ? 'Checking...' : 'Run Reportability Check'}
+            </button>
+          </div>
+        )}
       </div>
 
-      {showForm && (
+      {!readOnly && showForm && (
         <div className="p-4 border rounded-lg bg-surface space-y-3">
           <h3 className="font-medium">New Operating Segment</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

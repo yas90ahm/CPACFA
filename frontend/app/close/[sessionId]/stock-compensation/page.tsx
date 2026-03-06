@@ -9,6 +9,8 @@ import { fmtMoney } from '@/lib/money';
 import { cn } from '@/lib/utils';
 import type { StockGrant, StockExpense } from '@/lib/types/stock-compensation';
 import { Plus, Play, Loader2, Award } from 'lucide-react';
+import { useAuth } from '@/lib/auth';
+import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
 const TYPE_LABEL: Record<string, string> = { rsu: 'RSU', option: 'Option', espp: 'ESPP', sar: 'SAR' };
 const STATUS_STYLES: Record<string, string> = {
@@ -27,6 +29,9 @@ export default function StockCompensationPage() {
   const { data: summary } = useCompensationSummary(sessionId);
   const createGrant = useCreateGrant(sessionId);
   const computeExpense = useComputeExpense(sessionId);
+
+  const { user } = useAuth();
+  const readOnly = isRoleReadOnly(user?.role ?? 'controller');
 
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
@@ -52,15 +57,17 @@ export default function StockCompensationPage() {
           <h1 className="text-2xl font-display text-primary">Stock Compensation</h1>
           <p className="text-text-secondary text-sm mt-0.5">Manage equity grants and compute ASC 718 compensation expense</p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-border rounded-input hover:bg-hover text-text-secondary">
-            <Plus className="w-4 h-4" /> Add Grant
-          </button>
-          <button onClick={() => computeExpense.mutate()} disabled={computeExpense.isPending} className="flex items-center gap-1.5 px-4 py-1.5 text-sm bg-accent text-white rounded-input font-medium hover:bg-accent/90 disabled:opacity-50">
-            {computeExpense.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-            {computeExpense.isPending ? 'Computing…' : 'Compute Period Expense'}
-          </button>
-        </div>
+        {!readOnly && (
+          <div className="flex gap-2">
+            <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-border rounded-input hover:bg-hover text-text-secondary">
+              <Plus className="w-4 h-4" /> Add Grant
+            </button>
+            <button onClick={() => computeExpense.mutate()} disabled={computeExpense.isPending} className="flex items-center gap-1.5 px-4 py-1.5 text-sm bg-accent text-white rounded-input font-medium hover:bg-accent/90 disabled:opacity-50">
+              {computeExpense.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+              {computeExpense.isPending ? 'Computing…' : 'Compute Period Expense'}
+            </button>
+          </div>
+        )}
       </div>
 
       {summary && (
@@ -82,7 +89,7 @@ export default function StockCompensationPage() {
         </div>
       )}
 
-      {showForm && (
+      {!readOnly && showForm && (
         <div className="p-5 border border-border rounded-card bg-surface space-y-4">
           <h3 className="font-medium text-primary">New Grant</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -117,9 +124,11 @@ export default function StockCompensationPage() {
           <p className="text-text-secondary text-sm max-w-md mx-auto mb-4">
             Add stock grants (RSUs, options, ESPP) to compute ASC 718 compensation expense for the period.
           </p>
-          <button onClick={() => setShowForm(true)} className="px-4 py-2 text-sm bg-accent text-white rounded-input font-medium hover:bg-accent/90">
-            <Plus className="w-4 h-4 inline mr-1.5" /> Add First Grant
-          </button>
+          {!readOnly && (
+            <button onClick={() => setShowForm(true)} className="px-4 py-2 text-sm bg-accent text-white rounded-input font-medium hover:bg-accent/90">
+              <Plus className="w-4 h-4 inline mr-1.5" /> Add First Grant
+            </button>
+          )}
         </div>
       ) : (
         <>

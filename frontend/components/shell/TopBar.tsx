@@ -1,9 +1,12 @@
 'use client';
 
+import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { Settings, ArrowLeft } from 'lucide-react';
+import { Settings, ArrowLeft, LogOut, ChevronDown } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
+import { useAuth } from '@/lib/auth';
+import { canAccessSettings, getRoleLabel } from '@/lib/permissions';
 import type { CloseState } from '@/lib/types/close-session';
 
 function stateClass(s: CloseState): string {
@@ -14,17 +17,22 @@ function stateClass(s: CloseState): string {
   return 'bg-text-muted/20 text-text-secondary border-border-light';
 }
 
+const ROLE_BADGE_STYLE: Record<string, string> = {
+  admin: 'bg-accent-dim text-accent',
+  controller: 'bg-status-blue-dim text-status-blue',
+  reviewer: 'bg-status-green-dim text-status-green',
+  operating_partner: 'bg-status-amber-dim text-status-amber',
+  auditor: 'bg-text-muted/20 text-text-secondary',
+};
+
 export interface TopBarProps {
   entityName?: string;
   periodLabel?: string;
   state?: CloseState;
   userName?: string;
   userInitials?: string;
-  /** When false, period selector is hidden (e.g. on session list). Default true when periodLabel provided. */
   showPeriod?: boolean;
-  /** When 'portfolio', shows Portfolio Dashboard label instead of entity/period selectors. */
   mode?: 'close' | 'portfolio';
-  /** When true (e.g. operating partner role), show Back to Portfolio link. */
   showBackToPortfolio?: boolean;
 }
 
@@ -36,6 +44,22 @@ export function TopBar(p: TopBarProps) {
   const userInitials = p.userInitials ?? (userName ? userName.slice(0, 2).toUpperCase() : '');
   const showPeriod = p.showPeriod !== false;
   const isPortfolio = p.mode === 'portfolio';
+
+  const { user, logout } = useAuth();
+  const role = user?.role ?? 'controller';
+  const showSettings = canAccessSettings(role);
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
 
   return (
     <header className="fixed top-0 left-0 right-0 h-14 z-40 flex items-center justify-between px-4 bg-surface border-b border-border print:hidden">
@@ -68,14 +92,43 @@ export function TopBar(p: TopBarProps) {
             {state.replace('_', ' ')}
           </span>
         )}
-        <div className="flex items-center gap-2 pl-4 border-l border-border">
-          <div className="w-8 h-8 rounded-full bg-accent-dim flex items-center justify-center text-accent text-sm font-medium">{userInitials || '?'}</div>
-          <span className="text-sm text-primary">{userName || 'User'}</span>
+        {/* User menu */}
+        <div className="relative" ref={menuRef}>
+          <button
+            type="button"
+            onClick={() => setMenuOpen((o) => !o)}
+            className="flex items-center gap-2 pl-4 border-l border-border hover:bg-hover rounded-input px-2 py-1 transition-colors"
+          >
+            <div className="w-8 h-8 rounded-full bg-accent-dim flex items-center justify-center text-accent text-sm font-medium">{userInitials || '?'}</div>
+            <span className="text-sm text-primary">{userName || 'User'}</span>
+            <ChevronDown className={cn('w-3.5 h-3.5 text-text-muted transition-transform', menuOpen && 'rotate-180')} />
+          </button>
+          {menuOpen && (
+            <div className="absolute right-0 top-full mt-1 w-56 bg-surface border border-border rounded-card shadow-lg py-1 z-50">
+              <div className="px-4 py-3 border-b border-border">
+                <p className="text-sm font-medium text-primary">{userName || 'User'}</p>
+                <p className="text-xs text-text-secondary mt-0.5">{user?.email ?? ''}</p>
+                <span className={cn('inline-block mt-1.5 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide', ROLE_BADGE_STYLE[role] ?? 'bg-elevated text-text-secondary')}>
+                  {getRoleLabel(role)}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setMenuOpen(false); logout(); }}
+                className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-text-secondary hover:bg-hover hover:text-primary transition-colors"
+              >
+                <LogOut className="w-4 h-4" />
+                Sign Out
+              </button>
+            </div>
+          )}
         </div>
         <NotificationBell />
-        <Link href="/settings" className="p-2 rounded-input text-text-secondary hover:text-primary hover:bg-hover" aria-label="Settings">
-          <Settings className="w-5 h-5" />
-        </Link>
+        {showSettings && (
+          <Link href="/settings" className="p-2 rounded-input text-text-secondary hover:text-primary hover:bg-hover" aria-label="Settings">
+            <Settings className="w-5 h-5" />
+          </Link>
+        )}
       </div>
     </header>
   );

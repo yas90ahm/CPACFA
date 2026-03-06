@@ -9,6 +9,8 @@ import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { cn } from '@/lib/utils';
 import { formatMoney } from '@/lib/format';
 import type { AJETemplate } from '@/lib/types/journal-entry';
+import { useAuth } from '@/lib/auth';
+import { canApplyTemplate, canSkipTemplate, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
 const FREQ_BADGE: Record<string, 'neutral' | 'info'> = { Monthly: 'info', Quarterly: 'neutral', Annual: 'neutral' };
 const PERIOD_BADGE: Record<string, 'warning' | 'success' | 'neutral' | 'info'> = { pending: 'warning', applied: 'success', skipped: 'neutral', auto_applied: 'info' };
@@ -33,6 +35,11 @@ export function AdjustmentsTemplatesTab({
   onBulkApply,
   sessionId,
 }: AdjustmentsTemplatesTabProps) {
+  const { user } = useAuth();
+  const role = user?.role ?? 'controller';
+  const readOnly = isRoleReadOnly(role);
+  const canApply = canApplyTemplate(role);
+  const canSkip = canSkipTemplate(role);
   const jeNumberById = useMemo(() => Object.fromEntries(journalEntries.map((e) => [e.id, e.jeNumber])), [journalEntries]);
   const [skipTemplateId, setSkipTemplateId] = useState<string | null>(null);
   const [skipReason, setSkipReason] = useState('');
@@ -104,14 +111,15 @@ export function AdjustmentsTemplatesTab({
       width: '200px',
       cell: (row: AJETemplate) => {
         if (row.periodStatus === 'pending') {
+          if (readOnly) return <span className="text-sm text-text-muted">Pending</span>;
           return (
             <div className="flex gap-2">
-              <button type="button" className="text-sm text-accent hover:underline" onClick={() => setApplyConfirm(row)}>
+              {canApply && <button type="button" className="text-sm text-accent hover:underline" onClick={() => setApplyConfirm(row)}>
                 Apply
-              </button>
-              <button type="button" className="text-sm text-text-secondary hover:underline" onClick={() => setSkipTemplateId(row.id)}>
+              </button>}
+              {canSkip && <button type="button" className="text-sm text-text-secondary hover:underline" onClick={() => setSkipTemplateId(row.id)}>
                 Skip
-              </button>
+              </button>}
             </div>
           );
         }
@@ -129,13 +137,13 @@ export function AdjustmentsTemplatesTab({
               <span title={row.skipReason ?? ''} className="text-sm text-text-muted truncate max-w-[120px]">
                 {row.skipReason || 'Skipped'}
               </span>
-              <button
+              {canSkip && <button
                 type="button"
                 onClick={() => onUndoSkip(row.id)}
                 className="text-xs text-accent hover:underline whitespace-nowrap"
               >
                 Undo
-              </button>
+              </button>}
             </div>
           );
         }
@@ -162,7 +170,7 @@ export function AdjustmentsTemplatesTab({
             </div>
           </>
         )}
-        {pending.length > 0 && (
+        {pending.length > 0 && canApply && (
           <button
             type="button"
             className="px-4 py-2 rounded-input bg-accent text-white text-sm font-medium hover:bg-accent/90"

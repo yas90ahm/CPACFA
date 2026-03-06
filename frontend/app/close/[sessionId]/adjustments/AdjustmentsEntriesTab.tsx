@@ -13,6 +13,8 @@ import { cn } from '@/lib/utils';
 import { sumMoneyStrings, moneyAbs } from '@/lib/money';
 import type { JournalEntry, JournalEntryStatus } from '@/lib/types/journal-entry';
 import { Paperclip } from 'lucide-react';
+import { useAuth } from '@/lib/auth';
+import { canCreateJE, canProposeJE, canApproveJE, canPostJE, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
 const STATUS_LABEL: Record<JournalEntryStatus, string> = {
   draft: 'Draft',
@@ -66,6 +68,14 @@ export function AdjustmentsEntriesTab({
   search,
   onSearchChange,
 }: AdjustmentsEntriesTabProps) {
+  const { user } = useAuth();
+  const role = user?.role ?? 'controller';
+  const userId = user?.userId ?? '';
+  const readOnly = isRoleReadOnly(role);
+  const canCreate = canCreateJE(role);
+  const canPropose = canProposeJE(role);
+  const canPost = canPostJE(role);
+
   const { data: manifest } = useQuery({
     queryKey: ['evidence-manifest', sessionId],
     queryFn: () =>
@@ -152,11 +162,13 @@ export function AdjustmentsEntriesTab({
       width: '120px',
       align: 'right' as const,
       cell: (row: JournalEntry) => {
-        if (row.status === 'draft') return <><button type="button" className="text-sm text-accent hover:underline mr-2" onClick={() => onEdit(row)}>Edit</button><button type="button" className="text-sm text-accent hover:underline mr-2" onClick={() => onPropose(row)}>Propose</button><button type="button" className="text-sm text-status-red hover:underline" onClick={() => onDelete(row)}>Delete</button></>;
-        if (row.status === 'proposed') return <><button type="button" className="text-sm text-accent hover:underline mr-2" onClick={() => onView(row)}>View</button><button type="button" className="text-sm text-status-green hover:underline mr-2" onClick={() => onApprove(row)}>Approve</button><button type="button" className="text-sm text-status-red hover:underline" onClick={() => onReject(row)}>Reject</button></>;
-        if (row.status === 'approved') return <><button type="button" className="text-sm text-accent hover:underline mr-2" onClick={() => onView(row)}>View</button><button type="button" className="text-sm text-status-green hover:underline" onClick={() => onPost(row)}>Post</button></>;
+        const canApproveThis = canApproveJE(role, row.createdBy ?? '', userId);
+        if (readOnly) return <button type="button" className="text-sm text-accent hover:underline" onClick={() => onView(row)}>View</button>;
+        if (row.status === 'draft') return <>{canCreate && <button type="button" className="text-sm text-accent hover:underline mr-2" onClick={() => onEdit(row)}>Edit</button>}{canPropose && <button type="button" className="text-sm text-accent hover:underline mr-2" onClick={() => onPropose(row)}>Propose</button>}{canCreate && <button type="button" className="text-sm text-status-red hover:underline" onClick={() => onDelete(row)}>Delete</button>}</>;
+        if (row.status === 'proposed') return <><button type="button" className="text-sm text-accent hover:underline mr-2" onClick={() => onView(row)}>View</button>{canApproveThis && <button type="button" className="text-sm text-status-green hover:underline mr-2" onClick={() => onApprove(row)}>Approve</button>}{canApproveThis && <button type="button" className="text-sm text-status-red hover:underline" onClick={() => onReject(row)}>Reject</button>}</>;
+        if (row.status === 'approved') return <><button type="button" className="text-sm text-accent hover:underline mr-2" onClick={() => onView(row)}>View</button>{canPost && <button type="button" className="text-sm text-status-green hover:underline" onClick={() => onPost(row)}>Post</button>}</>;
         if (row.status === 'posted') return <button type="button" className="text-sm text-accent hover:underline" onClick={() => onView(row)}>View</button>;
-        if (row.status === 'rejected') return <><button type="button" className="text-sm text-accent hover:underline mr-2" onClick={() => onEdit(row)}>Edit</button><button type="button" className="text-sm text-status-red hover:underline" onClick={() => onDelete(row)}>Delete</button></>;
+        if (row.status === 'rejected') return <>{canCreate && <button type="button" className="text-sm text-accent hover:underline mr-2" onClick={() => onEdit(row)}>Edit</button>}{canCreate && <button type="button" className="text-sm text-status-red hover:underline" onClick={() => onDelete(row)}>Delete</button>}</>;
         return null;
       },
     },
@@ -256,13 +268,15 @@ export function AdjustmentsEntriesTab({
             {p.label}
           </button>
         ))}
-        <button
-          type="button"
-          className="ml-auto px-4 py-2 rounded-input bg-accent text-white text-sm font-medium hover:bg-accent/90"
-          onClick={onNewEntry}
-        >
-          + New Journal Entry
-        </button>
+        {canCreate && (
+          <button
+            type="button"
+            className="ml-auto px-4 py-2 rounded-input bg-accent text-white text-sm font-medium hover:bg-accent/90"
+            onClick={onNewEntry}
+          >
+            + New Journal Entry
+          </button>
+        )}
       </div>
 
       <DataTable

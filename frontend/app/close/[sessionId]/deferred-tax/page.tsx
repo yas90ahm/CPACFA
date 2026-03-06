@@ -8,6 +8,8 @@ import { MoneyCell } from '@/components/shared/MoneyCell';
 import { fmtMoney } from '@/lib/money';
 import type { DeferredTaxItem } from '@/lib/types/deferred-tax';
 import { Plus, Calculator, Loader2, FileSpreadsheet } from 'lucide-react';
+import { useAuth } from '@/lib/auth';
+import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
 const TYPE_LABEL: Record<string, string> = { temporary_difference: 'Temporary Diff', nol_carryforward: 'NOL Carryforward', tax_credit: 'Tax Credit' };
 
@@ -18,6 +20,9 @@ export default function DeferredTaxPage() {
   const { data: items, isLoading } = useDeferredTaxItems(sessionId);
   const createItem = useCreateDeferredTaxItem(sessionId);
   const calculateTax = useCalculateDeferredTax(sessionId);
+
+  const { user } = useAuth();
+  const readOnly = isRoleReadOnly(user?.role ?? 'controller');
 
   const [showForm, setShowForm] = useState(false);
   const [taxRate, setTaxRate] = useState('0.21');
@@ -47,12 +52,14 @@ export default function DeferredTaxPage() {
           <h1 className="text-2xl font-display text-primary">Deferred Tax</h1>
           <p className="text-text-secondary text-sm mt-0.5">Manage temporary differences and compute deferred tax assets/liabilities</p>
         </div>
-        <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-border rounded-input hover:bg-hover text-text-secondary">
-          <Plus className="w-4 h-4" /> Add Item
-        </button>
+        {!readOnly && (
+          <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-border rounded-input hover:bg-hover text-text-secondary">
+            <Plus className="w-4 h-4" /> Add Item
+          </button>
+        )}
       </div>
 
-      {showForm && (
+      {!readOnly && showForm && (
         <div className="p-5 border border-border rounded-card bg-surface space-y-4">
           <h3 className="font-medium text-primary">New Deferred Tax Item</h3>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -85,10 +92,12 @@ export default function DeferredTaxPage() {
           <label className="block text-xs text-text-tertiary uppercase tracking-wider mb-1">Tax Rate</label>
           <input type="number" step="0.01" value={taxRate} onChange={(e) => setTaxRate(e.target.value)} className="border border-border rounded-input px-3 py-1.5 text-sm w-24 bg-input text-primary" />
         </div>
-        <button onClick={handleCalculate} disabled={calculateTax.isPending} className="flex items-center gap-1.5 px-4 py-1.5 text-sm bg-accent text-white rounded-input font-medium disabled:opacity-50">
-          {calculateTax.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Calculator className="w-4 h-4" />}
-          {calculateTax.isPending ? 'Calculating…' : 'Calculate'}
-        </button>
+        {!readOnly && (
+          <button onClick={handleCalculate} disabled={calculateTax.isPending} className="flex items-center gap-1.5 px-4 py-1.5 text-sm bg-accent text-white rounded-input font-medium disabled:opacity-50">
+            {calculateTax.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Calculator className="w-4 h-4" />}
+            {calculateTax.isPending ? 'Calculating…' : 'Calculate'}
+          </button>
+        )}
       </div>
 
       {calcResult && (
@@ -119,9 +128,11 @@ export default function DeferredTaxPage() {
           <p className="text-text-secondary text-sm max-w-md mx-auto mb-4">
             Add temporary differences between book and tax basis to compute deferred tax assets and liabilities.
           </p>
-          <button onClick={() => setShowForm(true)} className="px-4 py-2 text-sm bg-accent text-white rounded-input font-medium hover:bg-accent/90">
-            <Plus className="w-4 h-4 inline mr-1.5" /> Add First Item
-          </button>
+          {!readOnly && (
+            <button onClick={() => setShowForm(true)} className="px-4 py-2 text-sm bg-accent text-white rounded-input font-medium hover:bg-accent/90">
+              <Plus className="w-4 h-4 inline mr-1.5" /> Add First Item
+            </button>
+          )}
         </div>
       ) : (
         <DataTable<DeferredTaxItem>
