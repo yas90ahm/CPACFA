@@ -83,7 +83,7 @@ export function Sidebar({
 
   return (
     <aside className="fixed left-0 top-[56px] w-[240px] h-[calc(100vh-56px)] bg-surface border-r border-border flex flex-col z-30 print:hidden">
-      <nav className="flex-1 py-4 overflow-y-auto">
+      <nav className="flex-1 py-3 overflow-y-auto space-y-0.5">
         {navItems.filter((item) => {
           if (item.external && item.href === '/settings') {
             return role !== 'operating_partner' && role !== 'auditor';

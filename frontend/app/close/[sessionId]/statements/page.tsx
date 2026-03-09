@@ -278,7 +278,7 @@ export default function StatementsPage() {
             type="button"
             onClick={handleExportCsv}
             disabled={!hasStatements}
-            className="px-3 py-1.5 rounded-input border border-border text-sm text-text-secondary hover:bg-hover print:hidden disabled:opacity-50"
+            className="px-3 py-1.5 rounded-full border border-border text-sm text-text-secondary hover:bg-hover print:hidden disabled:opacity-50 transition-colors"
             aria-label="Export CSV"
           >
             <FileDown className="w-4 h-4 inline mr-1.5" />
@@ -288,7 +288,7 @@ export default function StatementsPage() {
             type="button"
             onClick={handleExportPdf}
             disabled={exporting}
-            className="px-3 py-1.5 rounded-input border border-border text-sm text-text-secondary hover:bg-hover print:hidden disabled:opacity-50"
+            className="px-3 py-1.5 rounded-full border border-border text-sm text-text-secondary hover:bg-hover print:hidden disabled:opacity-50 transition-colors"
             aria-label="Export PDF"
           >
             {exporting ? <Loader2 className="w-4 h-4 inline mr-1.5 animate-spin" /> : <FileDown className="w-4 h-4 inline mr-1.5" />}
@@ -300,9 +300,9 @@ export default function StatementsPage() {
               onClick={handleRegenerate}
               disabled={generating}
               className={cn(
-                'px-4 py-2 rounded-input text-sm font-medium flex items-center gap-2',
+                'px-5 py-2 rounded-full text-sm font-medium flex items-center gap-2 transition-all',
                 !hasStatements || isStale
-                  ? 'bg-accent text-white hover:opacity-90'
+                  ? 'bg-accent text-white hover:bg-accent-hover shadow-glow-accent'
                   : 'border border-border text-primary hover:bg-hover',
                 generating && 'opacity-70'
               )}
@@ -335,7 +335,7 @@ export default function StatementsPage() {
               }
             }}
             className={cn(
-              'px-3 py-1 text-sm rounded-md',
+              'px-3 py-1 text-sm rounded-full transition-colors',
               periodView === pv ? 'bg-accent text-white' : 'border border-border text-text-secondary hover:bg-hover'
             )}
           >
@@ -402,7 +402,7 @@ export default function StatementsPage() {
               type="button"
               onClick={handleRegenerate}
               disabled={generating}
-              className="px-6 py-2.5 rounded-input bg-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-70 inline-flex items-center gap-2"
+              className="px-6 py-2.5 rounded-full bg-accent text-white text-sm font-medium hover:bg-accent-hover shadow-glow-accent disabled:opacity-70 inline-flex items-center gap-2 transition-all"
             >
               {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
               Prepare Statements

@@ -320,9 +320,9 @@ export default function ReviewPage() {
               onClick={primaryAction.onClick}
               disabled={!primaryAction.enabled}
               className={cn(
-                'px-6 py-2 rounded-input text-sm font-medium transition-colors',
+                'px-6 py-2.5 rounded-full text-sm font-medium transition-all',
                 primaryAction.enabled
-                  ? 'bg-accent text-white hover:bg-accent/90'
+                  ? 'bg-accent text-white hover:bg-accent-hover shadow-glow-accent'
                   : 'bg-surface-alt text-text-muted cursor-not-allowed'
               )}
             >

@@ -61,7 +61,7 @@ export function FilterBar(props: FilterBarProps) {
           type="button"
           onClick={p.toggle}
           className={cn(
-            'px-3 py-1.5 rounded-input text-xs font-medium border',
+            'px-3 py-1.5 rounded-full text-xs font-medium border transition-colors',
             p.active ? 'bg-accent-dim text-accent border-accent/30' : 'bg-elevated text-text-secondary border-border-light hover:bg-hover'
           )}
         >

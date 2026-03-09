@@ -47,15 +47,15 @@ export function DataTable<T>(props: DataTableProps<T>) {
 
   if (loading) {
     return (
-      <div className="rounded-card border border-border overflow-hidden">
+      <div className="rounded-card border border-border overflow-hidden bg-surface">
         <table className="w-full border-collapse">
-          <thead className="sticky top-0 z-10 bg-surface border-b border-border">
-            <tr>
+          <thead className="sticky top-0 z-10 bg-surface-alt">
+            <tr className="border-b border-border">
               {columns.map((col) => (
                 <th
                   key={col.id}
                   className={cn(
-                    'px-3 py-2.5 text-left text-xs font-medium text-text-secondary',
+                    'px-4 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-text-secondary',
                     col.align === 'right' && 'text-right',
                     col.align === 'center' && 'text-center'
                   )}
@@ -70,7 +70,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
             {Array.from({ length: 5 }).map((_, i) => (
               <tr key={i} className="border-b border-border-light">
                 {columns.map((col) => (
-                  <td key={col.id} className="px-3 py-2.5">
+                  <td key={col.id} className="px-4 py-3.5">
                     <div className="h-5 bg-elevated rounded animate-pulse" />
                   </td>
                 ))}
@@ -83,19 +83,19 @@ export function DataTable<T>(props: DataTableProps<T>) {
   }
 
   return (
-    <div className="rounded-card border border-border overflow-hidden">
+    <div className="rounded-card border border-border overflow-hidden bg-surface">
       <table className="w-full border-collapse">
-        <thead className="sticky top-0 z-10 bg-surface border-b border-border">
-          <tr>
+        <thead className="sticky top-0 z-10 bg-surface-alt">
+          <tr className="border-b border-border">
             {columns.map((col) => (
               <th
                 key={col.id}
                 className={cn(
-                  'px-3 py-2.5 text-xs font-medium text-text-secondary',
+                  'px-4 py-3.5 text-xs font-semibold uppercase tracking-wider text-text-secondary',
                   col.align === 'right' && 'text-right',
                   col.align === 'center' && 'text-center',
                   col.align !== 'right' && col.align !== 'center' && 'text-left',
-                  col.sortKey && 'cursor-pointer hover:text-primary'
+                  col.sortKey && 'cursor-pointer hover:text-primary transition-colors'
                 )}
                 style={col.width ? { width: col.width } : undefined}
                 onClick={col.sortKey ? () => onSort?.(col.sortKey as keyof T & string) : undefined}
@@ -113,7 +113,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={columns.length} className="px-3 py-8 text-center text-text-secondary text-sm">
+              <td colSpan={columns.length} className="px-4 py-12 text-center text-text-secondary text-sm">
                 {emptyMessage}
               </td>
             </tr>
@@ -127,8 +127,8 @@ export function DataTable<T>(props: DataTableProps<T>) {
                     key={id}
                     onClick={() => onRowClick?.(row)}
                     className={cn(
-                      'border-b border-border-light hover:bg-hover transition-colors',
-                      onRowClick && 'cursor-pointer',
+                      'border-b border-border-light transition-colors',
+                      onRowClick && 'cursor-pointer hover:bg-hover',
                       rowClassName?.(row)
                     )}
                   >
@@ -136,7 +136,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
                       <td
                         key={col.id}
                         className={cn(
-                          'px-3 py-2.5 text-sm',
+                          'px-4 py-3.5 text-sm',
                           col.align === 'right' && 'text-right',
                           col.align === 'center' && 'text-center'
                         )}
@@ -147,7 +147,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
                   </tr>
                   {expanded && renderExpanded && (
                     <tr className="bg-elevated border-b border-border-light">
-                      <td colSpan={columns.length} className="px-3 py-3">
+                      <td colSpan={columns.length} className="px-4 py-4">
                         {renderExpanded(row)}
                       </td>
                     </tr>
@@ -158,7 +158,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
           )}
         </tbody>
         {footer && rows.length > 0 && (
-          <tfoot className="sticky bottom-0 z-10 bg-surface border-t-2 border-border">
+          <tfoot className="sticky bottom-0 z-10 bg-surface-alt border-t-2 border-border">
             {footer}
           </tfoot>
         )}

@@ -5,33 +5,37 @@
 /* Base styles using CSS variables so layout is always styled even if Tailwind purges */
 @layer base {
   :root {
-    --bg-primary: #0f1629;
-    --bg-surface: #1a2035;
-    --bg-elevated: #242b3d;
-    --bg-hover: #2d3548;
-    --bg-input: #141a2e;
-    --border-default: #2d3548;
-    --border-light: #242b3d;
-    --border-focus: #6366f1;
-    --text-primary: #ffffff;
-    --text-secondary: #8892a7;
-    --text-tertiary: #5a6478;
-    --text-muted: #3d4555;
-    --accent: #6366f1;
-    --accent-dim: rgba(99,102,241,0.12);
-    --status-green: #22c55e;
-    --status-green-dim: rgba(34,197,94,0.12);
-    --status-amber: #f59e0b;
-    --status-amber-dim: rgba(245,158,11,0.12);
-    --status-red: #ef4444;
-    --status-red-dim: rgba(239,68,68,0.12);
+    --bg-primary: #0B0F1A;
+    --bg-surface: #141829;
+    --bg-surface-alt: #1A1F35;
+    --bg-elevated: #232845;
+    --bg-hover: #2A3050;
+    --bg-input: #111525;
+    --border-default: #262C48;
+    --border-light: #1E2340;
+    --border-focus: #7C5CFC;
+    --text-primary: #F1F1F4;
+    --text-secondary: #8B90A7;
+    --text-tertiary: #5C6280;
+    --text-muted: #3D4260;
+    --accent: #7C5CFC;
+    --accent-hover: #6B4FE0;
+    --accent-dim: rgba(124,92,252,0.10);
+    --status-green: #34D399;
+    --status-green-dim: rgba(52,211,153,0.10);
+    --status-amber: #FBBF24;
+    --status-amber-dim: rgba(251,191,36,0.10);
+    --status-red: #F87171;
+    --status-red-dim: rgba(248,113,113,0.10);
     --status-blue: #60A5FA;
-    --status-blue-dim: rgba(96,165,250,0.12);
+    --status-blue-dim: rgba(96,165,250,0.10);
     --certified-gold: #eab308;
-    --certified-gold-dim: rgba(234,179,8,0.12);
+    --certified-gold-dim: rgba(234,179,8,0.10);
     --ai-purple: #A78BFA;
     --ai-purple-dim: rgba(167,139,250,0.06);
     --ai-purple-border: rgba(167,139,250,0.20);
+    --radius-card: 12px;
+    --radius-input: 8px;
   }
 
   * {
@@ -40,13 +44,16 @@
 
   html {
     @apply antialiased;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   body {
     background-color: var(--bg-primary) !important;
     color: var(--text-primary) !important;
-    font-family: var(--font-sans), 'DM Sans', system-ui, sans-serif;
+    font-family: var(--font-sans), 'Inter', 'DM Sans', system-ui, sans-serif;
     min-height: 100vh;
+    letter-spacing: -0.01em;
   }
 
   .font-mono,
@@ -60,17 +67,68 @@
 /* Form fallbacks so login is always styled */
 input[type="email"],
 input[type="password"],
-input[type="text"] {
+input[type="text"],
+input[type="date"],
+input[type="number"],
+select,
+textarea {
   background-color: var(--bg-input);
   color: var(--text-primary);
   border: 1px solid var(--border-default);
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-input);
+  padding: 0.625rem 0.875rem;
+  font-size: 0.875rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+  outline: none;
+}
+
 button[type="submit"] {
   background-color: var(--accent);
   color: white;
-  border-radius: 6px;
-  padding: 0.5rem 1rem;
+  border-radius: 9999px;
+  padding: 0.625rem 1.5rem;
   font-weight: 500;
+  font-size: 0.875rem;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+button[type="submit"]:hover {
+  background-color: var(--accent-hover);
+  box-shadow: 0 0 20px rgba(124,92,252,0.15);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+}
+
+/* Utility: landing-page style primary CTA button */
+@layer utilities {
+  .btn-primary {
+    @apply inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-accent text-white text-sm font-medium transition-all;
+  }
+  .btn-primary:hover {
+    @apply bg-accent-hover shadow-glow-accent;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center gap-2 px-5 py-2 rounded-full border border-border text-text-secondary text-sm font-medium transition-all hover:bg-hover hover:text-primary;
+  }
 }

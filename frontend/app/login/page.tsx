@@ -22,8 +22,8 @@ export default function LoginPage() {
       router.replace('/close');
     }
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg-primary, #0C0E13)' }}>
-        <div className="animate-spin h-8 w-8 border-2 border-t-transparent rounded-full" style={{ borderColor: 'var(--accent, #6366F1)', borderTopColor: 'transparent' }} />
+      <div className="min-h-screen flex items-center justify-center bg-primary">
+        <div className="animate-spin h-8 w-8 border-2 border-accent border-t-transparent rounded-full" />
       </div>
     );
   }
@@ -42,18 +42,18 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg-primary, #0C0E13)' }}>
-      <div className="w-full max-w-md p-8 rounded-xl" style={{ backgroundColor: 'var(--bg-surface, #14161D)', border: '1px solid var(--border-default, #2A2D37)' }}>
-        <h1 className="text-3xl font-display mb-1" style={{ color: 'var(--text-primary, #E8EAF0)', fontStyle: 'italic' }}>
+    <div className="min-h-screen flex items-center justify-center bg-primary">
+      <div className="w-full max-w-md p-8 rounded-card bg-surface border border-border">
+        <h1 className="text-3xl font-display mb-1 text-primary tracking-[0.15em] uppercase">
           Sabit
         </h1>
-        <p className="mb-8" style={{ color: 'var(--text-secondary, #9DA3B0)', fontSize: '14px' }}>
+        <p className="mb-8 text-text-secondary text-sm">
           Financial Close Engine
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-primary, #E8EAF0)' }}>
+            <label className="block text-sm font-medium mb-1.5 text-primary">
               Email
             </label>
             <input
@@ -62,17 +62,12 @@ export default function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@company.com"
               required
-              className="w-full px-3 py-2 rounded-lg text-sm"
-              style={{
-                backgroundColor: 'var(--bg-input, #1A1D27)',
-                border: '1px solid var(--border-default, #2A2D37)',
-                color: 'var(--text-primary, #E8EAF0)',
-              }}
+              className="w-full"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-primary, #E8EAF0)' }}>
+            <label className="block text-sm font-medium mb-1.5 text-primary">
               Password
             </label>
             <input
@@ -80,12 +75,7 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="w-full px-3 py-2 rounded-lg text-sm"
-              style={{
-                backgroundColor: 'var(--bg-input, #1A1D27)',
-                border: '1px solid var(--border-default, #2A2D37)',
-                color: 'var(--text-primary, #E8EAF0)',
-              }}
+              className="w-full"
             />
           </div>
 
@@ -93,7 +83,7 @@ export default function LoginPage() {
           <input type="hidden" value={tenantId} />
 
           {error && (
-            <div className="p-3 rounded-lg text-sm" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#EF4444' }}>
+            <div className="p-3 rounded-input text-sm bg-status-red-dim text-status-red border border-status-red/30">
               {error}
             </div>
           )}
@@ -101,19 +91,15 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors"
-            style={{
-              backgroundColor: loading ? 'var(--accent-muted, #4A4FC7)' : 'var(--accent, #6366F1)',
-              color: '#FFFFFF',
-            }}
+            className="w-full py-2.5 rounded-full text-sm font-medium bg-accent text-white hover:bg-accent-hover shadow-glow-accent transition-all disabled:opacity-60"
           >
             {loading ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
 
-        <p className="mt-6 text-center text-sm" style={{ color: 'var(--text-secondary, #9DA3B0)' }}>
+        <p className="mt-6 text-center text-sm text-text-secondary">
           Don&apos;t have an account?{' '}
-          <Link href="/register" style={{ color: 'var(--accent, #6366F1)' }} className="hover:underline">
+          <Link href="/register" className="text-accent hover:underline">
             Register
           </Link>
         </p>

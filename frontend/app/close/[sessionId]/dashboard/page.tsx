@@ -345,7 +345,7 @@ export default function CloseDashboardPage() {
               </div>
               <Link
                 href={ctaHref}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-input bg-accent text-white text-sm font-medium hover:opacity-90"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-accent text-white text-sm font-medium hover:bg-accent-hover shadow-glow-accent transition-all"
               >
                 {ctaLabel} <ArrowRight className="w-4 h-4" />
               </Link>
@@ -393,7 +393,7 @@ export default function CloseDashboardPage() {
           {!readOnly && (session?.state === 'IN_PROGRESS' || session?.state === 'OPEN') && (
             <button
               type="button"
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-input bg-accent text-white text-sm font-medium hover:opacity-90"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-accent text-white text-sm font-medium hover:bg-accent-hover shadow-glow-accent transition-all"
               onClick={() => {
                 const firstIncomplete = PIPELINE_STEPS.find((s) => pipelineStatus[s.id] !== 'complete');
                 if (firstIncomplete) {
@@ -418,7 +418,7 @@ export default function CloseDashboardPage() {
                 <Link
                   href={`/close/${sessionId}/${step.path}`}
                   className={cn(
-                    'flex items-center gap-1.5 px-3 py-1.5 rounded-input text-xs font-medium transition-colors',
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors',
                     status === 'complete' && 'bg-status-green-dim text-status-green',
                     status === 'active' && 'bg-accent-dim text-accent ring-1 ring-accent/30',
                     status === 'pending' && 'bg-elevated text-text-tertiary',
@@ -482,8 +482,8 @@ export default function CloseDashboardPage() {
             <h2 className="text-xs font-medium text-text-secondary uppercase tracking-wide">Gate Status</h2>
             <span className="text-sm font-mono text-primary">{gatesPassing} of {gatesTotal} passing</span>
           </div>
-          <div className="h-1.5 bg-elevated rounded-full mb-4 overflow-hidden">
-            <div className="h-full bg-status-green rounded-full transition-all" style={{ width: `${gatesTotal > 0 ? (gatesPassing / gatesTotal) * 100 : 0}%` }} />
+          <div className="h-2 bg-elevated rounded-full mb-4 overflow-hidden">
+            <div className="h-full bg-accent rounded-full transition-all" style={{ width: `${gatesTotal > 0 ? (gatesPassing / gatesTotal) * 100 : 0}%` }} />
           </div>
           <ul className="space-y-1.5">
             {gatesWithMapping.map((gate) => (

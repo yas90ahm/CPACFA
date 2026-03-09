@@ -37,8 +37,8 @@ export default function HomePage() {
   }, [user, token, isLoading, router]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-      <p style={{ color: 'var(--text-secondary)' }}>Redirecting...</p>
+    <div className="min-h-screen flex items-center justify-center bg-primary">
+      <p className="text-text-secondary">Redirecting...</p>
     </div>
   );
 }

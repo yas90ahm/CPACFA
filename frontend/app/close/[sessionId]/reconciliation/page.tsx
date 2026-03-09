@@ -659,21 +659,33 @@ export default function ReconciliationPage() {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-4 py-3 px-4 rounded-input bg-surface border border-border">
-        <span className="text-status-green text-sm">Completed: {completed}</span>
-        <span className="text-accent text-sm">In Progress: {inProgress}</span>
-        <span className="text-text-muted text-sm">Not Started: {notStarted}</span>
-        <span className="text-status-green text-sm inline-flex items-center gap-1">
-          <Check className="w-4 h-4" /> Approved: {approved}
+      <div className="flex flex-wrap items-center gap-3 py-3 px-4 rounded-card bg-surface border border-border">
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-status-green-dim text-status-green">
+          <span className="w-1.5 h-1.5 rounded-full bg-status-green" />
+          {completed} Complete
         </span>
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-status-blue-dim text-status-blue">
+          <span className="w-1.5 h-1.5 rounded-full bg-status-blue" />
+          {inProgress} In Progress
+        </span>
+        {notStarted > 0 && (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-elevated text-text-secondary">
+            <span className="w-1.5 h-1.5 rounded-full bg-text-tertiary" />
+            {notStarted} Not Started
+          </span>
+        )}
         {overTolerance > 0 && (
-          <span className="text-status-red font-medium text-sm">Over Tolerance: {overTolerance}</span>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-status-red-dim text-status-red">
+            <span className="w-1.5 h-1.5 rounded-full bg-status-red" />
+            {overTolerance} Over Tolerance
+          </span>
         )}
         <div className="flex-1 min-w-[120px] max-w-[200px]">
           <div className="h-2 bg-elevated rounded-full overflow-hidden">
-            <div className="h-full bg-status-green rounded-full" style={{ width: `${progressPct}%` }} />
+            <div className="h-full bg-accent rounded-full transition-all" style={{ width: `${progressPct}%` }} />
           </div>
         </div>
+        <span className="font-mono text-sm text-primary">{progressPct}%</span>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">

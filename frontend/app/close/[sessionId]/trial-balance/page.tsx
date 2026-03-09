@@ -170,7 +170,7 @@ export default function TrialBalancePage() {
       align: 'left' as const,
       sortKey: 'accountType',
       cell: (r: TrialBalanceRow) => (
-        <span className={cn('px-2 py-0.5 rounded text-xs', ACCOUNT_TYPE_STYLE[r.accountType as AccountType] ?? 'bg-surface-alt text-text-tertiary')}>
+        <span className={cn('px-2 py-0.5 rounded-full text-xs', ACCOUNT_TYPE_STYLE[r.accountType as AccountType] ?? 'bg-surface-alt text-text-tertiary')}>
           {r.accountType}
         </span>
       ),
@@ -386,7 +386,7 @@ export default function TrialBalancePage() {
               document.body.removeChild(a);
               URL.revokeObjectURL(url);
             }}
-            className="px-3 py-1.5 rounded-input border border-border text-sm text-text-secondary hover:bg-hover"
+            className="px-3 py-1.5 rounded-full border border-border text-sm text-text-secondary hover:bg-hover transition-colors"
           >
             <FileDown className="w-4 h-4 inline mr-1" />
             Export CSV
@@ -395,7 +395,7 @@ export default function TrialBalancePage() {
             type="button"
             onClick={() => setAdjusted(false)}
             className={cn(
-              'px-3 py-1.5 rounded-input text-sm border',
+              'px-3 py-1.5 rounded-full text-sm border transition-colors',
               !adjusted ? 'bg-accent-dim text-accent border-accent/30' : 'bg-elevated text-text-secondary border-border-light'
             )}
           >
@@ -405,7 +405,7 @@ export default function TrialBalancePage() {
             type="button"
             onClick={() => setAdjusted(true)}
             className={cn(
-              'px-3 py-1.5 rounded-input text-sm border',
+              'px-3 py-1.5 rounded-full text-sm border transition-colors',
               adjusted ? 'bg-accent-dim text-accent border-accent/30' : 'bg-elevated text-text-secondary border-border-light'
             )}
           >
@@ -415,19 +415,32 @@ export default function TrialBalancePage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-4 py-2 px-3 rounded-input bg-surface border border-border">
+      <div className="flex flex-wrap items-center gap-4 py-3 px-4 rounded-card bg-surface border border-border">
         <span className="font-mono text-sm text-primary">Total Debits: <MoneyCell value={totalDebits} showDollar /></span>
         <span className="font-mono text-sm text-primary">Total Credits: <MoneyCell value={totalCredits} showDollar /></span>
-        <span className={cn('font-mono text-sm', balanced ? 'text-status-green' : 'text-status-red')}>
-          Difference: <MoneyCell value={difference} showDollar />
-        </span>
-        <span className="text-text-secondary text-sm">Account Count: {filtered.length}</span>
+        {balanced ? (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-status-green-dim text-status-green">
+            <span className="w-1.5 h-1.5 rounded-full bg-status-green" />
+            Balanced
+          </span>
+        ) : (
+          <span className={cn('font-mono text-sm text-status-red')}>
+            Difference: <MoneyCell value={difference} showDollar />
+          </span>
+        )}
+        <span className="text-text-secondary text-sm">{filtered.length} accounts</span>
         {baseRows.length === 0 ? (
           <span className="text-text-tertiary text-sm">No accounts loaded</span>
         ) : unmappedCount > 0 ? (
-          <span className="px-2 py-0.5 rounded text-xs bg-status-amber-dim text-status-amber">Unmapped: {unmappedCount}</span>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-status-amber-dim text-status-amber">
+            <span className="w-1.5 h-1.5 rounded-full bg-status-amber" />
+            {unmappedCount} Unmapped
+          </span>
         ) : (
-          <span className="text-status-green text-sm">All mapped</span>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-status-green-dim text-status-green">
+            <span className="w-1.5 h-1.5 rounded-full bg-status-green" />
+            All Mapped
+          </span>
         )}
       </div>
 

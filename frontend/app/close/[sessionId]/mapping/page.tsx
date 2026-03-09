@@ -292,7 +292,7 @@ export default function MappingPage() {
                 type="button"
                 disabled={generateMutation.isPending}
                 onClick={() => generateMutation.mutate(undefined)}
-                className="px-4 py-2 rounded-input bg-accent text-white text-sm font-medium hover:bg-accent/90 disabled:opacity-50 flex items-center gap-2"
+                className="px-5 py-2 rounded-full bg-accent text-white text-sm font-medium hover:bg-accent-hover shadow-glow-accent disabled:opacity-50 flex items-center gap-2 transition-all"
               >
                 {generateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                 {generateMutation.isPending ? 'Generating...' : 'Auto-Map Remaining'}
@@ -302,16 +302,22 @@ export default function MappingPage() {
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-4 py-2 px-3 rounded-input bg-surface border border-border">
-        <span className="text-text-secondary text-sm">Total Accounts: {totalAccounts}</span>
-        <span className="text-status-green text-sm">Mapped: {mappedCount}</span>
-        <span className={cn('text-sm', unmappedCount > 0 ? 'text-status-amber font-medium' : 'text-status-green')}>
-          Unmapped: {unmappedCount}
+      <div className="flex flex-wrap items-center gap-4 py-3 px-4 rounded-card bg-surface border border-border">
+        <span className="text-text-secondary text-sm">{totalAccounts} accounts</span>
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-status-green-dim text-status-green">
+          <span className="w-1.5 h-1.5 rounded-full bg-status-green" />
+          {mappedCount} Mapped
         </span>
+        {unmappedCount > 0 && (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-status-amber-dim text-status-amber">
+            <span className="w-1.5 h-1.5 rounded-full bg-status-amber" />
+            {unmappedCount} Unmapped
+          </span>
+        )}
         <div className="flex-1 min-w-[120px] max-w-[200px] h-2 bg-elevated rounded-full overflow-hidden">
-          <div className="h-full bg-status-green rounded-full transition-all" style={{ width: `${progressPct}%` }} />
+          <div className="h-full bg-accent rounded-full transition-all" style={{ width: `${progressPct}%` }} />
         </div>
-        <span className="font-mono text-sm text-primary">{mappedCount}/{totalAccounts} ({progressPct}%)</span>
+        <span className="font-mono text-sm text-primary">{progressPct}%</span>
       </div>
 
       {csvImportResult && (
@@ -359,14 +365,14 @@ export default function MappingPage() {
             <>
             <div className="overflow-x-auto">
               <table className="w-full border-collapse">
-                <thead className="sticky top-0 z-10 bg-surface border-b border-border">
+                <thead className="sticky top-0 z-10 bg-surface-alt border-b border-border">
                   <tr>
-                    <th className="px-3 py-2.5 text-left text-xs font-medium text-text-secondary w-[100px]">Code</th>
-                    <th className="px-3 py-2.5 text-left text-xs font-medium text-text-secondary">Account Name</th>
-                    <th className="px-3 py-2.5 text-left text-xs font-medium text-text-secondary w-[90px]">Type</th>
-                    <th className="px-3 py-2.5 text-right text-xs font-medium text-text-secondary w-[120px]">Balance</th>
-                    <th className="px-3 py-2.5 text-left text-xs font-medium text-text-secondary min-w-[180px]">Mapping</th>
-                    {canMap && <th className="px-3 py-2.5 text-left text-xs font-medium text-text-secondary w-[200px]">Action</th>}
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-text-secondary w-[100px]">Code</th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-text-secondary">Account Name</th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-text-secondary w-[90px]">Type</th>
+                    <th className="px-4 py-3.5 text-right text-xs font-semibold uppercase tracking-wider text-text-secondary w-[120px]">Balance</th>
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-text-secondary min-w-[180px]">Mapping</th>
+                    {canMap && <th className="px-4 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-text-secondary w-[200px]">Action</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -381,13 +387,13 @@ export default function MappingPage() {
                         !r.mappingReportingLineId && 'border-l-4 border-l-status-amber bg-status-amber/5'
                       )}
                     >
-                      <td className="px-3 py-2 font-mono text-sm text-primary">{r.accountCode}</td>
-                      <td className="px-3 py-2 text-sm text-primary">{r.accountName}</td>
-                      <td className="px-3 py-2">
-                        <span className={cn('px-2 py-0.5 rounded text-xs', ACCOUNT_TYPE_STYLE[r.accountType])}>{r.accountType}</span>
+                      <td className="px-4 py-3.5 font-mono text-sm text-primary">{r.accountCode}</td>
+                      <td className="px-4 py-3.5 text-sm text-primary">{r.accountName}</td>
+                      <td className="px-4 py-3.5">
+                        <span className={cn('px-2 py-0.5 rounded-full text-xs', ACCOUNT_TYPE_STYLE[r.accountType])}>{r.accountType}</span>
                       </td>
-                      <td className="px-3 py-2 text-right font-mono text-sm"><MoneyCell value={r.netBalance} /></td>
-                      <td className="px-3 py-2 text-sm">
+                      <td className="px-4 py-3.5 text-right font-mono text-sm"><MoneyCell value={r.netBalance} /></td>
+                      <td className="px-4 py-3.5 text-sm">
                         {r.mappingReportingLineName ? (
                           <span className="text-primary">{r.mappingReportingLineName}</span>
                         ) : suggestion ? (
@@ -406,7 +412,7 @@ export default function MappingPage() {
                           <span className="text-status-amber">⚠ Unmapped</span>
                         )}
                       </td>
-                      {canMap && <td className="px-3 py-2">
+                      {canMap && <td className="px-4 py-3.5">
                         {/* Unmapped row WITH a suggestion: Accept / Edit / Reject */}
                         {!r.mappingReportingLineId && suggestion && editingSuggestionId !== suggestion.id ? (
                           <div className="flex items-center gap-1">

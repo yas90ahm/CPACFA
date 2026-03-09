@@ -19,6 +19,8 @@ const DEMO_TENANT_ID = 'demo-cloudmetrics';
 const DEMO_TENANT_NAME = 'CloudMetrics Demo Inc.';
 const DEMO_USER_EMAIL = 'demo@cloudmetrics.io';
 const DEMO_USER_PASSWORD = 'DemoPass2026!';
+const DEMO_CONTROLLER_EMAIL = 'controller@cloudmetrics.io';
+const DEMO_CONTROLLER_PASSWORD = 'Controller2026!';
 const DEMO_PERIOD = '2025-01';
 const DEMO_ENTITY_ID = 'entity-1';
 
@@ -36,12 +38,20 @@ export async function seedDemo(): Promise<void> {
     [DEMO_TENANT_ID, DEMO_TENANT_NAME]
   );
 
-  // 2. Demo user (idempotent: create only if not exists)
+  // 2. Demo users (idempotent: create only if not exists)
   let user = await getUserByEmail(DEMO_TENANT_ID, DEMO_USER_EMAIL);
   if (!user) {
     const pwHash = await hashPassword(DEMO_USER_PASSWORD);
     user = await createUser(DEMO_TENANT_ID, DEMO_USER_EMAIL, pwHash, 'approver');
     console.log('[seed_demo] Created demo user:', DEMO_USER_EMAIL);
+  }
+
+  // Controller user
+  let controllerUser = await getUserByEmail(DEMO_TENANT_ID, DEMO_CONTROLLER_EMAIL);
+  if (!controllerUser) {
+    const pwHash = await hashPassword(DEMO_CONTROLLER_PASSWORD);
+    controllerUser = await createUser(DEMO_TENANT_ID, DEMO_CONTROLLER_EMAIL, pwHash, 'preparer');
+    console.log('[seed_demo] Created controller user:', DEMO_CONTROLLER_EMAIL);
   }
 
   const pool = await getTenantPoolWithMigrations(DEMO_TENANT_ID);
