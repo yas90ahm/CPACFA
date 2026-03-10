@@ -9,12 +9,26 @@ import { useAjeTemplates, useJournalEntries } from '@/lib/queries/adjustments';
 import { useVariances } from '@/lib/queries/variance';
 import { useStatements, useValidation } from '@/lib/queries/statements';
 import { useAuditTrail } from '@/lib/queries/audit-trail';
+import { useCertification } from '@/lib/queries/certification';
 import { useTrialBalanceContext } from '../context/trial-balance-context';
 import { cn } from '@/lib/utils';
-import { Check, Circle, ArrowRight, Zap, AlertTriangle, ChevronRight, RefreshCw } from 'lucide-react';
+import {
+  Check,
+  Circle,
+  ArrowRight,
+  AlertTriangle,
+  ChevronRight,
+  RefreshCw,
+  Clock,
+  BarChart3,
+  Activity,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
 import { OpenStateDashboard } from './OpenStateDashboard';
 import { FileUploadZone } from '@/components/shared/FileUploadZone';
 import { GLUploadFlow } from './GLUploadFlow';
+import { IntegrityRibbon } from '@/components/shared/IntegrityRibbon';
 import { useAuth } from '@/lib/auth';
 import { canReplaceGL, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
@@ -43,21 +57,13 @@ function formatRelativeTime(iso: string): string {
   }
 }
 
-function formatTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  } catch {
-    return iso;
-  }
-}
-
 const PIPELINE_STEPS = [
-  { id: 'upload', label: 'Upload', path: 'trial-balance' },
-  { id: 'map', label: 'Map', path: 'mapping' },
-  { id: 'recon', label: 'Recon', path: 'reconciliation' },
-  { id: 'adjust', label: 'Adjust', path: 'adjustments' },
-  { id: 'generate', label: 'Prepare', path: 'statements' },
-  { id: 'variance', label: 'Variance', path: 'variance' },
+  { id: 'upload', label: 'Upload GL', path: 'trial-balance' },
+  { id: 'map', label: 'Map Accounts', path: 'mapping' },
+  { id: 'recon', label: 'Reconcile', path: 'reconciliation' },
+  { id: 'adjust', label: 'Adjustments', path: 'adjustments' },
+  { id: 'generate', label: 'Statements', path: 'statements' },
+  { id: 'variance', label: 'Variances', path: 'variance' },
   { id: 'review', label: 'Review', path: 'review' },
   { id: 'certify', label: 'Certify', path: 'review' },
 ] as const;
@@ -72,6 +78,7 @@ export default function CloseDashboardPage() {
   const { data: session } = useCloseSession(sessionId);
   const { data: readiness } = useCloseReadiness(sessionId);
   const { data: issues = [] } = useCloseIssues(sessionId);
+  const { data: certification } = useCertification(sessionId);
   const [ingestToast, setIngestToast] = useState<string | null>(null);
   const [showReplaceConfirm, setShowReplaceConfirm] = useState(false);
   const [showReplaceUpload, setShowReplaceUpload] = useState(false);
@@ -109,23 +116,20 @@ export default function CloseDashboardPage() {
   const { data: variances = [] } = useVariances(sessionId);
   const { data: stmtData } = useStatements(sessionId);
   const { data: validation } = useValidation(sessionId);
-  const { data: auditTrail } = useAuditTrail(sessionId, { limit: 8 });
+  const { data: auditTrail } = useAuditTrail(sessionId, { limit: 10 });
   const { mappedCount, unmappedCount, rows: tbRows } = useTrialBalanceContext();
 
-  // Wait for session to load before rendering anything
+  // Loading state
   if (!session) {
     return (
-      <div className="space-y-6">
-        <div className="bg-surface border border-border rounded-card p-7 animate-pulse">
-          <div className="h-6 w-48 bg-elevated rounded mb-2" />
-          <div className="h-4 w-32 bg-elevated rounded mb-5" />
-          <div className="h-3.5 bg-elevated rounded-full mb-5" />
-          <div className="flex gap-6">
-            <div className="h-4 w-24 bg-elevated rounded" />
-            <div className="h-4 w-32 bg-elevated rounded" />
-            <div className="h-4 w-20 bg-elevated rounded" />
-          </div>
+      <div className="space-y-6 animate-pulse">
+        <div className="h-32 bg-[#141829] rounded-xl" />
+        <div className="grid grid-cols-3 gap-4">
+          <div className="h-24 bg-[#141829] rounded-xl" />
+          <div className="h-24 bg-[#141829] rounded-xl" />
+          <div className="h-24 bg-[#141829] rounded-xl" />
         </div>
+        <div className="h-48 bg-[#141829] rounded-xl" />
       </div>
     );
   }
@@ -140,7 +144,7 @@ export default function CloseDashboardPage() {
     );
   }
 
-  // GL Replace flow: show upload flow when a replacement file has been selected
+  // GL Replace flow
   if (replaceFile) {
     return (
       <div className="max-w-2xl space-y-8">
@@ -155,9 +159,7 @@ export default function CloseDashboardPage() {
           onBack={() => setReplaceFile(null)}
           skipAdvance
           replaceMode
-          onComplete={() => {
-            setReplaceFile(null);
-          }}
+          onComplete={() => setReplaceFile(null)}
         />
       </div>
     );
@@ -175,12 +177,10 @@ export default function CloseDashboardPage() {
   const ajeTemplateResolved = ajeTemplates.filter((t) => t.periodStatus === 'applied' || t.periodStatus === 'skipped').length;
   const ajeTemplateTotal = ajeTemplates.length;
   const ajeEntryAwaitingApproval = journalEntries.filter((e) => e.status === 'proposed').length;
-  const ajeApprovedNotPosted = journalEntries.find((e) => e.status === 'approved');
-  const ajeRejected = journalEntries.find((e) => e.status === 'rejected');
   const totalAccounts = tbRows.length;
   const mappingGatePassing = totalAccounts > 0 && unmappedCount === 0;
 
-  // Derive gate data
+  // Gate data
   const gatesBase = readiness?.gates ?? [];
   const gatesWithMapping = gatesBase.map((g) => {
     if (g.id === 'all_accounts_mapped') return { ...g, passing: mappingGatePassing, detail: `${mappedCount}/${totalAccounts} mapped` };
@@ -196,10 +196,11 @@ export default function CloseDashboardPage() {
   });
   const gatesPassing = gatesWithMapping.filter((g) => g.passing).length;
   const gatesTotal = gatesWithMapping.length;
+  const progressPct = gatesTotal > 0 ? Math.round((gatesPassing / gatesTotal) * 100) : 0;
 
-  // Derive pipeline step statuses
+  // Pipeline step statuses
   const pipelineStatus: Record<string, 'complete' | 'active' | 'pending'> = {};
-  pipelineStatus.upload = 'complete'; // Always complete once past OPEN state
+  pipelineStatus.upload = 'complete';
   pipelineStatus.map = mappingGatePassing ? 'complete' : totalAccounts > 0 ? 'active' : 'pending';
   pipelineStatus.recon = reconTotal > 0 && reconComplete === reconTotal ? 'complete' : reconTotal > 0 ? 'active' : 'pending';
   pipelineStatus.adjust = ajeTemplateTotal > 0 && ajeTemplatePending === 0 ? 'complete' : ajeTemplateTotal > 0 ? 'active' : 'pending';
@@ -209,7 +210,28 @@ export default function CloseDashboardPage() {
   pipelineStatus.review = reviewState === 'UNDER_REVIEW' || reviewState === 'CERTIFIED' || reviewState === 'LOCKED' ? 'complete' : 'pending';
   pipelineStatus.certify = reviewState === 'CERTIFIED' || reviewState === 'LOCKED' ? 'complete' : reviewState === 'UNDER_REVIEW' ? 'active' : 'pending';
 
-  // Financial highlights from statements
+  const completedSteps = Object.values(pipelineStatus).filter((s) => s === 'complete').length;
+  const activeStep = PIPELINE_STEPS.find((s) => pipelineStatus[s.id] === 'active');
+
+  // Timing
+  const startDate = session?.startedAt ?? session?.createdAt;
+  const dayElapsed = startDate ? Math.max(1, Math.ceil((Date.now() - new Date(startDate).getTime()) / 86400000)) : 1;
+  const targetDays = 10;
+  const statusLabel = dayElapsed <= targetDays * 0.7 ? 'On Track' : dayElapsed <= targetDays ? 'Behind' : 'Overdue';
+
+  // CTA
+  const firstFailing = gatesWithMapping.find((g) => !g.passing);
+  const allPassing = gatesPassing === gatesTotal && gatesTotal > 0;
+  const ctaLabel = allPassing
+    ? (session?.state === 'IN_PROGRESS' ? 'Submit for Review' : 'Ready to Certify')
+    : 'Continue Close';
+  const ctaHref = allPassing
+    ? `/close/${sessionId}/review`
+    : firstFailing?.navigateTo
+      ? firstFailing.navigateTo.replace('[sessionId]', sessionId)
+      : `/close/${sessionId}/mapping`;
+
+  // Financial highlights
   const highlights = useMemo(() => {
     if (!stmtData) return null;
     const findAmount = (lines: { lineItemName: string; amount: string; isGrandTotal?: boolean }[], pattern: RegExp): string | null => {
@@ -228,86 +250,60 @@ export default function CloseDashboardPage() {
     };
   }, [stmtData]);
 
-  // Validation checks
-  const validationChecks = validation?.checks ?? [];
-  const balanceEquation = highlights?.totalAssets && highlights?.totalLiabilities && highlights?.totalEquity;
+  // Attention items
+  const attentionItems: { text: string; link: string; linkLabel: string }[] = [];
+  if (unmappedCount > 0) attentionItems.push({ text: `${unmappedCount} accounts unmapped`, link: `/close/${sessionId}/mapping?unmapped=1`, linkLabel: 'Map Accounts' });
+  if (reconTotal > 0 && reconComplete < reconTotal) attentionItems.push({ text: `${reconTotal - reconComplete} reconciliations incomplete`, link: `/close/${sessionId}/reconciliation`, linkLabel: 'Reconcile' });
+  if (ajeTemplatePending > 0) attentionItems.push({ text: `${ajeTemplatePending} AJE template${ajeTemplatePending !== 1 ? 's' : ''} pending`, link: `/close/${sessionId}/adjustments?tab=templates`, linkLabel: 'Resolve' });
+  if (ajeEntryAwaitingApproval > 0) attentionItems.push({ text: `${ajeEntryAwaitingApproval} journal entr${ajeEntryAwaitingApproval !== 1 ? 'ies' : 'y'} awaiting approval`, link: `/close/${sessionId}/adjustments?tab=entries`, linkLabel: 'Review' });
+  if (statementsStale) attentionItems.push({ text: 'Statements stale — regeneration needed', link: `/close/${sessionId}/statements`, linkLabel: 'Regenerate' });
+  if (varianceUnexplained.length > 0) attentionItems.push({ text: `${varianceUnexplained.length} material variance${varianceUnexplained.length !== 1 ? 's' : ''} unexplained`, link: `/close/${sessionId}/variance`, linkLabel: 'Explain' });
 
-  // "What Needs Attention" items
-  const attentionItems: { icon: 'warn' | 'ok'; text: string; link: string; linkLabel: string }[] = [];
-  if (unmappedCount > 0) attentionItems.push({ icon: 'warn', text: `${unmappedCount} accounts unmapped`, link: `/close/${sessionId}/mapping?unmapped=1`, linkLabel: 'Go to Mapping' });
-  if (reconTotal > 0 && reconComplete < reconTotal) attentionItems.push({ icon: 'warn', text: `${reconTotal - reconComplete} reconciliations incomplete`, link: `/close/${sessionId}/reconciliation`, linkLabel: 'Go to Recon' });
-  if (ajeTemplatePending > 0) attentionItems.push({ icon: 'warn', text: `${ajeTemplatePending} AJE template${ajeTemplatePending !== 1 ? 's' : ''} not resolved`, link: `/close/${sessionId}/adjustments?tab=templates`, linkLabel: 'Go to Adjustments' });
-  if (ajeEntryAwaitingApproval > 0) attentionItems.push({ icon: 'warn', text: `${ajeEntryAwaitingApproval} journal entr${ajeEntryAwaitingApproval !== 1 ? 'ies' : 'y'} awaiting approval`, link: `/close/${sessionId}/adjustments?tab=entries`, linkLabel: 'Go to Adjustments' });
-  if (statementsStale) attentionItems.push({ icon: 'warn', text: 'Statements stale — regeneration needed', link: `/close/${sessionId}/statements`, linkLabel: 'Go to Statements' });
-  if (varianceUnexplained.length > 0) attentionItems.push({ icon: 'warn', text: `${varianceUnexplained.length} material variance${varianceUnexplained.length !== 1 ? 's' : ''} unexplained`, link: `/close/${sessionId}/variance`, linkLabel: 'Go to Variance' });
-  // "OK" items
-  if (totalAccounts > 0 && unmappedCount === 0) attentionItems.push({ icon: 'ok', text: 'All accounts mapped', link: '', linkLabel: '' });
-  if (reconTotal > 0 && reconComplete === reconTotal) attentionItems.push({ icon: 'ok', text: 'All reconciliations complete', link: '', linkLabel: '' });
-  if (journalEntries.length > 0 && journalEntries.every((e) => e.status === 'posted')) attentionItems.push({ icon: 'ok', text: 'All journal entries posted', link: '', linkLabel: '' });
+  const chainIntegrity = auditTrail?.chainIntegrity ?? null;
 
   return (
-    <div className="space-y-6">
-      {/* Ingest toast */}
+    <div className="space-y-6 max-w-[1200px]">
+      {/* Toast notifications */}
       {ingestToast && (
-        <div className="rounded-input border border-status-green bg-status-green-dim text-status-green px-4 py-3 text-sm flex items-center justify-between">
+        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 text-emerald-400 px-4 py-3 text-sm flex items-center justify-between">
           <span>{ingestToast}</span>
-          <button type="button" onClick={() => setIngestToast(null)} className="text-status-green hover:opacity-80" aria-label="Dismiss">×</button>
+          <button type="button" onClick={() => setIngestToast(null)} className="hover:opacity-80" aria-label="Dismiss">x</button>
         </div>
       )}
-
       {createdToast && (
-        <div className="rounded-input border border-accent bg-accent-dim text-accent px-4 py-3 text-sm flex items-center justify-between">
+        <div className="rounded-lg border border-[#7C5CFC]/30 bg-[#7C5CFC]/5 text-[#7C5CFC] px-4 py-3 text-sm flex items-center justify-between">
           <span>{createdToast}</span>
-          <button type="button" onClick={() => setCreatedToast(null)} className="text-accent hover:opacity-80" aria-label="Dismiss">×</button>
+          <button type="button" onClick={() => setCreatedToast(null)} className="hover:opacity-80" aria-label="Dismiss">x</button>
         </div>
       )}
 
-      {/* Replace GL confirmation dialog */}
+      {/* Replace GL dialogs */}
       {showReplaceConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-surface border border-border rounded-card p-6 max-w-md w-full mx-4 space-y-4 shadow-lg">
-            <h3 className="text-lg font-display text-primary">Replace GL Data?</h3>
-            <p className="text-sm text-text-secondary">
-              Replacing the GL will reset your trial balance. Account mappings will be preserved. Any reconciliations in progress may need to be re-verified.
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-[#1a1d2e] border border-[#2a2d3e] rounded-xl p-6 max-w-md w-full mx-4 space-y-4 shadow-2xl">
+            <h3 className="text-lg font-semibold text-white">Replace GL Data?</h3>
+            <p className="text-sm text-gray-400">
+              Replacing the GL will reset your trial balance. Account mappings will be preserved.
             </p>
             <div className="flex gap-3 justify-end">
-              <button
-                type="button"
-                onClick={() => setShowReplaceConfirm(false)}
-                className="px-4 py-2 rounded-input border border-border text-sm font-medium hover:bg-hover"
-              >
+              <button type="button" onClick={() => setShowReplaceConfirm(false)} className="px-4 py-2 rounded-lg border border-[#2a2d3e] text-sm text-gray-300 hover:bg-[#232845]">
                 Cancel
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowReplaceConfirm(false);
-                  // Show file upload zone inline — we use a temporary state
-                  setReplaceFile(null);
-                  // We need to show the upload zone; set a flag
-                  setShowReplaceUpload(true);
-                }}
-                className="px-4 py-2 rounded-input bg-accent text-accent-contrast text-sm font-medium hover:opacity-90"
-              >
+              <button type="button" onClick={() => { setShowReplaceConfirm(false); setShowReplaceUpload(true); }} className="px-4 py-2 rounded-lg bg-[#7C5CFC] text-white text-sm font-medium hover:bg-[#6B4FE0]">
                 Continue
               </button>
             </div>
           </div>
         </div>
       )}
-
-      {/* Replace GL file upload zone */}
       {showReplaceUpload && !replaceFile && (
-        <div className="bg-surface border border-border rounded-card p-6 space-y-4">
+        <div className="bg-[#141829] border border-[#262C48] rounded-xl p-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium text-primary">Upload Replacement GL File</h3>
-            <button type="button" onClick={() => setShowReplaceUpload(false)} className="text-sm text-text-secondary hover:text-primary">Cancel</button>
+            <h3 className="text-sm font-medium text-white">Upload Replacement GL File</h3>
+            <button type="button" onClick={() => setShowReplaceUpload(false)} className="text-sm text-gray-400 hover:text-white">Cancel</button>
           </div>
           <FileUploadZone
-            onFile={(f) => {
-              setReplaceFile(f);
-              setShowReplaceUpload(false);
-            }}
+            onFile={(f) => { setReplaceFile(f); setShowReplaceUpload(false); }}
             title="Drop your new GL export here"
             subtitle="or click to browse"
             hint="This will replace existing GL data for this period"
@@ -315,256 +311,249 @@ export default function CloseDashboardPage() {
         </div>
       )}
 
-      {/* Hero Progress Card */}
-      {(() => {
-        const progressPct = gatesTotal > 0 ? Math.round((gatesPassing / gatesTotal) * 100) : 0;
-        const startDate = session?.startedAt ?? session?.createdAt;
-        const dayElapsed = startDate ? Math.max(1, Math.ceil((Date.now() - new Date(startDate).getTime()) / 86400000)) : 1;
-        const targetDays = 10;
-        const statusLabel = dayElapsed <= targetDays * 0.7 ? 'On Track' : dayElapsed <= targetDays ? 'Behind' : 'Overdue';
-        const statusColor = statusLabel === 'On Track' ? 'text-status-green' : statusLabel === 'Behind' ? 'text-status-amber' : 'text-status-red';
-        const firstFailing = gatesWithMapping.find((g) => !g.passing);
-        const allPassing = gatesPassing === gatesTotal && gatesTotal > 0;
-        const ctaLabel = allPassing
-          ? (session?.state === 'IN_PROGRESS' ? 'Submit for Review' : 'Ready to Certify')
-          : 'Continue Close';
-        const ctaHref = allPassing
-          ? `/close/${sessionId}/review`
-          : firstFailing?.navigateTo
-            ? firstFailing.navigateTo.replace('[sessionId]', sessionId)
-            : `/close/${sessionId}/mapping`;
-
-        return (
-          <section className="bg-[#1a1d23] border border-border/60 rounded-card p-7 shadow-lg">
-            <div className="flex items-start justify-between mb-5">
-              <div>
-                <h1 className="text-2xl font-display text-white">
-                  {session?.periodLabel ?? ''} Close
-                </h1>
-                <p className="text-sm text-gray-400 mt-0.5">{session?.entityName ?? ''}</p>
-              </div>
-              <Link
-                href={ctaHref}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-accent text-white text-sm font-medium hover:bg-accent-hover shadow-glow-accent transition-all"
-              >
-                {ctaLabel} <ArrowRight className="w-4 h-4" />
-              </Link>
-            </div>
-
-            <div className="flex items-center gap-4 mb-5">
-              <div className="flex-1 h-3.5 bg-white/10 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-accent rounded-full transition-all duration-500"
-                  style={{ width: `${progressPct}%` }}
-                />
-              </div>
-              <span className="text-2xl font-bold text-white tabular-nums">{progressPct}%</span>
-            </div>
-
-            <div className="flex items-center gap-6 text-sm">
-              <span className="text-gray-400">
-                Day <span className="text-white font-medium">{dayElapsed}</span> of {targetDays}
-              </span>
-              <span className="text-gray-400">
-                <span className="text-white font-medium">{gatesPassing}</span> of {gatesTotal} gates passing
-              </span>
-              <span className={cn('font-medium', statusColor)}>{statusLabel}</span>
-            </div>
-          </section>
-        );
-      })()}
-
-      {/* Page header with Prepare Close button */}
-      <div className="flex items-center justify-between">
+      {/* === HEADER === */}
+      <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-display text-primary">{session?.periodLabel ?? ''} Close</h1>
-          <p className="text-sm text-text-secondary mt-0.5">Status: {session?.state?.replace('_', ' ') ?? 'IN PROGRESS'}</p>
+          <div className="flex items-center gap-3 mb-1">
+            <h1 className="text-2xl font-semibold text-white tracking-tight">
+              {session?.periodLabel ?? ''} Close
+            </h1>
+            <IntegrityRibbon
+              chainIntegrity={chainIntegrity}
+              certified={!!certification}
+              certifiedBy={certification?.certifiedBy}
+              certifiedAt={certification?.certifiedAt}
+              snapshotHash={certification?.snapshotHash}
+              signature={certification?.signature}
+            />
+          </div>
+          <p className="text-sm text-gray-500">{session?.entityName ?? ''}</p>
         </div>
         <div className="flex items-center gap-3">
           {canReplaceGL(role) && session?.state === 'IN_PROGRESS' && (
             <button
               type="button"
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-input border border-border text-xs font-medium text-text-secondary hover:bg-hover hover:text-primary"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#2a2d3e] text-xs text-gray-400 hover:bg-[#1a1d2e] hover:text-white transition-colors"
               onClick={() => setShowReplaceConfirm(true)}
             >
-              <RefreshCw className="w-3.5 h-3.5" /> Replace GL Data
+              <RefreshCw className="w-3.5 h-3.5" /> Replace GL
             </button>
           )}
           {!readOnly && (session?.state === 'IN_PROGRESS' || session?.state === 'OPEN') && (
-            <button
-              type="button"
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-accent text-white text-sm font-medium hover:bg-accent-hover shadow-glow-accent transition-all"
-              onClick={() => {
-                const firstIncomplete = PIPELINE_STEPS.find((s) => pipelineStatus[s.id] !== 'complete');
-                if (firstIncomplete) {
-                  window.location.href = `/close/${sessionId}/${firstIncomplete.path}`;
-                }
-              }}
+            <Link
+              href={ctaHref}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#7C5CFC] text-white text-sm font-medium hover:bg-[#6B4FE0] transition-colors"
             >
-              <Zap className="w-4 h-4" /> Prepare Close
-            </button>
+              {ctaLabel} <ArrowRight className="w-4 h-4" />
+            </Link>
           )}
         </div>
       </div>
 
-      {/* Pipeline visualization */}
-      <section className="bg-surface border border-border rounded-card p-5">
-        <h2 className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-4">Pipeline</h2>
-        <div className="flex items-center gap-1 overflow-x-auto pb-1">
-          {PIPELINE_STEPS.map((step, i) => {
-            const status = pipelineStatus[step.id] ?? 'pending';
-            return (
-              <div key={step.id} className="flex items-center gap-1 shrink-0">
-                <Link
-                  href={`/close/${sessionId}/${step.path}`}
-                  className={cn(
-                    'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors',
-                    status === 'complete' && 'bg-status-green-dim text-status-green',
-                    status === 'active' && 'bg-accent-dim text-accent ring-1 ring-accent/30',
-                    status === 'pending' && 'bg-elevated text-text-tertiary',
-                  )}
-                >
-                  {status === 'complete' && <Check className="w-3 h-3" />}
-                  {status === 'active' && <Circle className="w-3 h-3 fill-current" />}
-                  {status === 'pending' && <Circle className="w-3 h-3" />}
-                  {step.label}
-                </Link>
-                {i < PIPELINE_STEPS.length - 1 && (
-                  <ChevronRight className="w-3 h-3 text-text-muted shrink-0" />
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* Action Items */}
-      <section>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-xs font-medium text-text-secondary uppercase tracking-wide">Action Items</h2>
-          <span className="text-xs text-text-tertiary">
-            {attentionItems.filter((i) => i.icon === 'ok').length} of {attentionItems.length} complete
-          </span>
-        </div>
-        {attentionItems.filter((i) => i.icon === 'warn').length === 0 && attentionItems.length > 0 ? (
-          <div className="bg-status-green-dim border border-status-green/30 rounded-card p-4 flex items-center gap-3 text-sm text-status-green">
-            <Check className="w-5 h-5 shrink-0" />
-            <span className="font-medium">All action items resolved — ready for review.</span>
+      {/* === STATUS CARDS === */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Progress Card */}
+        <div className="bg-[#141829] border border-[#262C48] rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Close Progress</span>
+            <BarChart3 className="w-4 h-4 text-gray-600" />
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {attentionItems.filter((i) => i.icon === 'warn').map((item, i) => (
-              <Link
-                key={i}
-                href={item.link}
-                className="bg-surface border border-border rounded-card p-4 hover:border-accent transition-colors group"
-              >
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="w-4 h-4 text-status-amber shrink-0 mt-0.5" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-primary">{item.text}</p>
-                    <p className="text-xs text-accent mt-1 flex items-center gap-1 group-hover:underline">
-                      {item.linkLabel} <ArrowRight className="w-3 h-3" />
-                    </p>
+          <div className="flex items-end gap-3 mb-3">
+            <span className="text-3xl font-semibold text-white tabular-nums">{progressPct}%</span>
+            <span className="text-sm text-gray-500 mb-1">{gatesPassing}/{gatesTotal} gates</span>
+          </div>
+          <div className="h-2 bg-[#1a1d2e] rounded-full overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-700"
+              style={{
+                width: `${progressPct}%`,
+                background: progressPct === 100 ? '#34D399' : '#7C5CFC',
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Timeline Card */}
+        <div className="bg-[#141829] border border-[#262C48] rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Timeline</span>
+            <Clock className="w-4 h-4 text-gray-600" />
+          </div>
+          <div className="flex items-end gap-3 mb-3">
+            <span className="text-3xl font-semibold text-white tabular-nums">Day {dayElapsed}</span>
+            <span className="text-sm text-gray-500 mb-1">of {targetDays}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={cn(
+              'px-2 py-0.5 rounded text-xs font-medium',
+              statusLabel === 'On Track' && 'bg-emerald-500/10 text-emerald-400',
+              statusLabel === 'Behind' && 'bg-amber-500/10 text-amber-400',
+              statusLabel === 'Overdue' && 'bg-red-500/10 text-red-400',
+            )}>
+              {statusLabel}
+            </span>
+            {activeStep && (
+              <span className="text-xs text-gray-500">Current: {activeStep.label}</span>
+            )}
+          </div>
+        </div>
+
+        {/* Session State Card */}
+        <div className="bg-[#141829] border border-[#262C48] rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Session State</span>
+            <Activity className="w-4 h-4 text-gray-600" />
+          </div>
+          <div className="mb-3">
+            <span className={cn(
+              'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium',
+              reviewState === 'IN_PROGRESS' && 'bg-amber-500/10 text-amber-400',
+              reviewState === 'UNDER_REVIEW' && 'bg-[#7C5CFC]/10 text-[#7C5CFC]',
+              reviewState === 'CERTIFIED' && 'bg-emerald-500/10 text-emerald-400',
+              reviewState === 'LOCKED' && 'bg-gray-500/10 text-gray-400',
+            )}>
+              <span className={cn(
+                'w-2 h-2 rounded-full',
+                reviewState === 'IN_PROGRESS' && 'bg-amber-400',
+                reviewState === 'UNDER_REVIEW' && 'bg-[#7C5CFC]',
+                reviewState === 'CERTIFIED' && 'bg-emerald-400',
+                reviewState === 'LOCKED' && 'bg-gray-400',
+              )} />
+              {reviewState.replace('_', ' ')}
+            </span>
+          </div>
+          <p className="text-xs text-gray-500">
+            {attentionItems.length > 0
+              ? `${attentionItems.length} item${attentionItems.length !== 1 ? 's' : ''} need attention`
+              : 'All tasks complete'}
+          </p>
+        </div>
+      </div>
+
+      {/* === CLOSE PROGRESS WATERFALL === */}
+      <div className="bg-[#141829] border border-[#262C48] rounded-xl p-6">
+        <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-5">Close Pipeline</h2>
+        <div className="relative">
+          {/* Connecting line */}
+          <div className="absolute top-5 left-5 right-5 h-px bg-[#262C48]" />
+          <div className="relative flex items-start justify-between">
+            {PIPELINE_STEPS.map((step, i) => {
+              const status = pipelineStatus[step.id] ?? 'pending';
+              return (
+                <Link
+                  key={step.id}
+                  href={`/close/${sessionId}/${step.path}`}
+                  className="flex flex-col items-center gap-2 group relative z-10"
+                  style={{ width: `${100 / PIPELINE_STEPS.length}%` }}
+                >
+                  <div className={cn(
+                    'w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium border-2 transition-all',
+                    status === 'complete' && 'bg-emerald-500/10 border-emerald-500 text-emerald-400',
+                    status === 'active' && 'bg-[#7C5CFC]/10 border-[#7C5CFC] text-[#7C5CFC] ring-4 ring-[#7C5CFC]/10',
+                    status === 'pending' && 'bg-[#1a1d2e] border-[#2a2d3e] text-gray-600',
+                  )}>
+                    {status === 'complete' ? <Check className="w-4 h-4" /> : i + 1}
                   </div>
-                </div>
+                  <span className={cn(
+                    'text-xs font-medium text-center transition-colors',
+                    status === 'complete' && 'text-emerald-400',
+                    status === 'active' && 'text-white',
+                    status === 'pending' && 'text-gray-600',
+                  )}>
+                    {step.label}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* === GATE STATUS + FINANCIALS === */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Gate Status */}
+        <div className="bg-[#141829] border border-[#262C48] rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider">Gate Status</h2>
+            <span className="text-xs text-gray-500 tabular-nums">{gatesPassing}/{gatesTotal} passing</span>
+          </div>
+          <div className="space-y-1">
+            {gatesWithMapping.map((gate) => (
+              <Link
+                key={gate.id}
+                href={(gate.navigateTo ?? '').replace('[sessionId]', sessionId)}
+                className="flex items-center gap-3 py-2.5 px-3 rounded-lg hover:bg-[#1a1d2e] transition-colors group"
+              >
+                {gate.passing ? (
+                  <div className="w-5 h-5 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0">
+                    <Check className="w-3 h-3 text-emerald-400" />
+                  </div>
+                ) : (
+                  <div className="w-5 h-5 rounded-full border-2 border-amber-500/50 shrink-0" />
+                )}
+                <span className="flex-1 text-sm text-gray-300 group-hover:text-white transition-colors">{gate.name}</span>
+                <span className="text-xs text-gray-600 font-mono">{gate.detail}</span>
               </Link>
             ))}
           </div>
-        )}
-      </section>
+        </div>
 
-      {/* Gate Status + Period Summary side-by-side */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Gate Status */}
-        <section className="bg-surface border border-border rounded-card p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xs font-medium text-text-secondary uppercase tracking-wide">Gate Status</h2>
-            <span className="text-sm font-mono text-primary">{gatesPassing} of {gatesTotal} passing</span>
-          </div>
-          <div className="h-2 bg-elevated rounded-full mb-4 overflow-hidden">
-            <div className="h-full bg-accent rounded-full transition-all" style={{ width: `${gatesTotal > 0 ? (gatesPassing / gatesTotal) * 100 : 0}%` }} />
-          </div>
-          <ul className="space-y-1.5">
-            {gatesWithMapping.map((gate) => (
-              <li key={gate.id}>
-                <Link
-                  href={(gate.navigateTo ?? '').replace('[sessionId]', sessionId)}
-                  className="flex items-center gap-2.5 py-1.5 px-2 rounded-input hover:bg-hover text-sm"
-                >
-                  {gate.passing ? (
-                    <Check className="w-4 h-4 text-status-green shrink-0" />
-                  ) : (
-                    <span className="w-4 h-4 rounded-full border-2 border-status-amber shrink-0" />
-                  )}
-                  <span className="flex-1 text-primary">{gate.name}</span>
-                  <span className="text-xs text-text-secondary font-mono">{gate.detail}</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        {/* Period Summary */}
-        <section className="bg-surface border border-border rounded-card p-5">
-          <h2 className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-4">Period Summary</h2>
+        {/* Financial Summary */}
+        <div className="bg-[#141829] border border-[#262C48] rounded-xl p-5">
+          <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-4">Period Summary</h2>
           {highlights && (highlights.revenue || highlights.totalAssets) ? (
             <div className="space-y-3">
-              <dl className="space-y-2 text-sm">
+              <div className="grid grid-cols-2 gap-4">
                 {highlights.revenue && (
-                  <div className="flex justify-between">
-                    <dt className="text-text-secondary">Total Revenue</dt>
-                    <dd className="font-mono text-primary">{formatMoney(highlights.revenue)}</dd>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Revenue</p>
+                    <p className="text-lg font-semibold text-white tabular-nums">{formatMoney(highlights.revenue)}</p>
                   </div>
                 )}
                 {highlights.netIncome && (
-                  <div className="flex justify-between">
-                    <dt className="text-text-secondary">Net Income</dt>
-                    <dd className="font-mono text-primary">{formatMoney(highlights.netIncome)}</dd>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Net Income</p>
+                    <p className="text-lg font-semibold text-white tabular-nums">{formatMoney(highlights.netIncome)}</p>
                   </div>
                 )}
-                <div className="border-t border-border-light my-1" />
+              </div>
+              <div className="border-t border-[#262C48] pt-3 grid grid-cols-3 gap-4">
                 {highlights.totalAssets && (
-                  <div className="flex justify-between">
-                    <dt className="text-text-secondary">Total Assets</dt>
-                    <dd className="font-mono text-primary">{formatMoney(highlights.totalAssets)}</dd>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Assets</p>
+                    <p className="text-sm font-medium text-gray-300 tabular-nums">{formatMoney(highlights.totalAssets)}</p>
                   </div>
                 )}
                 {highlights.totalLiabilities && (
-                  <div className="flex justify-between">
-                    <dt className="text-text-secondary">Total Liabilities</dt>
-                    <dd className="font-mono text-primary">{formatMoney(highlights.totalLiabilities)}</dd>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Liabilities</p>
+                    <p className="text-sm font-medium text-gray-300 tabular-nums">{formatMoney(highlights.totalLiabilities)}</p>
                   </div>
                 )}
                 {highlights.totalEquity && (
-                  <div className="flex justify-between">
-                    <dt className="text-text-secondary">Total Equity</dt>
-                    <dd className="font-mono text-primary">{formatMoney(highlights.totalEquity)}</dd>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Equity</p>
+                    <p className="text-sm font-medium text-gray-300 tabular-nums">{formatMoney(highlights.totalEquity)}</p>
                   </div>
                 )}
-              </dl>
-              {balanceEquation && (
-                <div className={cn(
-                  'flex items-center gap-2 text-xs px-3 py-2 rounded-input',
-                  validation?.allPassing ? 'bg-status-green-dim text-status-green' : 'bg-surface-alt text-text-secondary'
-                )}>
-                  {validation?.allPassing && <Check className="w-3.5 h-3.5" />}
-                  A = L + E {validation?.allPassing ? ' — verified' : ''}
+              </div>
+              {validation?.allPassing && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/5 border border-emerald-500/10 text-emerald-400 text-xs">
+                  <Check className="w-3.5 h-3.5" />
+                  A = L + E verified
                 </div>
               )}
-              {/* Prior period comparison from variance data */}
               {variances.length > 0 && (
-                <div className="pt-2 border-t border-border-light">
-                  <p className="text-xs text-text-tertiary mb-2">vs Prior Period:</p>
+                <div className="border-t border-[#262C48] pt-3">
+                  <p className="text-xs text-gray-600 mb-2">vs Prior Period</p>
                   <div className="space-y-1">
                     {variances.filter((v) => v.isMaterial).slice(0, 3).map((v) => {
                       const pct = parseFloat(v.changePercent || '0');
-                      const isUp = pct > 0;
                       return (
                         <div key={v.id} className="flex justify-between text-xs">
-                          <span className="text-text-secondary truncate mr-2">{v.lineItemName}</span>
-                          <span className={cn('font-mono shrink-0', isUp ? 'text-status-green' : pct < 0 ? 'text-status-red' : 'text-text-secondary')}>
-                            {isUp ? '+' : ''}{pct.toFixed(1)}%
+                          <span className="text-gray-500 truncate mr-2">{v.lineItemName}</span>
+                          <span className={cn('font-mono shrink-0', pct > 0 ? 'text-emerald-400' : pct < 0 ? 'text-red-400' : 'text-gray-500')}>
+                            {pct > 0 ? '+' : ''}{pct.toFixed(1)}%
                           </span>
                         </div>
                       );
@@ -574,31 +563,72 @@ export default function CloseDashboardPage() {
               )}
             </div>
           ) : (
-            <p className="text-sm text-text-tertiary">Generate financial statements to see period summary.</p>
+            <div className="text-sm text-gray-600 py-4 text-center">
+              Generate financial statements to see period summary
+            </div>
           )}
-        </section>
+        </div>
       </div>
 
-      {/* Recent Activity */}
-      <section className="bg-surface border border-border rounded-card p-5">
-        <h2 className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-4">Recent Activity</h2>
-        <ul className="space-y-2">
-          {(auditTrail?.events ?? []).length === 0 ? (
-            <li className="text-sm text-text-tertiary">No recent activity</li>
-          ) : (
-            (auditTrail?.events ?? []).map((a) => (
-              <li key={a.id} className="flex items-start gap-3 text-sm py-1">
-                <span className="text-xs font-mono text-text-tertiary w-16 shrink-0 pt-0.5">{formatTime(a.timestamp)}</span>
-                <span className="text-text-secondary">{a.userName ?? a.userId ?? 'System'}</span>
-                <span className="text-primary flex-1">{a.description || a.eventType}</span>
-              </li>
-            ))
-          )}
-        </ul>
-        <Link href={`/close/${sessionId}/audit-trail`} className="mt-3 inline-block text-xs text-accent hover:underline">
-          View full audit trail
-        </Link>
-      </section>
+      {/* === ACTION ITEMS (only if there are items) === */}
+      {attentionItems.length > 0 && (
+        <div className="bg-[#141829] border border-amber-500/20 rounded-xl p-5">
+          <h2 className="text-xs font-medium text-amber-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+            <AlertTriangle className="w-3.5 h-3.5" />
+            Needs Attention
+          </h2>
+          <div className="space-y-2">
+            {attentionItems.map((item, i) => (
+              <div key={i} className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-[#1a1d2e] transition-colors">
+                <span className="text-sm text-gray-300">{item.text}</span>
+                <Link href={item.link} className="text-xs text-[#7C5CFC] hover:text-white font-medium flex items-center gap-1 shrink-0">
+                  {item.linkLabel} <ArrowRight className="w-3 h-3" />
+                </Link>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* All clear banner */}
+      {attentionItems.length === 0 && gatesTotal > 0 && (
+        <div className="flex items-center gap-3 px-5 py-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20 text-emerald-400 text-sm">
+          <Check className="w-5 h-5 shrink-0" />
+          <span className="font-medium">All action items resolved — ready for review.</span>
+        </div>
+      )}
+
+      {/* === RECENT ACTIVITY === */}
+      <div className="bg-[#141829] border border-[#262C48] rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider">Recent Activity</h2>
+          <Link href={`/close/${sessionId}/audit-trail`} className="text-xs text-[#7C5CFC] hover:text-white transition-colors">
+            View all
+          </Link>
+        </div>
+        {(auditTrail?.events ?? []).length === 0 ? (
+          <p className="text-sm text-gray-600 py-2">No recent activity</p>
+        ) : (
+          <div className="space-y-0">
+            {(auditTrail?.events ?? []).map((a, i) => (
+              <div key={a.id} className={cn(
+                'flex items-start gap-4 py-3',
+                i < (auditTrail?.events ?? []).length - 1 && 'border-b border-[#1e2135]'
+              )}>
+                <div className="w-8 h-8 rounded-full bg-[#1a1d2e] border border-[#262C48] flex items-center justify-center shrink-0 mt-0.5">
+                  <Activity className="w-3.5 h-3.5 text-gray-500" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-gray-300">{a.description || a.eventType}</p>
+                  <p className="text-xs text-gray-600 mt-0.5">
+                    {a.userName ?? a.userId ?? 'System'} · {formatRelativeTime(a.timestamp)}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
