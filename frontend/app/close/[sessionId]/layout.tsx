@@ -15,6 +15,7 @@ import { useAuth } from '@/lib/auth';
 import { getUserDisplay } from '@/lib/utils';
 import { isReadOnly, canCertify, canLockPeriod, canSubmitForReview, isSidebarItemVisible } from '@/lib/permissions';
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary';
+import { VerifiedCloseWorkflow } from '@/components/shared/VerifiedCloseWorkflow';
 import { TrialBalanceProvider, useTrialBalanceContext } from './context/trial-balance-context';
 
 function CloseSessionInner({ children }: { children: React.ReactNode }) {
@@ -115,7 +116,10 @@ function CloseSessionInner({ children }: { children: React.ReactNode }) {
           paddingTop: readOnly ? 'calc(56px + 40px + 32px)' : 'calc(56px + 40px)',
         }}
       >
-        <div className="p-6">{children}</div>
+        <div className="p-6">
+          <VerifiedCloseWorkflow sessionId={sessionId} />
+          {children}
+        </div>
       </main>
       <IssuePanel
         issues={issues}
