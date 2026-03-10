@@ -18,6 +18,7 @@ import {
   Settings,
   BookOpen,
   HeartPulse,
+  Brain,
   ChevronDown,
   PanelLeftClose,
   PanelLeft,
@@ -27,7 +28,7 @@ interface NavItem {
   href: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-  badgeProp?: 'recon' | 'adjustments' | 'unmapped' | 'variance';
+  badgeProp?: 'recon' | 'adjustments' | 'unmapped' | 'variance' | 'aiPending';
   external?: boolean;
 }
 
@@ -54,6 +55,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: 'mapping', label: 'Account Mapping', icon: ArrowRightLeft, badgeProp: 'unmapped' },
       { href: 'reconciliation', label: 'Reconciliation', icon: ShieldCheck, badgeProp: 'recon' },
       { href: 'adjustments', label: 'Adjustments', icon: PenLine, badgeProp: 'adjustments' },
+      { href: 'ai-review', label: 'AI Review', icon: Brain, badgeProp: 'aiPending' },
     ],
   },
   {
@@ -83,6 +85,7 @@ export function Sidebar({
   adjustmentsBadge = 0,
   statementsStale = false,
   varianceUnexplainedCount = 0,
+  aiPendingCount = 0,
   sessionState,
   userRole,
   collapsed = false,
@@ -94,6 +97,7 @@ export function Sidebar({
   adjustmentsBadge?: number;
   statementsStale?: boolean;
   varianceUnexplainedCount?: number;
+  aiPendingCount?: number;
   sessionState?: string;
   userRole?: string;
   collapsed?: boolean;
@@ -118,6 +122,7 @@ export function Sidebar({
     if (badgeProp === 'recon') return reconIncompleteCount;
     if (badgeProp === 'adjustments') return adjustmentsBadge;
     if (badgeProp === 'variance') return varianceUnexplainedCount;
+    if (badgeProp === 'aiPending') return aiPendingCount;
     return 0;
   };
 

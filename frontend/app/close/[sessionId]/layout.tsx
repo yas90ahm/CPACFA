@@ -10,6 +10,7 @@ import { useCloseSession, useCloseIssues, useCloseReadiness } from '@/lib/querie
 import { useReconciliations } from '@/lib/queries/reconciliations';
 import { useAjeTemplates, useJournalEntries } from '@/lib/queries/adjustments';
 import { useVariances } from '@/lib/queries/variance';
+import { useHITLStaging } from '@/lib/queries/ai-insights';
 import { useAuth } from '@/lib/auth';
 import { getUserDisplay } from '@/lib/utils';
 import { isReadOnly, canCertify, canLockPeriod, canSubmitForReview, isSidebarItemVisible } from '@/lib/permissions';
@@ -54,6 +55,8 @@ function CloseSessionInner({ children }: { children: React.ReactNode }) {
   const { data: ajeTemplates = [] } = useAjeTemplates(sessionId);
   const { data: journalEntries = [] } = useJournalEntries(sessionId);
   const { data: variances = [] } = useVariances(sessionId);
+  const { data: allStaging = [] } = useHITLStaging();
+  const aiPendingCount = allStaging.filter((s) => s.status === 'pending').length;
   const reconIncompleteCount = reconciliations.filter((r) => r.status !== 'approved').length;
   const adjustmentsPendingTemplates = ajeTemplates.filter((t) => t.periodStatus === 'pending').length;
   const adjustmentsPendingEntries = journalEntries.filter((e) => e.status === 'proposed' || e.status === 'rejected').length;
@@ -99,6 +102,7 @@ function CloseSessionInner({ children }: { children: React.ReactNode }) {
         adjustmentsBadge={adjustmentsBadge}
         statementsStale={statementsStale}
         varianceUnexplainedCount={varianceUnexplainedCount}
+        aiPendingCount={aiPendingCount}
         sessionState={state}
         userRole={role}
         collapsed={sidebarCollapsed}
