@@ -15,6 +15,7 @@ import { MoneyCell } from '@/components/shared/MoneyCell';
 import { cn } from '@/lib/utils';
 import { sumMoneyStrings } from '@/lib/money';
 import type { JournalEntry, JournalEntryStatus, AJETemplate } from '@/lib/types/journal-entry';
+import { JEClassificationHint } from '@/components/shared/SmartCloseAssistant';
 
 const displayUser = (user: { userId: string; email?: string } | null) => user?.email ?? user?.userId ?? 'Unknown';
 
@@ -376,6 +377,13 @@ export default function AdjustmentsPage() {
           Templates: {pendingTemplatesCount > 0 ? `${pendingTemplatesCount} pending` : 'All resolved ✓'}
         </span>
       </div>
+
+      <JEClassificationHint
+        pendingCount={draftCount}
+        proposedCount={proposedCount}
+        postedCount={postedCount}
+        templatesPending={pendingTemplatesCount}
+      />
 
       <div className="flex border-b border-border">
         <button

@@ -9,7 +9,7 @@ import { useCertification } from '@/lib/queries/certification';
 import { useAuth } from '@/lib/auth';
 import { useStatements } from '@/lib/queries/statements';
 import { useAuditTrail } from '@/lib/queries/audit-trail';
-import { useJournalEntries } from '@/lib/queries/adjustments';
+import { useJournalEntries, useAjeTemplates } from '@/lib/queries/adjustments';
 import { useReconciliations } from '@/lib/queries/reconciliations';
 import { useVariances } from '@/lib/queries/variance';
 import { useBoardPackage } from '@/lib/queries/cumulative';
@@ -40,6 +40,7 @@ import {
   Shield,
 } from 'lucide-react';
 import { canSubmitForReview, canCertify, canLockPeriod, canReopenPeriod, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
+import { CloseChecklistSuggestions } from '@/components/shared/SmartCloseAssistant';
 
 export default function ReviewPage() {
   const params = useParams();
@@ -68,6 +69,7 @@ export default function ReviewPage() {
   const { data: journalEntries = [] } = useJournalEntries(sessionId);
   const { data: reconciliations = [] } = useReconciliations(sessionId);
   const { data: variances = [] } = useVariances(sessionId);
+  const { data: ajeTemplates = [] } = useAjeTemplates(sessionId);
 
   const { data: manifestData } = useQuery({
     queryKey: ['evidence-manifest', sessionId],
@@ -359,6 +361,22 @@ export default function ReviewPage() {
       {/* Certification Checklist (visible in IN_PROGRESS and UNDER_REVIEW) */}
       {(currentState === 'IN_PROGRESS' || currentState === 'UNDER_REVIEW') && (
         <CertificationChecklist gates={gatesWithTies} sessionId={sessionId} />
+      )}
+
+      {/* AI Next Steps (visible in IN_PROGRESS) */}
+      {currentState === 'IN_PROGRESS' && (
+        <CloseChecklistSuggestions
+          sessionId={sessionId}
+          unmappedCount={0}
+          reconIncomplete={reconciliations.filter((r) => r.status !== 'completed' && r.status !== 'approved').length}
+          reconTotal={reconciliations.length}
+          templatesPending={ajeTemplates.filter((t) => t.periodStatus === 'pending').length}
+          proposedEntries={journalEntries.filter((e) => e.status === 'proposed').length}
+          statementsGenerated={!!statementsData?.incomeStatement}
+          statementsStale={session?.statementsStale ?? false}
+          varianceUnexplained={variances.filter((v) => v.isMaterial && v.explanationStatus === 'pending').length}
+          currentState={currentState}
+        />
       )}
 
       {/* Close Package Summary */}

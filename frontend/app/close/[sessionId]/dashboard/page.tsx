@@ -30,6 +30,8 @@ import { FileUploadZone } from '@/components/shared/FileUploadZone';
 import { GLUploadFlow } from './GLUploadFlow';
 import { IntegrityRibbon } from '@/components/shared/IntegrityRibbon';
 import { AIInsightsPanel } from '@/components/shared/AIInsightsPanel';
+import { CloseHealthScore } from '@/components/shared/SmartCloseAssistant';
+import { useHITLStaging } from '@/lib/queries/ai-insights';
 import { useAuth } from '@/lib/auth';
 import { canReplaceGL, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
@@ -119,6 +121,8 @@ export default function CloseDashboardPage() {
   const { data: validation } = useValidation(sessionId);
   const { data: auditTrail } = useAuditTrail(sessionId, { limit: 10 });
   const { mappedCount, unmappedCount, rows: tbRows } = useTrialBalanceContext();
+  const { data: allStaging = [] } = useHITLStaging();
+  const aiPendingCount = allStaging.filter((s) => s.status === 'pending').length;
 
   // Loading state
   if (!session) {
@@ -352,7 +356,7 @@ export default function CloseDashboardPage() {
       </div>
 
       {/* === STATUS CARDS === */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {/* Progress Card */}
         <div className="bg-[#141829] border border-[#262C48] rounded-xl p-5">
           <div className="flex items-center justify-between mb-4">
@@ -429,6 +433,17 @@ export default function CloseDashboardPage() {
               : 'All tasks complete'}
           </p>
         </div>
+
+        {/* Close Health Score */}
+        <CloseHealthScore
+          gatesPassing={gatesPassing}
+          gatesTotal={gatesTotal}
+          reconComplete={reconComplete}
+          reconTotal={reconTotal}
+          aiPendingCount={aiPendingCount}
+          chainIntegrity={chainIntegrity}
+          overdueItems={attentionItems.length}
+        />
       </div>
 
       {/* === CLOSE PROGRESS WATERFALL === */}

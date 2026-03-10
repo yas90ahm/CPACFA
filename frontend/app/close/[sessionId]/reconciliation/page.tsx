@@ -14,6 +14,7 @@ import { moneyAbs, cmpMoney, sumMoneyStrings, fmtMoney } from '@/lib/money';
 import { Paperclip, Check, AlertCircle, Layers, CheckCircle2, Loader2 } from 'lucide-react';
 import { canCompleteRecon, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 import { useAuth } from '@/lib/auth';
+import { ReconAIFlags } from '@/components/shared/SmartCloseAssistant';
 
 const STATUS_ORDER: ReconStatus[] = ['not_started', 'in_progress', 'completed', 'approved'];
 const STATUS_LABEL: Record<ReconStatus, string> = {
@@ -706,6 +707,13 @@ export default function ReconciliationPage() {
           </label>
         </FilterBar>
       </div>
+
+      {!batchMode && (
+        <ReconAIFlags
+          reconciliations={recons as unknown as Parameters<typeof ReconAIFlags>[0]['reconciliations']}
+          sessionId={sessionId}
+        />
+      )}
 
       <DataTable
         columns={columns}
