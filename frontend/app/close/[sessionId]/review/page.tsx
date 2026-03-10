@@ -41,6 +41,7 @@ import {
 } from 'lucide-react';
 import { canSubmitForReview, canCertify, canLockPeriod, canReopenPeriod, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 import { CloseChecklistSuggestions } from '@/components/shared/SmartCloseAssistant';
+import { AuditDefenseExport } from '@/components/shared/AuditDefenseExport';
 
 export default function ReviewPage() {
   const params = useParams();
@@ -621,6 +622,13 @@ export default function ReviewPage() {
           )}
         </div>
       )}
+
+      {/* Audit Defense Export */}
+      <AuditDefenseExport
+        sessionId={sessionId}
+        periodLabel={session?.periodLabel ?? ''}
+        isCertified={currentState === 'CERTIFIED' || currentState === 'LOCKED'}
+      />
 
       {/* Submit for Review Dialog */}
       <ConfirmDialog
