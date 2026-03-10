@@ -19,6 +19,7 @@ import {
   BookOpen,
   HeartPulse,
   Brain,
+  ListChecks,
   ChevronDown,
   PanelLeftClose,
   PanelLeft,
@@ -56,6 +57,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: 'reconciliation', label: 'Reconciliation', icon: ShieldCheck, badgeProp: 'recon' },
       { href: 'adjustments', label: 'Adjustments', icon: PenLine, badgeProp: 'adjustments' },
       { href: 'ai-review', label: 'AI Review', icon: Brain, badgeProp: 'aiPending' },
+      { href: 'checklist', label: 'Checklist', icon: ListChecks },
     ],
   },
   {

@@ -31,6 +31,7 @@ import { GLUploadFlow } from './GLUploadFlow';
 import { IntegrityRibbon } from '@/components/shared/IntegrityRibbon';
 import { AIInsightsPanel } from '@/components/shared/AIInsightsPanel';
 import { CloseHealthScore } from '@/components/shared/SmartCloseAssistant';
+import { CloseChecklist } from '@/components/shared/CloseChecklist';
 import { useHITLStaging } from '@/lib/queries/ai-insights';
 import { useAuth } from '@/lib/auth';
 import { canReplaceGL, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
@@ -484,6 +485,18 @@ export default function CloseDashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* === CLOSE CHECKLIST === */}
+      <CloseChecklist
+        sessionId={sessionId}
+        periodLabel={session?.periodLabel ?? ''}
+        reconComplete={reconComplete}
+        reconTotal={reconTotal}
+        ajeTemplatesPending={ajeTemplatePending}
+        statementsGenerated={statementsGenerated}
+        varianceUnexplained={varianceUnexplained.length}
+        allJePosted={journalEntries.length > 0 && journalEntries.every((e) => e.status === 'posted' || e.status === 'rejected')}
+      />
 
       {/* === GATE STATUS + FINANCIALS === */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
