@@ -29,6 +29,7 @@ import { OpenStateDashboard } from './OpenStateDashboard';
 import { FileUploadZone } from '@/components/shared/FileUploadZone';
 import { GLUploadFlow } from './GLUploadFlow';
 import { IntegrityRibbon } from '@/components/shared/IntegrityRibbon';
+import { AIInsightsPanel } from '@/components/shared/AIInsightsPanel';
 import { useAuth } from '@/lib/auth';
 import { canReplaceGL, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
@@ -569,6 +570,9 @@ export default function CloseDashboardPage() {
           )}
         </div>
       </div>
+
+      {/* === AI INSIGHTS PANEL === */}
+      <AIInsightsPanel sessionId={sessionId} />
 
       {/* === ACTION ITEMS (only if there are items) === */}
       {attentionItems.length > 0 && (
