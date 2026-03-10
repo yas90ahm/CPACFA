@@ -26,7 +26,7 @@ const ALL_NAV_ITEMS: { href: string; page: string; label: string; icon: React.Co
   { href: '/settings/evidence-policy', page: 'evidence-policy', label: 'Evidence Policy', icon: FileCheck },
   { href: '/settings/templates', page: 'templates', label: 'Templates', icon: LayoutTemplate },
   { href: '/settings/taxonomy', page: 'taxonomy', label: 'Taxonomy', icon: FolderTree },
-  { href: '/settings/integrations', page: 'integrations', label: 'Integrations', icon: Plug },
+  // { href: '/settings/integrations', page: 'integrations', label: 'Integrations', icon: Plug },
   { href: '/settings/team', page: 'team', label: 'Team & Roles', icon: Users },
 ];
 
