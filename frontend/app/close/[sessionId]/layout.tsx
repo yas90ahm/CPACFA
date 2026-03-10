@@ -23,6 +23,7 @@ function CloseSessionInner({ children }: { children: React.ReactNode }) {
   const sessionId = params.sessionId as string;
   const { user } = useAuth();
   const [issuePanelOpen, setIssuePanelOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { unmappedCount } = useTrialBalanceContext();
   const role = user?.role ?? 'controller';
   const showBackToPortfolio = role === 'operating_partner' || role === 'admin';
@@ -31,11 +32,9 @@ function CloseSessionInner({ children }: { children: React.ReactNode }) {
   // URL-level route protection: redirect restricted roles away from pages they can't access
   useEffect(() => {
     if (!pathname || !sessionId) return;
-    // Extract the page segment from the pathname (e.g., /close/123/mapping → mapping)
     const segments = pathname.split('/').filter(Boolean);
     const sessionIdx = segments.indexOf(sessionId);
     const pageSegment = sessionIdx >= 0 && segments.length > sessionIdx + 1 ? segments[sessionIdx + 1] : 'dashboard';
-    // Build a fake href to check against sidebar visibility
     const testHref = `/close/${sessionId}/${pageSegment}`;
     if (!isSidebarItemVisible(role, testHref)) {
       router.replace(`/close/${sessionId}/dashboard`);
@@ -66,6 +65,8 @@ function CloseSessionInner({ children }: { children: React.ReactNode }) {
   const canAdvance = readiness?.canAdvance ?? false;
   const gatesRemaining = readiness ? readiness.gatesTotal - readiness.gatesPassing : 3;
 
+  const sidebarWidth = sidebarCollapsed ? '60px' : '240px';
+
   return (
     <>
       <TopBar
@@ -91,8 +92,25 @@ function CloseSessionInner({ children }: { children: React.ReactNode }) {
           You are viewing this close session in read-only mode
         </div>
       )}
-      <Sidebar sessionId={sessionId} unmappedCount={unmappedCount} reconIncompleteCount={reconIncompleteCount} adjustmentsBadge={adjustmentsBadge} statementsStale={statementsStale} varianceUnexplainedCount={varianceUnexplainedCount} sessionState={state} userRole={role} />
-      <main className="pl-[240px] pt-[56px] pb-6 print:pl-0 print:pt-6" style={{ paddingTop: readOnly ? 'calc(56px + 40px + 32px)' : 'calc(56px + 40px)' }}>
+      <Sidebar
+        sessionId={sessionId}
+        unmappedCount={unmappedCount}
+        reconIncompleteCount={reconIncompleteCount}
+        adjustmentsBadge={adjustmentsBadge}
+        statementsStale={statementsStale}
+        varianceUnexplainedCount={varianceUnexplainedCount}
+        sessionState={state}
+        userRole={role}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
+      />
+      <main
+        className="pb-6 print:pl-0 print:pt-6 transition-all duration-200"
+        style={{
+          paddingLeft: sidebarWidth,
+          paddingTop: readOnly ? 'calc(56px + 40px + 32px)' : 'calc(56px + 40px)',
+        }}
+      >
         <div className="p-6">{children}</div>
       </main>
       <IssuePanel
