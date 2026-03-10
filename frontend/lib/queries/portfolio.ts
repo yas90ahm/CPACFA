@@ -77,6 +77,52 @@ export function usePortfolioSummary() {
 
 export const usePortfolioCompanies = usePortfolioEntities;
 
+// --- Integrity Reports ---
+
+export interface IntegrityComponent {
+  label: string;
+  score: number;
+  weight: number;
+  detail?: string;
+}
+
+export interface EntityIntegrityReport {
+  entityId: string;
+  entityName: string;
+  overallScore: number;
+  components: IntegrityComponent[];
+  trend?: number[];
+  issues?: string[];
+}
+
+export interface PortfolioIntegrityReport {
+  overallScore: number;
+  entities: EntityIntegrityReport[];
+  aggregateComponents: IntegrityComponent[];
+  trend?: number[];
+}
+
+export function useEntityIntegrityReport(entityId: string | null) {
+  return useQuery({
+    queryKey: ['entity-integrity', entityId],
+    queryFn: async (): Promise<EntityIntegrityReport> => {
+      return apiFetch<EntityIntegrityReport>(`/api/portfolio/entities/${entityId}/integrity-report`);
+    },
+    enabled: !!entityId,
+    staleTime: STALE_TIME,
+  });
+}
+
+export function usePortfolioIntegrityReport() {
+  return useQuery({
+    queryKey: ['portfolio-integrity'],
+    queryFn: async (): Promise<PortfolioIntegrityReport> => {
+      return apiFetch<PortfolioIntegrityReport>('/api/portfolio/integrity-report');
+    },
+    staleTime: STALE_TIME,
+  });
+}
+
 export function useEntityHistory(entityId: string | null, periods?: number) {
   return useQuery({
     queryKey: ['entity-history', entityId, periods],

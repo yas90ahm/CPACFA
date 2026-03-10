@@ -7,6 +7,7 @@ import type { PortfolioCompany } from '@/lib/types/portfolio';
 import type { CloseState } from '@/lib/types/close-session';
 import { cn } from '@/lib/utils';
 import { ChevronLeft, ChevronRight, Lock, AlertTriangle, TrendingDown, TrendingUp, Minus, ShieldCheck, FileWarning } from 'lucide-react';
+import { PortfolioIntegritySection } from '@/components/shared/PortfolioIntegrity';
 
 const MARGIN_THRESHOLD = 10;
 
@@ -252,6 +253,9 @@ export default function PortfolioPage() {
           )}
         </p>
       </div>
+
+      {/* Portfolio Integrity Score */}
+      <PortfolioIntegritySection />
 
       {attentionCompanies.length > 0 ? (
         <section>
