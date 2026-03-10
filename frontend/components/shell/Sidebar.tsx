@@ -56,6 +56,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: 'mapping', label: 'Account Mapping', icon: ArrowRightLeft, badgeProp: 'unmapped' },
       { href: 'reconciliation', label: 'Reconciliation', icon: ShieldCheck, badgeProp: 'recon' },
       { href: 'adjustments', label: 'Adjustments', icon: PenLine, badgeProp: 'adjustments' },
+      { href: 'controls', label: 'Controls', icon: ShieldCheck },
       { href: 'ai-review', label: 'AI Review', icon: Brain, badgeProp: 'aiPending' },
       { href: 'checklist', label: 'Checklist', icon: ListChecks },
     ],

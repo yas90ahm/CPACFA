@@ -32,6 +32,7 @@ import { IntegrityRibbon } from '@/components/shared/IntegrityRibbon';
 import { AIInsightsPanel } from '@/components/shared/AIInsightsPanel';
 import { CloseHealthScore } from '@/components/shared/SmartCloseAssistant';
 import { CloseChecklist } from '@/components/shared/CloseChecklist';
+import { DataQualityPanel } from '@/components/shared/DataQualityPanel';
 import { useHITLStaging } from '@/lib/queries/ai-insights';
 import { useAuth } from '@/lib/auth';
 import { canReplaceGL, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
@@ -598,6 +599,9 @@ export default function CloseDashboardPage() {
           )}
         </div>
       </div>
+
+      {/* === DATA QUALITY === */}
+      <DataQualityPanel periodLabel={session?.periodLabel ?? ''} />
 
       {/* === AI INSIGHTS PANEL === */}
       <AIInsightsPanel sessionId={sessionId} />
