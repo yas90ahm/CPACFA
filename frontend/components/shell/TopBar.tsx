@@ -20,6 +20,7 @@ function stateClass(s: CloseState): string {
 const ROLE_BADGE_STYLE: Record<string, string> = {
   admin: 'bg-[#7C5CFC]/10 text-[#7C5CFC]',
   controller: 'bg-sky-500/10 text-sky-400',
+  fund_controller: 'bg-indigo-500/10 text-indigo-400',
   reviewer: 'bg-emerald-500/10 text-emerald-400',
   operating_partner: 'bg-amber-500/10 text-amber-400',
   auditor: 'bg-gray-500/10 text-gray-400',

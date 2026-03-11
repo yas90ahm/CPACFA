@@ -4,6 +4,7 @@ import { useState, FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
+import { getDefaultLandingPage } from '@/lib/permissions';
 import { Shield, ArrowRight, Play, User, Briefcase, Eye, TrendingUp } from 'lucide-react';
 
 export default function LoginPage() {
@@ -19,11 +20,7 @@ export default function LoginPage() {
 
   // Already authenticated — redirect
   if (!authLoading && token) {
-    if (user?.role === 'operating_partner' || user?.role === 'admin') {
-      router.replace('/portfolio');
-    } else {
-      router.replace('/close');
-    }
+    router.replace(getDefaultLandingPage(user?.role ?? 'controller'));
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#0B0F1A]">
         <div className="animate-spin h-8 w-8 border-2 border-[#7C5CFC] border-t-transparent rounded-full" />
