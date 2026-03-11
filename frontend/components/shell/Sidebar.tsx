@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { isSidebarItemVisible } from '@/lib/permissions';
+import { getPersona, type Persona } from '@/lib/permissions';
 import {
   LayoutDashboard,
   Table,
@@ -24,6 +24,16 @@ import {
   ChevronDown,
   PanelLeftClose,
   PanelLeft,
+  Building2,
+  GitMerge,
+  BarChart3,
+  Shield,
+  Briefcase,
+  PenTool,
+  CheckSquare,
+  FileSignature,
+  AlertCircle,
+  Layers,
 } from 'lucide-react';
 
 interface NavItem {
@@ -40,48 +50,174 @@ interface NavGroup {
   defaultOpen?: boolean;
 }
 
-const NAV_GROUPS: NavGroup[] = [
-  {
-    label: 'Overview',
-    defaultOpen: true,
-    items: [
-      { href: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    ],
-  },
-  {
-    label: 'Close Management',
-    defaultOpen: true,
-    items: [
-      { href: 'trial-balance', label: 'Trial Balance', icon: Table, badgeProp: 'unmapped' },
-      { href: 'gl-health', label: 'GL Health', icon: HeartPulse },
-      { href: 'mapping', label: 'Account Mapping', icon: ArrowRightLeft, badgeProp: 'unmapped' },
-      { href: 'reconciliation', label: 'Reconciliation', icon: ShieldCheck, badgeProp: 'recon' },
-      { href: 'adjustments', label: 'Adjustments', icon: PenLine, badgeProp: 'adjustments' },
-      { href: 'discrepancies', label: 'Discrepancies', icon: Crosshair },
-      { href: 'controls', label: 'Controls', icon: ShieldCheck },
-      { href: 'ai-review', label: 'AI Review', icon: Brain, badgeProp: 'aiPending' },
-      { href: 'checklist', label: 'Checklist', icon: ListChecks },
-    ],
-  },
-  {
-    label: 'Reports',
-    defaultOpen: true,
-    items: [
-      { href: 'statements', label: 'Statements', icon: FileText },
-      { href: 'variance', label: 'Variance Analysis', icon: TrendingUp, badgeProp: 'variance' },
-      { href: 'board-package', label: 'Board Package', icon: BookOpen },
-    ],
-  },
-  {
-    label: 'Administration',
-    defaultOpen: true,
-    items: [
-      { href: 'review', label: 'Review & Certify', icon: Award },
-      { href: 'audit-trail', label: 'Audit Trail', icon: History },
-      { href: '/settings', label: 'Settings', icon: Settings, external: true },
-    ],
-  },
-];
+// ── Persona-specific navigation ──────────────────────────────────────────────
+
+function getOperatingPartnerNav(): NavGroup[] {
+  return [
+    {
+      label: 'Portfolio',
+      defaultOpen: true,
+      items: [
+        { href: '/portfolio', label: 'Command Center', icon: LayoutDashboard, external: true },
+      ],
+    },
+    {
+      label: 'Intelligence',
+      defaultOpen: true,
+      items: [
+        { href: '/portfolio#integrity', label: 'Integrity Scores', icon: Shield, external: true },
+        { href: '/portfolio#reports', label: 'Portfolio Reports', icon: BarChart3, external: true },
+      ],
+    },
+    {
+      label: 'Settings',
+      defaultOpen: false,
+      items: [
+        { href: '/settings', label: 'Settings', icon: Settings, external: true },
+      ],
+    },
+  ];
+}
+
+function getFundControllerNav(sessionId: string): NavGroup[] {
+  return [
+    {
+      label: 'Portfolio',
+      defaultOpen: true,
+      items: [
+        { href: '/close', label: 'All Entities', icon: Building2, external: true },
+        { href: '/portfolio', label: 'Portfolio Reports', icon: BarChart3, external: true },
+      ],
+    },
+    {
+      label: 'Consolidation',
+      defaultOpen: true,
+      items: [
+        { href: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { href: 'trial-balance', label: 'Trial Balance', icon: Table, badgeProp: 'unmapped' },
+        { href: 'mapping', label: 'Account Mapping', icon: ArrowRightLeft, badgeProp: 'unmapped' },
+        { href: 'reconciliation', label: 'Reconciliation', icon: ShieldCheck, badgeProp: 'recon' },
+        { href: 'adjustments', label: 'Adjustments', icon: PenLine, badgeProp: 'adjustments' },
+      ],
+    },
+    {
+      label: 'Intercompany',
+      defaultOpen: true,
+      items: [
+        { href: 'discrepancies', label: 'Discrepancies', icon: Crosshair },
+        { href: 'gl-health', label: 'GL Health', icon: HeartPulse },
+        { href: 'controls', label: 'Controls', icon: ShieldCheck },
+      ],
+    },
+    {
+      label: 'Reports & Review',
+      defaultOpen: true,
+      items: [
+        { href: 'statements', label: 'Statements', icon: FileText },
+        { href: 'variance', label: 'Variance Analysis', icon: TrendingUp, badgeProp: 'variance' },
+        { href: 'board-package', label: 'Board Package', icon: BookOpen },
+        { href: 'review', label: 'Review & Certify', icon: Award },
+        { href: 'ai-review', label: 'AI Review', icon: Brain, badgeProp: 'aiPending' },
+        { href: 'audit-trail', label: 'Audit Trail', icon: History },
+        { href: 'checklist', label: 'Checklist', icon: ListChecks },
+      ],
+    },
+    {
+      label: 'Administration',
+      defaultOpen: false,
+      items: [
+        { href: '/settings', label: 'Settings', icon: Settings, external: true },
+      ],
+    },
+  ];
+}
+
+function getReviewerNav(): NavGroup[] {
+  return [
+    {
+      label: 'Review',
+      defaultOpen: true,
+      items: [
+        { href: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { href: 'review', label: 'Review & Certify', icon: Award },
+      ],
+    },
+    {
+      label: 'Financial Outputs',
+      defaultOpen: true,
+      items: [
+        { href: 'statements', label: 'Financial Statements', icon: FileText },
+        { href: 'variance', label: 'Variance Analysis', icon: TrendingUp, badgeProp: 'variance' },
+      ],
+    },
+    {
+      label: 'AI & Compliance',
+      defaultOpen: true,
+      items: [
+        { href: 'ai-review', label: 'AI Justifications', icon: Brain, badgeProp: 'aiPending' },
+        { href: 'discrepancies', label: 'Discrepancies', icon: Crosshair },
+        { href: 'checklist', label: 'Certification Checklist', icon: ListChecks },
+        { href: 'audit-trail', label: 'Audit Trail', icon: History },
+      ],
+    },
+  ];
+}
+
+function getControllerNav(): NavGroup[] {
+  return [
+    {
+      label: 'Close Workflow',
+      defaultOpen: true,
+      items: [
+        { href: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { href: 'trial-balance', label: 'Trial Balance', icon: Table, badgeProp: 'unmapped' },
+        { href: 'mapping', label: 'Account Mapping', icon: ArrowRightLeft, badgeProp: 'unmapped' },
+        { href: 'reconciliation', label: 'Reconciliation', icon: ShieldCheck, badgeProp: 'recon' },
+        { href: 'adjustments', label: 'Adjustments', icon: PenLine, badgeProp: 'adjustments' },
+      ],
+    },
+    {
+      label: 'Reporting',
+      defaultOpen: true,
+      items: [
+        { href: 'statements', label: 'Statements', icon: FileText },
+        { href: 'variance', label: 'Variance Analysis', icon: TrendingUp, badgeProp: 'variance' },
+        { href: 'board-package', label: 'Board Package', icon: BookOpen },
+      ],
+    },
+    {
+      label: 'Quality & AI',
+      defaultOpen: true,
+      items: [
+        { href: 'gl-health', label: 'GL Health', icon: HeartPulse },
+        { href: 'discrepancies', label: 'Discrepancies', icon: Crosshair },
+        { href: 'controls', label: 'Controls', icon: ShieldCheck },
+        { href: 'ai-review', label: 'AI Review', icon: Brain, badgeProp: 'aiPending' },
+        { href: 'checklist', label: 'Checklist', icon: ListChecks },
+      ],
+    },
+    {
+      label: 'Administration',
+      defaultOpen: true,
+      items: [
+        { href: 'review', label: 'Review & Certify', icon: Award },
+        { href: 'audit-trail', label: 'Audit Trail', icon: History },
+        { href: '/settings', label: 'Settings', icon: Settings, external: true },
+      ],
+    },
+  ];
+}
+
+function getNavForPersona(persona: Persona, sessionId: string): NavGroup[] {
+  switch (persona) {
+    case 'operating_partner': return getOperatingPartnerNav();
+    case 'fund_controller': return getFundControllerNav(sessionId);
+    case 'reviewer': return getReviewerNav();
+    case 'controller': return getControllerNav();
+  }
+}
+
+// ── Sidebar Component ────────────────────────────────────────────────────────
 
 export function Sidebar({
   sessionId,
@@ -110,11 +246,14 @@ export function Sidebar({
 }) {
   const pathname = usePathname();
   const base = `/close/${sessionId}`;
-  const isUnderReview = sessionState === 'UNDER_REVIEW';
   const role = userRole ?? 'controller';
+  const persona = getPersona(role);
+  const navGroups = getNavForPersona(persona, sessionId);
+  const isUnderReview = sessionState === 'UNDER_REVIEW';
+
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
-    NAV_GROUPS.forEach((g) => { initial[g.label] = g.defaultOpen !== false; });
+    navGroups.forEach((g) => { initial[g.label] = g.defaultOpen !== false; });
     return initial;
   });
 
@@ -149,16 +288,7 @@ export function Sidebar({
       </div>
 
       <nav className="flex-1 overflow-y-auto pb-4">
-        {NAV_GROUPS.map((group) => {
-          const visibleItems = group.items.filter((item) => {
-            if (item.external && item.href === '/settings') {
-              return role !== 'operating_partner' && role !== 'auditor';
-            }
-            return isSidebarItemVisible(role, item.href);
-          });
-
-          if (visibleItems.length === 0) return null;
-
+        {navGroups.map((group) => {
           const isOpen = openGroups[group.label] !== false;
 
           return (
@@ -181,9 +311,9 @@ export function Sidebar({
               {/* Group items */}
               {(collapsed || isOpen) && (
                 <div className="space-y-0.5 px-2">
-                  {visibleItems.map((item) => {
+                  {group.items.map((item) => {
                     const href = item.external ? item.href : `${base}/${item.href}`;
-                    const isActive = pathname === href || (item.href !== 'dashboard' && pathname?.startsWith(href));
+                    const isActive = pathname === href || (!item.external && item.href !== 'dashboard' && pathname?.startsWith(href));
                     const badgeCount = getBadgeCount(item.badgeProp);
 
                     return (
@@ -231,7 +361,7 @@ export function Sidebar({
         })}
       </nav>
 
-      {/* Sabit branding at bottom */}
+      {/* Persona indicator + branding */}
       {!collapsed && (
         <div className="px-4 py-3 border-t border-[#1e2235]">
           <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-700">Sabit</span>
