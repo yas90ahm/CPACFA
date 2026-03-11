@@ -25,15 +25,8 @@ import {
   PanelLeftClose,
   PanelLeft,
   Building2,
-  GitMerge,
   BarChart3,
   Shield,
-  Briefcase,
-  PenTool,
-  CheckSquare,
-  FileSignature,
-  AlertCircle,
-  Layers,
 } from 'lucide-react';
 
 interface NavItem {

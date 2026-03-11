@@ -8,6 +8,9 @@ import type { CloseState } from '@/lib/types/close-session';
 import { cn } from '@/lib/utils';
 import { ChevronLeft, ChevronRight, Lock, AlertTriangle, TrendingDown, TrendingUp, Minus, ShieldCheck, FileWarning } from 'lucide-react';
 import { PortfolioIntegritySection } from '@/components/shared/PortfolioIntegrity';
+import { useAuth } from '@/lib/auth';
+import { getPersona } from '@/lib/permissions';
+import { OperatingPartnerDashboard } from '@/components/dashboards/OperatingPartnerDashboard';
 
 const MARGIN_THRESHOLD = 10;
 
@@ -118,7 +121,14 @@ function Sparkline({ history, target }: { history: (number | null)[]; target: nu
 }
 
 export default function PortfolioPage() {
+  const { user } = useAuth();
+  const persona = getPersona(user?.role ?? 'controller');
   const router = useRouter();
+
+  // Operating partner gets a dedicated executive dashboard
+  if (persona === 'operating_partner') {
+    return <OperatingPartnerDashboard />;
+  }
   const { data: companies = [], isLoading: entitiesLoading, error: entitiesError } = usePortfolioCompanies();
   const { data: summary, isLoading: summaryLoading } = usePortfolioSummary();
   const periods = buildPeriods(summary?.currentPeriod);

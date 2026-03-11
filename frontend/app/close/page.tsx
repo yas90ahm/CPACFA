@@ -9,7 +9,9 @@ import { StatusBadge } from '@/components/shared/StatusBadge';
 import { SlideOverPanel } from '@/components/shared/SlideOverPanel';
 import { TopBar } from '@/components/shell/TopBar';
 import { useAuth } from '@/lib/auth';
+import { getPersona } from '@/lib/permissions';
 import { cn, getUserDisplay } from '@/lib/utils';
+import { FundControllerDashboard } from '@/components/dashboards/FundControllerDashboard';
 import type { SessionListItem } from '@/lib/types/session-list';
 import type { CloseState } from '@/lib/types/close-session';
 import { Lock, Plus } from 'lucide-react';
@@ -40,6 +42,24 @@ function formatStarted(iso: string | null): string {
 export default function ClosePage() {
   const router = useRouter();
   const { user } = useAuth();
+  const persona = getPersona(user?.role ?? 'controller');
+
+  // Fund controller gets multi-entity overview dashboard
+  if (persona === 'fund_controller') {
+    return (
+      <>
+        <TopBar
+          entityName={getUserDisplay(user).displayName}
+          showPeriod={false}
+          userName={getUserDisplay(user).displayName}
+          userInitials={getUserDisplay(user).initials}
+        />
+        <div className="min-h-screen bg-primary pt-14 p-6">
+          <FundControllerDashboard />
+        </div>
+      </>
+    );
+  }
   const { data: entities = [], isLoading: entitiesLoading } = useEntities();
   const entitiesReady = !entitiesLoading && entities.length > 0;
   const entityId = entitiesReady ? entities[0].id : null;

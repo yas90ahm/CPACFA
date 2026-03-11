@@ -36,7 +36,8 @@ import { DataQualityPanel } from '@/components/shared/DataQualityPanel';
 import { AgentActivityPanel } from '@/components/shared/AgentActivityPanel';
 import { useHITLStaging } from '@/lib/queries/ai-insights';
 import { useAuth } from '@/lib/auth';
-import { canReplaceGL, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
+import { canReplaceGL, isReadOnly as isRoleReadOnly, getPersona } from '@/lib/permissions';
+import { ReviewerDashboard } from '@/components/dashboards/ReviewerDashboard';
 
 function formatMoney(v: string | null | undefined): string {
   if (!v) return '$0';
@@ -80,7 +81,13 @@ export default function CloseDashboardPage() {
   const sessionId = params.sessionId as string;
   const { user } = useAuth();
   const role = user?.role ?? 'controller';
+  const persona = getPersona(role);
   const readOnly = isRoleReadOnly(role);
+
+  // Persona-specific dashboards
+  if (persona === 'reviewer') {
+    return <ReviewerDashboard sessionId={sessionId} />;
+  }
   const { data: session } = useCloseSession(sessionId);
   const { data: readiness } = useCloseReadiness(sessionId);
   const { data: issues = [] } = useCloseIssues(sessionId);
