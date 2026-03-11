@@ -4,7 +4,7 @@ import { useState, FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
-import { Shield, ArrowRight } from 'lucide-react';
+import { Shield, ArrowRight, Play, User, Briefcase, Eye, TrendingUp } from 'lucide-react';
 
 export default function LoginPage() {
   const { login, token, user, isLoading: authLoading } = useAuth();
@@ -14,6 +14,8 @@ export default function LoginPage() {
   const [tenantId, setTenantId] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showDemo, setShowDemo] = useState(false);
+  const [demoLoading, setDemoLoading] = useState<string | null>(null);
 
   // Already authenticated — redirect
   if (!authLoading && token) {
@@ -39,6 +41,27 @@ export default function LoginPage() {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const DEMO_ROLES = [
+    { key: 'controller', label: 'Controller', name: 'Sarah Chen', email: 'controller@demo.sabit.io', icon: User, color: '#7C5CFC', desc: 'Full close workflow access' },
+    { key: 'cfo', label: 'CFO', name: 'Michael Torres', email: 'cfo@demo.sabit.io', icon: Briefcase, color: '#34D399', desc: 'Review, certify & sign' },
+    { key: 'auditor', label: 'Auditor', name: 'Emily Park', email: 'auditor@demo.sabit.io', icon: Eye, color: '#FBBF24', desc: 'Read-only audit access' },
+    { key: 'partner', label: 'PE Partner', name: 'James Whitfield', email: 'partner@demo.sabit.io', icon: TrendingUp, color: '#F87171', desc: 'Portfolio-level view' },
+  ] as const;
+
+  const handleDemoLogin = async (demoEmail: string, roleKey: string) => {
+    setError('');
+    setDemoLoading(roleKey);
+    try {
+      localStorage.setItem('sabit_demo_mode', 'true');
+      await login(demoEmail, 'SabitDemo2025!', 'apex-capital-partners');
+    } catch (err: unknown) {
+      localStorage.removeItem('sabit_demo_mode');
+      setError(err instanceof Error ? err.message : 'Demo login failed');
+    } finally {
+      setDemoLoading(null);
     }
   };
 
@@ -129,6 +152,54 @@ export default function LoginPage() {
             Register
           </Link>
         </p>
+
+        {/* Demo section */}
+        <div className="mt-6">
+          {!showDemo ? (
+            <button
+              onClick={() => setShowDemo(true)}
+              className="w-full py-3 rounded-xl text-sm font-medium bg-[#141829] border border-[#262C48] text-gray-400 hover:text-white hover:border-[#7C5CFC]/30 transition-all flex items-center justify-center gap-2"
+            >
+              <Play className="w-4 h-4" />
+              Try Demo
+            </button>
+          ) : (
+            <div className="bg-[#141829] border border-[#262C48] rounded-2xl p-5 shadow-2xl">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Demo Environment</p>
+              <p className="text-[11px] text-gray-600 mb-4">Apex Capital Partners — 3 portfolio companies</p>
+              <div className="grid grid-cols-2 gap-2">
+                {DEMO_ROLES.map((role) => {
+                  const Icon = role.icon;
+                  const isLoading = demoLoading === role.key;
+                  return (
+                    <button
+                      key={role.key}
+                      onClick={() => handleDemoLogin(role.email, role.key)}
+                      disabled={!!demoLoading}
+                      className="group relative flex flex-col items-start p-3 rounded-xl bg-[#0d1017] border border-[#1e2235] hover:border-[#7C5CFC]/40 transition-all text-left disabled:opacity-50"
+                    >
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <div
+                          className="w-7 h-7 rounded-lg flex items-center justify-center"
+                          style={{ background: `${role.color}15`, border: `1px solid ${role.color}30` }}
+                        >
+                          {isLoading ? (
+                            <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          ) : (
+                            <Icon className="w-3.5 h-3.5" style={{ color: role.color }} />
+                          )}
+                        </div>
+                        <span className="text-xs font-semibold text-white">{role.label}</span>
+                      </div>
+                      <p className="text-[10px] text-gray-500">{role.name}</p>
+                      <p className="text-[9px] text-gray-700 mt-0.5">{role.desc}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Trust badge */}
         <div className="mt-8 flex items-center justify-center gap-4 text-[10px] text-gray-700 uppercase tracking-wider">

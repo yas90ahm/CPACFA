@@ -164,6 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setUser(null);
     saveToStorage(null, null);
+    try { localStorage.removeItem('sabit_demo_mode'); } catch { /* noop */ }
     router.replace('/login');
   }, [router]);
 

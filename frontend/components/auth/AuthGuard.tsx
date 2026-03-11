@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
+import { DemoModeBanner } from '@/components/shared/DemoModeBanner';
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const { token, isLoading } = useAuth();
@@ -31,5 +32,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      <DemoModeBanner />
+      {children}
+    </>
+  );
 }
