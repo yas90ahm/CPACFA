@@ -60,8 +60,8 @@ function computePeriodDepreciation(
   periodEnd: string,
   accumulatedBeforePeriod: number
 ): number {
-  const cost = asset.cost;
-  const residual = asset.residualValue ?? 0;
+  const cost = Number(asset.cost);
+  const residual = Number(asset.residualValue ?? 0);
   const lifeYears = asset.usefulLifeYears;
   if (lifeYears <= 0) return 0;
 
@@ -75,11 +75,11 @@ function computePeriodDepreciation(
   const daysInYear = 365.25;
   const fraction = Math.min(1, daysInPeriod / daysInYear);
 
-  const maxAccumulated = Math.max(0, cost - residual);
+  const maxAccumulated = Math.max(0, Number(cost) - Number(residual));
   const remainingToDepreciate = Math.max(0, maxAccumulated - accumulatedBeforePeriod);
 
   if (asset.method === 'straight_line') {
-    const depreciable = Math.max(0, cost - residual);
+    const depreciable = Math.max(0, Number(cost) - Number(residual));
     const annualDep = lifeYears > 0 ? depreciable / lifeYears : 0;
     const periodDep = annualDep * fraction;
     if (periodDep >= remainingToDepreciate) {
@@ -89,7 +89,7 @@ function computePeriodDepreciation(
   }
 
   if (asset.method === 'declining_balance') {
-    const bookValue = Math.max(0, cost - accumulatedBeforePeriod);
+    const bookValue = Math.max(0, Number(cost) - accumulatedBeforePeriod);
     if (bookValue <= 0) return 0;
     const rate = 2 / lifeYears; // double-declining
     const annualDep = bookValue * rate;
@@ -117,7 +117,7 @@ function accumulatedToDate(asset: FixedAssetRow, toDate: string): number {
   const to = new Date(toDate);
   if (to <= depStart) return 0;
   let acc = 0;
-  const maxAccumulated = Math.max(0, asset.cost - (asset.residualValue ?? 0));
+  const maxAccumulated = Math.max(0, Number(asset.cost) - Number(asset.residualValue ?? 0));
   const lifeYears = Math.ceil(asset.usefulLifeYears) + 2;
   for (let y = 0; y < lifeYears; y++) {
     const rangeStart = new Date(depStart.getFullYear() + y, depStart.getMonth(), depStart.getDate());
@@ -158,8 +158,8 @@ function buildDepreciationEntriesForAsset(
   }
   const accumulatedBefore = accumulatedToDate(asset, periodStart);
   const periodDep = computePeriodDepreciation(asset, periodStart, periodEnd, accumulatedBefore);
-  const cost = asset.cost;
-  const residual = asset.residualValue ?? 0;
+  const cost = Number(asset.cost);
+  const residual = Number(asset.residualValue ?? 0);
   const maxAccumulated = Math.max(0, cost - residual);
   let accumulatedEnd = round2(accumulatedBefore + periodDep);
   let finalAmount = periodDep;
@@ -296,8 +296,8 @@ export async function runDepreciation(
       fixedAssetId: asset.id,
       periodStart: entry.periodStart,
       periodEnd: entry.periodEnd,
-      depreciationAmount: entry.depreciationAmount,
-      accumulatedDepreciation: entry.accumulatedDepreciation,
+      depreciationAmount: String(entry.depreciationAmount),
+      accumulatedDepreciation: String(entry.accumulatedDepreciation),
     });
   }
 
@@ -335,15 +335,15 @@ export async function getDepreciationSummary(
 
   for (const d of detailRows) {
     const asset = assetMap.get(d.fixedAssetId);
-    totalDepreciation += d.depreciationAmount;
+    totalDepreciation += Number(d.depreciationAmount);
     byAsset.push({
       fixedAssetId: d.fixedAssetId,
       assetNumber: asset?.assetNumber ?? d.fixedAssetId,
       assetType: asset?.assetType ?? 'Unknown',
-      depreciationAmount: d.depreciationAmount,
+      depreciationAmount: Number(d.depreciationAmount),
     });
     const t = asset?.assetType ?? 'Unknown';
-    byType[t] = (byType[t] ?? 0) + d.depreciationAmount;
+    byType[t] = (byType[t] ?? 0) + Number(d.depreciationAmount);
   }
 
   return {

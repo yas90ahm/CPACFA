@@ -36,6 +36,99 @@ import { getDefaultSnippetsForShadowAuditor } from './standards_snippets_shadow.
 import { getDefaultSnippetsForClassifier } from './standards_snippets_classifier.js';
 import { getDefaultSnippetsForAdvisor } from './standards_snippets_advisor.js';
 import { callAIWithSchema } from './ai_client.js';
+import {
+  queryGlobal,
+  searchFinancialMemory,
+  type MemoryEntry,
+} from '../knowledge_base/index.js';
+import { isDbConfigured, getPool } from '../db/index.js';
+import { queryVectorStore } from '../knowledge_base/vector_store/pg_vector_store.js';
+
+// --- Knowledge Base integration helpers ---
+
+/** Convert KB MemoryEntry[] to snippet format usable by prompts. */
+function kbEntriesToSnippets(entries: MemoryEntry[]): Array<{ rule_id: string; title: string; snippet_markdown: string }> {
+  return entries.map((e) => ({
+    rule_id: (e.payload?.['citation'] as string) ?? e.id,
+    title: e.source + (e.payload?.['topic'] ? `: ${e.payload['topic']}` : ''),
+    snippet_markdown: e.text,
+  }));
+}
+
+/** Query KB for relevant GAAP/IFRS standards. Returns extra snippets to merge with defaults.
+ * Primary: pgvector semantic search returns specific ASC paragraph citations (e.g., ASC 606-10-25-27).
+ * Fallback: queryGlobal keyword search for broader coverage. */
+async function queryKbForJustifier(facts: Record<string, unknown>): Promise<Array<{ rule_id: string; title: string; snippet_markdown: string }>> {
+  try {
+    const query = String(facts['memo'] ?? facts['description'] ?? Object.values(facts).slice(0, 3).join(' ')).slice(0, 300);
+    if (!query.trim()) return [];
+
+    // Primary: pgvector semantic search for specific ASC paragraph-level citations
+    if (isDbConfigured()) {
+      try {
+        const pool = getPool();
+        const vectorResults = await queryVectorStore(pool, query, {
+          topK: 5,
+          tier: 'tier1_global',
+          minSimilarity: 0.1,
+        });
+        if (vectorResults.length > 0) {
+          const vectorSnippets = vectorResults.map((c) => ({
+            rule_id: c.citation,
+            title: [c.framework, c.section].filter(Boolean).join(': '),
+            snippet_markdown: `**${c.citation}** — ${c.chunkText}`,
+          }));
+          // Also get keyword results for broader coverage and merge
+          const keywordEntries = await queryGlobal(query, { topK: 3 });
+          const keywordSnippets = kbEntriesToSnippets(keywordEntries);
+          // Deduplicate by rule_id (prefer vector results — they have specific paragraph citations)
+          const seen = new Set(vectorSnippets.map((s) => s.rule_id));
+          for (const ks of keywordSnippets) {
+            if (!seen.has(ks.rule_id)) {
+              vectorSnippets.push(ks);
+              seen.add(ks.rule_id);
+            }
+          }
+          return vectorSnippets.slice(0, 7);
+        }
+      } catch {
+        // pgvector unavailable, fall through to keyword
+      }
+    }
+
+    // Fallback: keyword-based queryGlobal
+    const entries = await queryGlobal(query, { topK: 5 });
+    return kbEntriesToSnippets(entries);
+  } catch { return []; }
+}
+
+/** Query KB for policy snippets relevant to shadow audit. */
+async function queryKbForShadowAuditor(facts: Record<string, unknown>): Promise<Array<{ rule_id: string; title: string; snippet_markdown: string }>> {
+  try {
+    const query = String(facts['memo'] ?? facts['source'] ?? Object.values(facts).slice(0, 3).join(' ')).slice(0, 300);
+    if (!query.trim()) return [];
+    const results = searchFinancialMemory(query, { tiers: ['global'], topK: 5 });
+    return results.map((r) => ({
+      rule_id: (r.entry.payload?.['citation'] as string) ?? r.entry.id,
+      title: r.entry.source + (r.entry.payload?.['topic'] ? `: ${r.entry.payload['topic']}` : ''),
+      snippet_markdown: r.entry.text,
+    }));
+  } catch { return []; }
+}
+
+/** Query KB for firm CoA history relevant to classification. */
+function queryKbForClassifier(sourceLines: NormalizedSourceLine[]): Array<{ rule_id: string; title: string; snippet_markdown: string }> {
+  try {
+    const query = sourceLines.slice(0, 5).map((l) => l.accountName ?? l.source_id).join(' ').slice(0, 300);
+    if (!query.trim()) return [];
+    const results = searchFinancialMemory(query, { tiers: ['firm'], topK: 5 });
+    return results.map((r) => ({
+      rule_id: r.entry.id,
+      title: r.entry.source + (r.entry.payload?.['name'] ? `: ${r.entry.payload['name']}` : ''),
+      snippet_markdown: r.entry.text,
+    }));
+  } catch { return []; }
+}
 
 /** Stable hash of facts + snippets + prompt_version for idempotency / audit. */
 export function hashJustifierInputs(
@@ -80,7 +173,8 @@ const AI_FAILED_MEMO_PREFIX = 'AI justification could not be generated.';
 export async function runJustifier(params: RunJustifierParams): Promise<RunJustifierResult> {
   const { pool, aiPool, tenantId, periodLabel, relatedType, relatedId, facts } = params;
   const logPool = aiPool ?? pool;
-  const standards_snippets = getDefaultSnippetsForJustifier();
+  const kbSnippets = await queryKbForJustifier(facts);
+  const standards_snippets = [...getDefaultSnippetsForJustifier(), ...kbSnippets];
   const context = { tenantId, periodLabel, relatedType, relatedId };
   const userPrompt = buildJustifierUserPrompt({ facts, standards_snippets, context });
   const systemPrompt = buildJustifierSystemPrompt();
@@ -158,7 +252,8 @@ const AI_FAILED_FINDING_CODE = 'AI_FAILED';
 export async function runShadowAudit(params: RunShadowAuditParams): Promise<RunShadowAuditResult> {
   const { pool, aiPool, tenantId, periodLabel, subjectType, subjectId, facts, materialityThreshold, workflowState } = params;
   const logPool = aiPool ?? pool;
-  const standards_snippets = getDefaultSnippetsForShadowAuditor();
+  const kbSnippets = await queryKbForShadowAuditor(facts);
+  const standards_snippets = [...getDefaultSnippetsForShadowAuditor(), ...kbSnippets];
   const context = {
     tenantId,
     periodLabel,
@@ -253,7 +348,8 @@ export interface RunClassifierResult {
 export async function runClassifier(params: RunClassifierParams): Promise<RunClassifierResult> {
   const { pool, aiPool, tenantId, periodLabel, sourceLines, coaTaxonomy = [] } = params;
   const logPool = aiPool ?? pool;
-  const standards_snippets = getDefaultSnippetsForClassifier();
+  const kbSnippets = queryKbForClassifier(sourceLines);
+  const standards_snippets = [...getDefaultSnippetsForClassifier(), ...kbSnippets];
   const context = { tenantId, periodLabel };
   const userPrompt = buildClassifierUserPrompt({
     sourceLines,

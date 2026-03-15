@@ -56,10 +56,10 @@ export function computeIntercompanyReconciliation(
   return {
     pairId: pair.id,
     periodLabel: input.periodLabel,
-    matchedAmount,
-    balanceA,
-    balanceB,
-    variance,
+    matchedAmount: String(matchedAmount),
+    balanceA: String(balanceA),
+    balanceB: String(balanceB),
+    variance: String(variance),
     status,
     varianceDetail,
   };

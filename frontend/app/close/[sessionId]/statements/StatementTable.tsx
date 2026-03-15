@@ -2,30 +2,12 @@
 
 import React, { useState, useCallback } from 'react';
 import { MoneyCell } from '@/components/shared/MoneyCell';
+import { fmtMoney, isMoneyNegative } from '@/lib/money';
 import type { StatementLineItem, AccountRollup, JournalEntryRef } from '@/lib/types/statements';
-
-/**
- * Format a GAAP-style amount string for display: "1234567.89" -> "1,234,567.89"
- * Negative amounts shown in parentheses: "-1234.56" -> "(1,234.56)"
- *
- * Uses parseFloat internally for pure formatting/presentation only.
- * This is acceptable because the result is never used for financial computation —
- * all arithmetic happens on the backend via Decimal.js + PostgreSQL NUMERIC(20,2).
- */
-function formatGaapAmount(amount: string, showDollar: boolean = false): string {
-  if (!amount) return '';
-  const n = parseFloat(amount);
-  if (Number.isNaN(n)) return amount;
-  const abs = Math.abs(n);
-  const formatted = abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const prefix = showDollar ? '$ ' : '';
-  return n < 0 ? `${prefix}(${formatted})` : `${prefix}${formatted}`;
-}
 
 function amountCell(amount: string, isGrandTotal: boolean, isSubtotal: boolean, onClick?: () => void) {
   const hasAmount = amount && amount.trim() !== '';
-  // parseFloat for UI-only sign check (color determination), not financial computation
-  const isNeg = hasAmount && parseFloat(amount) < 0;
+  const isNeg = hasAmount && isMoneyNegative(amount);
   const showDollar = isGrandTotal || isSubtotal;
   const clickable = onClick && hasAmount && !isSubtotal && !isGrandTotal;
   return (
@@ -36,11 +18,11 @@ function amountCell(amount: string, isGrandTotal: boolean, isSubtotal: boolean, 
           onClick={onClick}
           className="border-b border-dotted border-current hover:bg-hover rounded px-1 -mx-1"
         >
-          <span className={isNeg ? 'text-status-red' : ''}>{formatGaapAmount(amount)}</span>
+          <span className={isNeg ? 'text-status-red' : ''}>{fmtMoney(amount, { dash: false })}</span>
         </button>
       ) : hasAmount ? (
         <span className={`${isGrandTotal ? 'font-bold' : isSubtotal ? 'font-semibold' : ''} ${isNeg ? 'text-status-red' : ''}`}>
-          {formatGaapAmount(amount, showDollar)}
+          {fmtMoney(amount, { dollar: showDollar, dash: false })}
         </span>
       ) : (
         <span />
@@ -49,15 +31,53 @@ function amountCell(amount: string, isGrandTotal: boolean, isSubtotal: boolean, 
   );
 }
 
+function budgetAmountCell(amount: string | undefined, isGrandTotal: boolean, isSubtotal: boolean) {
+  if (!amount || !amount.trim()) return <td className="text-right font-mono tabular-nums text-sm py-1.5" />;
+  const isNeg = isMoneyNegative(amount);
+  return (
+    <td className={`text-right font-mono tabular-nums text-sm py-1.5 ${isGrandTotal ? 'border-t-2 border-b-[3px] border-double border-text-muted' : isSubtotal ? 'border-t border-text-muted/50' : ''}`}>
+      <span className={`${isGrandTotal ? 'font-bold' : isSubtotal ? 'font-semibold' : ''} ${isNeg ? 'text-status-red' : ''}`}>
+        {fmtMoney(amount, { dash: false })}
+      </span>
+    </td>
+  );
+}
+
+function varianceCell(amount: string | undefined, isGrandTotal: boolean, isSubtotal: boolean) {
+  if (!amount || !amount.trim()) return <td className="text-right font-mono tabular-nums text-sm py-1.5" />;
+  const isNeg = isMoneyNegative(amount);
+  return (
+    <td className={`text-right font-mono tabular-nums text-sm py-1.5 ${isGrandTotal ? 'border-t-2 border-b-[3px] border-double border-text-muted' : isSubtotal ? 'border-t border-text-muted/50' : ''}`}>
+      <span className={`${isGrandTotal ? 'font-bold' : isSubtotal ? 'font-semibold' : ''} ${isNeg ? 'text-status-red' : 'text-status-green'}`}>
+        {fmtMoney(amount, { dash: false })}
+      </span>
+    </td>
+  );
+}
+
+function variancePctCell(pct: string | undefined, isGrandTotal: boolean, isSubtotal: boolean) {
+  if (!pct || !pct.trim()) return <td className="text-right font-mono tabular-nums text-sm py-1.5" />;
+  const isNeg = isMoneyNegative(pct);
+  return (
+    <td className={`text-right font-mono tabular-nums text-sm py-1.5 ${isGrandTotal ? 'border-t-2 border-b-[3px] border-double border-text-muted' : isSubtotal ? 'border-t border-text-muted/50' : ''}`}>
+      <span className={`${isGrandTotal ? 'font-bold' : isSubtotal ? 'font-semibold' : ''} ${isNeg ? 'text-status-red' : 'text-status-green'}`}>
+        {fmtMoney(pct, { dash: false })}%
+      </span>
+    </td>
+  );
+}
+
 export interface StatementTableProps {
   lines: StatementLineItem[];
   showPriorPeriod?: boolean;
   showChanges?: boolean;
+  showBudget?: boolean;
+  budgetData?: Map<string, { budget: string; variance: string; variancePct: string }>;
   /** Called with a real JE ID when user clicks a journal entry reference. */
   onOpenJeById?: (jeId: string) => void;
 }
 
-export function StatementTable({ lines, showPriorPeriod, showChanges, onOpenJeById }: StatementTableProps) {
+export function StatementTable({ lines, showPriorPeriod, showChanges, showBudget, budgetData, onOpenJeById }: StatementTableProps) {
   const [expandedLineId, setExpandedLineId] = useState<string | null>(null);
   const [expandedAccountKey, setExpandedAccountKey] = useState<string | null>(null);
 
@@ -71,14 +91,46 @@ export function StatementTable({ lines, showPriorPeriod, showChanges, onOpenJeBy
     setExpandedAccountKey((prev) => (prev === key ? null : key));
   }, []);
 
+  /** Count the extra columns after Amount for colspan calculations */
+  const extraColCount =
+    (showBudget ? 3 : 0) + (showChanges ? 2 : 0);
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse" style={{ border: 'none' }}>
+        {/* Column headers when budget or changes are shown */}
+        {(showPriorPeriod || showBudget || showChanges) && (
+          <thead>
+            <tr className="text-xs text-text-secondary uppercase tracking-wide">
+              <th className="text-left py-1.5 pr-4 font-medium" />
+              {showPriorPeriod && <th className="text-right py-1.5 font-medium">Prior</th>}
+              <th className="text-right py-1.5 font-medium">Amount</th>
+              {showBudget && (
+                <>
+                  <th className="text-right py-1.5 font-medium">Budget</th>
+                  <th className="text-right py-1.5 font-medium">Variance ($)</th>
+                  <th className="text-right py-1.5 font-medium">Variance (%)</th>
+                </>
+              )}
+              {showChanges && (
+                <>
+                  <th className="text-right py-1.5 font-medium">Change</th>
+                  <th className="text-right py-1.5 font-medium">Change %</th>
+                </>
+              )}
+            </tr>
+          </thead>
+        )}
         <tbody>
           {lines.map((row) => {
             const isSectionHeader = row.indentLevel === 0 && !row.amount;
             const isExpanded = expandedLineId === row.id;
             const hasAccounts = row.accounts && row.accounts.length > 0;
+
+            // Look up budget data by the line's taxonomy ID or line ID
+            const budgetEntry = showBudget && budgetData
+              ? budgetData.get(row.taxonomyLineId) ?? budgetData.get(row.id)
+              : undefined;
 
             return (
               <React.Fragment key={row.id}>
@@ -110,6 +162,25 @@ export function StatementTable({ lines, showPriorPeriod, showChanges, onOpenJeBy
                     row.isSubtotal ?? false,
                     hasAccounts ? () => toggleLine(row.id) : undefined
                   )}
+                  {showBudget && (
+                    <>
+                      {budgetAmountCell(
+                        budgetEntry?.budget,
+                        row.isGrandTotal ?? false,
+                        row.isSubtotal ?? false
+                      )}
+                      {varianceCell(
+                        budgetEntry?.variance,
+                        row.isGrandTotal ?? false,
+                        row.isSubtotal ?? false
+                      )}
+                      {variancePctCell(
+                        budgetEntry?.variancePct,
+                        row.isGrandTotal ?? false,
+                        row.isSubtotal ?? false
+                      )}
+                    </>
+                  )}
                   {showChanges && (
                     <>
                       {amountCell(
@@ -117,8 +188,8 @@ export function StatementTable({ lines, showPriorPeriod, showChanges, onOpenJeBy
                         row.isGrandTotal ?? false,
                         row.isSubtotal ?? false
                       )}
-                      <td className={`text-right font-mono tabular-nums text-sm py-1.5 ${row.changePercent != null && parseFloat(row.changePercent) < 0 ? 'text-status-red' : ''}`}>
-                        {row.changePercent != null ? `${formatGaapAmount(row.changePercent)}%` : ''}
+                      <td className={`text-right font-mono tabular-nums text-sm py-1.5 ${row.changePercent != null && isMoneyNegative(row.changePercent) ? 'text-status-red' : ''}`}>
+                        {row.changePercent != null ? `${fmtMoney(row.changePercent, { dash: false })}%` : ''}
                       </td>
                     </>
                   )}
@@ -128,21 +199,23 @@ export function StatementTable({ lines, showPriorPeriod, showChanges, onOpenJeBy
                   row.accounts!.map((acc: AccountRollup) => {
                     const accKey = `${row.id}:${acc.accountCode}`;
                     const accExpanded = expandedAccountKey === accKey;
+                    const baseColSpan = showPriorPeriod && showChanges ? 4 : showPriorPeriod || showChanges ? 2 : 1;
                     return (
                       <React.Fragment key={accKey}>
                         <tr className="bg-surface-alt/50 print:hidden">
-                          <td className="py-1 pr-4 pl-8 text-sm text-text-secondary" colSpan={showPriorPeriod && showChanges ? 4 : showPriorPeriod || showChanges ? 2 : 1}>
-                            ├─ {acc.accountCode} {acc.accountName}
+                          <td className="py-1 pr-4 pl-8 text-sm text-text-secondary" colSpan={baseColSpan}>
+                            |-- {acc.accountCode} {acc.accountName}
                           </td>
                           {showPriorPeriod && <td />}
                           {amountCell(acc.balance, false, false, acc.entries?.length ? () => toggleAccount(row.id, acc.accountCode) : undefined)}
+                          {showBudget && <><td /><td /><td /></>}
                           {showChanges && <><td /><td /></>}
                         </tr>
                         {accExpanded &&
                           acc.entries?.map((ent) => (
                             <tr key={ent.jeId} className="bg-surface-alt/30 print:hidden">
-                              <td className="py-1 pr-4 pl-12 text-sm text-text-tertiary" colSpan={showPriorPeriod && showChanges ? 4 : showPriorPeriod || showChanges ? 2 : 1}>
-                                ├─ {ent.jeNumber} {ent.memo}
+                              <td className="py-1 pr-4 pl-12 text-sm text-text-tertiary" colSpan={baseColSpan}>
+                                |-- {ent.jeNumber} {ent.memo}
                               </td>
                               {showPriorPeriod && <td />}
                               <td className="text-right font-mono text-sm py-1">
@@ -158,16 +231,18 @@ export function StatementTable({ lines, showPriorPeriod, showChanges, onOpenJeBy
                                   <MoneyCell value={ent.amount} showDollar />
                                 )}
                               </td>
+                              {showBudget && <><td /><td /><td /></>}
                               {showChanges && <><td /><td /></>}
                             </tr>
                           ))}
                         {accExpanded && (
                           <tr className="bg-surface-alt/30 print:hidden font-medium">
-                            <td className="py-1 pr-4 pl-12 text-sm" colSpan={showPriorPeriod && showChanges ? 4 : showPriorPeriod || showChanges ? 2 : 1}>
-                              └─ Net
+                            <td className="py-1 pr-4 pl-12 text-sm" colSpan={baseColSpan}>
+                              \-- Net
                             </td>
                             {showPriorPeriod && <td />}
                             {amountCell(acc.balance, false, false)}
+                            {showBudget && <><td /><td /><td /></>}
                             {showChanges && <><td /><td /></>}
                           </tr>
                         )}

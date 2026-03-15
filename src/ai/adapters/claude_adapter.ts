@@ -5,7 +5,7 @@
  * Shadow mock: AI_SHADOW_SEVERITY=ok|warn|block, AI_SHADOW_FINDINGS_JSON optional.
  */
 
-import { generateText } from '../../llm/provider.js';
+import { generateTextWithUsage } from '../../llm/provider.js';
 import { aiMock, aiMockClassifier, aiMockAdvisor } from '../../lib/runtime_mode.js';
 import { JUSTIFIER_PROMPT_VERSION } from '../prompts/justifier.prompt.js';
 import { SHADOW_AUDITOR_PROMPT_VERSION } from '../prompts/shadow_auditor.prompt.js';
@@ -25,6 +25,10 @@ export interface ClaudeAdapterOutput {
   ok: boolean;
   rawText?: string;
   error?: string;
+  latencyMs?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  estimatedCostUsd?: number;
 }
 
 const MOCK_JUSTIFIER_JSON = JSON.stringify({
@@ -135,20 +139,37 @@ export async function callClaude(input: ClaudeAdapterInput): Promise<ClaudeAdapt
     setTimeout(() => reject(new Error('AI_TIMEOUT')), timeoutMs);
   });
 
+  const startTime = Date.now();
   try {
-    const textPromise = generateText({
+    const resultPromise = generateTextWithUsage({
       model,
       maxTokens: 2048,
       system: systemPrompt,
       prompt: userPrompt,
     });
-    const rawText = await Promise.race([textPromise, timeoutPromise]);
-    return { ok: true, rawText: rawText?.trim() ?? '' };
+    const result = await Promise.race([resultPromise, timeoutPromise]);
+    const latencyMs = Date.now() - startTime;
+    const inputTokens = result.inputTokens;
+    const outputTokens = result.outputTokens;
+    // Claude Sonnet 4 pricing: $3/M input, $15/M output
+    const estimatedCostUsd =
+      inputTokens != null && outputTokens != null
+        ? (inputTokens / 1_000_000) * 3 + (outputTokens / 1_000_000) * 15
+        : undefined;
+    return {
+      ok: true,
+      rawText: result.text?.trim() ?? '',
+      latencyMs,
+      inputTokens,
+      outputTokens,
+      estimatedCostUsd,
+    };
   } catch (err) {
+    const latencyMs = Date.now() - startTime;
     const message = err instanceof Error ? err.message : String(err);
     const isKeyMissing =
       /ANTHROPIC_API_KEY|OPENAI_API_KEY|MISTRAL_API_KEY|is not set/i.test(message);
     const error = isKeyMissing ? 'API_KEY_MISSING' : message;
-    return { ok: false, error };
+    return { ok: false, error, latencyMs };
   }
 }

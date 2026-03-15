@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { Check, X } from 'lucide-react';
+import { Check, X, Plug } from 'lucide-react';
+import { EmptyState } from '@/components/shared/EmptyState';
 
 interface Connection {
   id: string;
@@ -77,7 +78,11 @@ export default function IntegrationsPage() {
 
       <div className="space-y-4">
         {connections.length === 0 ? (
-          <p className="text-text-secondary text-sm">No ERP connections yet. Connect an accounting system to sync trial balance and optionally push journal entries.</p>
+          <EmptyState
+            icon={Plug}
+            title="No ERP Connections"
+            description="Connect an accounting system to sync trial balance data and optionally push journal entries."
+          />
         ) : (
         connections.map((conn) => {
           const connected = !!conn.credentialRef;

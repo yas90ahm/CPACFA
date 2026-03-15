@@ -1,19 +1,24 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCloseSession } from '@/lib/queries/close-session';
-import { useVariances } from '@/lib/queries/variance';
+import { useVariances, useClassifyVariance } from '@/lib/queries/variance';
+import type { VarianceClassification } from '@/lib/queries/variance';
 import { useCumulativeVariances } from '@/lib/queries/cumulative';
 import { useAuth } from '@/lib/auth';
 import { AISuggestionCard } from '@/components/shared/AISuggestionCard';
+import { AISuggestionBadge } from '@/components/shared/AISuggestionBadge';
 import { MoneyCell } from '@/components/shared/MoneyCell';
+import { fmtMoney } from '@/lib/money';
 import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import type { VarianceRecord } from '@/lib/types/variance';
 import { InvestigationPanel } from '@/components/investigation/InvestigationPanel';
-import { Check, X, ChevronDown, ChevronRight, Search, Loader2, Zap, Calendar } from 'lucide-react';
+import { Check, X, ChevronDown, ChevronRight, Search, Loader2, Zap, Calendar, TrendingUp, FileDown } from 'lucide-react';
+import { EmptyState } from '@/components/shared/EmptyState';
+import { ContinueToNextStep } from '@/components/shared/ContinueToNextStep';
 import { canExplainVariance, canApproveVariance, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
 type VariancePeriodView = 'current' | 'QTD' | 'YTD';
@@ -42,6 +47,12 @@ function changeColor(
   return 'neutral';
 }
 
+function colorStyle(color: 'favorable' | 'unfavorable' | 'neutral'): React.CSSProperties {
+  if (color === 'favorable') return { color: 'var(--status-success)' };
+  if (color === 'unfavorable') return { color: 'var(--status-error)' };
+  return { color: 'var(--text-secondary)' };
+}
+
 export default function VariancePage() {
   const params = useParams();
   const sessionId = params.sessionId as string;
@@ -67,6 +78,8 @@ export default function VariancePage() {
   const [investigatingVariance, setInvestigatingVariance] = useState<VarianceRecord | null>(null);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [draftingAll, setDraftingAll] = useState(false);
+  const [localClassifications, setLocalClassifications] = useState<Record<string, string>>({});
+  const classifyMutation = useClassifyVariance(sessionId);
   const [variancePeriodView, setVariancePeriodView] = useState<VariancePeriodView>('current');
   const [comparisonType, setComparisonType] = useState<VarianceComparisonType>('prior_year_same_period');
   const { data: cumulativeVarData } = useCumulativeVariances(
@@ -74,6 +87,39 @@ export default function VariancePage() {
     variancePeriodView !== 'current' ? variancePeriodView : null,
     comparisonType
   );
+
+  // ─── Auto-save draft explanations ──────────────────────────────────────────
+  const [draftSavedStatus, setDraftSavedStatus] = useState<Record<string, 'saving' | 'saved' | null>>({});
+  const prevLocalExplanationsRef = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    // Only auto-save entries that changed since the last render
+    const changedEntries = Object.entries(localExplanations).filter(
+      ([id, text]) => prevLocalExplanationsRef.current[id] !== text
+    );
+    if (changedEntries.length === 0) return;
+
+    const timer = setTimeout(async () => {
+      for (const [varianceId, text] of changedEntries) {
+        if (text.trim().length >= 20) {
+          setDraftSavedStatus(prev => ({ ...prev, [varianceId]: 'saving' }));
+          try {
+            await apiFetch(`/api/close/variances/${varianceId}/draft`, {
+              method: 'PUT',
+              body: { explanation: text },
+            });
+            setDraftSavedStatus(prev => ({ ...prev, [varianceId]: 'saved' }));
+            setTimeout(() => setDraftSavedStatus(prev => ({ ...prev, [varianceId]: null })), 2000);
+          } catch {
+            setDraftSavedStatus(prev => ({ ...prev, [varianceId]: null }));
+          }
+        }
+      }
+      prevLocalExplanationsRef.current = { ...localExplanations };
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [localExplanations]);
 
   const filtered = useMemo(() => {
     let list = [...variances];
@@ -195,6 +241,13 @@ export default function VariancePage() {
     }
   }, [materialUnexplained, apiFetch]);
 
+  const handleClassify = useCallback((varianceId: string, classification: string) => {
+    setLocalClassifications((prev) => ({ ...prev, [varianceId]: classification }));
+    classifyMutation.mutate({ varianceId, classification: classification as VarianceClassification });
+  }, [classifyMutation]);
+
+  const CLASSIFICATION_OPTIONS: VarianceClassification[] = ['Timing', 'Permanent', 'Volume', 'Price', 'Mix', 'Other'];
+
   const entityName = session?.entityName ?? 'Entity';
   const periodLabel = session?.periodLabel ?? 'Period';
 
@@ -202,38 +255,85 @@ export default function VariancePage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-display text-primary">Variance Analysis</h1>
-          <p className="text-text-secondary text-sm mt-0.5">
+          <h1
+            className="text-2xl font-display"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            Variance Analysis
+          </h1>
+          <p
+            className="text-sm mt-0.5"
+            style={{ color: 'var(--text-secondary)' }}
+          >
             {periodLabel} vs Prior Period
           </p>
         </div>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={async () => {
+              const token = typeof window !== 'undefined' ? localStorage.getItem('cpa_auth_token') : null;
+              const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+              const res = await fetch(`${API_URL}/api/close/sessions/${sessionId}/export/variances.xlsx`, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+              });
+              if (!res.ok) return;
+              const blob = await res.blob();
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `variances-${sessionId}.xlsx`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            }}
+            className="px-3 py-1.5 rounded-full text-sm transition-colors"
+            style={{
+              borderWidth: '1px',
+              borderStyle: 'solid',
+              borderColor: 'var(--border-default)',
+              color: 'var(--text-secondary)',
+            }}
+          >
+            <FileDown className="w-4 h-4 inline mr-1" />
+            Export Excel
+          </button>
         {canExplain && materialUnexplained.length > 0 && (
           <button
             type="button"
             onClick={handleDraftAll}
             disabled={draftingAll}
-            className="px-4 py-2 rounded-input bg-accent text-white text-sm font-medium hover:bg-accent/90 disabled:opacity-50 flex items-center gap-2"
+            className="px-4 py-2 text-sm font-medium disabled:opacity-50 flex items-center gap-2"
+            style={{
+              backgroundColor: 'var(--interactive-primary)',
+              color: '#fff',
+              borderRadius: 'var(--radius-md)',
+            }}
           >
             {draftingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
             {draftingAll ? 'Drafting...' : `Draft All Explanations (${materialUnexplained.length})`}
           </button>
         )}
+        </div>
       </div>
 
       {/* Period View Toggle */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">
-          <Calendar className="w-4 h-4 text-text-secondary" />
-          <span className="text-sm text-text-secondary">Period:</span>
+          <Calendar className="w-4 h-4" style={{ color: 'var(--text-secondary)' }} />
+          <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Period:</span>
           {(['current', 'QTD', 'YTD'] as const).map((pv) => (
             <button
               key={pv}
               type="button"
               onClick={() => setVariancePeriodView(pv)}
-              className={cn(
-                'px-3 py-1 text-sm rounded-md',
-                variancePeriodView === pv ? 'bg-accent text-white' : 'border border-border text-text-secondary hover:bg-hover'
-              )}
+              className="px-3 py-1 text-sm rounded-md"
+              style={
+                variancePeriodView === pv
+                  ? { backgroundColor: 'var(--interactive-primary)', color: '#fff' }
+                  : { borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--border-default)', color: 'var(--text-secondary)' }
+              }
             >
               {pv === 'current' ? 'Current Period' : pv === 'QTD' ? 'Quarter-to-Date' : 'Year-to-Date'}
             </button>
@@ -241,11 +341,18 @@ export default function VariancePage() {
         </div>
         {variancePeriodView !== 'current' && (
           <div className="flex items-center gap-2">
-            <span className="text-sm text-text-secondary">Compare:</span>
+            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Compare:</span>
             <select
               value={comparisonType}
               onChange={(e) => setComparisonType(e.target.value as VarianceComparisonType)}
-              className="text-sm border border-border rounded-input px-2 py-1"
+              className="text-sm px-2 py-1"
+              style={{
+                borderWidth: '1px',
+                borderStyle: 'solid',
+                borderColor: 'var(--border-default)',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'var(--bg-surface-sunken)',
+              }}
             >
               <option value="prior_year_same_period">vs Prior Year</option>
               <option value="sequential">vs Prior Quarter/Period</option>
@@ -257,8 +364,18 @@ export default function VariancePage() {
 
       {/* Cumulative Variance Note */}
       {variancePeriodView !== 'current' && cumulativeVarData && (
-        <div className="p-3 rounded-card border border-accent/30 bg-accent/5 text-sm text-text-secondary">
-          <span className="font-medium text-accent">{cumulativeVarData.currentPeriodLabel}</span>{' '}
+        <div
+          className="p-3 text-sm"
+          style={{
+            borderRadius: 'var(--radius-lg)',
+            borderWidth: '1px',
+            borderStyle: 'solid',
+            borderColor: 'var(--interactive-primary)',
+            backgroundColor: 'var(--interactive-primary-bg, rgba(59,130,246,0.05))',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          <span className="font-medium" style={{ color: 'var(--interactive-primary)' }}>{cumulativeVarData.currentPeriodLabel}</span>{' '}
           vs <span className="font-medium">{cumulativeVarData.priorPeriodLabel || 'N/A'}</span>
           {' '}&mdash; {cumulativeVarData.note}
         </div>
@@ -266,29 +383,54 @@ export default function VariancePage() {
 
       {/* Cumulative Variance Table */}
       {variancePeriodView !== 'current' && cumulativeVarData && cumulativeVarData.variances.length > 0 && (
-        <div className="border border-border rounded-card bg-surface overflow-hidden">
+        <div
+          className="overflow-hidden"
+          style={{
+            borderWidth: '1px',
+            borderStyle: 'solid',
+            borderColor: 'var(--border-default)',
+            borderRadius: 'var(--radius-lg)',
+            backgroundColor: 'var(--bg-surface)',
+          }}
+        >
           <table className="w-full text-sm border-collapse">
             <thead>
-              <tr className="border-b border-border bg-elevated/50">
-                <th className="text-left py-2.5 px-3 font-medium text-text-secondary">Statement</th>
-                <th className="text-left py-2.5 px-3 font-medium text-text-secondary">Line Item</th>
-                <th className="text-right py-2.5 px-3 font-medium text-text-secondary">{cumulativeVarData.currentPeriodLabel}</th>
-                <th className="text-right py-2.5 px-3 font-medium text-text-secondary">{cumulativeVarData.priorPeriodLabel || 'Prior'}</th>
-                <th className="text-right py-2.5 px-3 font-medium text-text-secondary">Change ($)</th>
-                <th className="text-right py-2.5 px-3 font-medium text-text-secondary">Change (%)</th>
-                <th className="text-center py-2.5 px-3 font-medium text-text-secondary">Material</th>
+              <tr
+                style={{
+                  borderBottomWidth: '1px',
+                  borderBottomStyle: 'solid',
+                  borderBottomColor: 'var(--border-default)',
+                  backgroundColor: 'var(--bg-surface-sunken)',
+                }}
+              >
+                <th className="text-left py-2.5 px-3 font-medium" style={{ color: 'var(--text-secondary)' }}>Statement</th>
+                <th className="text-left py-2.5 px-3 font-medium" style={{ color: 'var(--text-secondary)' }}>Line Item</th>
+                <th className="text-right py-2.5 px-3 font-medium" style={{ color: 'var(--text-secondary)' }}>{cumulativeVarData.currentPeriodLabel}</th>
+                <th className="text-right py-2.5 px-3 font-medium" style={{ color: 'var(--text-secondary)' }}>{cumulativeVarData.priorPeriodLabel || 'Prior'}</th>
+                <th className="text-right py-2.5 px-3 font-medium" style={{ color: 'var(--text-secondary)' }}>Change ($)</th>
+                <th className="text-right py-2.5 px-3 font-medium" style={{ color: 'var(--text-secondary)' }}>Change (%)</th>
+                <th className="text-center py-2.5 px-3 font-medium" style={{ color: 'var(--text-secondary)' }}>Material</th>
               </tr>
             </thead>
             <tbody>
               {cumulativeVarData.variances.map((v) => (
-                <tr key={v.fsLineId} className={cn('border-b border-border-light', v.isMaterial ? 'bg-status-amber/5' : 'opacity-60')}>
-                  <td className="py-2 px-3 text-xs uppercase text-text-muted">{v.statement.replace(/_/g, ' ')}</td>
+                <tr
+                  key={v.fsLineId}
+                  className={cn(!v.isMaterial && 'opacity-60')}
+                  style={{
+                    borderBottomWidth: '1px',
+                    borderBottomStyle: 'solid',
+                    borderBottomColor: 'var(--border-subtle)',
+                    ...(v.isMaterial ? { backgroundColor: 'var(--status-warning-bg)' } : {}),
+                  }}
+                >
+                  <td className="py-2 px-3 text-xs uppercase" style={{ color: 'var(--text-tertiary)' }}>{v.statement.replace(/_/g, ' ')}</td>
                   <td className="py-2 px-3">{v.label}</td>
-                  <td className="py-2 px-3 text-right font-mono">{Number(v.currentAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                  <td className="py-2 px-3 text-right font-mono">{Number(v.priorAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                  <td className="py-2 px-3 text-right font-mono">{Number(v.changeAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                  <td className="py-2 px-3 text-right font-mono">{v.changePercent != null ? `${Number(v.changePercent).toFixed(1)}%` : '\u2014'}</td>
-                  <td className="py-2 px-3 text-center">{v.isMaterial ? <span className="text-status-amber">&#x25CF;</span> : '\u2014'}</td>
+                  <td className="py-2 px-3 text-right font-mono">{fmtMoney(v.currentAmount, { dollar: true })}</td>
+                  <td className="py-2 px-3 text-right font-mono">{fmtMoney(v.priorAmount, { dollar: true })}</td>
+                  <td className="py-2 px-3 text-right font-mono">{fmtMoney(v.changeAmount, { dollar: true })}</td>
+                  <td className="py-2 px-3 text-right font-mono">{v.changePercent != null ? `${fmtMoney(v.changePercent, { dash: false })}%` : '\u2014'}</td>
+                  <td className="py-2 px-3 text-center">{v.isMaterial ? <span style={{ color: 'var(--status-warning)' }}>&#x25CF;</span> : '\u2014'}</td>
                 </tr>
               ))}
             </tbody>
@@ -297,18 +439,43 @@ export default function VariancePage() {
       )}
 
       {/* Summary bar */}
-      <div className="flex flex-wrap items-center gap-6 py-3 px-4 rounded-card border border-border bg-surface">
-        <span className="text-sm text-text-secondary">
+      <div
+        className="flex flex-wrap items-center gap-6 py-3 px-4"
+        style={{
+          borderRadius: 'var(--radius-lg)',
+          borderWidth: '1px',
+          borderStyle: 'solid',
+          borderColor: 'var(--border-default)',
+          backgroundColor: 'var(--bg-surface)',
+        }}
+      >
+        <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
           {stats.explained} of {stats.material} explained ({stats.material ? Math.round((stats.explained / stats.material) * 100) : 0}%)
         </span>
-        <div className="flex-1 min-w-[100px] max-w-[160px] h-2 bg-elevated rounded-full overflow-hidden">
-          <div className="h-full bg-status-green rounded-full transition-all" style={{ width: `${stats.material ? Math.round((stats.explained / stats.material) * 100) : 0}%` }} />
+        <div
+          className="flex-1 min-w-[100px] max-w-[160px] h-2 rounded-full overflow-hidden"
+          style={{ backgroundColor: 'var(--bg-surface-sunken)' }}
+        >
+          <div
+            className="h-full rounded-full transition-all"
+            style={{
+              backgroundColor: 'var(--status-success)',
+              width: `${stats.material ? Math.round((stats.explained / stats.material) * 100) : 0}%`,
+            }}
+          />
         </div>
-        <span className="text-sm text-status-green">Approved: <strong>{stats.approved}</strong></span>
-        <span className={cn('text-sm', stats.unexplained > 0 ? 'text-status-red font-medium' : 'text-text-secondary')}>
+        <span className="text-sm" style={{ color: 'var(--status-success)' }}>Approved: <strong>{stats.approved}</strong></span>
+        <span
+          className="text-sm"
+          style={
+            stats.unexplained > 0
+              ? { color: 'var(--status-error)', fontWeight: 500 }
+              : { color: 'var(--text-secondary)' }
+          }
+        >
           Need explanation: <strong>{stats.unexplained}</strong>
         </span>
-        <span className="text-xs text-text-muted">
+        <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
           Threshold: {variances[0]?.materialityThreshold ? `$${parseFloat(variances[0].materialityThreshold).toLocaleString()} or 10%` : 'From settings'}
         </span>
       </div>
@@ -324,27 +491,49 @@ export default function VariancePage() {
           Unexplained only
         </label>
         <div className="flex items-center gap-2">
-          <span className="text-sm text-text-secondary">Statement:</span>
+          <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Statement:</span>
           {['income_statement', 'balance_sheet', 'cash_flow', 'equity'].map((st) => (
             <button
               key={st}
               type="button"
               onClick={() => setStatementFilter((prev) => (prev === st ? null : st))}
-              className={cn(
-                'px-2.5 py-1 rounded-input text-xs font-medium border',
-                statementFilter === st ? 'border-accent bg-accent-dim text-accent' : 'border-border text-text-secondary hover:bg-hover'
-              )}
+              className="px-2.5 py-1 text-xs font-medium"
+              style={
+                statementFilter === st
+                  ? {
+                      borderWidth: '1px',
+                      borderStyle: 'solid',
+                      borderColor: 'var(--interactive-primary)',
+                      backgroundColor: 'var(--interactive-primary-bg, rgba(59,130,246,0.08))',
+                      color: 'var(--interactive-primary)',
+                      borderRadius: 'var(--radius-md)',
+                    }
+                  : {
+                      borderWidth: '1px',
+                      borderStyle: 'solid',
+                      borderColor: 'var(--border-default)',
+                      color: 'var(--text-secondary)',
+                      borderRadius: 'var(--radius-md)',
+                    }
+              }
             >
               {STATEMENT_LABELS[st] ?? st}
             </button>
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-sm text-text-secondary">Sort:</span>
+          <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Sort:</span>
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as 'changeAbs' | 'lineItem' | 'statement')}
-            className="rounded-input border border-border bg-input text-sm px-2 py-1"
+            className="text-sm px-2 py-1"
+            style={{
+              borderRadius: 'var(--radius-md)',
+              borderWidth: '1px',
+              borderStyle: 'solid',
+              borderColor: 'var(--border-default)',
+              backgroundColor: 'var(--bg-surface-sunken)',
+            }}
           >
             <option value="changeAbs">Largest variance first</option>
             <option value="lineItem">Line item</option>
@@ -355,33 +544,49 @@ export default function VariancePage() {
 
       {/* Table */}
       {variances.length === 0 ? (
-        <div className="bg-surface border border-border rounded-card p-12 text-center">
-          <p className="text-lg font-medium text-primary mb-2">No variance data yet</p>
-          <p className="text-text-secondary text-sm max-w-md mx-auto">
-            Variances are generated when financial statements are produced. Generate statements first, then return here to review period-over-period changes.
-          </p>
-        </div>
+        <EmptyState
+          icon={TrendingUp}
+          title="Generate financial statements to see variance analysis"
+          description="Variances are computed when financial statements are produced. Complete reconciliation and adjustments, then generate statements."
+        />
       ) : filtered.length === 0 ? (
-        <div className="bg-surface border border-border rounded-card p-12 text-center">
-          <p className="text-primary font-medium mb-1">No variances match the current filters</p>
-          <p className="text-text-secondary text-sm">Try adjusting the filters above to see more results.</p>
-        </div>
+        <EmptyState
+          icon={Search}
+          title="No variances match the current filters"
+          description="Try adjusting the filters above to see more results."
+        />
       ) : (
-      <div className="bg-surface border border-border rounded-card overflow-hidden">
+      <div
+        className="overflow-hidden"
+        style={{
+          backgroundColor: 'var(--bg-surface)',
+          borderWidth: '1px',
+          borderStyle: 'solid',
+          borderColor: 'var(--border-default)',
+          borderRadius: 'var(--radius-lg)',
+        }}
+      >
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-sm">
             <thead>
-              <tr className="border-b border-border bg-surface-alt">
+              <tr
+                style={{
+                  borderBottomWidth: '1px',
+                  borderBottomStyle: 'solid',
+                  borderBottomColor: 'var(--border-default)',
+                  backgroundColor: 'var(--bg-surface-sunken)',
+                }}
+              >
                 <th className="w-10 py-2" />
-                <th className="text-left py-2 px-3 font-medium text-text-secondary w-12">Statement</th>
-                <th className="text-left py-2 px-3 font-medium text-text-secondary">Line Item</th>
-                <th className="text-right py-2 px-3 font-medium text-text-secondary w-[140px]">Prior Period</th>
-                <th className="text-right py-2 px-3 font-medium text-text-secondary w-[140px]">Current Period</th>
-                <th className="text-right py-2 px-3 font-medium text-text-secondary w-[130px]">Change ($)</th>
-                <th className="text-right py-2 px-3 font-medium text-text-secondary w-20">Change (%)</th>
-                <th className="text-center py-2 px-2 font-medium text-text-secondary w-14">Material</th>
-                <th className="text-center py-2 px-2 font-medium text-text-secondary w-20">Explanation</th>
-                <th className="text-left py-2 px-3 font-medium text-text-secondary w-24">Approval</th>
+                <th className="text-left py-2 px-3 font-medium w-12" style={{ color: 'var(--text-secondary)' }}>Statement</th>
+                <th className="text-left py-2 px-3 font-medium" style={{ color: 'var(--text-secondary)' }}>Line Item</th>
+                <th className="text-right py-2 px-3 font-medium w-[140px]" style={{ color: 'var(--text-secondary)' }}>Prior Period</th>
+                <th className="text-right py-2 px-3 font-medium w-[140px]" style={{ color: 'var(--text-secondary)' }}>Current Period</th>
+                <th className="text-right py-2 px-3 font-medium w-[130px]" style={{ color: 'var(--text-secondary)' }}>Change ($)</th>
+                <th className="text-right py-2 px-3 font-medium w-20" style={{ color: 'var(--text-secondary)' }}>Change (%)</th>
+                <th className="text-center py-2 px-2 font-medium w-14" style={{ color: 'var(--text-secondary)' }}>Material</th>
+                <th className="text-center py-2 px-2 font-medium w-20" style={{ color: 'var(--text-secondary)' }}>Explanation</th>
+                <th className="text-left py-2 px-3 font-medium w-24" style={{ color: 'var(--text-secondary)' }}>Approval</th>
               </tr>
             </thead>
             <tbody>
@@ -391,29 +596,40 @@ export default function VariancePage() {
                 const displayExplanation = localExplanations[v.id] ?? v.explanation;
                 const displayStatus = v.explanationStatus;
                 const showAiDraft = v.isMaterial && v.explanationStatus === 'pending' && v.aiDraftExplanation && !localDismissedAi[v.id];
+                const isMaterialPending = v.isMaterial && v.explanationStatus === 'pending';
+                const isExplained = v.isMaterial && (v.explanationStatus === 'explained' || v.explanationStatus === 'approved');
 
                 return (
                   <React.Fragment key={v.id}>
                     <tr
-                      className={cn(
-                        'border-b border-border-light',
-                        !v.isMaterial && 'opacity-70',
-                        v.isMaterial && v.explanationStatus === 'pending' && 'bg-status-red/5'
-                      )}
+                      className={cn(!v.isMaterial && 'opacity-70')}
+                      style={{
+                        borderBottomWidth: '1px',
+                        borderBottomStyle: 'solid',
+                        borderBottomColor: 'var(--border-subtle)',
+                        ...(isMaterialPending
+                          ? {
+                              borderLeft: '3px solid var(--status-error)',
+                              backgroundColor: 'var(--status-error-bg)',
+                            }
+                          : isExplained
+                          ? { borderLeft: '3px solid var(--status-success)' }
+                          : {}),
+                      }}
                     >
                       <td className="py-1.5 pl-2">
                         {v.isMaterial ? (
                           <button
                             type="button"
                             onClick={() => toggleExpanded(v.id)}
-                            className="p-0.5 rounded hover:bg-hover"
+                            className="p-0.5 rounded"
                             aria-label={isExpanded ? 'Collapse' : 'Expand'}
                           >
                             {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                           </button>
                         ) : null}
                       </td>
-                      <td className="py-2 px-3 text-center font-mono text-text-secondary">{STATEMENT_LABELS[v.statementType] ?? v.statementType}</td>
+                      <td className="py-2 px-3 text-center font-mono" style={{ color: 'var(--text-secondary)' }}>{STATEMENT_LABELS[v.statementType] ?? v.statementType}</td>
                       <td className="py-2 px-3 font-medium">{v.lineItemName}</td>
                       <td className="py-2 px-3 text-right font-mono tabular-nums">
                         <MoneyCell value={v.priorAmount} showDollar />
@@ -421,50 +637,115 @@ export default function VariancePage() {
                       <td className="py-2 px-3 text-right font-mono tabular-nums">
                         <MoneyCell value={v.currentAmount} showDollar />
                       </td>
-                      <td className={cn('py-2 px-3 text-right font-mono tabular-nums', color === 'favorable' && 'text-status-green', color === 'unfavorable' && 'text-status-red')}>
+                      <td className="py-2 px-3 text-right font-mono tabular-nums" style={colorStyle(color)}>
                         <MoneyCell value={v.changeAmount} showDollar />
                       </td>
-                      <td className={cn('py-2 px-3 text-right font-mono tabular-nums', color === 'favorable' && 'text-status-green', color === 'unfavorable' && 'text-status-red')}>
+                      <td className="py-2 px-3 text-right font-mono tabular-nums" style={colorStyle(color)}>
                         {v.changePercent}%
                       </td>
                       <td className="py-2 px-2 text-center">{v.isMaterial ? '●' : '—'}</td>
                       <td className="py-2 px-2 text-center">
                         {!v.isMaterial && '—'}
-                        {v.isMaterial && displayStatus === 'approved' && <span className="text-status-green">✓</span>}
-                        {v.isMaterial && displayStatus === 'pending' && <span className="text-status-red">✗</span>}
-                        {v.isMaterial && displayStatus === 'explained' && <span className="text-status-green">✓</span>}
+                        {v.isMaterial && displayStatus === 'approved' && <span style={{ color: 'var(--status-success)' }}>✓</span>}
+                        {v.isMaterial && displayStatus === 'pending' && <span style={{ color: 'var(--status-error)' }}>✗</span>}
+                        {v.isMaterial && displayStatus === 'explained' && <span style={{ color: 'var(--status-success)' }}>✓</span>}
                       </td>
                       <td className="py-2 px-3">
-                        {!v.isMaterial && <span className="text-text-muted">N/A</span>}
-                        {v.isMaterial && displayStatus === 'pending' && <span className="text-status-amber">Pending</span>}
-                        {v.isMaterial && displayStatus === 'explained' && <span className="text-status-amber">Pending Approval</span>}
-                        {v.isMaterial && displayStatus === 'approved' && <span className="text-status-green">Approved</span>}
+                        {!v.isMaterial && <span style={{ color: 'var(--text-tertiary)' }}>N/A</span>}
+                        {v.isMaterial && displayStatus === 'pending' && <span style={{ color: 'var(--status-warning)' }}>Pending</span>}
+                        {v.isMaterial && displayStatus === 'explained' && <span style={{ color: 'var(--status-warning)' }}>Pending Approval</span>}
+                        {v.isMaterial && displayStatus === 'approved' && <span style={{ color: 'var(--status-success)' }}>Approved</span>}
                       </td>
                     </tr>
                     {isExpanded && v.isMaterial && (
-                      <tr key={`${v.id}-detail`} className="border-b border-border-light bg-surface-alt/50">
+                      <tr
+                        key={`${v.id}-detail`}
+                        style={{
+                          borderBottomWidth: '1px',
+                          borderBottomStyle: 'solid',
+                          borderBottomColor: 'var(--border-subtle)',
+                          backgroundColor: 'var(--bg-surface-sunken)',
+                        }}
+                      >
                         <td colSpan={10} className="p-4">
                           <div className="space-y-4 max-w-3xl">
                             {!v.isMaterial ? (
-                              <p className="text-sm text-text-tertiary">Below materiality threshold.</p>
+                              <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>Below materiality threshold.</p>
                             ) : (
                               <>
+                                {/* Classification dropdown */}
+                                <div className="flex flex-wrap items-center gap-4">
+                                  <div>
+                                    <label
+                                      className="block text-xs font-medium mb-1"
+                                      style={{ color: 'var(--text-secondary)' }}
+                                    >
+                                      Classification
+                                    </label>
+                                    <select
+                                      value={localClassifications[v.id] ?? v.classification ?? ''}
+                                      onChange={(e) => handleClassify(v.id, e.target.value)}
+                                      className="px-3 py-1.5 text-sm"
+                                      style={{
+                                        borderRadius: 'var(--radius-md)',
+                                        borderWidth: '1px',
+                                        borderStyle: 'solid',
+                                        borderColor: 'var(--border-default)',
+                                        backgroundColor: 'var(--bg-surface-sunken)',
+                                      }}
+                                      disabled={readOnly || displayStatus === 'approved'}
+                                    >
+                                      <option value="">Select classification...</option>
+                                      {CLASSIFICATION_OPTIONS.map((c) => (
+                                        <option key={c} value={c}>{c}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  {v.fullYearImpact != null && (
+                                    <div>
+                                      <label
+                                        className="block text-xs font-medium mb-1"
+                                        style={{ color: 'var(--text-secondary)' }}
+                                      >
+                                        Full Year Impact
+                                      </label>
+                                      <div className="text-sm font-mono" style={{ color: 'var(--text-primary)' }}>
+                                        If this trend continues: {fmtMoney(v.fullYearImpact, { dollar: true })} annual impact
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+
                                 {showAiDraft && (
                                   <AISuggestionCard
-                                    title="✦ AI Draft — Review and Edit"
+                                    title={<><AISuggestionBadge label="AI Draft" confidence={v.aiConfidence ?? undefined} /> Review and Edit</>}
                                     advisoryLabel="Advisory only — do not auto-apply"
                                     actions={
                                       <div className="flex gap-2">
                                         <button
                                           type="button"
-                                          className="px-3 py-1.5 rounded-input border border-accent text-accent text-sm hover:bg-accent-dim"
+                                          className="px-3 py-1.5 text-sm"
+                                          style={{
+                                            borderRadius: 'var(--radius-md)',
+                                            borderWidth: '1px',
+                                            borderStyle: 'solid',
+                                            borderColor: 'var(--interactive-primary)',
+                                            color: 'var(--interactive-primary)',
+                                          }}
                                           onClick={() => handleUseDraft(v.id, v.aiDraftExplanation!)}
                                         >
                                           Use as Starting Point
                                         </button>
                                         <button
                                           type="button"
-                                          className="px-3 py-1.5 rounded-input border border-border text-text-secondary text-sm hover:bg-hover"
+                                          className="px-3 py-1.5 text-sm"
+                                          style={{
+                                            borderRadius: 'var(--radius-md)',
+                                            borderWidth: '1px',
+                                            borderStyle: 'solid',
+                                            borderColor: 'var(--border-default)',
+                                            color: 'var(--text-secondary)',
+                                          }}
                                           onClick={() => handleDismissDraft(v.id)}
                                         >
                                           Dismiss Draft
@@ -476,19 +757,57 @@ export default function VariancePage() {
                                   </AISuggestionCard>
                                 )}
                                 <div>
-                                  <label className="block text-xs font-medium text-text-secondary mb-1">
+                                  <label
+                                    className="block text-xs font-medium mb-1"
+                                    style={{ color: 'var(--text-secondary)' }}
+                                  >
                                     Explanation {displayStatus === 'approved' ? '' : '(review and edit before saving)'}
                                   </label>
                                   {displayStatus === 'approved' ? (
-                                    <p className="text-sm text-primary rounded-input border border-border p-3 bg-input">{displayExplanation || '—'}</p>
+                                    <p
+                                      className="text-sm p-3"
+                                      style={{
+                                        color: 'var(--text-primary)',
+                                        borderRadius: 'var(--radius-md)',
+                                        borderWidth: '1px',
+                                        borderStyle: 'solid',
+                                        borderColor: 'var(--border-default)',
+                                        backgroundColor: 'var(--bg-surface-sunken)',
+                                      }}
+                                    >
+                                      {displayExplanation || '—'}
+                                    </p>
                                   ) : (
-                                    <textarea
-                                      value={localExplanations[v.id] ?? displayExplanation ?? ''}
-                                      onChange={(e) => setLocalExplanations((prev) => ({ ...prev, [v.id]: e.target.value }))}
-                                      placeholder="Enter explanation (min 20 characters)"
-                                      className="w-full min-h-[100px] px-3 py-2 rounded-input border border-border bg-input text-sm"
-                                      rows={4}
-                                    />
+                                    <>
+                                      <textarea
+                                        value={localExplanations[v.id] ?? displayExplanation ?? ''}
+                                        onChange={(e) => setLocalExplanations((prev) => ({ ...prev, [v.id]: e.target.value }))}
+                                        placeholder="Enter explanation (min 20 characters)"
+                                        className="w-full min-h-[100px] px-3 py-2 text-sm"
+                                        style={{
+                                          borderRadius: 'var(--radius-md)',
+                                          borderWidth: '1px',
+                                          borderStyle: 'solid',
+                                          borderColor: 'var(--border-default)',
+                                          backgroundColor: 'var(--bg-surface-sunken)',
+                                        }}
+                                        rows={4}
+                                      />
+                                      <div className="flex items-center gap-2 mt-1">
+                                        <p
+                                          className="text-xs"
+                                          style={{
+                                            color: (localExplanations[v.id] ?? displayExplanation ?? '').trim().length >= 20
+                                              ? 'var(--text-secondary)'
+                                              : 'var(--status-error)',
+                                          }}
+                                        >
+                                          {(localExplanations[v.id] ?? displayExplanation ?? '').trim().length}/20 min characters
+                                        </p>
+                                        {draftSavedStatus[v.id] === 'saving' && <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Saving...</span>}
+                                        {draftSavedStatus[v.id] === 'saved' && <span className="text-xs" style={{ color: 'var(--status-success)' }}>Draft saved</span>}
+                                      </div>
+                                    </>
                                   )}
                                 </div>
                                 {displayStatus !== 'approved' && !readOnly && (
@@ -496,7 +815,12 @@ export default function VariancePage() {
                                     {canExplain && displayStatus === 'pending' && (
                                       <button
                                         type="button"
-                                        className="px-4 py-2 rounded-input bg-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-50"
+                                        className="px-4 py-2 text-sm font-medium disabled:opacity-50"
+                                        style={{
+                                          borderRadius: 'var(--radius-md)',
+                                          backgroundColor: 'var(--interactive-primary)',
+                                          color: '#fff',
+                                        }}
                                         onClick={() => handleSaveExplanation(v.id, localExplanations[v.id] ?? displayExplanation ?? '')}
                                         disabled={((localExplanations[v.id] ?? displayExplanation ?? '').trim().length ?? 0) < 20 || savingIds.has(v.id)}
                                       >
@@ -506,7 +830,14 @@ export default function VariancePage() {
                                     {canApprove && displayStatus === 'explained' && (
                                       <button
                                         type="button"
-                                        className="px-4 py-2 rounded-input border border-status-green text-status-green text-sm font-medium hover:bg-status-green-dim disabled:opacity-50"
+                                        className="px-4 py-2 text-sm font-medium disabled:opacity-50"
+                                        style={{
+                                          borderRadius: 'var(--radius-md)',
+                                          borderWidth: '1px',
+                                          borderStyle: 'solid',
+                                          borderColor: 'var(--status-success)',
+                                          color: 'var(--status-success)',
+                                        }}
                                         onClick={() => handleApprove(v.id)}
                                         disabled={approvingIds.has(v.id)}
                                       >
@@ -516,7 +847,14 @@ export default function VariancePage() {
                                     {canExplain && (
                                       <button
                                         type="button"
-                                        className="px-4 py-2 rounded-input border border-border text-text-secondary text-sm font-medium hover:bg-hover flex items-center gap-1.5"
+                                        className="px-4 py-2 text-sm font-medium flex items-center gap-1.5"
+                                        style={{
+                                          borderRadius: 'var(--radius-md)',
+                                          borderWidth: '1px',
+                                          borderStyle: 'solid',
+                                          borderColor: 'var(--border-default)',
+                                          color: 'var(--text-secondary)',
+                                        }}
                                         onClick={() => setInvestigatingVariance(v)}
                                       >
                                         <Search className="w-3.5 h-3.5" /> Investigate
@@ -542,14 +880,34 @@ export default function VariancePage() {
       {/* Toast */}
       {toast && (
         <div
-          className={cn(
-            'fixed bottom-4 right-4 px-4 py-3 rounded-card border text-sm font-medium z-50',
-            toast.type === 'success' ? 'border-status-green bg-status-green-dim text-status-green' : 'border-status-red bg-status-red-dim text-status-red'
-          )}
+          className="fixed bottom-4 right-4 px-4 py-3 text-sm font-medium z-50"
+          style={{
+            borderRadius: 'var(--radius-lg)',
+            borderWidth: '1px',
+            borderStyle: 'solid',
+            ...(toast.type === 'success'
+              ? {
+                  borderColor: 'var(--status-success)',
+                  backgroundColor: 'var(--status-success-bg)',
+                  color: 'var(--status-success)',
+                }
+              : {
+                  borderColor: 'var(--status-error)',
+                  backgroundColor: 'var(--status-error-bg)',
+                  color: 'var(--status-error)',
+                }),
+          }}
         >
           {toast.message}
         </div>
       )}
+
+      <ContinueToNextStep
+        currentStep="Variance Analysis"
+        nextStep={{ label: 'Review', href: `/close/${sessionId}/review` }}
+        gatesPassed={stats.material > 0 && stats.unexplained === 0}
+        gateSummary={`All ${stats.material} material variances explained`}
+      />
 
       <InvestigationPanel
         open={!!investigatingVariance}

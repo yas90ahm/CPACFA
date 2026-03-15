@@ -17,7 +17,7 @@ import { createDecisionRecord } from '../services/decision_record_service.js';
 import { checkMappingCompleteness } from '../services/mapping_completeness_gate.js';
 import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
 import { appendEntry } from '../db/repositories/audit_ledger_repository.js';
-import { listFsTaxonomyLines, upsertFsTaxonomyLine } from '../db/repositories/fs_taxonomy_repository.js';
+import { listFsTaxonomyLines, upsertFsTaxonomyLine, toggleFsTaxonomyLineHidden } from '../db/repositories/fs_taxonomy_repository.js';
 
 const router = Router();
 
@@ -133,6 +133,16 @@ router.get('/suggestions', async (req: Request, res: Response) => {
   }
 });
 
+/** IDs that are section nodes (not mappable targets) */
+const SECTION_NODE_IDS = new Set([
+  'fs_asset', 'fs_liability', 'fs_equity', 'fs_expense',
+  'fs_asset_current', 'fs_asset_noncurrent',
+  'fs_liability_current', 'fs_liability_noncurrent',
+  'fs_opex', 'fs_other_income',
+]);
+/** CF lines should not be mapping targets (CF is derived, not mapped) */
+const CF_LINE_IDS = new Set(['fs_cf_operating', 'fs_cf_investing', 'fs_cf_financing']);
+
 /** GET /api/coa-mapping/taxonomy — list FS taxonomy lines */
 router.get('/taxonomy', async (req: Request, res: Response) => {
   try {
@@ -141,7 +151,12 @@ router.get('/taxonomy', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Tenant context required' });
       return;
     }
-    const lines = await listTaxonomyLines(pool);
+    const allLines = await listTaxonomyLines(pool);
+    // Enrich with mappable flag
+    const lines = allLines.map((l) => ({
+      ...l,
+      mappable: !l.isSubtotal && !SECTION_NODE_IDS.has(l.id) && !CF_LINE_IDS.has(l.id),
+    }));
     res.json({ lines });
   } catch (e) {
     send500(res, e, 'List taxonomy failed');
@@ -212,6 +227,33 @@ router.delete('/taxonomy/:id', async (req: Request, res: Response) => {
     res.json({ success: true });
   } catch (e) {
     send500(res, e, 'Delete taxonomy line failed');
+  }
+});
+
+/** PATCH /api/coa-mapping/taxonomy/:id — toggle or set is_hidden on a taxonomy line */
+router.patch('/taxonomy/:id', async (req: Request, res: Response) => {
+  try {
+    const pool = getTenantPool(req);
+    if (!pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const { id } = req.params;
+    const { is_hidden, isHidden } = req.body ?? {};
+    // Accept both snake_case and camelCase
+    const hiddenValue = is_hidden ?? isHidden;
+    const updated = await toggleFsTaxonomyLineHidden(
+      pool,
+      id,
+      hiddenValue != null ? Boolean(hiddenValue) : undefined
+    );
+    if (!updated) {
+      res.status(404).json({ error: 'Taxonomy line not found' });
+      return;
+    }
+    res.json(updated);
+  } catch (e) {
+    send500(res, e, 'Patch taxonomy line failed');
   }
 });
 

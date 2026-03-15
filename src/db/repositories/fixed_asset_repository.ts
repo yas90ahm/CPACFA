@@ -13,9 +13,9 @@ export interface FixedAssetRow {
   description?: string;
   assetType: string;
   acquisitionDate: string;
-  cost: number;
+  cost: string;
   usefulLifeYears: number;
-  residualValue: number;
+  residualValue: string;
   method: DepreciationMethod;
   depreciationStartDate: string;
   disposedDate?: string;
@@ -28,7 +28,7 @@ export interface DepreciationRunRow {
   tenantId: string;
   periodLabel: string;
   runAt: string;
-  totalDepreciation: number;
+  totalDepreciation: string;
   createdAt: string;
 }
 
@@ -38,8 +38,8 @@ export interface DepreciationRunDetailRow {
   fixedAssetId: string;
   periodStart: string;
   periodEnd: string;
-  depreciationAmount: number;
-  accumulatedDepreciation: number;
+  depreciationAmount: string;
+  accumulatedDepreciation: string;
   createdAt: string;
 }
 
@@ -55,9 +55,9 @@ function rowToFA(row: Record<string, unknown>): FixedAssetRow {
     description: row.description as string | undefined,
     assetType: row.asset_type as string,
     acquisitionDate: (row.acquisition_date as Date)?.toISOString?.()?.slice(0, 10) ?? String(row.acquisition_date),
-    cost: Number(row.cost),
+    cost: String(row.cost),
     usefulLifeYears: Number(row.useful_life_years),
-    residualValue: Number(row.residual_value ?? 0),
+    residualValue: String(row.residual_value ?? 0),
     method: row.method as DepreciationMethod,
     depreciationStartDate: (row.depreciation_start_date as Date)?.toISOString?.()?.slice(0, 10) ?? String(row.depreciation_start_date),
     disposedDate: row.disposed_date != null ? ((row.disposed_date as Date)?.toISOString?.()?.slice(0, 10) ?? String(row.disposed_date)) : undefined,
@@ -72,7 +72,7 @@ function rowToRun(row: Record<string, unknown>): DepreciationRunRow {
     tenantId: row.tenant_id as string,
     periodLabel: row.period_label as string,
     runAt: (row.run_at as Date)?.toISOString?.() ?? String(row.run_at),
-    totalDepreciation: Number(row.total_depreciation ?? 0),
+    totalDepreciation: String(row.total_depreciation ?? 0),
     createdAt: (row.created_at as Date)?.toISOString?.() ?? String(row.created_at),
   };
 }
@@ -84,8 +84,8 @@ function rowToDetail(row: Record<string, unknown>): DepreciationRunDetailRow {
     fixedAssetId: row.fixed_asset_id as string,
     periodStart: (row.period_start as Date)?.toISOString?.()?.slice(0, 10) ?? String(row.period_start),
     periodEnd: (row.period_end as Date)?.toISOString?.()?.slice(0, 10) ?? String(row.period_end),
-    depreciationAmount: Number(row.depreciation_amount),
-    accumulatedDepreciation: Number(row.accumulated_depreciation),
+    depreciationAmount: String(row.depreciation_amount),
+    accumulatedDepreciation: String(row.accumulated_depreciation),
     createdAt: (row.created_at as Date)?.toISOString?.() ?? String(row.created_at),
   };
 }
@@ -176,7 +176,7 @@ export async function createDepreciationRun(
      VALUES ($1, $2, $3, $4, $5, $6)`,
     [id, tenantId, periodLabel, now, totalDepreciation, now]
   );
-  return { id, tenantId, periodLabel, runAt: now, totalDepreciation, createdAt: now };
+  return { id, tenantId, periodLabel, runAt: now, totalDepreciation: String(totalDepreciation), createdAt: now };
 }
 
 export async function createDepreciationRunDetails(

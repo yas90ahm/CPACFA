@@ -37,7 +37,7 @@ export interface EvidencePolicyCheckResult {
 }
 
 /** Derive JE type from journal entry. Use existing classification if available; default manual_entry. */
-function deriveJeType(je: { source: string }, _lines?: { accountRef: string; debit: number; credit: number }[]): string {
+function deriveJeType(je: { source: string }, _lines?: { accountRef: string; debit: string | number; credit: string | number }[]): string {
   // Phase 2A: simple mapping. Future: derive from account types (revenue, cash, etc.)
   switch (je.source) {
     case 'recon':
@@ -48,9 +48,9 @@ function deriveJeType(je: { source: string }, _lines?: { accountRef: string; deb
 }
 
 /** Compute JE amount (max of sum debits / sum credits for materiality comparison). */
-function computeJeAmount(lines: { debit: number; credit: number }[]): number {
-  const sumDebits = sumRound2(lines.map((l) => l.debit ?? 0));
-  const sumCredits = sumRound2(lines.map((l) => l.credit ?? 0));
+function computeJeAmount(lines: { debit: string | number; credit: string | number }[]): number {
+  const sumDebits = sumRound2(lines.map((l) => Number(l.debit ?? 0)));
+  const sumCredits = sumRound2(lines.map((l) => Number(l.credit ?? 0)));
   return Math.max(sumDebits, sumCredits);
 }
 

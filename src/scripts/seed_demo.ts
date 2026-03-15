@@ -13,14 +13,15 @@ import * as periodTbRepo from '../db/repositories/period_trial_balance_repositor
 import * as closeSessionRepo from '../db/repositories/close_session_repository.js';
 import * as jeRepo from '../db/repositories/journal_entry_repository.js';
 import * as evidenceRepo from '../db/repositories/evidence_repository.js';
+import { upsertEntitySettings } from '../services/entity_settings_service.js';
 import type { TrialBalanceEntry } from '../types/financial.js';
 
 const DEMO_TENANT_ID = 'demo-cloudmetrics';
 const DEMO_TENANT_NAME = 'CloudMetrics Demo Inc.';
 const DEMO_USER_EMAIL = 'demo@cloudmetrics.io';
-const DEMO_USER_PASSWORD = 'DemoPass2026!';
+const DEMO_USER_PASSWORD = process.env.DEMO_USER_PASSWORD ?? 'DemoPass2026!';
 const DEMO_CONTROLLER_EMAIL = 'controller@cloudmetrics.io';
-const DEMO_CONTROLLER_PASSWORD = 'Controller2026!';
+const DEMO_CONTROLLER_PASSWORD = process.env.DEMO_CONTROLLER_PASSWORD ?? 'Controller2026!';
 const DEMO_PERIOD = '2025-01';
 const DEMO_ENTITY_ID = 'entity-1';
 
@@ -55,6 +56,12 @@ export async function seedDemo(): Promise<void> {
   }
 
   const pool = await getTenantPoolWithMigrations(DEMO_TENANT_ID);
+
+  // 2b. Entity settings — set entity name to "Meridian Manufacturing"
+  await upsertEntitySettings(pool, DEMO_TENANT_ID, DEMO_ENTITY_ID, {
+    entityName: 'Meridian Manufacturing',
+  });
+  console.log('[seed_demo] Entity settings created: Meridian Manufacturing');
 
   // 3. Trial balance — 25 realistic accounts (balanced)
   const tbEntries: TrialBalanceEntry[] = [

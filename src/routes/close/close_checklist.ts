@@ -13,7 +13,7 @@ import {
   createChecklistFromTemplate,
 } from '../../services/close_checklist_template_service.js';
 import { createChecklistSchema } from '../../schemas/closeSchemas.js';
-import { validateBody } from '../../middleware/validateRequest.js';
+import { validateBody } from '../../middleware/validationMiddleware.js';
 import { send500 } from '../../lib/errorHandler.js';
 import { recordAuditLogAction } from '../../services/audit_service.js';
 

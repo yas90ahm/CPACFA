@@ -9,8 +9,8 @@ import type { TrialBalanceEntry } from './financial.js';
 export interface IntegrityContractFact {
   /** Source identifier (e.g. contract id). */
   id?: string;
-  /** Total contract value (deterministic). */
-  totalContractValue: number;
+  /** Total contract value (deterministic). Decimal string. */
+  totalContractValue: string;
   /** Optional: period-recognized revenue when available. */
   periodRecognizedRevenue?: number;
 }

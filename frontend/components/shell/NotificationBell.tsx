@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bell } from 'lucide-react';
+import { Bell, PenLine, Award, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNotifications, useUnreadCount, useMarkAsRead, useMarkAllAsRead } from '@/lib/queries/notifications';
 
@@ -15,6 +15,24 @@ function timeAgo(dateStr: string): string {
   if (h < 24) return `${h}h ago`;
   const d = Math.floor(h / 24);
   return `${d}d ago`;
+}
+
+function notificationIcon(eventType?: string) {
+  switch (eventType) {
+    case 'adjusting_entry_approved':
+    case 'adjusting_entry_rejected':
+      return <PenLine className="w-4 h-4 shrink-0" />;
+    case 'close_submitted_for_review':
+    case 'review_complete':
+      return <Award className="w-4 h-4 shrink-0" />;
+    case 'period_certified':
+    case 'period_recertified':
+      return <CheckCircle2 className="w-4 h-4 shrink-0" />;
+    case 'close_overdue':
+      return <AlertTriangle className="w-4 h-4 shrink-0" />;
+    default:
+      return <Bell className="w-4 h-4 shrink-0" />;
+  }
 }
 
 export function NotificationBell() {
@@ -47,26 +65,37 @@ export function NotificationBell() {
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="p-2 rounded-input text-text-secondary hover:text-primary hover:bg-hover relative"
+        className="p-2 rounded-input hover:text-primary hover:bg-hover relative"
+        style={{ color: 'var(--text-secondary)' }}
         aria-label="Notifications"
       >
         <Bell className="w-5 h-5" />
         {count > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-status-red text-white text-[10px] font-bold px-1">
+          <span
+            className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-white text-xs font-bold px-1"
+            style={{ background: 'var(--status-error)' }}
+          >
             {count > 99 ? '99+' : count}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-96 max-h-[480px] bg-surface border border-border rounded-card shadow-lg overflow-hidden z-50">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-            <span className="text-sm font-medium text-primary">Notifications</span>
+        <div
+          className="absolute right-0 top-full mt-2 w-96 max-h-[480px] rounded-card shadow-lg overflow-hidden z-50"
+          style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)' }}
+        >
+          <div
+            className="flex items-center justify-between px-4 py-3"
+            style={{ borderBottom: '1px solid var(--border-default)' }}
+          >
+            <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Notifications</span>
             {count > 0 && (
               <button
                 type="button"
                 onClick={() => markAllRead.mutate()}
-                className="text-xs text-accent hover:underline"
+                className="text-xs hover:underline"
+                style={{ color: 'var(--interactive-primary)' }}
               >
                 Mark All Read
               </button>
@@ -74,7 +103,7 @@ export function NotificationBell() {
           </div>
           <div className="overflow-y-auto max-h-[400px]">
             {notifications.length === 0 ? (
-              <div className="px-4 py-8 text-center text-sm text-text-secondary">
+              <div className="px-4 py-8 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
                 No notifications
               </div>
             ) : (
@@ -84,18 +113,32 @@ export function NotificationBell() {
                   type="button"
                   onClick={() => handleClick(n)}
                   className={cn(
-                    'w-full text-left px-4 py-3 border-b border-border-light hover:bg-hover transition-colors',
-                    !n.read && 'bg-accent/5'
+                    'w-full text-left px-4 py-3 hover:bg-hover transition-colors',
                   )}
+                  style={{
+                    borderBottom: '1px solid var(--border-subtle)',
+                    ...(!n.read ? { background: 'var(--ai-bg)' } : {}),
+                  }}
                 >
                   <div className="flex items-start gap-2">
-                    {!n.read && <span className="mt-1.5 w-2 h-2 rounded-full bg-accent shrink-0" />}
+                    {!n.read && (
+                      <span
+                        className="mt-1.5 w-2 h-2 rounded-full shrink-0"
+                        style={{ background: 'var(--interactive-primary)' }}
+                      />
+                    )}
+                    <span className="mt-0.5 shrink-0" style={{ color: 'var(--text-secondary)' }}>
+                      {notificationIcon(n.eventType)}
+                    </span>
                     <div className={cn('min-w-0 flex-1', n.read && 'ml-4')}>
-                      <p className={cn('text-sm', !n.read ? 'font-medium text-primary' : 'text-text-secondary')}>
+                      <p
+                        className={cn('text-sm', !n.read && 'font-medium')}
+                        style={{ color: !n.read ? 'var(--text-primary)' : 'var(--text-secondary)' }}
+                      >
                         {n.title}
                       </p>
-                      <p className="text-xs text-text-secondary mt-0.5 line-clamp-2">{n.body}</p>
-                      <p className="text-[10px] text-text-muted mt-1">{timeAgo(n.createdAt)}</p>
+                      <p className="text-xs mt-0.5 line-clamp-2" style={{ color: 'var(--text-secondary)' }}>{n.body}</p>
+                      <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>{timeAgo(n.createdAt)}</p>
                     </div>
                   </div>
                 </button>

@@ -6,6 +6,7 @@
 import { Router, Request, Response } from 'express';
 import type { AuthRequest } from '../auth/middleware.js';
 import { requireAuth } from '../auth/middleware.js';
+import { requireRole } from '../middleware/requireRole.js';
 import { queryControl, isDbConfigured, getTenantPoolWithMigrations } from '../db/index.js';
 import { testConnectionForUrl, runTenantMigrationsForUrl } from '../db/migrate.js';
 import { randomUUID } from 'crypto';
@@ -22,8 +23,8 @@ function isValidPostgresUrl(url: string): boolean {
   }
 }
 
-/** POST /api/tenants — Create tenant. Optionally validate BYOD connection and run migrations. */
-router.post('/', async (req: Request, res: Response) => {
+/** POST /api/tenants — Create tenant. Requires admin role. Optionally validate BYOD connection and run migrations. */
+router.post('/', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     if (!isDbConfigured()) {
       return res.status(503).json({ error: 'Tenant creation requires DATABASE_URL (control DB)' });

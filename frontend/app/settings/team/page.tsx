@@ -5,7 +5,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SlideOverPanel } from '@/components/shared/SlideOverPanel';
 import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { Plus, Pencil, UserX } from 'lucide-react';
+import { Plus, Pencil, UserX, Users } from 'lucide-react';
+import { EmptyState } from '@/components/shared/EmptyState';
 
 type TeamRole = 'CONTROLLER' | 'REVIEWER' | 'CERTIFIER' | 'ADMIN';
 
@@ -115,6 +116,15 @@ export default function TeamPage() {
         <p><strong>Admin</strong> — Manages settings, team members, integrations. Does not participate in the close workflow directly.</p>
       </section>
 
+      {members.length === 0 ? (
+        <EmptyState
+          icon={Users}
+          title="No Team Members"
+          description="Invite your first team member to set up roles for the close workflow."
+          actionLabel="Invite Team Member"
+          onAction={() => setInviteOpen(true)}
+        />
+      ) : (
       <div className="bg-surface border border-border rounded-card overflow-hidden">
         <table className="w-full text-sm">
           <thead>
@@ -160,6 +170,7 @@ export default function TeamPage() {
           </tbody>
         </table>
       </div>
+      )}
 
       <div className={cn('rounded-card border p-4 text-sm', needsReviewer ? 'bg-status-amber-dim border-status-amber/50' : 'bg-surface-alt border-border')}>
         <p className="font-medium text-primary">Segregation of Duties</p>

@@ -1,727 +1,953 @@
 'use client';
 
-import { useParams, useSearchParams } from 'next/navigation';
-import { useState, useMemo } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useTrialBalanceContext } from '../context/trial-balance-context';
+import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useParams } from 'next/navigation';
+import { Search, Sparkles, Check, X, ChevronDown, GitBranch } from 'lucide-react';
+import { useTrialBalance } from '@/lib/queries/trial-balance';
+import {
+  useCOASuggestions,
+  useAcceptSuggestion,
+  useRejectSuggestion,
+  useGenerateSuggestions,
+} from '@/lib/queries/suggestions';
 import { MoneyCell } from '@/components/shared/MoneyCell';
-import { FilterBar } from '@/components/shared/FilterBar';
+import { StatusBadge } from '@/components/shared/StatusBadge';
+import { EmptyState } from '@/components/shared/EmptyState';
 import { AISuggestionCard } from '@/components/shared/AISuggestionCard';
-import { apiFetch, apiUpload } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { useCloseSession } from '@/lib/queries/close-session';
-import { useCOASuggestions, useGenerateSuggestions, useAcceptSuggestion, useRejectSuggestion } from '@/lib/queries/suggestions';
-import type { TrialBalanceRow, AccountType } from '@/lib/types/trial-balance';
+import { ContinueToNextStep } from '@/components/shared/ContinueToNextStep';
+import type { TrialBalanceRow } from '@/lib/types/trial-balance';
 import type { COASuggestion } from '@/lib/types/suggestion';
-import { sumMoneyStrings } from '@/lib/money';
-import { Pencil, Check, X, Sparkles, Loader2, Upload, Download } from 'lucide-react';
-import { canMapAccounts, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
-import { useAuth } from '@/lib/auth';
 
-/** API taxonomy line (flat). */
-interface TaxonomyLine {
-  id: string;
-  code: string;
-  name: string;
-  statement: string;
-  parentId?: string;
-  normalBalance?: string;
-}
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
 
-/** Tree node for taxonomy UI. */
-interface TaxonomyNode {
+type TabFilter = 'all' | 'needs-review' | 'accepted' | 'unmapped';
+
+interface TaxonomyItem {
   id: string;
   label: string;
-  children?: TaxonomyNode[];
+  category: string;
+  xbrl_label?: string;
 }
 
-const STATEMENT_LABELS: Record<string, string> = {
-  PL: 'Income Statement',
-  BS: 'Balance Sheet',
-  CF: 'Cash Flow Statement',
-};
+/** Merged row: trial balance row enriched with its matching COA suggestion */
+interface MergedRow {
+  row: TrialBalanceRow;
+  suggestion: COASuggestion | null;
+  /** Derived display status */
+  displayStatus: 'pending' | 'accepted' | 'rejected' | 'manual' | 'unmapped';
+}
 
-function buildTaxonomyTree(lines: TaxonomyLine[]): TaxonomyNode[] {
-  if (!lines.length) return [];
-  const map = new Map<string, TaxonomyNode>();
-  for (const l of lines) {
-    map.set(l.id, { id: l.id, label: l.name, children: [] });
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                            */
+/* ------------------------------------------------------------------ */
+
+function getConfidenceColor(confidence: number): string {
+  if (confidence >= 90) return 'var(--ai-primary)';
+  if (confidence >= 70) return 'var(--status-warning)';
+  return 'var(--status-error)';
+}
+
+function groupByCategory(items: TaxonomyItem[]): Record<string, TaxonomyItem[]> {
+  const groups: Record<string, TaxonomyItem[]> = {};
+  for (const item of items) {
+    if (!groups[item.category]) groups[item.category] = [];
+    groups[item.category].push(item);
   }
-  const roots: TaxonomyNode[] = [];
-  for (const l of lines) {
-    const node = map.get(l.id)!;
-    if (!l.parentId || !map.has(l.parentId)) {
-      roots.push(node);
-    } else {
-      const parent = map.get(l.parentId)!;
-      if (!parent.children) parent.children = [];
-      parent.children.push(node);
-    }
-  }
-  return roots;
+  return groups;
 }
 
-function flattenForSelect(lines: TaxonomyLine[]): { id: string; label: string; statementLabel: string }[] {
-  return lines.map((l) => ({
-    id: l.id,
-    label: l.name,
-    statementLabel: STATEMENT_LABELS[l.statement] ?? l.statement,
-  }));
-}
+/* ------------------------------------------------------------------ */
+/*  Skeleton Row                                                       */
+/* ------------------------------------------------------------------ */
 
-const ACCOUNT_TYPE_STYLE: Record<AccountType, string> = {
-  ASSET: 'bg-status-blue-dim text-status-blue',
-  LIABILITY: 'bg-status-amber-dim text-status-amber',
-  EQUITY: 'bg-equity-dim text-equity',
-  REVENUE: 'bg-status-green-dim text-status-green',
-  EXPENSE: 'bg-status-red-dim text-status-red',
-};
-
-const CONFIDENCE_BADGE: Record<string, string> = {
-  high: 'bg-status-green-dim text-status-green border-status-green/30',
-  medium: 'bg-status-amber-dim text-status-amber border-status-amber/30',
-  low: 'bg-status-red-dim text-status-red border-status-red/30',
-};
-
-export default function MappingPage() {
-  const p = useParams();
-  const sessionId = p.sessionId as string;
-  const searchParams = useSearchParams();
-  const unmappedOnlyDefault = searchParams.get('unmapped') === '1';
-  const queryClient = useQueryClient();
-  const { user } = useAuth();
-  const role = user?.role ?? 'controller';
-  const canMap = canMapAccounts(role);
-  const readOnly = isRoleReadOnly(role);
-
-  const { data: session } = useCloseSession(sessionId);
-  const entityId = session?.entityId ?? '';
-
-  /* ── Taxonomy ── */
-  const { data: taxonomyData } = useQuery({
-    queryKey: ['taxonomy'],
-    queryFn: () => apiFetch<{ lines: TaxonomyLine[] }>('/api/coa-mapping/taxonomy'),
-    staleTime: 60_000,
-  });
-  const taxonomyLines = taxonomyData?.lines ?? [];
-  const taxonomy = useMemo(() => buildTaxonomyTree(taxonomyLines), [taxonomyLines]);
-  const taxonomyFlat = useMemo(() => flattenForSelect(taxonomyLines), [taxonomyLines]);
-
-  /* ── SLM Suggestions ── */
-  const { data: coaSuggestions = [], isLoading: suggestionsLoading } = useCOASuggestions(sessionId);
-  const pendingSuggestions = useMemo(
-    () => coaSuggestions.filter((s) => s.status === 'pending'),
-    [coaSuggestions]
+function SkeletonRow() {
+  return (
+    <tr>
+      {[40, 80, 200, 80, 200, 100, 120].map((w, i) => (
+        <td key={i} className="px-3 py-3">
+          <div
+            className="h-4 rounded animate-pulse"
+            style={{
+              width: w === 200 ? '80%' : `${w}px`,
+              maxWidth: '100%',
+              backgroundColor: 'var(--bg-surface-sunken)',
+            }}
+          />
+        </td>
+      ))}
+    </tr>
   );
-  const generateMutation = useGenerateSuggestions(sessionId);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Main Page Component                                                */
+/* ------------------------------------------------------------------ */
+
+export default function AccountMappingPage() {
+  const params = useParams();
+  const sessionId = (params.sessionId as string) ?? null;
+
+  /* ── Data fetching ── */
+  const {
+    data: tbData,
+    isLoading: tbLoading,
+    isError: tbError,
+  } = useTrialBalance(sessionId, false);
+  const rows = tbData?.rows ?? [];
+
+  const {
+    data: coaSuggestions = [],
+    isLoading: suggestionsLoading,
+  } = useCOASuggestions(sessionId);
+
   const acceptMutation = useAcceptSuggestion();
   const rejectMutation = useRejectSuggestion();
+  const generateMutation = useGenerateSuggestions(sessionId);
 
-  /* ── Manual Mapping Mutation ── */
-  const manualMapMutation = useMutation({
-    mutationFn: async (params: { accountName: string; accountCode: string; lineId: string }) => {
-      return apiFetch<{ version: number; ruleIds: string[] }>('/api/coa-mapping/rules', {
-        method: 'POST',
-        body: {
-          entityId,
-          rules: [{
-            sourceAccountNamePattern: params.accountName,
-            sourceAccountNumberPattern: params.accountCode,
-            mappedFsLineId: params.lineId,
-            confidenceDefault: 1,
-            effectiveFrom: session?.periodStart ?? new Date().toISOString().slice(0, 10),
-          }],
-        },
+  /* ── Taxonomy ── */
+  const [taxonomy, setTaxonomy] = useState<TaxonomyItem[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<TaxonomyItem[]>('/api/coa-mapping/taxonomy')
+      .then((data) => {
+        if (!cancelled) {
+          // Handle both array and object responses
+          if (Array.isArray(data)) {
+            setTaxonomy(data);
+          } else if (data && typeof data === 'object' && 'lines' in data) {
+            const lines = (data as unknown as { lines: Array<{ id: string; name: string; statement: string; xbrl_label?: string }> }).lines;
+            setTaxonomy(
+              lines.map((l) => ({ id: l.id, label: l.name, category: l.statement, xbrl_label: l.xbrl_label }))
+            );
+          }
+        }
+      })
+      .catch(() => {
+        /* silently ignore taxonomy fetch errors */
       });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['trial-balance'] });
-      queryClient.invalidateQueries({ queryKey: ['taxonomy'] });
-      queryClient.invalidateQueries({ queryKey: ['readiness'] });
-      queryClient.invalidateQueries({ queryKey: ['coa-suggestions'] });
-    },
-  });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  /* ── Local UI State ── */
-  const { rows, setOverrides } = useTrialBalanceContext();
-  const [search, setSearch] = useState('');
-  const [typeFilters, setTypeFilters] = useState<Set<AccountType>>(new Set());
-  const [unmappedOnly, setUnmappedOnly] = useState(unmappedOnlyDefault || rows.some((r) => !r.mappingReportingLineId));
-  const [rightTab, setRightTab] = useState<'ai' | 'taxonomy'>('ai');
-  const [taxonomySelectedId, setTaxonomySelectedId] = useState<string | null>(null);
-  const [editingCode, setEditingCode] = useState<string | null>(null);
-  const [editingSuggestionId, setEditingSuggestionId] = useState<string | null>(null);
-  const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
+  const taxonomyGroups = useMemo(() => groupByCategory(taxonomy), [taxonomy]);
 
-  /* ── CSV Import State ── */
-  const [csvImportResult, setCsvImportResult] = useState<{ imported: number; skipped: number; errors: { row: number; reason: string }[] } | null>(null);
-  const [csvImporting, setCsvImporting] = useState(false);
-  const [csvError, setCsvError] = useState<string | null>(null);
+  /* ── Local UI state ── */
+  const [activeTab, setActiveTab] = useState<TabFilter>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+  const [autoAcceptEnabled, setAutoAcceptEnabled] = useState(false);
+  const [rejectedOverrides, setRejectedOverrides] = useState<Map<string, string>>(new Map());
 
-  const handleCsvImport = async (file: File) => {
-    setCsvImporting(true);
-    setCsvError(null);
-    setCsvImportResult(null);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('entityId', entityId);
-      const result = await apiUpload<{ imported: number; skipped: number; errors: { row: number; reason: string }[] }>('/api/coa-mapping/import', formData);
-      setCsvImportResult(result);
-      if (result.imported > 0) {
-        queryClient.invalidateQueries({ queryKey: ['trial-balance'] });
-        queryClient.invalidateQueries({ queryKey: ['taxonomy'] });
-        queryClient.invalidateQueries({ queryKey: ['readiness'] });
-      }
-    } catch (err) {
-      setCsvError(err instanceof Error ? err.message : 'CSV import failed');
-    } finally {
-      setCsvImporting(false);
-    }
-  };
-
-  /* ── Filtering ── */
-  const filtered = useMemo(() => {
-    let list = rows;
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      list = list.filter((r) => r.accountCode.toLowerCase().includes(q) || r.accountName.toLowerCase().includes(q));
-    }
-    if (typeFilters.size > 0) list = list.filter((r) => typeFilters.has(r.accountType));
-    if (unmappedOnly) list = list.filter((r) => !r.mappingReportingLineId);
-    return list;
-  }, [rows, search, typeFilters, unmappedOnly]);
-
-  const mappedCount = rows.filter((r) => r.mappingReportingLineId).length;
-  const unmappedCount = rows.filter((r) => !r.mappingReportingLineId).length;
-  const totalAccounts = rows.length;
-  const progressPct = totalAccounts ? Math.round((mappedCount / totalAccounts) * 1000) / 10 : 0;
-
-  /* ── Suggestion ↔ Row matching ── */
-  const suggestionByAccount = useMemo(() => {
+  /* ── Merge rows with suggestions ── */
+  const suggestionByCode = useMemo(() => {
     const map = new Map<string, COASuggestion>();
-    for (const s of pendingSuggestions) {
+    for (const s of coaSuggestions) {
       if (s.accountCode) map.set(s.accountCode, s);
     }
     return map;
-  }, [pendingSuggestions]);
+  }, [coaSuggestions]);
 
-  const unmappedSuggestions = useMemo(
-    () => pendingSuggestions.filter((s) => s.accountCode && rows.some((r) => r.accountCode === s.accountCode && !r.mappingReportingLineId)),
-    [pendingSuggestions, rows]
-  );
-  const highConfidenceSuggestions = unmappedSuggestions.filter((s) => s.confidenceBand === 'high');
+  const mergedRows: MergedRow[] = useMemo(() => {
+    return rows.map((row) => {
+      const suggestion = suggestionByCode.get(row.accountCode) ?? null;
+      let displayStatus: MergedRow['displayStatus'] = 'unmapped';
 
-  /* ── Handlers ── */
-  const handleAcceptSuggestion = (s: COASuggestion, overrideFsLineId?: string) => {
-    setBusyIds((prev) => new Set(prev).add(s.id));
-    acceptMutation.mutate(
-      { suggestionId: s.id, type: 'coa', overrideFsLineId },
-      { onSettled: () => setBusyIds((prev) => { const n = new Set(prev); n.delete(s.id); return n; }) }
-    );
-  };
+      if (suggestion) {
+        if (suggestion.status === 'pending') {
+          displayStatus = 'pending';
+        } else if (suggestion.status === 'accepted') {
+          displayStatus = 'accepted';
+        } else if (suggestion.status === 'rejected') {
+          displayStatus = 'rejected';
+        }
+      }
 
-  const handleRejectSuggestion = (s: COASuggestion) => {
-    setBusyIds((prev) => new Set(prev).add(s.id));
-    rejectMutation.mutate(
-      { suggestionId: s.id, type: 'coa' },
-      { onSettled: () => setBusyIds((prev) => { const n = new Set(prev); n.delete(s.id); return n; }) }
-    );
-  };
+      // If already mapped in TB and no pending suggestion, treat as accepted/manual
+      if (row.mappingReportingLineId && !suggestion) {
+        displayStatus = 'accepted';
+      }
+      if (
+        row.mappingReportingLineId &&
+        suggestion &&
+        suggestion.status === 'accepted' &&
+        row.mappingReportingLineId !== suggestion.suggestedFsLineId
+      ) {
+        displayStatus = 'manual';
+      }
 
-  const handleBulkAccept = () => {
-    highConfidenceSuggestions.forEach((s) => handleAcceptSuggestion(s));
-  };
-
-  const handleManualMap = (row: TrialBalanceRow, lineId: string, lineName: string) => {
-    // Optimistic UI update
-    setOverrides((prev) => ({ ...prev, [row.accountCode]: { lineId, lineName } }));
-    // Persist to backend
-    manualMapMutation.mutate({ accountName: row.accountName, accountCode: row.accountCode, lineId });
-  };
-
-  const typePills = (['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'] as const).map((t) => ({
-    id: t,
-    label: t,
-    active: typeFilters.has(t),
-    toggle: () => setTypeFilters((prev) => { const n = new Set(prev); if (n.has(t)) n.delete(t); else n.add(t); return n; }),
-  }));
-
-  const lineItemsByStatement = useMemo(() => {
-    const map: Record<string, { id: string; label: string }[]> = {};
-    taxonomyFlat.forEach((item) => {
-      if (!map[item.statementLabel]) map[item.statementLabel] = [];
-      map[item.statementLabel].push({ id: item.id, label: item.label });
+      return { row, suggestion, displayStatus };
     });
-    return map;
-  }, [taxonomyFlat]);
+  }, [rows, suggestionByCode]);
 
+  /* ── Counts ── */
+  const mappedCount = useMemo(
+    () => mergedRows.filter((m) => m.displayStatus === 'accepted' || m.displayStatus === 'manual').length,
+    [mergedRows]
+  );
+  const needsReviewCount = useMemo(
+    () => mergedRows.filter((m) => m.displayStatus === 'pending' || m.displayStatus === 'rejected').length,
+    [mergedRows]
+  );
+  const acceptedCount = useMemo(
+    () => mergedRows.filter((m) => m.displayStatus === 'accepted' || m.displayStatus === 'manual').length,
+    [mergedRows]
+  );
+  const unmappedCount = useMemo(
+    () => mergedRows.filter((m) => m.displayStatus === 'unmapped').length,
+    [mergedRows]
+  );
+  const totalCount = mergedRows.length;
+  const progressPct = totalCount > 0 ? Math.round((mappedCount / totalCount) * 100) : 0;
+
+  /* ── Filtering ── */
+  const filteredRows = useMemo(() => {
+    let list = mergedRows;
+
+    // Tab filter
+    switch (activeTab) {
+      case 'needs-review':
+        list = list.filter((m) => m.displayStatus === 'pending' || m.displayStatus === 'rejected');
+        break;
+      case 'accepted':
+        list = list.filter((m) => m.displayStatus === 'accepted' || m.displayStatus === 'manual');
+        break;
+      case 'unmapped':
+        list = list.filter((m) => m.displayStatus === 'unmapped');
+        break;
+    }
+
+    // Search
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      list = list.filter(
+        (m) =>
+          m.row.accountCode.toLowerCase().includes(q) ||
+          m.row.accountName.toLowerCase().includes(q)
+      );
+    }
+
+    return list;
+  }, [mergedRows, activeTab, searchQuery]);
+
+  /* ── Checkbox helpers ── */
+  const toggleRow = useCallback((code: string) => {
+    setSelectedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+  }, []);
+
+  const toggleAll = useCallback(() => {
+    if (selectedRows.size === filteredRows.length) {
+      setSelectedRows(new Set());
+    } else {
+      setSelectedRows(new Set(filteredRows.map((m) => m.row.accountCode)));
+    }
+  }, [filteredRows, selectedRows.size]);
+
+  /* ── Actions ── */
+  const handleAccept = useCallback(
+    (suggestion: COASuggestion) => {
+      acceptMutation.mutate({ suggestionId: suggestion.id, type: 'coa' });
+    },
+    [acceptMutation]
+  );
+
+  const handleReject = useCallback(
+    (suggestion: COASuggestion) => {
+      rejectMutation.mutate({ suggestionId: suggestion.id, type: 'coa' });
+    },
+    [rejectMutation]
+  );
+
+  const handleSaveOverride = useCallback(
+    (accountCode: string, suggestion: COASuggestion) => {
+      const overrideId = rejectedOverrides.get(accountCode);
+      if (!overrideId) return;
+      acceptMutation.mutate({
+        suggestionId: suggestion.id,
+        type: 'coa',
+        overrideFsLineId: overrideId,
+      });
+      setRejectedOverrides((prev) => {
+        const next = new Map(prev);
+        next.delete(accountCode);
+        return next;
+      });
+    },
+    [acceptMutation, rejectedOverrides]
+  );
+
+  const handleBatchAccept = useCallback(() => {
+    for (const code of selectedRows) {
+      const merged = mergedRows.find((m) => m.row.accountCode === code);
+      if (merged?.suggestion && merged.suggestion.status === 'pending') {
+        acceptMutation.mutate({ suggestionId: merged.suggestion.id, type: 'coa' });
+      }
+    }
+    setSelectedRows(new Set());
+  }, [selectedRows, mergedRows, acceptMutation]);
+
+  const handleBatchReject = useCallback(() => {
+    for (const code of selectedRows) {
+      const merged = mergedRows.find((m) => m.row.accountCode === code);
+      if (merged?.suggestion && merged.suggestion.status === 'pending') {
+        rejectMutation.mutate({ suggestionId: merged.suggestion.id, type: 'coa' });
+      }
+    }
+    setSelectedRows(new Set());
+  }, [selectedRows, mergedRows, rejectMutation]);
+
+  /* ── Auto-accept logic ── */
+  useEffect(() => {
+    if (!autoAcceptEnabled) return;
+    const highConfPending = coaSuggestions.filter(
+      (s) => s.status === 'pending' && s.confidence > 95
+    );
+    for (const s of highConfPending) {
+      acceptMutation.mutate({ suggestionId: s.id, type: 'coa' });
+    }
+    // Only run when toggle is turned on or suggestions change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAcceptEnabled, coaSuggestions]);
+
+  /* ── Tab definitions ── */
+  const tabs: { key: TabFilter; label: string; count: number }[] = [
+    { key: 'all', label: 'All', count: totalCount },
+    { key: 'needs-review', label: 'Needs Review', count: needsReviewCount },
+    { key: 'accepted', label: 'Accepted', count: acceptedCount },
+    { key: 'unmapped', label: 'Unmapped', count: unmappedCount },
+  ];
+
+  const isLoading = tbLoading || suggestionsLoading;
+  const hasSuggestions = coaSuggestions.length > 0;
+
+  /* ── Render ── */
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+    <div style={{ padding: '24px' }}>
+      {/* ================================================================ */}
+      {/* HEADER                                                           */}
+      {/* ================================================================ */}
+      <div className="flex items-start justify-between">
         <div>
-          <h1 className="font-display text-2xl text-primary">Account Mapping</h1>
-          <p className="text-text-secondary text-sm mt-0.5">Map GL accounts to reporting line items</p>
-        </div>
-        {canMap && (
-          <div className="flex items-center gap-2">
-            <a
-              href={`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'}/api/coa-mapping/import/template`}
-              className="px-3 py-2 rounded-input border border-border text-sm text-text-secondary hover:bg-hover flex items-center gap-1.5"
-              download
-            >
-              <Download className="w-4 h-4" />
-              Template
-            </a>
-            <label className={cn('px-4 py-2 rounded-input border border-border text-sm font-medium flex items-center gap-2 cursor-pointer hover:bg-hover', csvImporting && 'opacity-50 pointer-events-none')}>
-              <Upload className="w-4 h-4" />
-              {csvImporting ? 'Importing...' : 'Import CSV'}
-              <input
-                type="file"
-                accept=".csv"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleCsvImport(f);
-                  e.target.value = '';
-                }}
-              />
-            </label>
-            {unmappedCount > 0 && (
-              <button
-                type="button"
-                disabled={generateMutation.isPending}
-                onClick={() => generateMutation.mutate(undefined)}
-                className="px-5 py-2 rounded-full bg-accent text-white text-sm font-medium hover:bg-accent-hover shadow-glow-accent disabled:opacity-50 flex items-center gap-2 transition-all"
-              >
-                {generateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                {generateMutation.isPending ? 'Generating...' : 'Auto-Map Remaining'}
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-4 py-3 px-4 rounded-card bg-surface border border-border">
-        <span className="text-text-secondary text-sm">{totalAccounts} accounts</span>
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-status-green-dim text-status-green">
-          <span className="w-1.5 h-1.5 rounded-full bg-status-green" />
-          {mappedCount} Mapped
-        </span>
-        {unmappedCount > 0 && (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-status-amber-dim text-status-amber">
-            <span className="w-1.5 h-1.5 rounded-full bg-status-amber" />
-            {unmappedCount} Unmapped
-          </span>
-        )}
-        <div className="flex-1 min-w-[120px] max-w-[200px] h-2 bg-elevated rounded-full overflow-hidden">
-          <div className="h-full bg-accent rounded-full transition-all" style={{ width: `${progressPct}%` }} />
-        </div>
-        <span className="font-mono text-sm text-primary">{progressPct}%</span>
-      </div>
-
-      {csvImportResult && (
-        <div className={cn('rounded-input border px-4 py-3 text-sm flex items-center justify-between', csvImportResult.imported > 0 ? 'border-status-green bg-status-green-dim text-status-green' : 'border-status-amber bg-status-amber-dim text-status-amber')}>
-          <span>
-            Imported {csvImportResult.imported} mappings. {csvImportResult.skipped > 0 && `${csvImportResult.skipped} skipped.`}
-            {csvImportResult.errors.length > 0 && ` ${csvImportResult.errors.length} errors.`}
-          </span>
-          <button type="button" onClick={() => setCsvImportResult(null)} className="hover:opacity-80">×</button>
-        </div>
-      )}
-      {csvError && (
-        <div className="rounded-input border border-status-red bg-status-red-dim text-status-red px-4 py-3 text-sm flex items-center justify-between">
-          <span>{csvError}</span>
-          <button type="button" onClick={() => setCsvError(null)} className="hover:opacity-80">×</button>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6">
-        <div className="space-y-4">
-          <FilterBar
-            searchPlaceholder="Search by code or name..."
-            searchValue={search}
-            onSearchChange={setSearch}
-            pills={typePills}
+          <h1
+            className="font-semibold"
+            style={{
+              fontSize: '24px',
+              color: 'var(--text-primary)',
+              margin: 0,
+            }}
           >
-            <label className="flex items-center gap-2 text-sm text-text-secondary">
-              <input
-                type="checkbox"
-                checked={unmappedOnly}
-                onChange={(e) => setUnmappedOnly(e.target.checked)}
-                className="rounded border-border bg-input"
-              />
-              Show unmapped only
-            </label>
-          </FilterBar>
-
-          <div className="rounded-card border border-border overflow-hidden">
-            {rows.length === 0 ? (
-              <div className="px-6 py-12 text-center">
-                <p className="text-primary font-medium mb-1">No trial balance data</p>
-                <p className="text-text-secondary text-sm">Upload a GL or trial balance from the dashboard to see accounts and map them to reporting lines.</p>
-              </div>
-            ) : (
-            <>
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead className="sticky top-0 z-10 bg-surface-alt border-b border-border">
-                  <tr>
-                    <th className="px-4 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-text-secondary w-[100px]">Code</th>
-                    <th className="px-4 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-text-secondary">Account Name</th>
-                    <th className="px-4 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-text-secondary w-[90px]">Type</th>
-                    <th className="px-4 py-3.5 text-right text-xs font-semibold uppercase tracking-wider text-text-secondary w-[120px]">Balance</th>
-                    <th className="px-4 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-text-secondary min-w-[180px]">Mapping</th>
-                    {canMap && <th className="px-4 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-text-secondary w-[200px]">Action</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((r) => {
-                    const suggestion = !r.mappingReportingLineId ? suggestionByAccount.get(r.accountCode) : undefined;
-                    const isBusy = suggestion ? busyIds.has(suggestion.id) : false;
-                    return (
-                    <tr
-                      key={r.accountCode}
-                      className={cn(
-                        'border-b border-border-light hover:bg-hover',
-                        !r.mappingReportingLineId && 'border-l-4 border-l-status-amber bg-status-amber/5'
-                      )}
-                    >
-                      <td className="px-4 py-3.5 font-mono text-sm text-primary">{r.accountCode}</td>
-                      <td className="px-4 py-3.5 text-sm text-primary">{r.accountName}</td>
-                      <td className="px-4 py-3.5">
-                        <span className={cn('px-2 py-0.5 rounded-full text-xs', ACCOUNT_TYPE_STYLE[r.accountType])}>{r.accountType}</span>
-                      </td>
-                      <td className="px-4 py-3.5 text-right font-mono text-sm"><MoneyCell value={r.netBalance} /></td>
-                      <td className="px-4 py-3.5 text-sm">
-                        {r.mappingReportingLineName ? (
-                          <span className="text-primary">{r.mappingReportingLineName}</span>
-                        ) : suggestion ? (
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-ai-purple text-xs">{suggestion.suggestedFsLineLabel ?? suggestion.suggestedFsLineId}</span>
-                            <span className={cn('px-1.5 py-0.5 rounded text-[10px] border', CONFIDENCE_BADGE[suggestion.confidenceBand])}>
-                              {suggestion.confidenceBand.toUpperCase()}
-                            </span>
-                            {suggestion.autoAccepted && (
-                              <span className="px-1.5 py-0.5 rounded text-[10px] bg-status-green-dim text-status-green border border-status-green/30">
-                                Auto-accepted
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-status-amber">⚠ Unmapped</span>
-                        )}
-                      </td>
-                      {canMap && <td className="px-4 py-3.5">
-                        {/* Unmapped row WITH a suggestion: Accept / Edit / Reject */}
-                        {!r.mappingReportingLineId && suggestion && editingSuggestionId !== suggestion.id ? (
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              disabled={isBusy}
-                              onClick={() => handleAcceptSuggestion(suggestion)}
-                              className="px-2 py-1 rounded text-xs bg-status-green-dim text-status-green border border-status-green/30 disabled:opacity-50"
-                            >
-                              {isBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3 inline" />} Accept
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isBusy}
-                              onClick={() => setEditingSuggestionId(suggestion.id)}
-                              className="px-2 py-1 rounded text-xs bg-elevated text-text-secondary border border-border disabled:opacity-50"
-                            >
-                              <Pencil className="w-3 h-3 inline" /> Edit
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isBusy}
-                              onClick={() => handleRejectSuggestion(suggestion)}
-                              className="px-2 py-1 rounded text-xs bg-status-red-dim text-status-red border border-status-red/30 disabled:opacity-50"
-                            >
-                              <X className="w-3 h-3 inline" /> Reject
-                            </button>
-                          </div>
-                        ) : !r.mappingReportingLineId && suggestion && editingSuggestionId === suggestion.id ? (
-                          /* Edit mode: dropdown to override then accept */
-                          <select
-                            className="w-full max-w-[200px] px-2 py-1.5 rounded-input bg-input border border-border text-sm text-primary focus:outline-none focus:border-border-focus"
-                            value={suggestion.suggestedFsLineId}
-                            onChange={(e) => {
-                              const lineId = e.target.value;
-                              if (lineId) {
-                                handleAcceptSuggestion(suggestion, lineId);
-                                setEditingSuggestionId(null);
-                              }
-                            }}
-                            onBlur={() => setEditingSuggestionId(null)}
-                            autoFocus
-                          >
-                            {Object.entries(lineItemsByStatement).map(([stmt, items]) => (
-                              <optgroup key={stmt} label={stmt}>
-                                {items.map((item) => (
-                                  <option key={item.id} value={item.id}>{item.label}</option>
-                                ))}
-                              </optgroup>
-                            ))}
-                          </select>
-                        ) : !r.mappingReportingLineId ? (
-                          /* Unmapped row WITHOUT a suggestion: manual dropdown */
-                          <select
-                            className="w-full max-w-[200px] px-2 py-1.5 rounded-input bg-input border border-border text-sm text-primary focus:outline-none focus:border-border-focus"
-                            value=""
-                            onChange={(e) => {
-                              const opt = e.target.selectedOptions?.[0];
-                              const id = opt?.value;
-                              const name = opt?.text;
-                              if (id && name) handleManualMap(r, id, name);
-                            }}
-                          >
-                            <option value="">Select...</option>
-                            {Object.entries(lineItemsByStatement).map(([stmt, items]) => (
-                              <optgroup key={stmt} label={stmt}>
-                                {items.map((item) => (
-                                  <option key={item.id} value={item.id}>{item.label}</option>
-                                ))}
-                              </optgroup>
-                            ))}
-                          </select>
-                        ) : editingCode === r.accountCode ? (
-                          /* Mapped row in edit mode */
-                          <select
-                            className="w-full max-w-[200px] px-2 py-1.5 rounded-input bg-input border border-border text-sm text-primary focus:outline-none focus:border-border-focus"
-                            value={r.mappingReportingLineId ?? ''}
-                            onChange={(e) => {
-                              const opt = e.target.selectedOptions?.[0];
-                              const id = opt?.value;
-                              const name = opt?.text;
-                              if (id && name) handleManualMap(r, id, name);
-                              setEditingCode(null);
-                            }}
-                            onBlur={() => setEditingCode(null)}
-                            autoFocus
-                          >
-                            {Object.entries(lineItemsByStatement).map(([stmt, items]) => (
-                              <optgroup key={stmt} label={stmt}>
-                                {items.map((item) => (
-                                  <option key={item.id} value={item.id}>{item.label}</option>
-                                ))}
-                              </optgroup>
-                            ))}
-                          </select>
-                        ) : (
-                          /* Mapped row: edit pencil */
-                          <button
-                            type="button"
-                            className="p-1.5 rounded-input text-text-tertiary hover:text-primary hover:bg-hover"
-                            onClick={() => setEditingCode(r.accountCode)}
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                        )}
-                      </td>}
-                    </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {filtered.length === 0 && (
-              <div className="px-3 py-8 text-center text-text-secondary text-sm">No accounts match filters.</div>
-            )}
-            </>
-            )}
-          </div>
+            Account Mapping
+          </h1>
+          <p
+            style={{
+              fontSize: '13px',
+              color: 'var(--text-secondary)',
+              marginTop: '8px',
+              margin: 0,
+              paddingTop: '8px',
+            }}
+          >
+            {mappedCount} of {totalCount} accounts mapped ({progressPct}%)
+          </p>
         </div>
 
-        {/* ── Right Panel ── */}
-        <div className="space-y-4">
-          <div className="flex border-b border-border">
+        {/* Auto-accept toggle */}
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <span
+            style={{
+              fontSize: '13px',
+              color: 'var(--text-secondary)',
+            }}
+          >
+            Auto-accept High Confidence (&gt;95%)
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={autoAcceptEnabled}
+            onClick={() => setAutoAcceptEnabled((v) => !v)}
+            className="relative inline-flex shrink-0 rounded-full transition-colors duration-200"
+            style={{
+              width: '44px',
+              height: '24px',
+              backgroundColor: autoAcceptEnabled
+                ? 'var(--status-success)'
+                : 'var(--border-default)',
+            }}
+          >
+            <span
+              className="inline-block rounded-full shadow transition-transform duration-200"
+              style={{
+                width: '20px',
+                height: '20px',
+                marginTop: '2px',
+                backgroundColor: 'white',
+                transform: autoAcceptEnabled ? 'translateX(22px)' : 'translateX(2px)',
+              }}
+            />
+          </button>
+        </label>
+      </div>
+
+      {/* Progress bar */}
+      <div
+        className="w-full overflow-hidden"
+        style={{
+          height: '6px',
+          borderRadius: '3px',
+          backgroundColor: 'var(--bg-surface-sunken)',
+          marginTop: '12px',
+        }}
+      >
+        <div
+          className="h-full transition-all duration-300"
+          style={{
+            width: `${progressPct}%`,
+            borderRadius: '3px',
+            backgroundColor: 'var(--interactive-primary)',
+          }}
+        />
+      </div>
+
+      {/* ================================================================ */}
+      {/* FILTER TABS                                                      */}
+      {/* ================================================================ */}
+      <div
+        className="flex items-center justify-between"
+        style={{
+          marginTop: '16px',
+          borderBottom: '1px solid var(--border-default)',
+        }}
+      >
+        <div className="flex">
+          {tabs.map((tab) => (
             <button
+              key={tab.key}
               type="button"
-              className={cn('px-4 py-2 text-sm font-medium border-b-2 -mb-px', rightTab === 'ai' ? 'text-accent border-accent' : 'text-text-secondary border-transparent')}
-              onClick={() => setRightTab('ai')}
+              onClick={() => setActiveTab(tab.key)}
+              className="relative px-4 pb-3 pt-2 text-sm font-medium transition-colors"
+              style={{
+                color:
+                  activeTab === tab.key
+                    ? 'var(--interactive-primary)'
+                    : 'var(--text-secondary)',
+                borderBottom:
+                  activeTab === tab.key
+                    ? '2px solid var(--interactive-primary)'
+                    : '2px solid transparent',
+                marginBottom: '-1px',
+              }}
+              onMouseEnter={(e) => {
+                if (activeTab !== tab.key) {
+                  (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (activeTab !== tab.key) {
+                  (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)';
+                }
+              }}
             >
-              AI Suggestions {pendingSuggestions.length > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full bg-ai-purple text-white text-[10px]">{pendingSuggestions.length}</span>}
+              {tab.label} ({tab.count})
             </button>
-            <button
-              type="button"
-              className={cn('px-4 py-2 text-sm font-medium border-b-2 -mb-px', rightTab === 'taxonomy' ? 'text-accent border-accent' : 'text-text-secondary border-transparent')}
-              onClick={() => setRightTab('taxonomy')}
-            >
-              Taxonomy
-            </button>
-          </div>
+          ))}
+        </div>
 
-          {rightTab === 'ai' && (
-            <div className="space-y-4 border-l-4 border-ai-purple pl-4 bg-ai-purple-dim rounded-r-card py-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-ai-purple">AI Suggestions</span>
-                <span className="text-xs text-text-tertiary">Advisory only</span>
-              </div>
-
-              {/* Generate button — shown when no suggestions and accounts are unmapped */}
-              {!suggestionsLoading && coaSuggestions.length === 0 && unmappedCount > 0 && (
-                <button
-                  type="button"
-                  disabled={generateMutation.isPending}
-                  onClick={() => generateMutation.mutate(undefined)}
-                  className="w-full px-3 py-2.5 rounded-input border border-ai-purple-border text-ai-purple text-sm font-medium hover:bg-ai-purple-dim flex items-center justify-center gap-2"
-                >
-                  {generateMutation.isPending ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> Generating...</>
-                  ) : (
-                    <><Sparkles className="w-4 h-4" /> Generate AI Suggestions</>
-                  )}
-                </button>
-              )}
-              {generateMutation.isError && (
-                <p className="text-status-red text-xs">Failed to generate suggestions. Try again.</p>
-              )}
-
-              {mappedCount === totalAccounts && totalAccounts > 0 ? (
-                <p className="text-status-green text-sm">All accounts mapped. No suggestions needed.</p>
-              ) : unmappedSuggestions.length === 0 && coaSuggestions.length > 0 ? (
-                <p className="text-text-secondary text-sm">No pending suggestions for unmapped accounts.</p>
-              ) : unmappedSuggestions.length > 0 ? (
-                <>
-                  {/* Bulk accept high-confidence */}
-                  {highConfidenceSuggestions.length > 1 && (
-                    <button
-                      type="button"
-                      className="w-full px-3 py-2 rounded-input border border-ai-purple-border text-ai-purple text-sm hover:bg-ai-purple-dim"
-                      onClick={handleBulkAccept}
-                    >
-                      Accept all high-confidence ({highConfidenceSuggestions.length})
-                    </button>
-                  )}
-                  {unmappedSuggestions.map((s) => (
-                    <AISuggestionCard
-                      key={s.id}
-                      title="AI Suggested"
-                      advisoryLabel=""
-                      actions={
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            disabled={busyIds.has(s.id)}
-                            className="px-2 py-1 rounded text-xs bg-status-green-dim text-status-green border border-status-green/30 disabled:opacity-50"
-                            onClick={() => handleAcceptSuggestion(s)}
-                          >
-                            {busyIds.has(s.id) ? 'Accepting...' : 'Accept'}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busyIds.has(s.id)}
-                            className="px-2 py-1 rounded text-xs bg-status-red-dim text-status-red border border-status-red/30 disabled:opacity-50"
-                            onClick={() => handleRejectSuggestion(s)}
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      }
-                    >
-                      <div>
-                        <div className="font-medium">{s.accountCode} — {s.accountName}</div>
-                        <div className="mt-1 text-xs">
-                          Suggested: <span className="font-medium">{s.suggestedFsLineLabel ?? s.suggestedFsLineId}</span>
-                        </div>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className={cn('px-1.5 py-0.5 rounded text-[10px] border', CONFIDENCE_BADGE[s.confidenceBand])}>
-                            {s.confidenceBand.toUpperCase()} ({Math.round(s.confidence * 100)}%)
-                          </span>
-                          {s.autoAccepted && (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] bg-status-green-dim text-status-green border border-status-green/30">
-                              Auto-accepted
-                            </span>
-                          )}
-                        </div>
-                        {(s.alternatives ?? []).length > 0 && (
-                          <div className="mt-1 text-[10px] text-text-tertiary">
-                            Alt: {(s.alternatives ?? []).slice(0, 2).map((a) => a.label).join(', ')}
-                          </div>
-                        )}
-                      </div>
-                    </AISuggestionCard>
-                  ))}
-                </>
-              ) : null}
-            </div>
-          )}
-
-          {rightTab === 'taxonomy' && (
-            <div className="rounded-card border border-border p-3 max-h-[500px] overflow-y-auto">
-              <TaxonomyTree
-                nodes={taxonomy}
-                selectedId={taxonomySelectedId}
-                onSelect={setTaxonomySelectedId}
-                rows={rows}
-              />
-            </div>
-          )}
+        {/* Search */}
+        <div className="relative" style={{ width: '240px' }}>
+          <Search
+            className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+            style={{
+              width: '16px',
+              height: '16px',
+              color: 'var(--text-secondary)',
+            }}
+          />
+          <input
+            type="text"
+            placeholder="Search accounts..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 text-sm rounded-md outline-none transition-colors"
+            style={{
+              border: '1px solid var(--border-default)',
+              backgroundColor: 'var(--bg-surface)',
+              color: 'var(--text-primary)',
+            }}
+          />
         </div>
       </div>
+
+      {/* ================================================================ */}
+      {/* EMPTY / GENERATE STATE                                           */}
+      {/* ================================================================ */}
+      {!isLoading && rows.length === 0 && (
+        <div style={{ marginTop: '24px' }}>
+          <EmptyState
+            icon={GitBranch}
+            title="No accounts to map"
+            description="Upload a trial balance first, then return here to map accounts."
+          />
+        </div>
+      )}
+
+      {!isLoading && rows.length > 0 && !hasSuggestions && (
+        <div className="flex justify-center" style={{ marginTop: '24px' }}>
+          <button
+            type="button"
+            disabled={generateMutation.isPending}
+            onClick={() => generateMutation.mutate(undefined)}
+            className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white rounded-md transition-colors"
+            style={{
+              backgroundColor: 'var(--interactive-primary)',
+              opacity: generateMutation.isPending ? 0.7 : 1,
+            }}
+          >
+            {generateMutation.isPending ? (
+              <>
+                <Sparkles className="w-4 h-4 animate-pulse" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-4 h-4" />
+                Generate AI Suggestions
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* ================================================================ */}
+      {/* MAPPING TABLE                                                    */}
+      {/* ================================================================ */}
+      {(isLoading || rows.length > 0) && (
+        <div
+          className="overflow-x-auto"
+          style={{
+            marginTop: '16px',
+            border: '1px solid var(--border-default)',
+            borderRadius: '8px',
+          }}
+        >
+          <table className="w-full border-collapse" style={{ minWidth: '900px' }}>
+            <thead>
+              <tr
+                style={{
+                  height: '44px',
+                  backgroundColor: 'var(--bg-surface-sunken)',
+                }}
+              >
+                <th style={{ width: '40px', padding: '0 12px' }}>
+                  <input
+                    type="checkbox"
+                    checked={
+                      filteredRows.length > 0 &&
+                      selectedRows.size === filteredRows.length
+                    }
+                    onChange={toggleAll}
+                    className="cursor-pointer"
+                    aria-label="Select all rows"
+                  />
+                </th>
+                {[
+                  { label: 'Account Code', width: '80px' },
+                  { label: 'Account Name', width: undefined },
+                  { label: 'GL Type', width: '80px' },
+                  { label: 'Suggested Mapping', width: '200px' },
+                  { label: 'Confidence', width: '100px' },
+                  { label: 'Actions', width: '120px' },
+                ].map((col) => (
+                  <th
+                    key={col.label}
+                    className="text-left font-semibold uppercase"
+                    style={{
+                      width: col.width,
+                      minWidth: col.label === 'Account Name' ? '200px' : undefined,
+                      padding: '0 12px',
+                      fontSize: '11px',
+                      letterSpacing: '0.06em',
+                      color: 'var(--text-secondary)',
+                    }}
+                  >
+                    {col.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading
+                ? Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} />)
+                : filteredRows.map((merged) => (
+                    <MappingRow
+                      key={merged.row.accountCode}
+                      merged={merged}
+                      isSelected={selectedRows.has(merged.row.accountCode)}
+                      onToggleSelect={toggleRow}
+                      onAccept={handleAccept}
+                      onReject={handleReject}
+                      rejectedOverride={rejectedOverrides.get(merged.row.accountCode)}
+                      onOverrideChange={(code, lineId) =>
+                        setRejectedOverrides((prev) => {
+                          const next = new Map(prev);
+                          next.set(code, lineId);
+                          return next;
+                        })
+                      }
+                      onSaveOverride={handleSaveOverride}
+                      taxonomyGroups={taxonomyGroups}
+                    />
+                  ))}
+            </tbody>
+          </table>
+
+          {!isLoading && filteredRows.length === 0 && rows.length > 0 && (
+            <div
+              className="text-center py-8 text-sm"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              No accounts match the current filter.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ================================================================ */}
+      {/* CONTINUE TO NEXT STEP                                            */}
+      {/* ================================================================ */}
+      <ContinueToNextStep
+        currentStep="Mapping"
+        nextStep={{ label: 'Reconciliation', href: `/close/${sessionId}/reconciliation` }}
+        gatesPassed={!isLoading && totalCount > 0 && unmappedCount === 0 && needsReviewCount === 0}
+        gateSummary={`All ${totalCount} accounts mapped`}
+      />
+
+      {/* ================================================================ */}
+      {/* BATCH ACTIONS BAR                                                */}
+      {/* ================================================================ */}
+      {selectedRows.size > 0 && (
+        <div
+          className="fixed bottom-0 left-0 right-0 flex items-center justify-between px-6"
+          style={{
+            height: '52px',
+            backgroundColor: 'var(--bg-nav)',
+            color: 'white',
+            zIndex: 50,
+          }}
+        >
+          <span className="text-sm font-medium">
+            {selectedRows.size} accounts selected
+          </span>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleBatchAccept}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium text-white rounded-md transition-colors"
+              style={{ backgroundColor: 'var(--status-success)' }}
+            >
+              <Check className="w-4 h-4" />
+              Accept All
+            </button>
+            <button
+              type="button"
+              onClick={handleBatchReject}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-md transition-colors"
+              style={{
+                color: 'white',
+                border: '1px solid white',
+                backgroundColor: 'transparent',
+              }}
+            >
+              <X className="w-4 h-4" />
+              Reject All
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedRows(new Set())}
+              className="text-sm underline transition-opacity hover:opacity-80"
+              style={{ color: 'white' }}
+            >
+              Clear Selection
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function TaxonomyTree({
-  nodes,
-  selectedId,
-  onSelect,
-  rows,
-}: {
-  nodes: TaxonomyNode[];
-  selectedId: string | null;
-  onSelect: (id: string | null) => void;
-  rows: TrialBalanceRow[];
-}) {
-  const countByLine = useMemo(() => {
-    // Group rows by their mapped reporting line
-    const groups: Record<string, string[]> = {};
-    rows.forEach((r) => {
-      if (r.mappingReportingLineId) {
-        if (!groups[r.mappingReportingLineId]) groups[r.mappingReportingLineId] = [];
-        groups[r.mappingReportingLineId].push(r.netBalance);
-      }
-    });
-    // Build result with count and summed balance (as money string)
-    const map: Record<string, { count: number; balance: string }> = {};
-    for (const [lineId, balances] of Object.entries(groups)) {
-      map[lineId] = { count: balances.length, balance: sumMoneyStrings(balances) };
-    }
-    return map;
-  }, [rows]);
+/* ------------------------------------------------------------------ */
+/*  Mapping Table Row                                                  */
+/* ------------------------------------------------------------------ */
+
+interface MappingRowProps {
+  merged: MergedRow;
+  isSelected: boolean;
+  onToggleSelect: (code: string) => void;
+  onAccept: (suggestion: COASuggestion) => void;
+  onReject: (suggestion: COASuggestion) => void;
+  rejectedOverride: string | undefined;
+  onOverrideChange: (code: string, lineId: string) => void;
+  onSaveOverride: (code: string, suggestion: COASuggestion) => void;
+  taxonomyGroups: Record<string, TaxonomyItem[]>;
+}
+
+function MappingRow({
+  merged,
+  isSelected,
+  onToggleSelect,
+  onAccept,
+  onReject,
+  rejectedOverride,
+  onOverrideChange,
+  onSaveOverride,
+  taxonomyGroups,
+}: MappingRowProps) {
+  const { row, suggestion, displayStatus } = merged;
+
+  // Row background and left border by status
+  const rowStyle: React.CSSProperties = {};
+  switch (displayStatus) {
+    case 'pending':
+      rowStyle.backgroundColor = 'var(--ai-bg)';
+      rowStyle.borderLeft = '3px solid var(--ai-primary)';
+      break;
+    case 'accepted':
+      rowStyle.backgroundColor = 'var(--bg-surface)';
+      break;
+    case 'rejected':
+      rowStyle.backgroundColor = 'var(--status-error-bg)';
+      rowStyle.borderLeft = '3px solid var(--status-error)';
+      break;
+    case 'manual':
+      rowStyle.backgroundColor = 'var(--bg-surface)';
+      rowStyle.borderLeft = '3px solid var(--interactive-primary)';
+      break;
+    case 'unmapped':
+      rowStyle.backgroundColor = 'var(--bg-surface)';
+      break;
+  }
+
+  const confidenceValue = suggestion
+    ? Math.round(suggestion.confidence * 100)
+    : null;
+  const confidenceBarWidth = 60;
+  const confidenceBarHeight = 4;
 
   return (
-    <ul className="space-y-0.5 text-sm">
-      {nodes.map((n) => (
-        <li key={n.id}>
-          {n.children?.length ? (
-            <>
-              <div className="font-medium text-text-secondary py-1">{n.label}</div>
-              <ul className="pl-4 border-l border-border-light ml-1">
-                <TaxonomyTree nodes={n.children} selectedId={selectedId} onSelect={onSelect} rows={rows} />
-              </ul>
-            </>
-          ) : (
-            <button
-              type="button"
-              onClick={() => onSelect(selectedId === n.id ? null : n.id)}
-              className={cn(
-                'w-full text-left px-2 py-1.5 rounded-input flex items-center justify-between',
-                selectedId === n.id ? 'bg-accent-dim text-accent' : 'hover:bg-hover text-primary'
-              )}
+    <tr
+      style={{
+        ...rowStyle,
+        borderBottom: '1px solid var(--border-default)',
+      }}
+    >
+      {/* Checkbox */}
+      <td style={{ width: '40px', padding: '0 12px' }}>
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={() => onToggleSelect(row.accountCode)}
+          className="cursor-pointer"
+          aria-label={`Select ${row.accountCode}`}
+        />
+      </td>
+
+      {/* Account Code */}
+      <td
+        className="font-mono text-sm"
+        style={{
+          padding: '10px 12px',
+          color: 'var(--text-primary)',
+        }}
+      >
+        {row.accountCode}
+      </td>
+
+      {/* Account Name */}
+      <td
+        className="text-sm"
+        style={{
+          padding: '10px 12px',
+          color: 'var(--text-primary)',
+          minWidth: '200px',
+        }}
+      >
+        {row.accountName}
+      </td>
+
+      {/* GL Type chip */}
+      <td style={{ padding: '10px 12px' }}>
+        <span
+          className="inline-block px-2 py-0.5 rounded text-xs font-medium"
+          style={{
+            backgroundColor: 'var(--bg-surface-sunken)',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          {row.accountType}
+        </span>
+      </td>
+
+      {/* Suggested Mapping */}
+      <td style={{ padding: '10px 12px', width: '200px' }}>
+        {displayStatus === 'pending' && suggestion && (
+          <AISuggestionCard
+            suggestion={suggestion.suggestedFsLineLabel ?? suggestion.suggestedFsLineId}
+            confidence={confidenceValue ?? undefined}
+            reasoning={(suggestion as unknown as { xbrl_label?: string }).xbrl_label ? `XBRL: ${(suggestion as unknown as { xbrl_label?: string }).xbrl_label}` : undefined}
+            onAccept={() => onAccept(suggestion)}
+            onReject={() => onReject(suggestion)}
+            className="text-sm"
+          />
+        )}
+        {displayStatus === 'accepted' && (
+          <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
+            {row.mappingReportingLineName ??
+              suggestion?.suggestedFsLineLabel ??
+              suggestion?.suggestedFsLineId ??
+              '—'}
+          </span>
+        )}
+        {displayStatus === 'rejected' && suggestion && (
+          <div>
+            <span
+              className="text-sm line-through"
+              style={{ color: 'var(--text-tertiary)' }}
             >
-              <span>{n.label}</span>
-              {countByLine[n.id] && (
-                <span className="font-mono text-xs text-text-secondary">
-                  {countByLine[n.id].count} acct · <MoneyCell value={countByLine[n.id].balance} />
-                </span>
-              )}
-            </button>
-          )}
-        </li>
-      ))}
-    </ul>
+              {suggestion.suggestedFsLineLabel ?? suggestion.suggestedFsLineId}
+            </span>
+            <div style={{ marginTop: '4px' }}>
+              <div className="relative">
+                <select
+                  className="w-full appearance-none pr-7 pl-2 py-1 text-xs rounded-md outline-none"
+                  style={{
+                    border: '1px solid var(--border-default)',
+                    backgroundColor: 'var(--bg-surface)',
+                    color: 'var(--text-primary)',
+                  }}
+                  value={rejectedOverride ?? ''}
+                  onChange={(e) => onOverrideChange(row.accountCode, e.target.value)}
+                >
+                  <option value="">Select mapping...</option>
+                  {Object.entries(taxonomyGroups).map(([category, items]) => (
+                    <optgroup key={category} label={category}>
+                      {items.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.label}{item.xbrl_label ? ` (XBRL: ${item.xbrl_label})` : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+                <ChevronDown
+                  className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none"
+                  style={{
+                    width: '12px',
+                    height: '12px',
+                    color: 'var(--text-secondary)',
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+        {displayStatus === 'manual' && suggestion && (
+          <div>
+            <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
+              {row.mappingReportingLineName ?? '—'}
+            </span>
+            <p
+              style={{
+                fontSize: '11px',
+                color: 'var(--text-tertiary)',
+                marginTop: '2px',
+              }}
+            >
+              Overridden from AI suggestion:{' '}
+              {suggestion.suggestedFsLineLabel ?? suggestion.suggestedFsLineId}
+            </p>
+          </div>
+        )}
+        {displayStatus === 'unmapped' && (
+          <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
+            —
+          </span>
+        )}
+      </td>
+
+      {/* Confidence */}
+      <td style={{ padding: '10px 12px', width: '100px' }}>
+        {displayStatus !== 'pending' && confidenceValue !== null && suggestion && (
+          <div className="flex items-center gap-2">
+            <span
+              className="text-xs font-semibold tabular-nums"
+              style={{ color: getConfidenceColor(confidenceValue) }}
+            >
+              {confidenceValue}%
+            </span>
+            <div
+              className="overflow-hidden rounded-full"
+              style={{
+                width: `${confidenceBarWidth}px`,
+                height: `${confidenceBarHeight}px`,
+                backgroundColor: 'var(--bg-surface-sunken)',
+              }}
+            >
+              <div
+                className="h-full rounded-full"
+                style={{
+                  width: `${Math.min(100, Math.max(0, confidenceValue))}%`,
+                  backgroundColor: getConfidenceColor(confidenceValue),
+                }}
+              />
+            </div>
+          </div>
+        )}
+      </td>
+
+      {/* Actions */}
+      <td style={{ padding: '10px 12px', width: '120px' }}>
+        {displayStatus === 'accepted' && (
+          <span
+            className="text-xs font-medium cursor-pointer"
+            style={{ color: 'var(--text-link)' }}
+          >
+            Edit
+          </span>
+        )}
+        {displayStatus === 'rejected' && suggestion && rejectedOverride && (
+          <button
+            type="button"
+            onClick={() => onSaveOverride(row.accountCode, suggestion)}
+            className="inline-flex items-center gap-1 text-xs font-medium text-white rounded-md transition-colors"
+            style={{
+              height: '28px',
+              padding: '0 10px',
+              backgroundColor: 'var(--interactive-primary)',
+            }}
+          >
+            Save
+          </button>
+        )}
+        {displayStatus === 'manual' && (
+          <StatusBadge
+            variant="info"
+            label="MANUAL"
+            size="sm"
+            showIcon={false}
+          />
+        )}
+      </td>
+    </tr>
   );
 }

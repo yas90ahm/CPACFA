@@ -17,6 +17,7 @@ interface CoaRuleRow {
   mapped_fs_line_id: string;
   confidence_default: string;
   cash_flow_class: string | null;
+  pe_line_id: string | null;
   created_at: string;
 }
 
@@ -33,9 +34,14 @@ function rowToRule(row: CoaRuleRow): CoaMappingRule {
     mappedFsLineId: row.mapped_fs_line_id,
     confidenceDefault: Number(row.confidence_default),
     cashFlowClass: (row.cash_flow_class as CashFlowClass) ?? undefined,
+    peLineId: row.pe_line_id ?? undefined,
     createdAt: row.created_at,
   };
 }
+
+const SELECT_COLS = `id, tenant_id, entity_id, effective_from, effective_to, version,
+    source_account_name_pattern, source_account_number_pattern, mapped_fs_line_id,
+    confidence_default, cash_flow_class, pe_line_id, created_at`;
 
 export async function getNextRuleVersion(pool: Pool, tenantId: string, entityId: string): Promise<number> {
   const r = await pool.query<{ max: string | null }>(
@@ -52,8 +58,7 @@ export async function listCoaMappingRules(
   entityId: string,
   opts?: { asOfDate?: string; version?: number }
 ): Promise<CoaMappingRule[]> {
-  let sql = `SELECT id, tenant_id, entity_id, effective_from, effective_to, version,
-    source_account_name_pattern, source_account_number_pattern, mapped_fs_line_id, confidence_default, cash_flow_class, created_at
+  let sql = `SELECT ${SELECT_COLS}
     FROM coa_mapping_rules WHERE tenant_id = $1 AND entity_id = $2`;
   const params: unknown[] = [tenantId, entityId];
   if (opts?.asOfDate) {
@@ -83,13 +88,15 @@ export async function insertCoaMappingRule(
     mappedFsLineId: string;
     confidenceDefault: number;
     cashFlowClass?: string | null;
+    peLineId?: string | null;
   }
 ): Promise<CoaMappingRule> {
   await pool.query(
     `INSERT INTO coa_mapping_rules (
       id, tenant_id, entity_id, effective_from, effective_to, version,
-      source_account_name_pattern, source_account_number_pattern, mapped_fs_line_id, confidence_default, cash_flow_class
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      source_account_name_pattern, source_account_number_pattern, mapped_fs_line_id,
+      confidence_default, cash_flow_class, pe_line_id
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
     [
       id,
       tenantId,
@@ -102,10 +109,11 @@ export async function insertCoaMappingRule(
       input.mappedFsLineId,
       input.confidenceDefault,
       input.cashFlowClass ?? null,
+      input.peLineId ?? null,
     ]
   );
   const r = await pool.query<CoaRuleRow>(
-    'SELECT id, tenant_id, entity_id, effective_from, effective_to, version, source_account_name_pattern, source_account_number_pattern, mapped_fs_line_id, confidence_default, cash_flow_class, created_at FROM coa_mapping_rules WHERE id = $1 AND tenant_id = $2',
+    `SELECT ${SELECT_COLS} FROM coa_mapping_rules WHERE id = $1 AND tenant_id = $2`,
     [id, tenantId]
   );
   return rowToRule(r.rows[0]);

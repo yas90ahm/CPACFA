@@ -12,6 +12,12 @@ interface FsTaxonomyRow {
   statement: string;
   parent_id: string | null;
   normal_balance: string;
+  is_subtotal: boolean;
+  is_contra: boolean;
+  is_hidden: boolean;
+  display_order: number;
+  xbrl_element: string | null;
+  xbrl_label: string | null;
   created_at: string;
 }
 
@@ -23,20 +29,40 @@ function rowToLine(row: FsTaxonomyRow): FsTaxonomyLine {
     statement: row.statement as FsTaxonomyLine['statement'],
     parentId: row.parent_id ?? undefined,
     normalBalance: row.normal_balance as FsTaxonomyLine['normalBalance'],
+    isSubtotal: row.is_subtotal ?? false,
+    isContra: row.is_contra ?? false,
+    isHidden: row.is_hidden ?? false,
+    displayOrder: row.display_order ?? 0,
+    xbrlElement: row.xbrl_element ?? undefined,
+    xbrlLabel: row.xbrl_label ?? undefined,
     createdAt: row.created_at,
   };
 }
 
 export async function listFsTaxonomyLines(pool: Pool): Promise<FsTaxonomyLine[]> {
   const r = await pool.query<FsTaxonomyRow>(
-    'SELECT id, code, name, statement, parent_id, normal_balance, created_at FROM fs_taxonomy_lines ORDER BY statement, code'
+    `SELECT id, code, name, statement, parent_id, normal_balance,
+       COALESCE(is_subtotal, FALSE) AS is_subtotal,
+       COALESCE(is_contra, FALSE) AS is_contra,
+       COALESCE(is_hidden, FALSE) AS is_hidden,
+       COALESCE(display_order, 0) AS display_order,
+       xbrl_element, xbrl_label,
+       created_at
+     FROM fs_taxonomy_lines ORDER BY display_order, statement, code`
   );
   return r.rows.map(rowToLine);
 }
 
 export async function getFsTaxonomyLineById(pool: Pool, id: string): Promise<FsTaxonomyLine | null> {
   const r = await pool.query<FsTaxonomyRow>(
-    'SELECT id, code, name, statement, parent_id, normal_balance, created_at FROM fs_taxonomy_lines WHERE id = $1',
+    `SELECT id, code, name, statement, parent_id, normal_balance,
+       COALESCE(is_subtotal, FALSE) AS is_subtotal,
+       COALESCE(is_contra, FALSE) AS is_contra,
+       COALESCE(is_hidden, FALSE) AS is_hidden,
+       COALESCE(display_order, 0) AS display_order,
+       xbrl_element, xbrl_label,
+       created_at
+     FROM fs_taxonomy_lines WHERE id = $1`,
     [id]
   );
   const row = r.rows[0];
@@ -65,4 +91,19 @@ export async function upsertFsTaxonomyLine(
   );
   const got = await getFsTaxonomyLineById(pool, input.id);
   return got!;
+}
+
+export async function toggleFsTaxonomyLineHidden(
+  pool: Pool,
+  id: string,
+  isHidden?: boolean
+): Promise<FsTaxonomyLine | null> {
+  // If isHidden is not provided, toggle the current value
+  const query = isHidden !== undefined
+    ? `UPDATE fs_taxonomy_lines SET is_hidden = $2 WHERE id = $1 RETURNING id`
+    : `UPDATE fs_taxonomy_lines SET is_hidden = NOT COALESCE(is_hidden, FALSE) WHERE id = $1 RETURNING id`;
+  const params = isHidden !== undefined ? [id, isHidden] : [id];
+  const result = await pool.query(query, params);
+  if (result.rowCount === 0) return null;
+  return getFsTaxonomyLineById(pool, id);
 }

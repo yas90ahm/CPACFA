@@ -11,7 +11,7 @@ import { listDisclosureChecklist, updateDisclosureStep, getDisclosureItem } from
 // import { suggestDisclosuresAgentic, generateDisclosureReviewSummaryAgentic, suggestEvidenceForDisclosureItemAgentic } from '../../services/agentic_disclosure_suggestions.js';
 import type { MaterialitySettings } from '../../types/close_and_controls.js';
 import { disclosureSuggestEvidenceSchema, disclosureReviewSummarySchema } from '../../schemas/closeSchemas.js';
-import { validateBody } from '../../middleware/validateRequest.js';
+import { validateBody } from '../../middleware/validationMiddleware.js';
 import { send500 } from '../../lib/errorHandler.js';
 
 const router = Router();

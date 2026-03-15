@@ -232,7 +232,7 @@ export async function emitIssuesForUnmatchedAboveMateriality(
   const unmatched = await getUnmatchedReconItems(pool, opts.tenantId, opts.reconRunId);
   const emitted: { issueId: string; reconItemId: string; amount: number }[] = [];
   for (const item of unmatched) {
-    const absAmount = Math.abs(item.amount);
+    const absAmount = Math.abs(Number(item.amount));
     if (absAmount <= threshold) continue;
     const issue = await createIssueForSession(pool, {
       closeSessionId: opts.closeSessionId,
@@ -244,7 +244,7 @@ export async function emitIssuesForUnmatchedAboveMateriality(
       sourceRef: { reconRunId: opts.reconRunId, reconItemId: item.id, source: item.source, amount: item.amount, threshold },
       createdBy: opts.createdBy ?? undefined,
     });
-    emitted.push({ issueId: issue.issueId, reconItemId: item.id, amount: item.amount });
+    emitted.push({ issueId: issue.issueId, reconItemId: item.id, amount: Number(item.amount) });
   }
   return emitted;
 }

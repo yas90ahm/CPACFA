@@ -5,7 +5,7 @@
 export type JobStatus = 'pending' | 'locked' | 'completed' | 'failed' | 'dead';
 
 // QUARANTINED — ingestion_pipeline not in MVP architecture
-export type JobType = /* 'ingestion_pipeline' | */ 'agentic_cleanup' | 'statement_generation';
+export type JobType = /* 'ingestion_pipeline' | */ 'agentic_cleanup' | 'statement_generation' | 'resolution_agent';
 
 export interface Job {
   id: string;

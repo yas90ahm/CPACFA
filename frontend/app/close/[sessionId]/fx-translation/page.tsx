@@ -8,6 +8,7 @@ import type { TranslationResult, RemeasurementResult, TranslationLine, Translati
 import { Globe, ArrowRightLeft, Check, Loader2, X } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
+import { fmtMoney } from '@/lib/money';
 
 export default function FxTranslationPage() {
   const params = useParams();
@@ -110,9 +111,9 @@ export default function FxTranslationPage() {
     });
   };
 
-  const fmtNum = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2 });
+  const fmtNum = (n: number) => fmtMoney(n, { dash: false });
 
-  if (configLoading) return <div className="text-text-secondary">Loading...</div>;
+  if (configLoading) return <div style={{ color: 'var(--text-secondary)' }}>Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -120,59 +121,67 @@ export default function FxTranslationPage() {
         <h1 className="text-xl font-semibold flex items-center gap-2">
           <Globe className="w-5 h-5" /> FX Translation
         </h1>
-        <span className="text-xs text-text-secondary flex items-center gap-1">
+        <span className="text-xs flex items-center gap-1" style={{ color: 'var(--text-secondary)' }}>
           {saveConfig.isPending && <><Loader2 className="w-3 h-3 animate-spin" /> Saving...</>}
-          {saveConfig.isSuccess && !saveConfig.isPending && <><Check className="w-3 h-3 text-green-600" /> Saved</>}
+          {saveConfig.isSuccess && !saveConfig.isPending && <><Check className="w-3 h-3" style={{ color: 'var(--status-success)' }} /> Saved</>}
         </span>
       </div>
 
       <div className="flex gap-2">
-        <button onClick={() => setTab('translate')} className={`px-3 py-1.5 text-sm rounded-md ${tab === 'translate' ? 'bg-accent text-white' : 'border hover:bg-hover'}`}>
+        <button
+          onClick={() => setTab('translate')}
+          className={`px-3 py-1.5 text-sm rounded-md ${tab === 'translate' ? 'text-white' : 'hover:bg-hover'}`}
+          style={tab === 'translate' ? { background: 'var(--interactive-primary)' } : { borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid' }}
+        >
           Current-Rate Translation
         </button>
-        <button onClick={() => setTab('remeasure')} className={`px-3 py-1.5 text-sm rounded-md ${tab === 'remeasure' ? 'bg-accent text-white' : 'border hover:bg-hover'}`}>
+        <button
+          onClick={() => setTab('remeasure')}
+          className={`px-3 py-1.5 text-sm rounded-md ${tab === 'remeasure' ? 'text-white' : 'hover:bg-hover'}`}
+          style={tab === 'remeasure' ? { background: 'var(--interactive-primary)' } : { borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid' }}
+        >
           Temporal Remeasurement
         </button>
       </div>
 
-      <div className="p-4 border rounded-lg bg-surface space-y-4">
+      <div className="p-4 rounded-lg space-y-4" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface)' }}>
         <h3 className="font-medium">FX Rates</h3>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <div>
-            <label className="block text-xs text-text-secondary mb-1">Source Currency</label>
-            <input value={sourceCurrency} onChange={(e) => setSourceCurrency(e.target.value)} className="border rounded px-2 py-1.5 text-sm w-full" />
+            <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Source Currency</label>
+            <input value={sourceCurrency} onChange={(e) => setSourceCurrency(e.target.value)} className="rounded px-2 py-1.5 text-sm w-full" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }} />
           </div>
           <div>
-            <label className="block text-xs text-text-secondary mb-1">Reporting Currency</label>
-            <input value={reportingCurrency} onChange={(e) => setReportingCurrency(e.target.value)} className="border rounded px-2 py-1.5 text-sm w-full" />
+            <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Reporting Currency</label>
+            <input value={reportingCurrency} onChange={(e) => setReportingCurrency(e.target.value)} className="rounded px-2 py-1.5 text-sm w-full" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }} />
           </div>
           <div>
-            <label className="block text-xs text-text-secondary mb-1">Closing Rate</label>
-            <input type="number" step="0.0001" value={closingRate} onChange={(e) => setClosingRate(e.target.value)} className="border rounded px-2 py-1.5 text-sm w-full" />
+            <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Closing Rate</label>
+            <input type="number" step="0.0001" value={closingRate} onChange={(e) => setClosingRate(e.target.value)} className="rounded px-2 py-1.5 text-sm w-full" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }} />
           </div>
           <div>
-            <label className="block text-xs text-text-secondary mb-1">Average Rate</label>
-            <input type="number" step="0.0001" value={averageRate} onChange={(e) => setAverageRate(e.target.value)} className="border rounded px-2 py-1.5 text-sm w-full" />
+            <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Average Rate</label>
+            <input type="number" step="0.0001" value={averageRate} onChange={(e) => setAverageRate(e.target.value)} className="rounded px-2 py-1.5 text-sm w-full" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }} />
           </div>
           <div>
-            <label className="block text-xs text-text-secondary mb-1">Historic Rate</label>
-            <input type="number" step="0.0001" value={historicRate} onChange={(e) => setHistoricRate(e.target.value)} className="border rounded px-2 py-1.5 text-sm w-full" />
+            <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Historic Rate</label>
+            <input type="number" step="0.0001" value={historicRate} onChange={(e) => setHistoricRate(e.target.value)} className="rounded px-2 py-1.5 text-sm w-full" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }} />
           </div>
         </div>
       </div>
 
-      <div className="p-4 border rounded-lg bg-surface space-y-3">
+      <div className="p-4 rounded-lg space-y-3" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface)' }}>
         <div className="flex items-center justify-between">
           <h3 className="font-medium">Balance Lines</h3>
-          {!readOnly && <button onClick={addLine} className="text-sm text-accent hover:underline">+ Add Line</button>}
+          {!readOnly && <button onClick={addLine} className="text-sm hover:underline" style={{ color: 'var(--interactive-primary)' }}>+ Add Line</button>}
         </div>
         {lines.map((line, idx) => (
           <div key={idx} className="flex items-center gap-2">
             <div className="grid grid-cols-4 gap-2 flex-1">
-              <input placeholder="Label" value={line.label} onChange={(e) => updateLine(idx, 'label', e.target.value)} className="border rounded px-2 py-1.5 text-sm" />
-              <input type="number" placeholder="Amount" value={line.amount || ''} onChange={(e) => updateLine(idx, 'amount', Number(e.target.value))} className="border rounded px-2 py-1.5 text-sm" />
-              <input placeholder="Currency" value={line.currency} onChange={(e) => updateLine(idx, 'currency', e.target.value)} className="border rounded px-2 py-1.5 text-sm" />
-              <select value={line.balanceType ?? 'monetary'} onChange={(e) => updateLine(idx, 'balanceType', e.target.value)} className="border rounded px-2 py-1.5 text-sm">
+              <input placeholder="Label" value={line.label} onChange={(e) => updateLine(idx, 'label', e.target.value)} className="rounded px-2 py-1.5 text-sm" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }} />
+              <input type="number" placeholder="Amount" value={line.amount || ''} onChange={(e) => updateLine(idx, 'amount', Number(e.target.value))} className="rounded px-2 py-1.5 text-sm" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }} />
+              <input placeholder="Currency" value={line.currency} onChange={(e) => updateLine(idx, 'currency', e.target.value)} className="rounded px-2 py-1.5 text-sm" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }} />
+              <select value={line.balanceType ?? 'monetary'} onChange={(e) => updateLine(idx, 'balanceType', e.target.value)} className="rounded px-2 py-1.5 text-sm" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }}>
                 <option value="monetary">Monetary</option>
                 <option value="nonmonetary">Non-monetary</option>
                 <option value="equity">Equity</option>
@@ -181,7 +190,7 @@ export default function FxTranslationPage() {
               </select>
             </div>
             {!readOnly && lines.length > 1 && (
-              <button type="button" onClick={() => setLines(lines.filter((_, i) => i !== idx))} className="text-text-tertiary hover:text-red-600 shrink-0" title="Remove line">
+              <button type="button" onClick={() => setLines(lines.filter((_, i) => i !== idx))} className="shrink-0" style={{ color: 'var(--text-tertiary)' }} title="Remove line">
                 <X className="w-4 h-4" />
               </button>
             )}
@@ -193,7 +202,8 @@ export default function FxTranslationPage() {
         <button
           onClick={tab === 'translate' ? handleTranslate : handleRemeasure}
           disabled={translate.isPending || remeasure.isPending}
-          className="flex items-center gap-1 px-4 py-2 bg-accent text-white rounded-md hover:bg-accent/90 disabled:opacity-50"
+          className="flex items-center gap-1 px-4 py-2 text-white rounded-md disabled:opacity-50"
+          style={{ background: 'var(--interactive-primary)' }}
         >
           <ArrowRightLeft className="w-4 h-4" /> {tab === 'translate' ? 'Translate' : 'Remeasure'}
         </button>
@@ -202,12 +212,12 @@ export default function FxTranslationPage() {
       {tab === 'translate' && translationResult && (
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-4">
-            <div className="p-4 border rounded-lg bg-surface">
-              <div className="text-sm text-text-secondary">Total Translated</div>
+            <div className="p-4 rounded-lg" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface)' }}>
+              <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Total Translated</div>
               <div className="text-lg font-semibold">{fmtNum(translationResult.totalTranslated)}</div>
             </div>
-            <div className="p-4 border rounded-lg bg-surface">
-              <div className="text-sm text-text-secondary">CTA (Equity)</div>
+            <div className="p-4 rounded-lg" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface)' }}>
+              <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>CTA (Equity)</div>
               <div className="text-lg font-semibold">{fmtNum(translationResult.cta)}</div>
             </div>
           </div>
@@ -227,9 +237,12 @@ export default function FxTranslationPage() {
 
       {tab === 'remeasure' && remeasurementResult && (
         <div className="space-y-3">
-          <div className="p-4 border rounded-lg bg-surface">
-            <div className="text-sm text-text-secondary">Remeasurement Gain/Loss</div>
-            <div className={`text-lg font-semibold ${remeasurementResult.remeasurementGainLoss >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+          <div className="p-4 rounded-lg" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface)' }}>
+            <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Remeasurement Gain/Loss</div>
+            <div
+              className="text-lg font-semibold"
+              style={{ color: remeasurementResult.remeasurementGainLoss >= 0 ? 'var(--status-success)' : 'var(--status-error)' }}
+            >
               {fmtNum(remeasurementResult.remeasurementGainLoss)}
             </div>
           </div>

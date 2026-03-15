@@ -89,7 +89,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
                 >
                   <item.icon className="w-5 h-5 shrink-0" />
                   {item.label}
-                  {readOnly && <span className="ml-auto text-[10px] text-text-muted uppercase">View</span>}
+                  {readOnly && <span className="ml-auto text-xs text-text-muted uppercase">View</span>}
                 </Link>
               );
             })}

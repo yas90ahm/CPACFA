@@ -10,6 +10,7 @@ import { apiUpload } from '@/lib/api';
 import type { FieldMapping } from '@/lib/types/ingest';
 import type { GLParseResult, ValidationResult, TBPreview } from '@/lib/types/ingest';
 import { Check, AlertTriangle, X } from 'lucide-react';
+import { fmtMoney } from '@/lib/money';
 
 /** Backend parse response (same as GL). */
 interface ParsePreviewResponse {
@@ -69,9 +70,7 @@ const TB_REQUIRED_FIELDS: FieldMapping[] = [
 ];
 
 function formatMoney(s: string): string {
-  const n = parseFloat(s);
-  if (Number.isNaN(n)) return s;
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n);
+  return fmtMoney(s, { dollar: true, dash: false });
 }
 
 export interface TBUploadFlowProps {

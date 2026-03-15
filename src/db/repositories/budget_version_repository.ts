@@ -55,7 +55,7 @@ async function getBudgetVersionLines(pool: Pool, budgetVersionId: string): Promi
   );
   return r.rows.map((row) => ({
     label: row.label,
-    amount: Number(row.amount),
+    amount: String(row.amount),
     category: (row.category as BudgetVersionLine['category']) ?? undefined,
     driverRef: row.driver_ref ?? undefined,
   }));

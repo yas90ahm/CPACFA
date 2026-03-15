@@ -1,0 +1,212 @@
+/*
+ * SABIT DESIGN TOKENS
+ * Complete CSS custom property system for light and dark themes.
+ * Light theme is the default. Dark theme is applied via [data-theme="dark"].
+ *
+ * Source: SABIT_VISUAL_DESIGN_SPEC.md
+ */
+
+:root {
+  /* === BACKGROUNDS === */
+  --bg-base: #F8F7F4;
+  --bg-surface: #FFFFFF;
+  --bg-surface-raised: #FFFFFF;
+  --bg-surface-sunken: #F1F0EC;
+  --bg-overlay: rgba(10, 10, 8, 0.52);
+  --bg-nav: #1B1F27;
+  --bg-nav-hover: #272C36;
+  --bg-nav-active: #2F3542;
+  --bg-header: #FFFFFF;
+  --bg-table-row-alt: #FAFAF6;
+  --bg-table-row-hover: #F0EFE8;
+  --bg-table-row-selected: #EBF0FA;
+  --bg-ai: #F5F0FF;
+  --bg-certified: #F0F7F1;
+  --bg-certification-ceremony: #FAFBFC;
+
+  /* === TEXT === */
+  --text-primary: #1A1A1A;
+  --text-secondary: #5C5C5C;
+  --text-tertiary: #8A8A8A;
+  --text-inverse: #F0F0F0;
+  --text-inverse-secondary: #A0A4AB;
+  --text-link: #1A6CB4;
+  --text-link-hover: #134E82;
+  --text-number: #1A1A1A;
+  --text-number-negative: #B91C1C;
+  --text-number-total: #111111;
+  --text-ai-label: #6B21A8;
+
+  /* === BORDERS === */
+  --border-default: #E2E0DB;
+  --border-strong: #C8C5BD;
+  --border-subtle: #EEEDE9;
+  --border-focus: #1A6CB4;
+  --border-ai: #C4B5DC;
+  --border-table-header: #D4D2CC;
+  --border-total-single: #1A1A1A;
+  --border-total-double: #1A1A1A;
+
+  /* === INTERACTIVE === */
+  --interactive-primary: #1A5FB4;
+  --interactive-primary-hover: #154A8F;
+  --interactive-primary-pressed: #0F3668;
+  --interactive-secondary: #FFFFFF;
+  --interactive-secondary-hover: #F0F4FA;
+  --interactive-ghost: transparent;
+  --interactive-ghost-hover: #F0F0EC;
+  --interactive-destructive: #B91C1C;
+  --interactive-destructive-hover: #991B1B;
+
+  /* === STATUS === */
+  --status-success: #15803D;
+  --status-success-bg: #F0FDF4;
+  --status-success-border: #BBF7D0;
+  --status-warning: #B45309;
+  --status-warning-bg: #FFFBEB;
+  --status-warning-border: #FDE68A;
+  --status-error: #B91C1C;
+  --status-error-bg: #FEF2F2;
+  --status-error-border: #FECACA;
+  --status-info: #1A5FB4;
+  --status-info-bg: #EFF6FF;
+  --status-info-border: #BFDBFE;
+  --status-neutral: #5C5C5C;
+  --status-neutral-bg: #F5F5F3;
+
+  /* === AI === */
+  --ai-primary: #7C3AED;
+  --ai-primary-muted: #A78BFA;
+  --ai-bg: #F5F0FF;
+  --ai-border: #DDD6FE;
+  --ai-badge-bg: #EDE9FE;
+  --ai-badge-text: #5B21B6;
+
+  /* === CERTIFICATION === */
+  --cert-primary: #14532D;
+  --cert-secondary: #166534;
+  --cert-gold: #A16207;
+  --cert-gold-light: #D4A017;
+  --cert-bg: #F7FBF8;
+  --cert-border: #86EFAC;
+  --cert-lock-icon: #14532D;
+
+  /* === SPACING (4px grid) === */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* === RADII === */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  /* === SHADOWS === */
+  --shadow-sm: 0 1px 3px 0 rgba(0,0,0,0.04), 0 1px 2px -1px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.04);
+  --shadow-xl: 0 24px 48px -12px rgba(0,0,0,0.25);
+
+  /* === TRANSITIONS === */
+  --transition-fast: 150ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow: 300ms ease;
+
+  /* === Z-INDEX === */
+  --z-base: 0;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-overlay: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+}
+
+/* === DARK THEME === */
+[data-theme="dark"] {
+  --bg-base: #121417;
+  --bg-surface: #1A1D23;
+  --bg-surface-raised: #22262E;
+  --bg-surface-sunken: #0D0F12;
+  --bg-overlay: rgba(0, 0, 0, 0.65);
+  --bg-nav: #0D0F12;
+  --bg-nav-hover: #1A1D23;
+  --bg-nav-active: #22262E;
+  --bg-header: #1A1D23;
+  --bg-table-row-alt: #1E2128;
+  --bg-table-row-hover: #262A33;
+  --bg-table-row-selected: #1A2536;
+  --bg-ai: #1C1726;
+  --bg-certified: #0F2418;
+  --bg-certification-ceremony: #14171B;
+
+  --text-primary: #E8E6E3;
+  --text-secondary: #9CA3AF;
+  --text-tertiary: #6B7280;
+  --text-inverse: #1A1A1A;
+  --text-inverse-secondary: #5C5C5C;
+  --text-link: #60A5FA;
+  --text-link-hover: #93C5FD;
+  --text-number: #E8E6E3;
+  --text-number-negative: #FCA5A5;
+  --text-number-total: #F3F2F0;
+  --text-ai-label: #C4B5FC;
+
+  --border-default: #2E3340;
+  --border-strong: #3D4451;
+  --border-subtle: #252930;
+  --border-focus: #60A5FA;
+  --border-ai: #4C3A6B;
+  --border-table-header: #3D4451;
+
+  --interactive-primary: #3B82F6;
+  --interactive-primary-hover: #60A5FA;
+  --interactive-primary-pressed: #2563EB;
+  --interactive-secondary: #1A1D23;
+  --interactive-secondary-hover: #1A2536;
+  --interactive-ghost-hover: #22262E;
+  --interactive-destructive: #EF4444;
+  --interactive-destructive-hover: #F87171;
+
+  --status-success: #4ADE80;
+  --status-success-bg: #0F2418;
+  --status-success-border: #166534;
+  --status-warning: #FBBF24;
+  --status-warning-bg: #1C1708;
+  --status-warning-border: #854D0E;
+  --status-error: #F87171;
+  --status-error-bg: #1F0D0D;
+  --status-error-border: #991B1B;
+  --status-info: #60A5FA;
+  --status-info-bg: #0C1929;
+  --status-info-border: #1E40AF;
+  --status-neutral: #9CA3AF;
+  --status-neutral-bg: #1E2128;
+
+  --ai-primary: #A78BFA;
+  --ai-primary-muted: #7C3AED;
+  --ai-bg: #1C1726;
+  --ai-border: #4C3A6B;
+  --ai-badge-bg: #2E1F5E;
+  --ai-badge-text: #C4B5FC;
+
+  --cert-primary: #4ADE80;
+  --cert-secondary: #22C55E;
+  --cert-gold: #FBBF24;
+  --cert-gold-light: #F59E0B;
+  --cert-bg: #0F2418;
+  --cert-border: #166534;
+  --cert-lock-icon: #4ADE80;
+
+  --shadow-sm: 0 1px 3px 0 rgba(0,0,0,0.3), 0 1px 2px -1px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.4), 0 2px 4px -2px rgba(0,0,0,0.3);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.5), 0 4px 6px -4px rgba(0,0,0,0.4);
+  --shadow-xl: 0 24px 48px -12px rgba(0,0,0,0.6);
+}

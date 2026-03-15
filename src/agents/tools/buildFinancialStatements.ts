@@ -222,7 +222,7 @@ export async function runBuildFinancialStatements(
     };
     if (standard && context) {
       const rows = await listContracts(context.pool, parsed.data.tenantId);
-      stmtOpts = { ...stmtOpts, contracts: rows.map((r) => ({ id: r.id, totalContractValue: r.totalContractValue, periodRecognizedRevenue: undefined })) };
+      stmtOpts = { ...stmtOpts, contracts: rows.map((r) => ({ id: r.id, totalContractValue: String(r.totalContractValue), periodRecognizedRevenue: undefined })) };
     }
     const result = standard
       ? await generateStatements(trialBalance, standard, stmtOpts)

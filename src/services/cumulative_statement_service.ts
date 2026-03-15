@@ -208,7 +208,7 @@ export async function generateCumulativeStatements(
       await repo.insertStatementLine(tx, {
         packageId: id,
         fsLineId: line.fsLineId,
-        amount: line.amount,
+        amount: Number(line.amount),
         statement: line.statement,
         metadata: line.metadata,
         displayOrder: line.displayOrder,
@@ -292,12 +292,12 @@ function buildCumulativeLines(
 function sumLineAcrossPeriods(
   fsLineId: string,
   periodPackageLines: Array<{ session: CloseSession; lines: StatementLine[] }>
-): number {
+): string {
   const amounts = periodPackageLines.map((p) => {
     const line = p.lines.find((l) => l.fsLineId === fsLineId);
-    return line?.amount ?? 0;
+    return Number(line?.amount ?? 0);
   });
-  return sumRound2(amounts);
+  return String(sumRound2(amounts));
 }
 
 function buildCumulativeEquityLine(
@@ -310,13 +310,13 @@ function buildCumulativeEquityLine(
   // Opening equity = first period's opening
   if (templateLine.fsLineId === 'eq_opening') {
     const firstLine = firstPeriod.lines.find((l) => l.fsLineId === 'eq_opening');
-    return { ...templateLine, packageId: '__cumulative__', amount: firstLine?.amount ?? 0 };
+    return { ...templateLine, packageId: '__cumulative__', amount: firstLine?.amount ?? '0' };
   }
 
   // Closing equity = latest period's closing
   if (templateLine.fsLineId === 'eq_closing') {
     const latestLine = latestPeriod.lines.find((l) => l.fsLineId === 'eq_closing');
-    return { ...templateLine, packageId: '__cumulative__', amount: latestLine?.amount ?? 0 };
+    return { ...templateLine, packageId: '__cumulative__', amount: latestLine?.amount ?? '0' };
   }
 
   // Activity lines (changes, OCI): sum across all periods
@@ -331,9 +331,9 @@ function runCumulativeValidation(lines: StatementLine[]): ValidationResult[] {
   const d = (n: number) => decimalFrom(n).toDecimalPlaces(2);
 
   // A = L + E
-  const totalAssets = lines.find((l) => l.fsLineId === 'bs_total_assets')?.amount ?? 0;
-  const totalLiabilities = lines.find((l) => l.fsLineId === 'bs_total_liabilities')?.amount ?? 0;
-  const totalEquityLine = lines.find((l) => l.fsLineId === 'bs_total_equity')?.amount ?? 0;
+  const totalAssets = Number(lines.find((l) => l.fsLineId === 'bs_total_assets')?.amount ?? 0);
+  const totalLiabilities = Number(lines.find((l) => l.fsLineId === 'bs_total_liabilities')?.amount ?? 0);
+  const totalEquityLine = Number(lines.find((l) => l.fsLineId === 'bs_total_equity')?.amount ?? 0);
   const aleCheck = d(totalAssets).equals(d(totalLiabilities).plus(d(totalEquityLine)));
   results.push({
     check: 'balance_sheet_equation',
@@ -342,8 +342,8 @@ function runCumulativeValidation(lines: StatementLine[]): ValidationResult[] {
   });
 
   // Net income tie (IS → Equity)
-  const isNetIncome = lines.find((l) => l.fsLineId === 'pl_net_income')?.amount ?? 0;
-  const eqNetIncome = lines.filter((l) => l.statement === 'equity' && /net income/i.test((l.metadata as { label?: string })?.label ?? '')).reduce((s, l) => s + l.amount, 0);
+  const isNetIncome = Number(lines.find((l) => l.fsLineId === 'pl_net_income')?.amount ?? 0);
+  const eqNetIncome = lines.filter((l) => l.statement === 'equity' && /net income/i.test((l.metadata as { label?: string })?.label ?? '')).reduce((s, l) => s + Number(l.amount), 0);
   const netIncomeTie = d(isNetIncome).equals(d(eqNetIncome || isNetIncome));
   results.push({
     check: 'net_income_tie',
@@ -352,11 +352,11 @@ function runCumulativeValidation(lines: StatementLine[]): ValidationResult[] {
   });
 
   // Cash tie (CF ending → BS cash)
-  const cfEndingCash = lines.find((l) => l.fsLineId === 'cf_ending_cash')?.amount ?? 0;
+  const cfEndingCash = Number(lines.find((l) => l.fsLineId === 'cf_ending_cash')?.amount ?? 0);
   const bsCashLines = lines.filter(
     (l) => l.statement === 'balance_sheet' && /cash|bank/i.test((l.metadata as { label?: string })?.label ?? '')
   );
-  const bsCash = sumRound2(bsCashLines.map((l) => l.amount));
+  const bsCash = sumRound2(bsCashLines.map((l) => Number(l.amount)));
   const cashTie = d(cfEndingCash).equals(d(bsCash));
   results.push({
     check: 'cash_tie',
@@ -365,7 +365,7 @@ function runCumulativeValidation(lines: StatementLine[]): ValidationResult[] {
   });
 
   // Equity tie
-  const eqClosing = lines.find((l) => l.fsLineId === 'eq_closing')?.amount ?? totalEquityLine;
+  const eqClosing = Number(lines.find((l) => l.fsLineId === 'eq_closing')?.amount ?? totalEquityLine);
   const eqTie = d(eqClosing).equals(d(totalEquityLine));
   results.push({
     check: 'equity_tie',

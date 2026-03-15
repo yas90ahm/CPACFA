@@ -3,10 +3,11 @@
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { Settings, ArrowLeft, LogOut, ChevronDown } from 'lucide-react';
+import { Settings, ArrowLeft, LogOut, ChevronDown, Sun, Moon } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth } from '@/lib/auth';
 import { canAccessSettings, getRoleLabel } from '@/lib/permissions';
+import { useTheme } from '@/components/ThemeProvider';
 import type { CloseState } from '@/lib/types/close-session';
 
 function stateClass(s: CloseState): string {
@@ -46,6 +47,7 @@ export function TopBar(p: TopBarProps) {
   const isPortfolio = p.mode === 'portfolio';
 
   const { user, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const role = user?.role ?? 'controller';
   const showSettings = canAccessSettings(role);
 
@@ -108,7 +110,7 @@ export function TopBar(p: TopBarProps) {
               <div className="px-4 py-3 border-b border-border">
                 <p className="text-sm font-medium text-primary">{userName || 'User'}</p>
                 <p className="text-xs text-text-secondary mt-0.5">{user?.email ?? ''}</p>
-                <span className={cn('inline-block mt-1.5 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide', ROLE_BADGE_STYLE[role] ?? 'bg-elevated text-text-secondary')}>
+                <span className={cn('inline-block mt-1.5 px-2 py-0.5 rounded text-xs font-medium uppercase tracking-wide', ROLE_BADGE_STYLE[role] ?? 'bg-elevated text-text-secondary')}>
                   {getRoleLabel(role)}
                 </span>
               </div>
@@ -123,6 +125,14 @@ export function TopBar(p: TopBarProps) {
             </div>
           )}
         </div>
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className="p-2 rounded-input text-text-secondary hover:text-primary hover:bg-hover transition-colors"
+          aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+        >
+          {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+        </button>
         <NotificationBell />
         {showSettings && (
           <Link href="/settings" className="p-2 rounded-input text-text-secondary hover:text-primary hover:bg-hover" aria-label="Settings">

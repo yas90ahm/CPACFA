@@ -99,5 +99,29 @@ export function runCrossStatementValidationForCertification(
     });
   }
 
+  // 5. Retained earnings tie: closing equity = opening equity + sum(changes) + sum(ociChanges)
+  if (equity && equity.openingEquity != null && equity.closingEquity != null) {
+    const opening = d(equity.openingEquity);
+    const changesSum = equity.changes.reduce(
+      (acc, c) => acc.plus(d(c.amount)),
+      decimalFrom(0)
+    );
+    const ociSum = (equity.ociChanges ?? []).reduce(
+      (acc, c) => acc.plus(d(c.amount)),
+      decimalFrom(0)
+    );
+    const expectedClosing = opening.plus(changesSum).plus(ociSum).toDecimalPlaces(2);
+    const actualClosing = d(equity.closingEquity);
+    const reTie = expectedClosing.equals(actualClosing);
+    checks.push({
+      check_name: 'retained_earnings_tie',
+      check_type: 'hard',
+      passes: reTie,
+      message: reTie
+        ? null
+        : `RE tie failed: opening equity ${equity.openingEquity} + changes ${changesSum.toFixed(2)} + OCI ${ociSum.toFixed(2)} = ${expectedClosing.toFixed(2)} ≠ closing equity ${equity.closingEquity}`,
+    });
+  }
+
   return checks;
 }

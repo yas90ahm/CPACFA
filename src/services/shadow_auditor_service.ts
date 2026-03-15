@@ -65,8 +65,8 @@ export function runPrePostChecks(input: PrePostCheckInput): PrePostCheckResult {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const accountRef = (line.accountRef ?? '').trim();
-    const debit = line.debit ?? 0;
-    const credit = line.credit ?? 0;
+    const debit = Number(line.debit ?? 0);
+    const credit = Number(line.credit ?? 0);
 
     // Restricted account check (config-driven) — block
     if (restricted.length > 0) {

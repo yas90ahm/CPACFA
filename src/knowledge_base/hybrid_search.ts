@@ -8,17 +8,36 @@ import { getGlobalEntries } from './tiers/tier1_global.js';
 import { getFirmEntries, findSimilarTreatments } from './tiers/tier2_firm.js';
 import { getSessionEntries } from './tiers/tier3_session.js';
 
-/** Keyword score: term overlap (BM25-style weight: more matches = higher score). */
-function keywordScore(text: string, query: string): number {
-  const q = query.toLowerCase();
-  const t = text.toLowerCase();
-  const terms = q.split(/\s+/).filter((w) => w.length > 1);
+/**
+ * BM25 scoring for keyword relevance ranking.
+ * Replaces naive term-overlap with TF-IDF-inspired scoring.
+ * @param query  - the search query
+ * @param document - the document text to score against
+ * @param avgDocLength - average document length across the corpus
+ * @param k1 - term frequency saturation parameter (1.2 is standard)
+ * @param b  - document length normalization (0.75 is standard)
+ */
+function bm25Score(query: string, document: string, avgDocLength: number, k1 = 1.2, b = 0.75): number {
+  const queryTerms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+  const docTerms = document.toLowerCase().split(/\s+/);
+  const docLength = docTerms.length;
+
   let score = 0;
-  for (const term of terms) {
-    if (t.includes(term)) score += 1;
-    if (t.startsWith(term) || t.includes(` ${term}`)) score += 0.5;
+  for (const term of queryTerms) {
+    const tf = docTerms.filter(t => t === term).length;
+    if (tf === 0) continue;
+    const numerator = tf * (k1 + 1);
+    const denominator = tf + k1 * (1 - b + b * (docLength / avgDocLength));
+    score += numerator / denominator;
   }
   return score;
+}
+
+/** Compute average document length for a set of entries. */
+function computeAvgDocLength(entries: { entry: MemoryEntry }[]): number {
+  if (entries.length === 0) return 1;
+  const totalWords = entries.reduce((sum, { entry }) => sum + entry.text.split(/\s+/).length, 0);
+  return totalWords / entries.length;
 }
 
 /** Gather entries from selected tiers (optional sessionId for Tier 3). */
@@ -51,13 +70,29 @@ export function hybridSearch(
   const sessionId = options?.sessionId;
 
   const pairs = gatherEntries(tiers, sessionId);
+  const avgDocLen = computeAvgDocLength(pairs);
+
+  // Hybrid scoring: Tier 1 (global/GAAP) uses semantic similarity when available,
+  // Tier 2 (firm) and Tier 3 (session) use BM25 for keyword relevance.
+  // Final hybrid: alpha * semantic_score + (1 - alpha) * bm25_score, alpha = 0.6
+  const alpha = 0.6;
+
   const scored: HybridSearchResult[] = pairs
     .map(({ entry, tier }) => {
-      const keyword = keywordScore(entry.text, query);
+      const bm25 = bm25Score(query, entry.text, avgDocLen);
+      // Semantic score placeholder: when vector similarity is available via payload, use it.
+      const semantic = (entry.payload?.['similarity'] as number | undefined) ?? 0;
+
+      // For global tier entries with semantic scores, use hybrid blend.
+      // For firm/session tiers, rely on BM25 (semantic = 0).
+      const finalScore = tier === 'global' && semantic > 0
+        ? alpha * semantic + (1 - alpha) * bm25
+        : bm25;
+
       return {
         entry,
-        score: keyword,
-        scoreBreakdown: { keyword },
+        score: finalScore,
+        scoreBreakdown: { keyword: bm25, semantic: semantic > 0 ? semantic : undefined },
         tier,
       };
     })

@@ -5,7 +5,7 @@
  *        operating_partner, auditor (future).
  */
 
-export type Role = 'admin' | 'controller' | 'reviewer' | 'operating_partner' | 'auditor';
+export type Role = 'admin' | 'controller' | 'reviewer' | 'operating_partner' | 'auditor' | 'fund_controller';
 
 /**
  * Normalize backend role names to frontend role names.
@@ -28,6 +28,8 @@ export function normalizeRole(backendRole: string | undefined): Role {
       return 'operating_partner';
     case 'auditor':
       return 'auditor';
+    case 'fund_controller':
+      return 'fund_controller';
     default:
       return 'controller';
   }
@@ -128,6 +130,7 @@ const SETTINGS_ACCESS: Record<string, string[]> = {
   reviewer: ['templates', 'reconciliation'],
   operating_partner: [],
   auditor: [],
+  fund_controller: ['general'],
 };
 
 export function canAccessSettings(role: string): boolean {
@@ -156,14 +159,36 @@ const OP_VISIBLE_PAGES = new Set([
   'board-package', 'audit-trail',
 ]);
 
+const AUDITOR_VISIBLE_PAGES = new Set([
+  'dashboard', 'trial-balance', 'gl-health', 'mapping',
+  'reconciliation', 'adjustments', 'fixed-assets', 'deferred-tax',
+  'stock-compensation', 'impairment', 'segments', 'fx-translation',
+  'consolidation', 'statements', 'variance',
+  'board-package', 'review', 'audit-trail',
+]);
+
+const FUND_CONTROLLER_VISIBLE_PAGES = new Set([
+  'dashboard', 'audit-trail',
+]);
+
+const ADMIN_ONLY_PAGES = new Set(['onboarding']);
+
 export function isSidebarItemVisible(role: string, href: string): boolean {
+  const segments = href.split('/').filter(Boolean);
+  const page = segments[segments.length - 1] ?? '';
+
+  if (ADMIN_ONLY_PAGES.has(page) && role !== 'admin') return false;
+
   if (role === 'operating_partner') {
-    // Extract the page segment from href like /close/123/dashboard → dashboard
-    const segments = href.split('/').filter(Boolean);
-    const page = segments[segments.length - 1] ?? '';
     return OP_VISIBLE_PAGES.has(page);
   }
-  // All other roles see everything
+  if (role === 'auditor') {
+    return AUDITOR_VISIBLE_PAGES.has(page);
+  }
+  if (role === 'fund_controller') {
+    return FUND_CONTROLLER_VISIBLE_PAGES.has(page);
+  }
+  // admin, controller, reviewer see everything
   return true;
 }
 
@@ -185,6 +210,7 @@ const ROLE_LABELS: Record<string, string> = {
   reviewer: 'Reviewer',
   operating_partner: 'Operating Partner',
   auditor: 'Auditor',
+  fund_controller: 'Fund Controller',
   // Backend role names (fallback if normalizeRole wasn't called)
   accountant: 'Controller',
   preparer: 'Controller',
@@ -200,6 +226,7 @@ export function getRoleLabel(role: string): string {
 
 export function getDefaultLandingPage(role: string): string {
   if (role === 'operating_partner' || role === 'admin') return '/portfolio';
+  if (role === 'fund_controller') return '/portfolio/consolidated';
   return '/close';
 }
 

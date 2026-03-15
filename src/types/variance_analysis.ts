@@ -10,11 +10,11 @@ export interface VarianceRecord {
   fsLineId: string;
   statement: string;
   label?: string;
-  currentAmount: number;
-  priorAmount: number;
-  changeAmount: number;
-  changePercentage: number | null;
-  materialThresholdPct: number;
+  currentAmount: string;
+  priorAmount: string;
+  changeAmount: string;
+  changePercentage: string | null;
+  materialThresholdPct: string;
   isMaterial: boolean;
   explanation?: string;
   /** AI-generated draft explanation (advisory; human edits and submits final). */
@@ -23,6 +23,10 @@ export interface VarianceRecord {
   explanationSource?: 'manual' | 'ai_draft' | 'ai_edited';
   approvedAt?: string;
   approvedBy?: string;
+  /** Classification of the variance (e.g. 'volume', 'price', 'timing', 'one-time', 'structural'). */
+  varianceType?: string;
+  /** Projected full-year impact = monthly variance x remaining months. */
+  fullYearImpact?: string;
   createdAt: string;
 }
 

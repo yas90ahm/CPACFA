@@ -17,4 +17,7 @@ export interface VarianceRecord {
   approvedAt: string | null;
   aiDraftExplanation: string | null;
   priorPeriodId: string | null;
+  classification: string | null;
+  fullYearImpact: string | null;
+  aiConfidence: number | null;
 }

@@ -24,6 +24,9 @@ import type {
 import type { EvidenceFile } from '@/lib/types/evidence';
 import { ChevronLeft, ChevronRight, Pencil, Check, Paperclip, Edit2, Trash2 } from 'lucide-react';
 import { canCompleteRecon, canApproveRecon, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
+import { ReconSourcePanel } from '@/components/close/ReconSourcePanel';
+import { RollForwardView } from '@/components/close/RollForwardView';
+import { Breadcrumb } from '@/components/shared/Breadcrumb';
 
 const STATUS_LABEL: Record<ReconStatus, string> = {
   not_started: 'Not Started',
@@ -422,8 +425,12 @@ export default function ReconDetailPage() {
   if (!recon) {
     return (
       <div className="p-6">
-        <p className="text-text-secondary">Reconciliation not found.</p>
-        <Link href={`/close/${sessionId}/reconciliation`} className="text-accent hover:underline mt-2 inline-block">
+        <p style={{ color: 'var(--text-secondary)' }}>Reconciliation not found.</p>
+        <Link
+          href={`/close/${sessionId}/reconciliation`}
+          className="hover:underline mt-2 inline-block"
+          style={{ color: 'var(--interactive-primary)' }}
+        >
           Back to Reconciliation
         </Link>
       </div>
@@ -432,20 +439,16 @@ export default function ReconDetailPage() {
 
   return (
     <div className="space-y-6">
+      <Breadcrumb items={[
+        { label: 'Close', href: `/close/${sessionId}/dashboard` },
+        { label: 'Reconciliation', href: `/close/${sessionId}/reconciliation` },
+        { label: recon.accountName || 'Detail' },
+      ]} />
       <div className="flex items-start justify-between gap-4">
         <div>
-          <nav className="text-sm text-text-secondary mb-1">
-            <Link href={`/close/${sessionId}/reconciliation`} className="text-accent hover:underline">
-              Reconciliation
-            </Link>
-            <span className="mx-2">›</span>
-            <span className="text-primary">
-              Account {recon.accountCode} — {recon.accountName}
-            </span>
-          </nav>
-          <h1 className="font-display text-2xl text-primary">
+          <h1 className="font-display text-2xl" style={{ color: 'var(--text-primary)' }}>
             {recon.accountName}
-            <span className="font-mono text-base text-text-secondary ml-2">{recon.accountCode}</span>
+            <span className="font-mono text-base ml-2" style={{ color: 'var(--text-secondary)' }}>{recon.accountCode}</span>
           </h1>
           <div className="mt-2">
             <StatusBadge variant={STATUS_BADGE[recon.status]} label={STATUS_LABEL[recon.status]} />
@@ -455,7 +458,11 @@ export default function ReconDetailPage() {
           {prevId && (
             <Link
               href={`/close/${sessionId}/reconciliation/${prevId}`}
-              className="inline-flex items-center gap-1 px-3 py-2 rounded-input border border-border hover:bg-hover text-sm"
+              className="inline-flex items-center gap-1 px-3 py-2 border text-sm"
+              style={{
+                borderColor: 'var(--border-default)',
+                borderRadius: 'var(--radius-md)',
+              }}
             >
               <ChevronLeft className="w-4 h-4" /> Previous
             </Link>
@@ -463,7 +470,11 @@ export default function ReconDetailPage() {
           {nextId && (
             <Link
               href={`/close/${sessionId}/reconciliation/${nextId}`}
-              className="inline-flex items-center gap-1 px-3 py-2 rounded-input border border-border hover:bg-hover text-sm"
+              className="inline-flex items-center gap-1 px-3 py-2 border text-sm"
+              style={{
+                borderColor: 'var(--border-default)',
+                borderRadius: 'var(--radius-md)',
+              }}
             >
               Next <ChevronRight className="w-4 h-4" />
             </Link>
@@ -475,18 +486,32 @@ export default function ReconDetailPage() {
                 disabled={!canMarkComplete}
                 title={missingForComplete.length ? missingForComplete.join('; ') : 'Mark complete'}
                 className={cn(
-                  'px-4 py-2 rounded-input text-sm font-medium',
-                  canMarkComplete
-                    ? 'bg-accent text-white hover:bg-accent/90'
-                    : 'bg-elevated text-text-muted cursor-not-allowed'
+                  'px-4 py-2 text-sm font-medium',
+                  !canMarkComplete && 'cursor-not-allowed'
                 )}
+                style={canMarkComplete
+                  ? {
+                      backgroundColor: 'var(--interactive-primary)',
+                      color: 'white',
+                      borderRadius: 'var(--radius-md)',
+                    }
+                  : {
+                      backgroundColor: 'var(--bg-surface-sunken)',
+                      color: 'var(--text-tertiary)',
+                      borderRadius: 'var(--radius-md)',
+                    }
+                }
                 onClick={handleMarkComplete}
               >
                 Mark Complete
               </button>
               <button
                 type="button"
-                className="px-4 py-2 rounded-input border border-border text-sm font-medium hover:bg-hover"
+                className="px-4 py-2 border text-sm font-medium"
+                style={{
+                  borderColor: 'var(--border-default)',
+                  borderRadius: 'var(--radius-md)',
+                }}
                 onClick={() => router.refresh()}
               >
                 Save Progress
@@ -500,16 +525,33 @@ export default function ReconDetailPage() {
                 disabled={canApproveOwn}
                 title={canApproveOwn ? 'Segregation of duties — a different user must approve' : 'Approve'}
                 className={cn(
-                  'px-4 py-2 rounded-input text-sm font-medium',
-                  canApproveOwn ? 'bg-elevated text-text-muted cursor-not-allowed' : 'bg-status-green text-white hover:opacity-90'
+                  'px-4 py-2 text-sm font-medium',
+                  canApproveOwn && 'cursor-not-allowed'
                 )}
+                style={canApproveOwn
+                  ? {
+                      backgroundColor: 'var(--bg-surface-sunken)',
+                      color: 'var(--text-tertiary)',
+                      borderRadius: 'var(--radius-md)',
+                    }
+                  : {
+                      backgroundColor: 'var(--status-success)',
+                      color: 'white',
+                      borderRadius: 'var(--radius-md)',
+                    }
+                }
                 onClick={handleApprove}
               >
                 Approve
               </button>
               <button
                 type="button"
-                className="px-4 py-2 rounded-input border border-status-red text-status-red text-sm font-medium hover:bg-status-red-dim"
+                className="px-4 py-2 border text-sm font-medium"
+                style={{
+                  borderColor: 'var(--status-error)',
+                  color: 'var(--status-error)',
+                  borderRadius: 'var(--radius-md)',
+                }}
                 onClick={() => setShowRejectInput(true)}
               >
                 Reject
@@ -520,45 +562,77 @@ export default function ReconDetailPage() {
       </div>
 
       {showRejectInput && (
-        <div className="p-4 rounded-card border border-status-red bg-status-red-dim">
-          <label className="block text-sm font-medium text-primary mb-2">Rejection reason (min 10 chars)</label>
+        <div
+          className="p-4 border"
+          style={{
+            borderColor: 'var(--status-error)',
+            backgroundColor: 'var(--status-error-bg)',
+            borderRadius: 'var(--radius-lg)',
+          }}
+        >
+          <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>Rejection reason (min 10 chars)</label>
           <textarea
             value={rejectReason}
             onChange={(e) => setRejectReason(e.target.value)}
-            className="w-full px-3 py-2 rounded-input border border-border bg-input text-sm"
+            className="w-full px-3 py-2 border text-sm"
+            style={{
+              borderColor: 'var(--border-default)',
+              backgroundColor: 'var(--bg-surface-sunken)',
+              borderRadius: 'var(--radius-md)',
+            }}
             rows={3}
             placeholder="Explain why this reconciliation is being rejected..."
           />
           <div className="flex gap-2 mt-2">
             <button
               type="button"
-              className="px-4 py-2 rounded-input bg-status-red text-white text-sm font-medium"
+              className="px-4 py-2 text-sm font-medium"
+              style={{
+                backgroundColor: 'var(--status-error)',
+                color: 'white',
+                borderRadius: 'var(--radius-md)',
+              }}
               onClick={handleReject}
               disabled={rejectReason.trim().length < 10}
             >
               Submit Rejection
             </button>
-            <button type="button" className="px-4 py-2 rounded-input border border-border text-sm" onClick={() => setShowRejectInput(false)}>
+            <button
+              type="button"
+              className="px-4 py-2 border text-sm"
+              style={{
+                borderColor: 'var(--border-default)',
+                borderRadius: 'var(--radius-md)',
+              }}
+              onClick={() => setShowRejectInput(false)}
+            >
               Cancel
             </button>
           </div>
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-6">
         <div className="space-y-6">
-          <section className="bg-surface border border-border rounded-card p-6">
-            <h2 className="text-sm font-medium text-text-secondary mb-4">Balance comparison</h2>
+          <section
+            className="border p-6"
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              borderColor: 'var(--border-default)',
+              borderRadius: 'var(--radius-lg)',
+            }}
+          >
+            <h2 className="text-sm font-medium mb-4" style={{ color: 'var(--text-secondary)' }}>Balance comparison</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <div className="text-xs text-text-secondary mb-1">GL Balance</div>
+                <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>GL Balance</div>
                 <div className="font-mono text-xl tabular-nums">
                   <MoneyCell value={recon.glBalance} showDollar />
                 </div>
-                <div className="text-xs text-text-muted mt-1">from adjusted trial balance as of {periodEndDisplay}</div>
+                <div className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>from adjusted trial balance as of {periodEndDisplay}</div>
               </div>
               <div>
-                <div className="text-xs text-text-secondary mb-1">Supporting Balance</div>
+                <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Supporting Balance</div>
                 {!readOnly && (recon.status === 'not_started' || recon.status === 'in_progress') && (editingSupporting || (!hasSupportingBalance && supportingBalanceLocal == null)) ? (
                   <div>
                     <MoneyInput
@@ -567,10 +641,11 @@ export default function ReconDetailPage() {
                       size="lg"
                       placeholder="0.00"
                     />
-                    <div className="text-xs text-text-muted mt-1">from {recon.sourceDocumentType}</div>
+                    <div className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>from {recon.sourceDocumentType}</div>
                     <button
                       type="button"
-                      className="mt-2 text-xs text-accent hover:underline disabled:opacity-50"
+                      className="mt-2 text-xs hover:underline disabled:opacity-50"
+                      style={{ color: 'var(--interactive-primary)' }}
                       onClick={handleSaveSupporting}
                       disabled={savingSupporting || !supportingBalanceLocal?.trim()}
                     >
@@ -580,13 +655,14 @@ export default function ReconDetailPage() {
                 ) : (
                   <div>
                     <div className="font-mono text-xl tabular-nums">
-                      {hasSupportingBalance || supportingDisplay != null ? <MoneyCell value={supportingDisplay} showDollar /> : <span className="text-text-muted">—</span>}
+                      {hasSupportingBalance || supportingDisplay != null ? <MoneyCell value={supportingDisplay} showDollar /> : <span style={{ color: 'var(--text-tertiary)' }}>—</span>}
                     </div>
-                    <div className="text-xs text-text-muted mt-1">from {recon.sourceDocumentType}</div>
+                    <div className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>from {recon.sourceDocumentType}</div>
                     {!readOnly && (recon.status === 'not_started' || recon.status === 'in_progress') && (hasSupportingBalance || supportingBalanceLocal != null) && (
                       <button
                         type="button"
-                        className="mt-2 text-xs text-accent hover:underline inline-flex items-center gap-1"
+                        className="mt-2 text-xs hover:underline inline-flex items-center gap-1"
+                        style={{ color: 'var(--interactive-primary)' }}
                         onClick={() => setEditingSupporting(true)}
                       >
                         <Edit2 className="w-3 h-3" /> Edit
@@ -597,15 +673,22 @@ export default function ReconDetailPage() {
               </div>
             </div>
             {recon.priorPeriodGlBalance != null && (
-              <div className="mt-4 p-3 rounded-input bg-elevated border border-border-light">
-                <div className="text-xs font-medium text-text-secondary mb-2">Prior Period Reference</div>
+              <div
+                className="mt-4 p-3 border"
+                style={{
+                  backgroundColor: 'var(--bg-surface-sunken)',
+                  borderColor: 'var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)',
+                }}
+              >
+                <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Prior Period Reference</div>
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
-                    <span className="text-text-muted text-xs">GL Balance:</span>
+                    <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>GL Balance:</span>
                     <span className="font-mono ml-1"><MoneyCell value={recon.priorPeriodGlBalance} showDollar /></span>
                   </div>
                   <div>
-                    <span className="text-text-muted text-xs">Supporting:</span>
+                    <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Supporting:</span>
                     <span className="font-mono ml-1">
                       {recon.priorPeriodSupportingBalance != null
                         ? <MoneyCell value={recon.priorPeriodSupportingBalance} showDollar />
@@ -616,7 +699,8 @@ export default function ReconDetailPage() {
                 {!recon.copiedFromPrior && !hasSupportingBalance && (recon.status === 'not_started' || recon.status === 'in_progress') && (
                   <button
                     type="button"
-                    className="mt-2 text-xs text-accent hover:underline disabled:opacity-50"
+                    className="mt-2 text-xs hover:underline disabled:opacity-50"
+                    style={{ color: 'var(--interactive-primary)' }}
                     onClick={() => copyPriorMutation.mutate()}
                     disabled={copyPriorMutation.isPending}
                   >
@@ -624,20 +708,23 @@ export default function ReconDetailPage() {
                   </button>
                 )}
                 {recon.copiedFromPrior && (
-                  <div className="mt-1 text-xs text-status-green">Copied from prior period</div>
+                  <div className="mt-1 text-xs" style={{ color: 'var(--status-success)' }}>Copied from prior period</div>
                 )}
               </div>
             )}
             <div className="mt-6 flex justify-center">
               <div
-                className={cn(
-                  'px-6 py-4 rounded-input border-2 text-center',
-                  !hasSupportingBalance
-                    ? 'border-border-light text-text-muted'
-                    : withinTolerance
-                      ? 'border-status-green text-status-green'
-                      : 'border-status-red text-status-red'
-                )}
+                className="px-6 py-4 border-2 text-center"
+                style={{
+                  borderRadius: 'var(--radius-md)',
+                  ...(
+                    !hasSupportingBalance
+                      ? { borderColor: 'var(--border-subtle)', color: 'var(--text-tertiary)' }
+                      : withinTolerance
+                        ? { borderColor: 'var(--status-success)', color: 'var(--status-success)' }
+                        : { borderColor: 'var(--status-error)', color: 'var(--status-error)' }
+                  ),
+                }}
               >
                 <div className="text-sm font-medium">Difference</div>
                 <div className="font-mono text-xl tabular-nums mt-1">
@@ -652,40 +739,61 @@ export default function ReconDetailPage() {
                     {withinTolerance ? 'Within tolerance ✓' : overTolerance ? `Over tolerance by ${fmtMoney(backendUnexplained, { dollar: true })}` : ''}
                   </div>
                 )}
-                <div className="text-xs text-text-muted mt-1">Tolerance: {fmtMoney(recon.tolerance, { dollar: true })}</div>
+                <div className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>Tolerance: {fmtMoney(recon.tolerance, { dollar: true })}</div>
               </div>
             </div>
           </section>
 
-          <section className="bg-surface border border-border rounded-card p-6">
-            <h2 className="text-sm font-medium text-text-secondary mb-4">Reconciling items</h2>
+          {/* Roll-Forward Schedule — renders only for applicable account types */}
+          <RollForwardView sessionId={sessionId} reconId={reconId} />
+
+          {/* Source Data Panel — only in editable states */}
+          {recon.status !== 'approved' && (
+            <ReconSourcePanel sessionId={sessionId} reconId={reconId} />
+          )}
+
+          <section
+            className="border p-6"
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              borderColor: 'var(--border-default)',
+              borderRadius: 'var(--radius-lg)',
+            }}
+          >
+            <h2 className="text-sm font-medium mb-4" style={{ color: 'var(--text-secondary)' }}>Reconciling items</h2>
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-sm">
                 <thead>
-                  <tr className="border-b border-border">
-                    <th className="text-left py-2 font-medium text-text-secondary">Description</th>
-                    <th className="text-right py-2 font-medium text-text-secondary w-28">Amount</th>
-                    <th className="text-left py-2 font-medium text-text-secondary w-36">Type</th>
-                    <th className="text-left py-2 font-medium text-text-secondary w-28">Date</th>
+                  <tr style={{ borderBottom: '1px solid var(--border-default)' }}>
+                    <th className="text-left py-2 font-medium" style={{ color: 'var(--text-secondary)' }}>Description</th>
+                    <th className="text-right py-2 font-medium w-28" style={{ color: 'var(--text-secondary)' }}>Amount</th>
+                    <th className="text-left py-2 font-medium w-36" style={{ color: 'var(--text-secondary)' }}>Type</th>
+                    <th className="text-left py-2 font-medium w-28" style={{ color: 'var(--text-secondary)' }}>Date</th>
                     {!readOnly && (recon.status === 'not_started' || recon.status === 'in_progress') && <th className="w-20" />}
                   </tr>
                 </thead>
                 <tbody>
                   {items.map((item) => (
-                    <tr key={item.id} className="border-b border-border-light">
+                    <tr key={item.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                       <td className="py-2">{item.description}</td>
                       <td className="py-2 text-right font-mono">
                         <MoneyCell value={item.amount} showDollar />
                       </td>
                       <td className="py-2">
-                        <span className="px-2 py-0.5 rounded text-xs bg-elevated">{item.type}</span>
+                        <span
+                          className="px-2 py-0.5 rounded text-xs"
+                          style={{ backgroundColor: 'var(--bg-surface-sunken)' }}
+                        >
+                          {item.type}
+                        </span>
                       </td>
                       <td className="py-2">{formatDate(item.date)}</td>
                       {!readOnly && (recon.status === 'not_started' || recon.status === 'in_progress') && (
                         <td className="py-2">
                           <button
                             type="button"
-                            className="p-1 text-text-tertiary hover:text-status-red"
+                            className="p-1"
+                            style={{ color: 'var(--text-tertiary)' }}
                             onClick={() => handleDeleteItem(item.id)}
                             title="Delete"
                           >
@@ -700,12 +808,15 @@ export default function ReconDetailPage() {
             </div>
             <div className="mt-4 flex items-center justify-between">
               <div>
-                <span className="text-text-secondary text-sm">Items total: </span>
+                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Items total: </span>
                 <span className="font-mono font-medium">
                   <MoneyCell value={recon.reconcilingItemsTotal} showDollar />
                 </span>
               </div>
-              <div className={cn('text-sm font-medium', withinTolerance ? 'text-status-green' : 'text-status-red')}>
+              <div
+                className="text-sm font-medium"
+                style={{ color: withinTolerance ? 'var(--status-success)' : 'var(--status-error)' }}
+              >
                 Unexplained: <MoneyCell value={backendUnexplained} showDollar />
                 {withinTolerance && moneyAbs(backendUnexplained) < 0.01 && ' ✓ Fully reconciled'}
                 {withinTolerance && moneyAbs(backendUnexplained) >= 0.01 && ' — within tolerance'}
@@ -718,7 +829,11 @@ export default function ReconDetailPage() {
                   <div className="mt-4 flex gap-2">
                     <button
                       type="button"
-                      className="px-4 py-2 rounded-input border border-border text-sm font-medium hover:bg-hover"
+                      className="px-4 py-2 border text-sm font-medium"
+                      style={{
+                        borderColor: 'var(--border-default)',
+                        borderRadius: 'var(--radius-md)',
+                      }}
                       onClick={() => setShowAddItem(true)}
                     >
                       Add Item
@@ -726,7 +841,12 @@ export default function ReconDetailPage() {
                     {recon.priorPeriodGlBalance != null && !items.some((i) => i.description.startsWith('[Carried forward]')) && (
                       <button
                         type="button"
-                        className="px-4 py-2 rounded-input border border-accent/40 text-sm font-medium text-accent hover:bg-accent/10"
+                        className="px-4 py-2 border text-sm font-medium"
+                        style={{
+                          borderColor: 'color-mix(in srgb, var(--interactive-primary) 40%, transparent)',
+                          color: 'var(--interactive-primary)',
+                          borderRadius: 'var(--radius-md)',
+                        }}
                         onClick={handleCarryForward}
                         disabled={carryForwardPending}
                       >
@@ -735,19 +855,36 @@ export default function ReconDetailPage() {
                     )}
                   </div>
                 ) : (
-                  <div className="mt-4 p-4 rounded-input border border-border bg-elevated space-y-3">
+                  <div
+                    className="mt-4 p-4 border space-y-3"
+                    style={{
+                      borderColor: 'var(--border-default)',
+                      backgroundColor: 'var(--bg-surface-sunken)',
+                      borderRadius: 'var(--radius-md)',
+                    }}
+                  >
                     <input
                       type="text"
                       value={addItemDesc}
                       onChange={(e) => setAddItemDesc(e.target.value)}
                       placeholder="Description"
-                      className="w-full px-3 py-2 rounded-input border border-border bg-input text-sm"
+                      className="w-full px-3 py-2 border text-sm"
+                      style={{
+                        borderColor: 'var(--border-default)',
+                        backgroundColor: 'var(--bg-surface-sunken)',
+                        borderRadius: 'var(--radius-md)',
+                      }}
                     />
                     <MoneyInput value={addItemAmt} onChange={setAddItemAmt} size="sm" placeholder="0.00" />
                     <select
                       value={addItemType}
                       onChange={(e) => setAddItemType(e.target.value as ReconcilingItemType)}
-                      className="w-full px-3 py-2 rounded-input border border-border bg-input text-sm"
+                      className="w-full px-3 py-2 border text-sm"
+                      style={{
+                        borderColor: 'var(--border-default)',
+                        backgroundColor: 'var(--bg-surface-sunken)',
+                        borderRadius: 'var(--radius-md)',
+                      }}
                     >
                       {ITEM_TYPES.map((t) => (
                         <option key={t} value={t}>
@@ -759,18 +896,36 @@ export default function ReconDetailPage() {
                       type="date"
                       value={addItemDate}
                       onChange={(e) => setAddItemDate(e.target.value)}
-                      className="w-full px-3 py-2 rounded-input border border-border bg-input text-sm"
+                      className="w-full px-3 py-2 border text-sm"
+                      style={{
+                        borderColor: 'var(--border-default)',
+                        backgroundColor: 'var(--bg-surface-sunken)',
+                        borderRadius: 'var(--radius-md)',
+                      }}
                     />
                     <div className="flex gap-2">
                       <button
                         type="button"
-                        className="px-4 py-2 rounded-input bg-accent text-white text-sm disabled:opacity-50"
+                        className="px-4 py-2 text-sm disabled:opacity-50"
+                        style={{
+                          backgroundColor: 'var(--interactive-primary)',
+                          color: 'white',
+                          borderRadius: 'var(--radius-md)',
+                        }}
                         onClick={handleAddItem}
                         disabled={addItemMutation.isPending || !addItemDesc.trim()}
                       >
                         {addItemMutation.isPending ? 'Saving...' : 'Save'}
                       </button>
-                      <button type="button" className="px-4 py-2 rounded-input border border-border text-sm" onClick={() => setShowAddItem(false)}>
+                      <button
+                        type="button"
+                        className="px-4 py-2 border text-sm"
+                        style={{
+                          borderColor: 'var(--border-default)',
+                          borderRadius: 'var(--radius-md)',
+                        }}
+                        onClick={() => setShowAddItem(false)}
+                      >
                         Cancel
                       </button>
                     </div>
@@ -780,27 +935,51 @@ export default function ReconDetailPage() {
             )}
           </section>
 
-          <section className="bg-surface border border-border rounded-card p-6">
-            <h2 className="text-sm font-medium text-text-secondary mb-2">Notes</h2>
+          <section
+            className="border p-6"
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              borderColor: 'var(--border-default)',
+              borderRadius: 'var(--radius-lg)',
+            }}
+          >
+            <h2 className="text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Notes</h2>
             <textarea
               value={notesDisplay}
               onChange={(e) => setNotesLocal(e.target.value)}
               onBlur={handleNotesBlur}
               disabled={isApproved || readOnly}
               placeholder="Add notes about this reconciliation..."
-              className="w-full px-3 py-2 rounded-input border border-border bg-input text-sm min-h-[80px]"
+              className="w-full px-3 py-2 border text-sm min-h-[80px]"
+              style={{
+                borderColor: 'var(--border-default)',
+                backgroundColor: 'var(--bg-surface-sunken)',
+                borderRadius: 'var(--radius-md)',
+              }}
             />
           </section>
         </div>
 
         <div className="space-y-6">
-          <section className="bg-surface border border-border rounded-card p-6">
-            <h2 className="text-sm font-medium text-text-secondary mb-2 flex items-center gap-2">
+          <section
+            className="border p-6"
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              borderColor: 'var(--border-default)',
+              borderRadius: 'var(--radius-lg)',
+            }}
+          >
+            <h2 className="text-sm font-medium mb-2 flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
               Supporting documents
-              <span className="px-1.5 py-0.5 rounded text-xs bg-elevated">{evidence.length}</span>
+              <span
+                className="px-1.5 py-0.5 rounded text-xs"
+                style={{ backgroundColor: 'var(--bg-surface-sunken)' }}
+              >
+                {evidence.length}
+              </span>
             </h2>
             {evidence.length < 1 && (recon.status === 'not_started' || recon.status === 'in_progress') && (
-              <p className="text-status-amber text-sm mb-3">At least one supporting document is required to complete this reconciliation</p>
+              <p className="text-sm mb-3" style={{ color: 'var(--status-warning)' }}>At least one supporting document is required to complete this reconciliation</p>
             )}
             {!readOnly && (recon.status === 'not_started' || recon.status === 'in_progress') && (
               <FileUpload
@@ -817,19 +996,34 @@ export default function ReconDetailPage() {
           </section>
 
           {isCompleted && (
-            <section className="bg-surface border border-border rounded-card p-6">
-              <h2 className="text-sm font-medium text-text-secondary mb-3">Approval info</h2>
+            <section
+              className="border p-6"
+              style={{
+                backgroundColor: 'var(--bg-surface)',
+                borderColor: 'var(--border-default)',
+                borderRadius: 'var(--radius-lg)',
+              }}
+            >
+              <h2 className="text-sm font-medium mb-3" style={{ color: 'var(--text-secondary)' }}>Approval info</h2>
               <dl className="text-sm space-y-2">
                 <div>
-                  <dt className="text-text-muted">Completed by</dt>
+                  <dt style={{ color: 'var(--text-tertiary)' }}>Completed by</dt>
                   <dd className="font-medium">{recon.preparer ?? '—'} on {formatDate(recon.completedAt)}</dd>
                 </div>
                 <div>
-                  <dt className="text-text-muted">Approved by</dt>
+                  <dt style={{ color: 'var(--text-tertiary)' }}>Approved by</dt>
                   <dd className="font-medium">{recon.reviewer ? `${recon.reviewer} on ${formatDate(recon.approvedAt)}` : 'Pending approval'}</dd>
                 </div>
                 {recon.rejectedReason && (
-                  <div className="mt-3 p-3 rounded-input bg-status-amber-dim border border-status-amber/30 text-status-amber">
+                  <div
+                    className="mt-3 p-3 border"
+                    style={{
+                      backgroundColor: 'var(--status-warning-bg)',
+                      borderColor: 'color-mix(in srgb, var(--status-warning) 30%, transparent)',
+                      color: 'var(--status-warning)',
+                      borderRadius: 'var(--radius-md)',
+                    }}
+                  >
                     {recon.rejectedReason}
                   </div>
                 )}
@@ -837,20 +1031,27 @@ export default function ReconDetailPage() {
             </section>
           )}
 
-          <section className="bg-surface border border-border rounded-card p-6">
-            <h2 className="text-sm font-medium text-text-secondary mb-3">History</h2>
+          <section
+            className="border p-6"
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              borderColor: 'var(--border-default)',
+              borderRadius: 'var(--radius-lg)',
+            }}
+          >
+            <h2 className="text-sm font-medium mb-3" style={{ color: 'var(--text-secondary)' }}>History</h2>
             <ul className="space-y-2">
               {activity.length === 0 ? (
-                <li className="text-text-muted text-sm">No activity yet</li>
+                <li className="text-sm" style={{ color: 'var(--text-tertiary)' }}>No activity yet</li>
               ) : (
                 activity
                   .slice()
                   .reverse()
                   .map((a) => (
                     <li key={a.id} className="text-sm">
-                      <span className="font-medium text-primary">{a.user}</span>
-                      <span className="text-text-secondary"> {a.description}</span>
-                      <span className="text-text-muted text-xs block">{formatDateTime(a.timestamp)}</span>
+                      <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{a.user}</span>
+                      <span style={{ color: 'var(--text-secondary)' }}> {a.description}</span>
+                      <span className="text-xs block" style={{ color: 'var(--text-tertiary)' }}>{formatDateTime(a.timestamp)}</span>
                     </li>
                   ))
               )}

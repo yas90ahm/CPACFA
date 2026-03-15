@@ -48,8 +48,8 @@ export interface JournalEntryLine {
   jeId: string;
   lineIndex: number;
   accountRef: string;
-  debit: number;
-  credit: number;
+  debit: string;
+  credit: string;
   description?: string;
   /** Persisted amount provenance for audit trail (required for non-zero at API). */
   amountProvenance?: AmountProvenance;

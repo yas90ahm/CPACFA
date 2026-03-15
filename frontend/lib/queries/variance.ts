@@ -1,10 +1,12 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import type { VarianceRecord } from '@/lib/types/variance';
 
 const STALE_TIME = 30_000;
+
+export type VarianceClassification = 'Timing' | 'Permanent' | 'Volume' | 'Price' | 'Mix' | 'Other';
 
 function toVarianceRecord(r: Record<string, unknown>): VarianceRecord {
   const status = (r.explanationStatus ?? r.status) as string;
@@ -29,6 +31,9 @@ function toVarianceRecord(r: Record<string, unknown>): VarianceRecord {
     approvedAt: (r.approvedAt ?? r.reviewedAt) as string | null,
     aiDraftExplanation: (r.aiDraftExplanation ?? r.aiDraft) as string | null,
     priorPeriodId: (r.priorPeriodId ?? r.prior_period_id ?? null) as string | null,
+    classification: (r.classification ?? null) as string | null,
+    fullYearImpact: r.fullYearImpact != null ? String(r.fullYearImpact) : null,
+    aiConfidence: r.aiConfidence != null ? Number(r.aiConfidence) : null,
   };
 }
 
@@ -45,5 +50,19 @@ export function useVariances(sessionId: string | null) {
     },
     enabled: !!sessionId,
     staleTime: STALE_TIME,
+  });
+}
+
+export function useClassifyVariance(sessionId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: { varianceId: string; classification: VarianceClassification }) =>
+      apiFetch(`/api/close/sessions/${sessionId}/variances/${params.varianceId}/classify`, {
+        method: 'POST',
+        body: { classification: params.classification },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['variances', sessionId] });
+    },
   });
 }

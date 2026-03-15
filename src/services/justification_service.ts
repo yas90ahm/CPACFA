@@ -6,6 +6,8 @@
 
 import type { Pool } from 'pg';
 import { generateText } from '../llm/provider.js';
+import { enterAdvisoryContext, exitAdvisoryContext } from '../lib/ai_boundary.js';
+import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import type {
   HandbookChunk,
   IRACJustification,
@@ -20,6 +22,7 @@ import { isDbConfigured } from '../db/index.js';
 import { disallowMemoryStoreInProduction } from '../lib/env.js';
 import * as justificationsRepo from '../db/repositories/tenant_justifications_repository.js';
 import type { JustificationRelatedType, CreatedByType } from '../db/repositories/tenant_justifications_repository.js';
+import { runJustifier, hashJustifierInputs, type JustifierRelatedType } from '../ai/ai_orchestrator.js';
 
 export interface CreateJustificationFromAIParams {
   tenantId: string;
@@ -118,29 +121,37 @@ async function generateIRACAnalysisAndConclusion(
   Output exactly two short paragraphs: first "Analysis:", then "Conclusion:". Do not include section headers in the text; just the paragraphs.`;
   const prompt = `Issue: ${issue}\n\nRule (from authority): ${ruleText}\n\nRelevant authority chunks:\n${citationsBlock}\n\nUser question / facts: ${question.slice(0, 500)}\n\nWrite Analysis (apply the rule to the facts; cite the codifications above) and Conclusion (state whether the treatment is supported and by which citation).`;
 
-  const text = await generateText({
-    model: IRAC_LLM_MODEL,
-    maxTokens: 1024,
-    system,
-    prompt,
-  });
+  enterAdvisoryContext();
+  try {
+    const text = await generateText({
+      model: IRAC_LLM_MODEL,
+      maxTokens: 1024,
+      system,
+      prompt,
+    });
 
-  let analysis = text;
-  let conclusion = '';
-  const conclusionMatch = text.match(/\bConclusion:?\s*([\s\S]*)/i);
-  if (conclusionMatch) {
-    conclusion = conclusionMatch[1].trim();
-    analysis = text.slice(0, text.indexOf(conclusionMatch[0])).replace(/Analysis:?\s*/i, '').trim();
-  }
-  if (!conclusion) {
-    const lastPara = text.split(/\n\n+/).pop() ?? text;
-    conclusion = lastPara.trim();
-    analysis = text.slice(0, text.lastIndexOf(lastPara)).replace(/Analysis:?\s*/i, '').trim();
-  }
-  if (!analysis) analysis = text;
-  if (!conclusion) conclusion = fallbackConclusion;
+    // Apply numeric guardrail on raw text (IRAC narrative output)
+    assertNoNumericAmountsInAgentOutput({ text }, 'justification_service_irac');
 
-  return { analysis, conclusion };
+    let analysis = text;
+    let conclusion = '';
+    const conclusionMatch = text.match(/\bConclusion:?\s*([\s\S]*)/i);
+    if (conclusionMatch) {
+      conclusion = conclusionMatch[1].trim();
+      analysis = text.slice(0, text.indexOf(conclusionMatch[0])).replace(/Analysis:?\s*/i, '').trim();
+    }
+    if (!conclusion) {
+      const lastPara = text.split(/\n\n+/).pop() ?? text;
+      conclusion = lastPara.trim();
+      analysis = text.slice(0, text.lastIndexOf(lastPara)).replace(/Analysis:?\s*/i, '').trim();
+    }
+    if (!analysis) analysis = text;
+    if (!conclusion) conclusion = fallbackConclusion;
+
+    return { analysis, conclusion };
+  } finally {
+    exitAdvisoryContext();
+  }
 }
 
 // --- RAG-backed justification ---
@@ -497,6 +508,59 @@ export function registerJustificationForPeriod(
     periodStart,
     periodEnd,
   });
+}
+
+// --- Orchestrator-based justification (Justifier pillar) ---
+
+export interface JustifyWithOrchestratorParams {
+  pool: Pool;
+  tenantId: string;
+  periodLabel: string;
+  relatedType: JustifierRelatedType;
+  relatedId: string;
+  facts: Record<string, unknown>;
+}
+
+/**
+ * Generate an IRAC justification via the AI orchestrator's Justifier pillar,
+ * then persist the result to tenant_justifications. Fail-open: returns a
+ * placeholder memo if AI fails. Always persists regardless of AI success.
+ */
+export async function justifyWithOrchestrator(
+  params: JustifyWithOrchestratorParams
+): Promise<{ id: string; createdAt: string; ok: boolean; memo_markdown: string }> {
+  const { pool, tenantId, periodLabel, relatedType, relatedId, facts } = params;
+  const inputsHash = hashJustifierInputs(facts, 'justifier_v1.0.0');
+
+  const result = await runJustifier({
+    pool,
+    tenantId,
+    periodLabel,
+    relatedType,
+    relatedId,
+    facts,
+  });
+
+  const persisted = await createJustificationFromAI({
+    tenantId,
+    pool,
+    periodLabel,
+    relatedType,
+    relatedId,
+    memo_markdown: result.memo_markdown,
+    irac_json: result.irac_json,
+    rule_ids: result.rule_ids,
+    prompt_version: result.prompt_version,
+    model: process.env.AI_MODEL,
+    inputs_hash: inputsHash,
+  });
+
+  return {
+    id: persisted.id,
+    createdAt: persisted.createdAt,
+    ok: result.ok,
+    memo_markdown: result.memo_markdown,
+  };
 }
 
 /**

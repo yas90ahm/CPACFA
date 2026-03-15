@@ -397,8 +397,8 @@ router.post(
         line_number: line.line_number ?? idx + 1,
         entry_date: entryDate ?? new Date().toISOString().slice(0, 10),
         account_code: line.account_code,
-        debit: line.debit ?? 0,
-        credit: line.credit ?? 0,
+        debit: String(line.debit ?? 0),
+        credit: String(line.credit ?? 0),
         description: line.description,
         created_by: createdBy,
       } as GeneralLedgerLine));

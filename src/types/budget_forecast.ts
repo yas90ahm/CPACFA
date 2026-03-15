@@ -18,7 +18,7 @@ export interface BudgetVersion {
 
 export interface BudgetVersionLine {
   label: string;
-  amount: number;
+  amount: string;
   category?: 'Revenue' | 'COGS' | 'OpEx' | 'Other';
   driverRef?: string; // optional link to driver (e.g. "headcount", "price")
 }

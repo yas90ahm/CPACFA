@@ -28,6 +28,7 @@ import * as reqRepo from '../db/repositories/recon_requirements_repository.js';
 import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
 import { getTrialBalanceForCertification } from './adjusted_trial_balance_service.js';
 import { createDraftJE } from './journal_entry_service.js';
+import { financialEvents, buildEventPacket } from '../events/financial_event_emitter.js';
 
 export class PeriodReconciliationError extends Error {
   constructor(
@@ -122,6 +123,17 @@ export async function initializeReconciliations(
     if (existingAccounts.has(req.accountCode)) continue;
     const glBalance = getGLBalanceForAccount(tb, req.accountCode);
     const reconId = randomUUID();
+
+    // When tolerance_type is 'percentage', compute the absolute threshold from GL balance
+    let effectiveToleranceAmount = req.toleranceAmount;
+    if (req.toleranceType === 'percentage' && req.tolerancePercentage != null) {
+      const glBalanceDecimal = from(glBalance || '0').abs();
+      const percentageThreshold = glBalanceDecimal
+        .mul(from(req.tolerancePercentage))
+        .div(from('100'));
+      effectiveToleranceAmount = percentageThreshold.toFixed(2);
+    }
+
     const recon = await reconRepo.insertPeriodReconciliation(pool, reconId, {
       tenantId,
       periodId,
@@ -129,7 +141,7 @@ export async function initializeReconciliations(
       requirementId: req.requirementId,
       accountCode: req.accountCode,
       glBalance: glBalance ?? null,
-      toleranceAmount: req.toleranceAmount,
+      toleranceAmount: effectiveToleranceAmount,
     });
     created.push(recon);
   }
@@ -227,6 +239,24 @@ export async function refreshGLBalances(
           sourceCheck: 'recon_completeness_gate',
           sourceDetails: { recon_id: recon.reconId },
         });
+        // Emit event for async resolution
+        financialEvents.emit('RECON_OVER_TOLERANCE', buildEventPacket('RECON_OVER_TOLERANCE', {
+          errorCode: 'RECON_OVER_TOLERANCE',
+          conflictingData: { unexplainedVariance: absUnexplained, tolerance, previousStatus: recon.status },
+          metadata: {
+            tenantId,
+            closeSessionId: periodId,
+            accountCodes: [recon.accountCode],
+          },
+          data: {
+            reconId: recon.reconId,
+            accountCode: recon.accountCode,
+            unexplainedVariance: absUnexplained!,
+            toleranceAmount: tolerance,
+            previousStatus: recon.status,
+            entityId: recon.entityId,
+          },
+        }));
       }
     }
   }
@@ -412,9 +442,22 @@ export async function approveReconciliation(
       tenantId,
       reconId,
       'approved',
-      { reviewedBy: userId, reviewedAt: new Date().toISOString() }
+      { reviewedBy: userId, reviewedAt: new Date().toISOString(), expectedStatus: 'completed' }
     );
-    if (!result) throw new PeriodReconciliationError('Reconciliation not found', 'NOT_FOUND');
+    if (!result) {
+      // Concurrent approval or status change
+      const current = await reconRepo.getPeriodReconciliationById(client as unknown as Pool, tenantId, reconId);
+      if (current?.status === 'approved') {
+        throw new PeriodReconciliationError(
+          `Reconciliation ${reconId} was already approved by ${current.reviewedBy ?? 'unknown'}`,
+          'CONFLICT'
+        );
+      }
+      throw new PeriodReconciliationError(
+        `Reconciliation ${reconId} is in status '${current?.status ?? 'unknown'}', cannot approve`,
+        'VALIDATION'
+      );
+    }
 
     const { executeCascade, CascadeTriggerType } = await import('./cascade_engine.js');
     await executeCascade(client as unknown as Pool, tenantId, {
@@ -578,6 +621,65 @@ export async function carryForwardReconItems(
   }
 
   return created;
+}
+
+/**
+ * Carry forward all unresolved reconciling items from one session to another (GAP I10).
+ * Only items where resolved_at IS NULL are carried forward.
+ * Sets carried_from_period and original_created_at for audit trail.
+ * Recalculates reconciling_items_total on affected target recons.
+ */
+export async function carryForwardItems(
+  pool: Pool,
+  tenantId: string,
+  fromSessionId: string,
+  toSessionId: string
+): Promise<ReconItem[]> {
+  const created = await reconRepo.carryForwardUnresolvedItems(
+    pool,
+    tenantId,
+    fromSessionId,
+    toSessionId
+  );
+
+  // Recalculate reconciling_items_total for each affected target recon
+  const affectedReconIds = new Set(created.map((i) => i.reconId));
+  for (const reconId of affectedReconIds) {
+    const items = await reconRepo.listReconItemsByReconId(pool, reconId);
+    const total = sumRound2(items.map((i) => Number(i.amount)));
+    // Need tenantId for the update call
+    await reconRepo.updateReconReconcilingItemsTotal(pool, tenantId, reconId, total.toFixed(2));
+  }
+
+  return created;
+}
+
+/**
+ * Resolve (clear) a reconciling item (GAP I10).
+ * Sets resolved_at to current timestamp and recalculates the recon total
+ * excluding resolved items.
+ */
+export async function resolveItem(
+  pool: Pool,
+  tenantId: string,
+  itemId: string
+): Promise<ReconItem> {
+  const resolved = await reconRepo.resolveReconItem(pool, tenantId, itemId);
+  if (!resolved) throw new PeriodReconciliationError('Recon item not found', 'NOT_FOUND');
+
+  // Recalculate total excluding resolved items
+  const items = await reconRepo.listReconItemsByReconId(pool, resolved.reconId);
+  const unresolvedTotal = sumRound2(
+    items.filter((i) => i.resolvedAt === null).map((i) => Number(i.amount))
+  );
+  await reconRepo.updateReconReconcilingItemsTotal(
+    pool,
+    tenantId,
+    resolved.reconId,
+    unresolvedTotal.toFixed(2)
+  );
+
+  return resolved;
 }
 
 /** Update notes on a reconciliation. */

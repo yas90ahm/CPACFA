@@ -44,6 +44,13 @@ import closeConsolidationConfigRouter from './close_consolidation_config.js';
 import closeFxTranslationConfigRouter from './close_fx_translation_config.js';
 import closeGlHealthRouter from './close_gl_health.js';
 import closeGlReplaceRouter from './close_gl_replace.js';
+import closeReconSourceRouter from './close_recon_source.js';
+import closeBudgetRouter from './close_budget.js';
+import closeEbitdaBridgeRouter from './close_ebitda_bridge.js';
+import closePeReportingRouter from './close_pe_reporting.js';
+import closeExcelExportRouter from './close_excel_export.js';
+import closeAuditDataRouter from './close_audit_data.js';
+import closeAccountAnalysisRouter from './close_account_analysis.js';
 
 const router = Router();
 router.use(closeJeAccrualsRouter);
@@ -86,5 +93,12 @@ router.use(closeConsolidationConfigRouter);
 router.use(closeFxTranslationConfigRouter);
 router.use(closeGlHealthRouter);
 router.use(closeGlReplaceRouter);
+router.use(closeReconSourceRouter);
+router.use(closeBudgetRouter);
+router.use(closeEbitdaBridgeRouter);
+router.use(closePeReportingRouter);
+router.use(closeExcelExportRouter);
+router.use(closeAuditDataRouter);
+router.use(closeAccountAnalysisRouter);
 
 export default router;

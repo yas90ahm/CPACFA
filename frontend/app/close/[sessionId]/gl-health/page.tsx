@@ -10,88 +10,92 @@ import { RefreshCw, ChevronDown, ChevronRight, AlertTriangle, AlertCircle, Info,
 import { useAuth } from '@/lib/auth';
 import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
-const gradeColors: Record<string, string> = {
-  A: 'bg-status-green-dim text-status-green',
-  B: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-  C: 'bg-status-amber-dim text-status-amber',
-  D: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
-  F: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+const gradeStyles: Record<string, React.CSSProperties> = {
+  A: { background: 'var(--status-success-bg)', color: 'var(--status-success)' },
+  B: { background: 'var(--status-info-bg)', color: 'var(--status-info)' },
+  C: { background: 'var(--status-warning-bg)', color: 'var(--status-warning)' },
+  D: { background: 'var(--status-warning-bg)', color: 'var(--status-warning)' },
+  F: { background: 'var(--status-error-bg)', color: 'var(--status-error)' },
 };
 
-const gradeBarColors: Record<string, string> = {
-  A: 'bg-status-green',
-  B: 'bg-blue-500',
-  C: 'bg-status-amber',
-  D: 'bg-orange-500',
-  F: 'bg-red-500',
+const gradeBarStyles: Record<string, React.CSSProperties> = {
+  A: { background: 'var(--status-success)' },
+  B: { background: 'var(--status-info)' },
+  C: { background: 'var(--status-warning)' },
+  D: { background: 'var(--status-warning)' },
+  F: { background: 'var(--status-error)' },
 };
 
-const statusIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+const statusIcons: Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {
   pass: CheckCircle2,
   warn: AlertTriangle,
   fail: XCircle,
 };
 
-const statusColors: Record<string, string> = {
-  pass: 'text-status-green',
-  warn: 'text-status-amber',
-  fail: 'text-red-500',
+const statusStyles: Record<string, React.CSSProperties> = {
+  pass: { color: 'var(--status-success)' },
+  warn: { color: 'var(--status-warning)' },
+  fail: { color: 'var(--status-error)' },
 };
 
-const severityIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+const severityIcons: Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {
   info: Info,
   warning: AlertCircle,
   critical: AlertTriangle,
 };
 
-const severityColors: Record<string, string> = {
-  info: 'text-blue-500',
-  warning: 'text-status-amber',
-  critical: 'text-red-500',
+const severityStyles: Record<string, React.CSSProperties> = {
+  info: { color: 'var(--status-info)' },
+  warning: { color: 'var(--status-warning)' },
+  critical: { color: 'var(--status-error)' },
 };
 
 function CheckCard({ check }: { check: GLHealthCheck }) {
   const [expanded, setExpanded] = useState(false);
   const StatusIcon = statusIcons[check.status] ?? CheckCircle2;
-  const barColor = check.score >= 90 ? 'bg-status-green' : check.score >= 70 ? 'bg-status-amber' : 'bg-red-500';
+  const barStyle: React.CSSProperties = check.score >= 90
+    ? { background: 'var(--status-success)' }
+    : check.score >= 70
+      ? { background: 'var(--status-warning)' }
+      : { background: 'var(--status-error)' };
 
   return (
-    <div className="bg-surface border border-border rounded-lg overflow-hidden">
+    <div className="rounded-lg overflow-hidden" style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid' }}>
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-hover transition-colors"
       >
-        <StatusIcon className={cn('w-5 h-5 shrink-0', statusColors[check.status])} />
+        <StatusIcon className="w-5 h-5 shrink-0" style={statusStyles[check.status]} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="font-medium text-primary text-sm truncate">{check.name}</span>
+            <span className="font-medium text-sm truncate" style={{ color: 'var(--text-primary)' }}>{check.name}</span>
             {check.findingCount > 0 && (
-              <span className="px-1.5 py-0.5 text-xs rounded bg-surface-raised text-text-secondary">
+              <span className="px-1.5 py-0.5 text-xs rounded" style={{ background: 'var(--bg-surface-raised)', color: 'var(--text-secondary)' }}>
                 {check.findingCount}
               </span>
             )}
           </div>
           <div className="mt-1 flex items-center gap-2">
-            <div className="flex-1 h-1.5 bg-surface-raised rounded-full overflow-hidden">
-              <div className={cn('h-full rounded-full transition-all', barColor)} style={{ width: `${check.score}%` }} />
+            <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-surface-raised)' }}>
+              <div className="h-full rounded-full transition-all" style={{ ...barStyle, width: `${check.score}%` }} />
             </div>
-            <span className="text-xs text-text-secondary w-8 text-right">{check.score}</span>
+            <span className="text-xs w-8 text-right" style={{ color: 'var(--text-secondary)' }}>{check.score}</span>
           </div>
         </div>
         {check.findingCount > 0 ? (
-          expanded ? <ChevronDown className="w-4 h-4 text-text-secondary shrink-0" /> : <ChevronRight className="w-4 h-4 text-text-secondary shrink-0" />
+          expanded ? <ChevronDown className="w-4 h-4 shrink-0" style={{ color: 'var(--text-secondary)' }} /> : <ChevronRight className="w-4 h-4 shrink-0" style={{ color: 'var(--text-secondary)' }} />
         ) : null}
       </button>
 
       {expanded && (check.findings ?? []).length > 0 && (
-        <div className="border-t border-border px-4 py-2 space-y-1 max-h-64 overflow-y-auto">
-          <p className="text-xs text-text-secondary mb-2">{check.description}</p>
+        <div className="px-4 py-2 space-y-1 max-h-64 overflow-y-auto" style={{ borderTopColor: 'var(--border-default)', borderTopWidth: '1px', borderTopStyle: 'solid' }}>
+          <p className="text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>{check.description}</p>
           {(check.findings ?? []).map((f: GLHealthFinding, i: number) => {
             const SevIcon = severityIcons[f.severity] ?? Info;
             return (
               <div key={i} className="flex items-start gap-2 py-1 text-xs">
-                <SevIcon className={cn('w-3.5 h-3.5 mt-0.5 shrink-0', severityColors[f.severity])} />
-                <span className="text-text-secondary">{f.message}</span>
+                <SevIcon className="w-3.5 h-3.5 mt-0.5 shrink-0" style={severityStyles[f.severity]} />
+                <span style={{ color: 'var(--text-secondary)' }}>{f.message}</span>
               </div>
             );
           })}
@@ -113,7 +117,7 @@ export default function GLHealthPage() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <Loader2 className="w-6 h-6 animate-spin text-text-secondary" />
+        <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--text-secondary)' }} />
       </div>
     );
   }
@@ -121,15 +125,16 @@ export default function GLHealthPage() {
   if (!analysis) {
     return (
       <div className="space-y-4">
-        <h1 className="text-2xl font-display text-primary">GL Health Analysis</h1>
-        <div className="bg-surface border border-border rounded-lg p-8 text-center">
-          <p className="text-text-secondary mb-4">
+        <h1 className="text-2xl font-display" style={{ color: 'var(--text-primary)' }}>GL Health Analysis</h1>
+        <div className="rounded-lg p-8 text-center" style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid' }}>
+          <p className="mb-4" style={{ color: 'var(--text-secondary)' }}>
             Upload a General Ledger to see health analysis, or run it manually.
           </p>
           {!readOnly && <button
             onClick={() => runMutation.mutate()}
             disabled={runMutation.isPending}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-accent text-white rounded-input hover:bg-accent/90 transition-colors disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-4 py-2 text-white rounded-input transition-colors disabled:opacity-50"
+            style={{ background: 'var(--interactive-primary)' }}
           >
             {runMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
             Run Analysis
@@ -140,8 +145,8 @@ export default function GLHealthPage() {
   }
 
   const grade = analysis.overallGrade;
-  const gradeColor = gradeColors[grade] ?? gradeColors.F;
-  const barColor = gradeBarColors[grade] ?? gradeBarColors.F;
+  const gradeStyle = gradeStyles[grade] ?? gradeStyles.F;
+  const barStyle = gradeBarStyles[grade] ?? gradeBarStyles.F;
 
   return (
     <div className="space-y-6">
@@ -149,19 +154,20 @@ export default function GLHealthPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-display text-primary">GL Health Analysis</h1>
-            <span className={cn('px-3 py-1 rounded-full text-lg font-bold', gradeColor)}>
+            <h1 className="text-2xl font-display" style={{ color: 'var(--text-primary)' }}>GL Health Analysis</h1>
+            <span className="px-3 py-1 rounded-full text-lg font-bold" style={gradeStyle}>
               {grade}
             </span>
           </div>
-          <p className="text-text-secondary text-sm mt-0.5">
+          <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
             {session?.periodLabel ?? analysis.periodLabel} — {analysis.findingCount} finding{analysis.findingCount !== 1 ? 's' : ''} across {(analysis.checks ?? []).length} checks
           </p>
         </div>
         {!readOnly && <button
           onClick={() => runMutation.mutate()}
           disabled={runMutation.isPending}
-          className="inline-flex items-center gap-2 px-3 py-1.5 text-sm border border-border rounded-input hover:bg-hover transition-colors disabled:opacity-50"
+          className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-input hover:bg-hover transition-colors disabled:opacity-50"
+          style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid' }}
         >
           {runMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
           Re-run Analysis
@@ -169,13 +175,13 @@ export default function GLHealthPage() {
       </div>
 
       {/* Overall Score Bar */}
-      <div className="bg-surface border border-border rounded-lg p-4">
+      <div className="rounded-lg p-4" style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid' }}>
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium text-primary">Overall Score</span>
-          <span className="text-sm text-text-secondary">{analysis.overallScore} / 100</span>
+          <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Overall Score</span>
+          <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{analysis.overallScore} / 100</span>
         </div>
-        <div className="h-3 bg-surface-raised rounded-full overflow-hidden">
-          <div className={cn('h-full rounded-full transition-all', barColor)} style={{ width: `${analysis.overallScore}%` }} />
+        <div className="h-3 rounded-full overflow-hidden" style={{ background: 'var(--bg-surface-raised)' }}>
+          <div className="h-full rounded-full transition-all" style={{ ...barStyle, width: `${analysis.overallScore}%` }} />
         </div>
       </div>
 
@@ -188,7 +194,7 @@ export default function GLHealthPage() {
 
       {/* Timestamp */}
       {analysis.createdAt && (
-        <p className="text-xs text-text-secondary text-right">
+        <p className="text-xs text-right" style={{ color: 'var(--text-secondary)' }}>
           Last run: {new Date(analysis.createdAt).toLocaleString()}
         </p>
       )}

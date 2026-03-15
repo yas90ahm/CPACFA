@@ -1,7 +1,7 @@
 'use client';
 
 import { useParams, useSearchParams } from 'next/navigation';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
@@ -9,14 +9,18 @@ import { useAuth } from '@/lib/auth';
 import { useCloseSession } from '@/lib/queries/close-session';
 import { useStatements, useValidation } from '@/lib/queries/statements';
 import { useCumulativePeriods, useGenerateCumulative } from '@/lib/queries/cumulative';
+import { useBudgetVariance } from '@/lib/queries/budget';
 import { StatementTable } from './StatementTable';
 import { EquityTable } from './EquityTable';
+import { EBITDABridge } from './EBITDABridge';
 import { JournalEntryForm } from '../adjustments/JournalEntryForm';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { SlideOverPanel } from '@/components/shared/SlideOverPanel';
 import { cn } from '@/lib/utils';
 import type { JournalEntry } from '@/lib/types/journal-entry';
-import { Check, X, AlertTriangle, Loader2, FileDown, Calendar } from 'lucide-react';
+import { Check, X, AlertTriangle, Loader2, FileDown, Calendar, FileText } from 'lucide-react';
+import { EmptyState } from '@/components/shared/EmptyState';
+import { ContinueToNextStep } from '@/components/shared/ContinueToNextStep';
 import { canGenerateStatements } from '@/lib/permissions';
 
 type PeriodView = 'current' | 'QTD' | 'YTD';
@@ -26,6 +30,7 @@ const TABS = [
   { id: 'balance-sheet', label: 'Balance Sheet', href: 'balance-sheet' },
   { id: 'cash-flow', label: 'Cash Flow', href: 'cash-flow' },
   { id: 'equity', label: 'Stockholders\' Equity', href: 'equity' },
+  { id: 'ebitda', label: 'EBITDA Bridge', href: 'ebitda' },
   { id: 'validation', label: 'Validation', href: 'validation' },
 ] as const;
 
@@ -40,18 +45,32 @@ function formatGeneratedAt(iso: string | null): string {
 function InlineValidation({ checks }: { checks: { id: string; name: string; passing: boolean; detail: string }[] }) {
   if (checks.length === 0) return null;
   return (
-    <div className="mt-8 pt-6 border-t border-border print:mt-4 print:pt-2">
-      <h3 className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-3">Validation</h3>
+    <div
+      className="mt-8 pt-6 print:mt-4 print:pt-2"
+      style={{ borderTop: '1px solid var(--border-default)' }}
+    >
+      <h3
+        className="text-xs font-medium uppercase tracking-wide mb-3"
+        style={{ color: 'var(--text-secondary)' }}
+      >
+        Validation
+      </h3>
       <div className="space-y-1.5">
         {checks.map((c) => (
           <div key={c.id} className="flex items-center gap-2 text-sm">
             {c.passing ? (
-              <Check className="w-4 h-4 text-status-green shrink-0" />
+              <Check className="w-4 h-4 shrink-0" style={{ color: 'var(--status-success)' }} />
             ) : (
-              <X className="w-4 h-4 text-status-red shrink-0" />
+              <X className="w-4 h-4 shrink-0" style={{ color: 'var(--status-error)' }} />
             )}
-            <span className={c.passing ? 'text-text-secondary' : 'text-status-red'}>{c.name}</span>
-            {c.detail && <span className="text-text-tertiary text-xs ml-1">({c.detail})</span>}
+            <span style={{ color: c.passing ? 'var(--text-secondary)' : 'var(--status-error)' }}>
+              {c.name}
+            </span>
+            {c.detail && (
+              <span className="text-xs ml-1" style={{ color: 'var(--text-tertiary)' }}>
+                ({c.detail})
+              </span>
+            )}
           </div>
         ))}
       </div>
@@ -78,9 +97,30 @@ export default function StatementsPage() {
   const [regenerateConfirm, setRegenerateConfirm] = useState(false);
   const [showPriorPeriod, setShowPriorPeriod] = useState(false);
   const [showChanges, setShowChanges] = useState(false);
+  const [showBudget, setShowBudget] = useState(false);
   const [jePanelOpen, setJePanelOpen] = useState(false);
   const [jePanelEntry, setJePanelEntry] = useState<JournalEntry | null>(null);
   const [toast, setToast] = useState<{ type: 'success' | 'warning'; message: string } | null>(null);
+
+  // Fetch budget variance data only when checkbox is checked
+  const { data: budgetVarianceData } = useBudgetVariance(showBudget ? sessionId : null);
+
+  // Build budget data map from variance response
+  const budgetDataMap = useMemo(() => {
+    if (!budgetVarianceData?.variance) return undefined;
+    const map = new Map<string, { budget: string; variance: string; variancePct: string }>();
+    for (const v of budgetVarianceData.variance) {
+      const key = v.taxonomyLineId ?? v.lineId ?? v.id;
+      if (key) {
+        map.set(key, {
+          budget: v.budget ?? v.budgetAmount ?? '0',
+          variance: v.variance ?? v.varianceAmount ?? '0',
+          variancePct: v.variancePct ?? v.variancePercent ?? '0',
+        });
+      }
+    }
+    return map;
+  }, [budgetVarianceData]);
 
   const hasStatements = !!statements?.incomeStatement;
   const generatedAt = session?.statementsGeneratedAt ?? null;
@@ -231,8 +271,15 @@ export default function StatementsPage() {
     <div className="space-y-4 print:space-y-0">
       {/* Stale banner */}
       {isStale && (
-        <div className="flex items-center justify-between gap-4 p-4 rounded-card border border-status-amber bg-status-amber-dim print:hidden">
-          <div className="flex items-center gap-2 text-status-amber font-medium">
+        <div
+          className="flex items-center justify-between gap-4 p-4 print:hidden"
+          style={{
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--status-warning)',
+            backgroundColor: 'var(--status-warning-bg)',
+          }}
+        >
+          <div className="flex items-center gap-2 font-medium" style={{ color: 'var(--status-warning)' }}>
             <AlertTriangle className="w-5 h-5 shrink-0" />
             Statements are stale — changes were made after last generation. Last generated: {formatGeneratedAt(generatedAt)}.
           </div>
@@ -240,7 +287,12 @@ export default function StatementsPage() {
             type="button"
             onClick={handleRegenerate}
             disabled={generating}
-            className="px-4 py-2 rounded-input bg-status-amber text-white text-sm font-medium hover:opacity-90 disabled:opacity-70 flex items-center gap-2"
+            className="px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-70 flex items-center gap-2"
+            style={{
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'var(--status-warning)',
+              color: '#ffffff',
+            }}
           >
             {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
             Regenerate Now
@@ -251,34 +303,52 @@ export default function StatementsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 print:block">
         <div>
-          <h1 className="text-2xl font-display text-primary">Financial Statements</h1>
-          <p className="text-text-secondary text-sm mt-0.5">
+          <h1 className="text-2xl font-display" style={{ color: 'var(--text-primary)' }}>
+            Financial Statements
+          </h1>
+          <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
             {periodLabel} — {entityName}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3 print:hidden">
           {generatedAt && (
-            <span className="text-sm text-text-muted">{formatGeneratedAt(generatedAt)}</span>
+            <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
+              {formatGeneratedAt(generatedAt)}
+            </span>
           )}
           {isStale && (
-            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-status-amber-dim text-status-amber text-xs font-medium">
+            <span
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium"
+              style={{
+                backgroundColor: 'var(--status-warning-bg)',
+                color: 'var(--status-warning)',
+              }}
+            >
               <AlertTriangle className="w-3.5 h-3.5" />
               Stale
             </span>
           )}
-          <label className="flex items-center gap-2 text-sm text-text-secondary">
+          <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
             <input type="checkbox" checked={showPriorPeriod} onChange={(e) => setShowPriorPeriod(e.target.checked)} />
             Show prior period
           </label>
-          <label className="flex items-center gap-2 text-sm text-text-secondary">
+          <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
             <input type="checkbox" checked={showChanges} onChange={(e) => setShowChanges(e.target.checked)} />
             Show changes
+          </label>
+          <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+            <input type="checkbox" checked={showBudget} onChange={(e) => setShowBudget(e.target.checked)} />
+            Show budget
           </label>
           <button
             type="button"
             onClick={handleExportCsv}
             disabled={!hasStatements}
-            className="px-3 py-1.5 rounded-full border border-border text-sm text-text-secondary hover:bg-hover print:hidden disabled:opacity-50 transition-colors"
+            className="px-3 py-1.5 rounded-full text-sm print:hidden disabled:opacity-50 transition-colors"
+            style={{
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-secondary)',
+            }}
             aria-label="Export CSV"
           >
             <FileDown className="w-4 h-4 inline mr-1.5" />
@@ -286,13 +356,47 @@ export default function StatementsPage() {
           </button>
           <button
             type="button"
+            disabled={!hasStatements}
+            onClick={async () => {
+              const token = getAuthToken();
+              const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+              const res = await fetch(`${API_URL}/api/close/sessions/${sessionId}/export/statements.xlsx`, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+              });
+              if (!res.ok) return;
+              const blob = await res.blob();
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `Financial_Statements_${session?.periodLabel ?? sessionId}.xlsx`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            }}
+            className="px-3 py-1.5 rounded-full text-sm print:hidden disabled:opacity-50 transition-colors"
+            style={{
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-secondary)',
+            }}
+            aria-label="Export Excel"
+          >
+            <FileDown className="w-4 h-4 inline mr-1.5" />
+            Export Excel
+          </button>
+          <button
+            type="button"
             onClick={handleExportPdf}
             disabled={exporting}
-            className="px-3 py-1.5 rounded-full border border-border text-sm text-text-secondary hover:bg-hover print:hidden disabled:opacity-50 transition-colors"
+            className="px-3 py-1.5 rounded-full text-sm print:hidden disabled:opacity-50 transition-colors"
+            style={{
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-secondary)',
+            }}
             aria-label="Export PDF"
           >
             {exporting ? <Loader2 className="w-4 h-4 inline mr-1.5 animate-spin" /> : <FileDown className="w-4 h-4 inline mr-1.5" />}
-            {exporting ? 'Exporting…' : 'Export PDF'}
+            {exporting ? 'Exporting\u2026' : 'Export PDF'}
           </button>
           {canGenerate && (
             <button
@@ -301,11 +405,20 @@ export default function StatementsPage() {
               disabled={generating}
               className={cn(
                 'px-5 py-2 rounded-full text-sm font-medium flex items-center gap-2 transition-all',
-                !hasStatements || isStale
-                  ? 'bg-accent text-white hover:bg-accent-hover shadow-glow-accent'
-                  : 'border border-border text-primary hover:bg-hover',
                 generating && 'opacity-70'
               )}
+              style={
+                !hasStatements || isStale
+                  ? {
+                      backgroundColor: 'var(--interactive-primary)',
+                      color: '#ffffff',
+                      boxShadow: 'var(--shadow-md)',
+                    }
+                  : {
+                      border: '1px solid var(--border-default)',
+                      color: 'var(--text-primary)',
+                    }
+              }
             >
               {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
               {!hasStatements ? 'Prepare Statements' : isStale ? 'Update Statements' : 'Reprepare'}
@@ -316,8 +429,8 @@ export default function StatementsPage() {
 
       {/* Period View Toggle */}
       <div className="flex items-center gap-2 print:hidden">
-        <Calendar className="w-4 h-4 text-text-secondary" />
-        <span className="text-sm text-text-secondary">Period:</span>
+        <Calendar className="w-4 h-4" style={{ color: 'var(--text-secondary)' }} />
+        <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Period:</span>
         {(['current', 'QTD', 'YTD'] as const).map((pv) => (
           <button
             key={pv}
@@ -334,10 +447,18 @@ export default function StatementsPage() {
                 );
               }
             }}
-            className={cn(
-              'px-3 py-1 text-sm rounded-full transition-colors',
-              periodView === pv ? 'bg-accent text-white' : 'border border-border text-text-secondary hover:bg-hover'
-            )}
+            className="px-3 py-1 text-sm rounded-full transition-colors"
+            style={
+              periodView === pv
+                ? {
+                    backgroundColor: 'var(--interactive-primary)',
+                    color: '#ffffff',
+                  }
+                : {
+                    border: '1px solid var(--border-default)',
+                    color: 'var(--text-secondary)',
+                  }
+            }
           >
             {pv === 'current' ? 'Current Period' : pv === 'QTD' ? 'Quarter-to-Date' : 'Year-to-Date'}
           </button>
@@ -346,8 +467,16 @@ export default function StatementsPage() {
 
       {/* Cumulative Banner */}
       {periodView !== 'current' && !cumulativeError && (
-        <div className="p-3 rounded-card border border-accent/30 bg-accent/5 text-sm text-text-secondary print:hidden">
-          <span className="font-medium text-accent">
+        <div
+          className="p-3 text-sm print:hidden"
+          style={{
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--interactive-primary)',
+            backgroundColor: 'var(--interactive-primary-bg, rgba(26,95,180,0.05))',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          <span className="font-medium" style={{ color: 'var(--interactive-primary)' }}>
             Cumulative {periodView === 'QTD' ? `Q${cumulativePeriods?.qtd?.quarter ?? ''}` : 'YTD'}{' '}
             {periodView === 'QTD' ? cumulativePeriods?.qtd?.fiscalYear : cumulativePeriods?.ytd?.fiscalYear}
           </span>
@@ -358,7 +487,15 @@ export default function StatementsPage() {
 
       {/* Cumulative Error */}
       {cumulativeError && periodView !== 'current' && (
-        <div className="p-3 rounded-card border border-status-red bg-status-red-dim text-sm text-status-red print:hidden">
+        <div
+          className="p-3 text-sm print:hidden"
+          style={{
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--status-error)',
+            backgroundColor: 'var(--status-error-bg)',
+            color: 'var(--status-error)',
+          }}
+        >
           {cumulativeError}
           {/* Show missing periods */}
           {(periodView === 'QTD' ? cumulativePeriods?.qtd?.periods : cumulativePeriods?.ytd?.periods)
@@ -372,17 +509,22 @@ export default function StatementsPage() {
       )}
 
       {/* Tabs */}
-      <div className="border-b border-border print:border-0 print:hidden">
+      <div className="print:border-0 print:hidden" style={{ borderBottom: '1px solid var(--border-default)' }}>
         <nav className="flex gap-6" aria-label="Statement tabs">
           {TABS.map((t) => (
             <button
               key={t.id}
               type="button"
               onClick={() => setTab(t.id)}
-              className={cn(
-                'pb-3 text-sm font-medium border-b-2 -mb-px transition-colors',
-                tab === t.id ? 'border-accent text-accent' : 'border-transparent text-text-secondary hover:text-primary'
-              )}
+              className="pb-3 text-sm font-medium -mb-px transition-colors"
+              style={{
+                borderBottom: tab === t.id
+                  ? '2px solid var(--interactive-primary)'
+                  : '2px solid transparent',
+                color: tab === t.id
+                  ? 'var(--interactive-primary)'
+                  : 'var(--text-secondary)',
+              }}
             >
               {t.label}
             </button>
@@ -391,30 +533,36 @@ export default function StatementsPage() {
       </div>
 
       {/* Content */}
-      <div className="bg-surface border border-border rounded-card p-6 print:border-0 print:shadow-none print:p-0">
-        {!hasStatements && tab !== 'validation' && (
-          <div className="text-center py-12">
-            <p className="text-lg font-medium text-primary mb-2">No statements generated yet</p>
-            <p className="text-text-secondary text-sm mb-6 max-w-md mx-auto">
-              Prepare financial statements from your adjusted trial balance. All four statements (Income Statement, Balance Sheet, Cash Flow, Equity) will be produced.
-            </p>
-            <button
-              type="button"
-              onClick={handleRegenerate}
-              disabled={generating}
-              className="px-6 py-2.5 rounded-full bg-accent text-white text-sm font-medium hover:bg-accent-hover shadow-glow-accent disabled:opacity-70 inline-flex items-center gap-2 transition-all"
-            >
-              {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-              Prepare Statements
-            </button>
-          </div>
+      <div
+        className="p-6 print:border-0 print:shadow-none print:p-0"
+        style={{
+          backgroundColor: 'var(--bg-surface)',
+          border: '1px solid var(--border-default)',
+          borderRadius: 'var(--radius-lg)',
+        }}
+      >
+        {!hasStatements && tab !== 'validation' && tab !== 'ebitda' && (
+          <EmptyState
+            icon={FileText}
+            title="Complete reconciliation and adjustments, then generate financial statements"
+            description="All four statements (Income Statement, Balance Sheet, Cash Flow, Equity) will be produced from your adjusted trial balance."
+            ctaLabel={generating ? 'Preparing\u2026' : 'Prepare Statements'}
+            onCtaClick={handleRegenerate}
+          />
         )}
         {tab === 'income-statement' && statements?.incomeStatement && (
           <>
             <div className="text-center mb-6 print:mb-4">
-              <h2 className="text-lg font-display text-primary mb-1 print:mb-2">{entityName}</h2>
-              <p className="text-sm font-medium text-primary">INCOME STATEMENT</p>
-              <p className="text-sm text-text-secondary">
+              <h2
+                className="text-lg font-display mb-1 print:mb-2"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                {entityName}
+              </h2>
+              <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                INCOME STATEMENT
+              </p>
+              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
                 {periodView === 'QTD' ? `For the Quarter Ended ${periodEndDisplay}` : periodView === 'YTD' ? `For the Year Ended ${periodEndDisplay}` : `For the Period Ended ${periodEndDisplay}`}
               </p>
             </div>
@@ -422,6 +570,8 @@ export default function StatementsPage() {
               lines={statements.incomeStatement.lines}
               showPriorPeriod={showPriorPeriod}
               showChanges={showChanges}
+              showBudget={showBudget}
+              budgetData={budgetDataMap}
               onOpenJeById={openJeById}
             />
             {validation && <InlineValidation checks={validation.checks} />}
@@ -430,14 +580,25 @@ export default function StatementsPage() {
         {tab === 'balance-sheet' && statements?.balanceSheet && (
           <>
             <div className="text-center mb-6 print:mb-4">
-              <h2 className="text-lg font-display text-primary mb-1 print:mb-2">{entityName}</h2>
-              <p className="text-sm font-medium text-primary">BALANCE SHEET</p>
-              <p className="text-sm text-text-secondary">As of {periodEndDisplay}</p>
+              <h2
+                className="text-lg font-display mb-1 print:mb-2"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                {entityName}
+              </h2>
+              <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                BALANCE SHEET
+              </p>
+              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                As of {periodEndDisplay}
+              </p>
             </div>
             <StatementTable
               lines={statements.balanceSheet.lines}
               showPriorPeriod={showPriorPeriod}
               showChanges={showChanges}
+              showBudget={showBudget}
+              budgetData={budgetDataMap}
               onOpenJeById={openJeById}
             />
             {validation && <InlineValidation checks={validation.checks} />}
@@ -446,9 +607,16 @@ export default function StatementsPage() {
         {tab === 'cash-flow' && statements?.cashFlow && (
           <>
             <div className="text-center mb-6 print:mb-4">
-              <h2 className="text-lg font-display text-primary mb-1 print:mb-2">{entityName}</h2>
-              <p className="text-sm font-medium text-primary">STATEMENT OF CASH FLOWS</p>
-              <p className="text-sm text-text-secondary">
+              <h2
+                className="text-lg font-display mb-1 print:mb-2"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                {entityName}
+              </h2>
+              <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                STATEMENT OF CASH FLOWS
+              </p>
+              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
                 {periodView === 'QTD' ? `For the Quarter Ended ${periodEndDisplay}` : periodView === 'YTD' ? `For the Year Ended ${periodEndDisplay}` : `For the Period Ended ${periodEndDisplay}`}
               </p>
             </div>
@@ -456,6 +624,8 @@ export default function StatementsPage() {
               lines={statements.cashFlow.lines}
               showPriorPeriod={showPriorPeriod}
               showChanges={showChanges}
+              showBudget={showBudget}
+              budgetData={budgetDataMap}
               onOpenJeById={openJeById}
             />
             {validation && <InlineValidation checks={validation.checks} />}
@@ -464,9 +634,16 @@ export default function StatementsPage() {
         {tab === 'equity' && statements?.equityColumnar && (
           <>
             <div className="text-center mb-6 print:mb-4">
-              <h2 className="text-lg font-display text-primary mb-1 print:mb-2">{entityName}</h2>
-              <p className="text-sm font-medium text-primary">STATEMENT OF STOCKHOLDERS&apos; EQUITY</p>
-              <p className="text-sm text-text-secondary">
+              <h2
+                className="text-lg font-display mb-1 print:mb-2"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                {entityName}
+              </h2>
+              <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                STATEMENT OF STOCKHOLDERS&apos; EQUITY
+              </p>
+              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
                 {periodView === 'QTD' ? `For the Quarter Ended ${periodEndDisplay}` : periodView === 'YTD' ? `For the Year Ended ${periodEndDisplay}` : `For the Period Ended ${periodEndDisplay}`}
               </p>
             </div>
@@ -474,38 +651,74 @@ export default function StatementsPage() {
             {validation && <InlineValidation checks={validation.checks} />}
           </>
         )}
+        {tab === 'ebitda' && (
+          <EBITDABridge sessionId={sessionId} />
+        )}
         {tab === 'validation' && validation && (
           <>
-            <h2 className="text-lg font-display text-primary mb-4">Cross-Statement Validation</h2>
+            <h2 className="text-lg font-display mb-4" style={{ color: 'var(--text-primary)' }}>
+              Cross-Statement Validation
+            </h2>
             {!validation.allPassing && (
-              <div className="mb-4 p-4 rounded-card border border-status-red bg-status-red-dim text-status-red font-medium">
+              <div
+                className="mb-4 p-4 font-medium"
+                style={{
+                  borderRadius: 'var(--radius-lg)',
+                  border: '1px solid var(--status-error)',
+                  backgroundColor: 'var(--status-error-bg)',
+                  color: 'var(--status-error)',
+                }}
+              >
                 2 validation checks failing — statements cannot be certified
               </div>
             )}
             <table className="w-full text-sm border-collapse">
               <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left py-2 font-medium text-text-secondary">Check</th>
-                  <th className="text-left py-2 font-medium text-text-secondary w-24">Status</th>
-                  <th className="text-left py-2 font-medium text-text-secondary">Detail</th>
+                <tr style={{ borderBottom: '1px solid var(--border-default)' }}>
+                  <th
+                    className="text-left py-2 font-medium"
+                    style={{ color: 'var(--text-secondary)' }}
+                  >
+                    Check
+                  </th>
+                  <th
+                    className="text-left py-2 font-medium w-24"
+                    style={{ color: 'var(--text-secondary)' }}
+                  >
+                    Status
+                  </th>
+                  <th
+                    className="text-left py-2 font-medium"
+                    style={{ color: 'var(--text-secondary)' }}
+                  >
+                    Detail
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {validation.checks.map((c) => (
-                  <tr key={c.id} className="border-b border-border-light">
+                  <tr key={c.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                     <td className="py-2">{c.name}</td>
                     <td className="py-2">
                       {c.passing ? (
-                        <span className="inline-flex items-center gap-1 text-status-green">
+                        <span
+                          className="inline-flex items-center gap-1"
+                          style={{ color: 'var(--status-success)' }}
+                        >
                           <Check className="w-4 h-4" /> Pass
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-status-red">
+                        <span
+                          className="inline-flex items-center gap-1"
+                          style={{ color: 'var(--status-error)' }}
+                        >
                           <X className="w-4 h-4" /> Fail
                         </span>
                       )}
                     </td>
-                    <td className="py-2 text-text-secondary">{c.detail}</td>
+                    <td className="py-2" style={{ color: 'var(--text-secondary)' }}>
+                      {c.detail}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -514,13 +727,31 @@ export default function StatementsPage() {
         )}
       </div>
 
+      <ContinueToNextStep
+        currentStep="Statements"
+        nextStep={{ label: 'Variance Analysis', href: `/close/${sessionId}/variance` }}
+        gatesPassed={hasStatements && !isStale}
+        gateSummary="Statements generated and current"
+      />
+
       {/* Toast */}
       {toast && (
         <div
-          className={cn(
-            'fixed bottom-4 right-4 px-4 py-3 rounded-card border text-sm font-medium z-50 print:hidden',
-            toast.type === 'success' ? 'border-status-green bg-status-green-dim text-status-green' : 'border-status-amber bg-status-amber-dim text-status-amber'
-          )}
+          className="fixed bottom-4 right-4 px-4 py-3 text-sm font-medium z-50 print:hidden"
+          style={{
+            borderRadius: 'var(--radius-lg)',
+            ...(toast.type === 'success'
+              ? {
+                  border: '1px solid var(--status-success)',
+                  backgroundColor: 'var(--status-success-bg)',
+                  color: 'var(--status-success)',
+                }
+              : {
+                  border: '1px solid var(--status-warning)',
+                  backgroundColor: 'var(--status-warning-bg)',
+                  color: 'var(--status-warning)',
+                }),
+          }}
         >
           {toast.message}
         </div>

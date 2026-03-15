@@ -133,10 +133,10 @@ export async function getIntercompanyReconciliation(
     tenant_id: string;
     pair_id: string;
     period_label: string;
-    matched_amount: number;
-    balance_a: number;
-    balance_b: number;
-    variance: number;
+    matched_amount: string;
+    balance_a: string;
+    balance_b: string;
+    variance: string;
     status: string;
     variance_detail: string | null;
     resolution: string | null;
@@ -155,10 +155,10 @@ export async function getIntercompanyReconciliation(
     tenantId: row.tenant_id,
     pairId: row.pair_id,
     periodLabel: row.period_label,
-    matchedAmount: Number(row.matched_amount),
-    balanceA: Number(row.balance_a),
-    balanceB: Number(row.balance_b),
-    variance: Number(row.variance),
+    matchedAmount: row.matched_amount,
+    balanceA: row.balance_a,
+    balanceB: row.balance_b,
+    variance: row.variance,
     status: row.status as IntercompanyReconciliationResult['status'],
     varianceDetail: row.variance_detail ?? undefined,
     resolution: row.resolution ?? undefined,
@@ -198,10 +198,10 @@ export async function listIntercompanyReconciliations(
     tenant_id: string;
     pair_id: string;
     period_label: string;
-    matched_amount: number;
-    balance_a: number;
-    balance_b: number;
-    variance: number;
+    matched_amount: string;
+    balance_a: string;
+    balance_b: string;
+    variance: string;
     status: string;
     variance_detail: string | null;
     resolution: string | null;
@@ -215,10 +215,10 @@ export async function listIntercompanyReconciliations(
     tenantId: row.tenant_id,
     pairId: row.pair_id,
     periodLabel: row.period_label,
-    matchedAmount: Number(row.matched_amount),
-    balanceA: Number(row.balance_a),
-    balanceB: Number(row.balance_b),
-    variance: Number(row.variance),
+    matchedAmount: row.matched_amount,
+    balanceA: row.balance_a,
+    balanceB: row.balance_b,
+    variance: row.variance,
     status: row.status as IntercompanyReconciliationResult['status'],
     varianceDetail: row.variance_detail ?? undefined,
     resolution: row.resolution ?? undefined,

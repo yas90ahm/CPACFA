@@ -28,6 +28,7 @@ import {
   type SlmError,
 } from './slm_client_service.js';
 import { checkMappingCompleteness } from './mapping_completeness_gate.js';
+import { runClassifier, type RunClassifierResult } from '../ai/ai_orchestrator.js';
 
 // ---------- Types ----------
 
@@ -650,4 +651,38 @@ export async function listCfSuggestions(
     modelVersion: r.model_version as string,
     status: r.status as string,
   }));
+}
+
+// ---------- Orchestrator-based classification (Classifier pillar) ----------
+
+export interface OrchestratorClassifyInput {
+  tenantId: string;
+  periodLabel: string;
+  sourceLines: Array<{
+    source_id: string;
+    accountName?: string;
+    debit?: number;
+    credit?: number;
+    description?: string;
+    [key: string]: unknown;
+  }>;
+  coaTaxonomy?: Array<{ key: string; label: string }>;
+}
+
+/**
+ * Classify accounts using the AI orchestrator's Classifier pillar (Claude-based).
+ * Complementary to the SLM microservice path (generateClassificationSuggestions).
+ * Fail-open: returns empty results on AI failure; does not block ingestion.
+ */
+export async function classifyWithOrchestrator(
+  pool: Pool,
+  input: OrchestratorClassifyInput
+): Promise<RunClassifierResult> {
+  return runClassifier({
+    pool,
+    tenantId: input.tenantId,
+    periodLabel: input.periodLabel,
+    sourceLines: input.sourceLines,
+    coaTaxonomy: input.coaTaxonomy,
+  });
 }

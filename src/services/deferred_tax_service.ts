@@ -162,8 +162,8 @@ export async function calculateDeferredTax(
   
   for (const item of items) {
     if (item.itemType === 'temporary_difference') {
-      const bookBasis = item.bookBasis ?? 0;
-      const taxBasis = item.taxBasis ?? 0;
+      const bookBasis = Number(item.bookBasis ?? 0);
+      const taxBasis = Number(item.taxBasis ?? 0);
       const tempDiff = bookBasis - taxBasis;
       const deferredTax = Math.abs(tempDiff) * taxRate;
       
@@ -185,14 +185,14 @@ export async function calculateDeferredTax(
       }
     } else if (item.itemType === 'nol_carryforward' || item.itemType === 'tax_credit') {
       // NOL and tax credits are assets
-      deferredTaxAssetGross += item.deferredTaxAsset ?? 0;
+      deferredTaxAssetGross += Number(item.deferredTaxAsset ?? 0);
     }
   }
   
   // Get valuation allowance if exists
   const allowances = await repo.listValuationAllowances(pool, tenantId, periodLabel);
   const latestAllowance = allowances[0];
-  const valuationAllowance = latestAllowance?.valuationAllowance ?? 0;
+  const valuationAllowance = Number(latestAllowance?.valuationAllowance ?? 0);
   
   const deferredTaxAssetNet = deferredTaxAssetGross - valuationAllowance;
   const deferredTaxLiabilityNet = deferredTaxLiabilityGross;
@@ -325,9 +325,9 @@ export async function assessValuationAllowance(
 
   await repo.createValuationAllowance(pool, tenantId, {
     periodLabel,
-    deferredTaxAssetGross,
-    valuationAllowance: result.valuationAllowance,
-    deferredTaxAssetNet: round2(deferredTaxAssetNet),
+    deferredTaxAssetGross: String(deferredTaxAssetGross),
+    valuationAllowance: String(result.valuationAllowance),
+    deferredTaxAssetNet: String(round2(deferredTaxAssetNet)),
     assessment: result.assessment,
     factors: {
       positiveSources: result.factors.positive,

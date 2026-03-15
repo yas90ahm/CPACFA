@@ -12,7 +12,7 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { setAuthTokenGetter, setAuthExpiredHandler } from '@/lib/api';
-import { normalizeRole } from '@/lib/permissions';
+import { normalizeRole, getDefaultLandingPage } from '@/lib/permissions';
 
 export interface AuthUser {
   userId: string;
@@ -144,13 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setToken(t);
         setUser(authUser);
         saveToStorage(t, authUser);
-        if (role === 'operating_partner') {
-          router.push('/portfolio');
-        } else if (role === 'admin') {
-          router.push('/portfolio');
-        } else {
-          router.push('/close');
-        }
+        router.push(getDefaultLandingPage(role));
       } catch (err) {
         throw err;
       } finally {

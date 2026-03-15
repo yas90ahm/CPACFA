@@ -38,16 +38,16 @@ export async function computeExpenseForPeriod(
   const results: StockExpenseRow[] = [];
 
   for (const grant of grants) {
-    const fairValue = grant.fairValuePerShare ?? 0;
+    const fairValue = Number(grant.fairValuePerShare ?? 0);
     const schedule = grant.vestingSchedule ?? [];
-    const totalShares = grant.sharesGranted;
+    const totalShares = Number(grant.sharesGranted);
 
     if (totalShares <= 0 || fairValue <= 0) continue;
 
     // Determine vesting fraction for this period
     const vestedEntries = schedule.filter((e) => e.vested);
     const sharesVestedSoFar = vestedEntries.reduce((sum, e) => sum + e.shares, 0);
-    const vestingFraction = totalShares > 0 ? sharesVestedSoFar / totalShares : 0;
+    const vestingFraction = Number(totalShares) > 0 ? sharesVestedSoFar / Number(totalShares) : 0;
 
     // Total expense = fairValue * sharesGranted; period expense = total * vestingFraction / periods
     const totalGrantExpense = fairValue * totalShares;
@@ -57,7 +57,7 @@ export async function computeExpenseForPeriod(
     // Cumulative = all expense recorded + this period
     const priorExpenses = await repo.listExpenses(pool, tenantId, periodLabel);
     const priorForGrant = priorExpenses.filter((e) => e.grantId === grant.id);
-    const priorCumulative = priorForGrant.reduce((sum, e) => sum + e.cumulativeExpense, 0);
+    const priorCumulative = priorForGrant.reduce((sum, e) => sum + Number(e.cumulativeExpense), 0);
     const cumulativeExpense = round2(priorCumulative + periodExpense);
 
     const expense = await repo.recordExpense(pool, tenantId, {
@@ -89,10 +89,10 @@ export async function getCompensationSummary(
   const byGrantType: Record<string, number> = {};
 
   for (const expense of expenses) {
-    totalExpense += expense.expenseAmount;
+    totalExpense += Number(expense.expenseAmount);
     const grant = grantMap.get(expense.grantId);
     const grantType = grant?.grantType ?? 'unknown';
-    byGrantType[grantType] = (byGrantType[grantType] ?? 0) + expense.expenseAmount;
+    byGrantType[grantType] = (byGrantType[grantType] ?? 0) + Number(expense.expenseAmount);
   }
 
   return {

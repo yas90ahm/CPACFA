@@ -8,7 +8,7 @@ import { buildJournalEntrySuggestions } from '../../services/month_end_close_ser
 // import { buildAccrualSuggestions, suggestAccrualsAgentic } from '../../services/accrual_deferral_service.js';
 // import { computeInventoryValuation } from '../../services/inventory_valuation_service.js';
 import { accrualSuggestionsSchema, inventoryValuationSchema, jeSuggestionsSchema } from '../../schemas/closeSchemas.js';
-import { validateBody } from '../../middleware/validateRequest.js';
+import { validateBody } from '../../middleware/validationMiddleware.js';
 import { send500 } from '../../lib/errorHandler.js';
 
 const router = Router();

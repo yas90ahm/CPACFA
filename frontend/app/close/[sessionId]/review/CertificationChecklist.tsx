@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { Check, X, Circle, ChevronRight } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { GateIndicator } from '@/components/shared/GateIndicator';
 import type { ReadinessGate } from '@/lib/types/readiness';
 
 export interface CertificationChecklistProps {
@@ -13,8 +14,16 @@ export interface CertificationChecklistProps {
 export function CertificationChecklist({ gates, sessionId }: CertificationChecklistProps) {
   const passingCount = gates.filter((g) => g.passing).length;
   const totalCount = gates.length;
+  const failingCount = totalCount - passingCount;
   const allPassing = passingCount === totalCount;
   const progressPct = totalCount > 0 ? (passingCount / totalCount) * 100 : 0;
+
+  // FIX 3C: Sort gates so blocking (failing) gates appear first
+  const sortedGates = [...gates].sort((a, b) => {
+    if (!a.passing && b.passing) return -1;
+    if (a.passing && !b.passing) return 1;
+    return 0;
+  });
 
   return (
     <div className="bg-surface border border-border rounded-card p-6 space-y-5">
@@ -29,6 +38,13 @@ export function CertificationChecklist({ gates, sessionId }: CertificationCheckl
         </span>
       </div>
 
+      {/* FIX 3C: Show blocking count */}
+      {failingCount > 0 && (
+        <div className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
+          {failingCount} of {totalCount} gate{failingCount !== 1 ? 's' : ''} blocking certification
+        </div>
+      )}
+
       <div className="w-full bg-elevated rounded-full h-2 overflow-hidden">
         <div
           className={cn('h-full rounded-full transition-all', allPassing ? 'bg-status-green' : 'bg-accent')}
@@ -37,44 +53,39 @@ export function CertificationChecklist({ gates, sessionId }: CertificationCheckl
       </div>
 
       <div className="space-y-2">
-        {gates.map((gate) => {
+        {sortedGates.map((gate, idx) => {
           const href = (gate.navigateTo ?? '').replace('[sessionId]', sessionId);
           const isPending = gate.id === 'ties' && !gate.passing;
+          const gateStatus = gate.passing
+            ? 'passed' as const
+            : isPending
+              ? 'not-evaluated' as const
+              : 'failed' as const;
+
+          // Find original index for gate numbering
+          const originalIdx = gates.findIndex((g) => g.id === gate.id);
 
           return (
             <Link
               key={gate.id}
               href={href}
-              className={cn(
-                'flex items-center gap-4 px-5 py-4 rounded-card border transition-colors group',
-                gate.passing
-                  ? 'border-border-light bg-surface hover:bg-hover'
-                  : isPending
-                    ? 'border-border-light bg-surface hover:bg-hover'
-                    : 'border-status-red/20 bg-status-red-dim/30 hover:bg-status-red-dim/50'
-              )}
+              className="flex items-center gap-4 p-3 rounded-r-lg transition-colors group"
+              style={{
+                borderLeft: `3px solid ${gate.passing ? 'var(--status-success)' : 'var(--status-error)'}`,
+                background: gate.passing ? 'transparent' : 'var(--status-error-bg)',
+              }}
             >
-              <div className={cn(
-                'w-7 h-7 rounded-full flex items-center justify-center shrink-0',
-                gate.passing
-                  ? 'bg-status-green-dim'
-                  : isPending
-                    ? 'bg-elevated'
-                    : 'bg-status-red-dim'
-              )}>
-                {gate.passing ? (
-                  <Check className="w-4 h-4 text-status-green" />
-                ) : isPending ? (
-                  <Circle className="w-4 h-4 text-text-muted" />
-                ) : (
-                  <X className="w-4 h-4 text-status-red" />
-                )}
-              </div>
               <div className="flex-1 min-w-0">
-                <div className="font-medium text-primary text-sm">{gate.name}</div>
-                <div className="text-xs text-text-secondary mt-0.5">
-                  {gate.passing ? gate.detail : isPending ? 'Will be validated when certifying' : gate.detail}
-                </div>
+                <GateIndicator
+                  gateNumber={originalIdx + 1}
+                  gateName={gate.name}
+                  status={gateStatus}
+                  detail={gate.passing ? gate.detail : isPending ? 'Will be validated when certifying' : undefined}
+                  failureReason={!gate.passing && !isPending ? gate.detail : undefined}
+                />
+                {!gate.passing && !isPending && (
+                  <span className="text-xs font-medium" style={{ color: 'var(--status-error)' }}>Blocks certification</span>
+                )}
               </div>
               <ChevronRight className="w-4 h-4 text-text-tertiary group-hover:text-primary shrink-0 transition-colors" />
             </Link>

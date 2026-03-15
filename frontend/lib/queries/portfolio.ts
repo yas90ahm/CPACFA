@@ -91,3 +91,57 @@ export function useEntityHistory(entityId: string | null, periods?: number) {
     staleTime: STALE_TIME,
   });
 }
+
+// --- Portfolio Integrity ---
+
+export interface IntegrityComponent {
+  name: string;
+  label?: string;
+  status: 'pass' | 'warn' | 'fail';
+  score: number;
+  weight: number;
+  detail?: string;
+}
+
+export interface EntityIntegrityReport {
+  entityId: string;
+  entityName: string;
+  overallScore: number;
+  overallStatus: 'pass' | 'warn' | 'fail';
+  components: IntegrityComponent[];
+  issues?: string[];
+  trend?: number[];
+  lastChecked: string;
+}
+
+export interface PortfolioIntegrityReport {
+  entities: EntityIntegrityReport[];
+  aggregateScore: number;
+  overallScore: number;
+  aggregateStatus: 'pass' | 'warn' | 'fail';
+  aggregateComponents: IntegrityComponent[];
+  trend?: number[];
+  checkedAt: string;
+}
+
+export function usePortfolioIntegrityReport() {
+  return useQuery({
+    queryKey: ['portfolio-integrity'],
+    queryFn: async (): Promise<PortfolioIntegrityReport> => {
+      try {
+        return await apiFetch<PortfolioIntegrityReport>('/api/portfolio/integrity');
+      } catch {
+        // Graceful degradation: return empty report if endpoint not yet implemented
+        return {
+          entities: [],
+          aggregateScore: 0,
+          overallScore: 0,
+          aggregateStatus: 'warn',
+          aggregateComponents: [],
+          checkedAt: new Date().toISOString(),
+        };
+      }
+    },
+    staleTime: STALE_TIME,
+  });
+}

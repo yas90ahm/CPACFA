@@ -10,6 +10,7 @@ import { send500 } from '../lib/errorHandler.js';
 import * as portfolioService from '../services/portfolio_service.js';
 import { checkOverdueAndNotify } from '../services/notification_service.js';
 import { buildEntityIntegrityReport, buildPortfolioIntegrityReport } from '../services/integrity_report_service.js';
+import { getPortfolioAlerts, getPortfolioMetrics } from '../services/portfolio_alerts_service.js';
 import type { AuthRequest } from '../auth/middleware.js';
 
 const router = Router();
@@ -165,6 +166,22 @@ router.get('/entities/:id/integrity-report', async (req: Request, res: Response)
   }
 });
 
+/** GET /api/portfolio/integrity — alias for /integrity-report */
+router.get('/integrity', async (req: Request, res: Response) => {
+  try {
+    const userId = (req as AuthRequest).userId;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    const controlPool = getControlPool();
+    const report = await buildPortfolioIntegrityReport(controlPool, userId);
+    res.json(report);
+  } catch (e) {
+    send500(res, e, 'Portfolio integrity report failed');
+  }
+});
+
 /** GET /api/portfolio/integrity-report — portfolio-level integrity scorecard */
 router.get('/integrity-report', async (req: Request, res: Response) => {
   try {
@@ -228,6 +245,38 @@ router.delete('/access/revoke', async (req: Request, res: Response) => {
     res.json({ revoked: true });
   } catch (e) {
     send500(res, e, 'Revoke portfolio access failed');
+  }
+});
+
+/** GET /api/portfolio/alerts -- portfolio-level alerts across entities */
+router.get('/alerts', async (req: Request, res: Response) => {
+  try {
+    const userId = (req as AuthRequest).userId;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    const controlPool = getControlPool();
+    const alerts = await getPortfolioAlerts(controlPool, userId);
+    res.json({ alerts });
+  } catch (e) {
+    send500(res, e, 'Portfolio alerts failed');
+  }
+});
+
+/** GET /api/portfolio/metrics -- aggregate financial and operational metrics */
+router.get('/metrics', async (req: Request, res: Response) => {
+  try {
+    const userId = (req as AuthRequest).userId;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    const controlPool = getControlPool();
+    const metrics = await getPortfolioMetrics(controlPool, userId);
+    res.json(metrics);
+  } catch (e) {
+    send500(res, e, 'Portfolio metrics failed');
   }
 });
 

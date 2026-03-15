@@ -10,13 +10,13 @@ export interface AcquisitionRow {
   acquisitionName: string;
   acquisitionDate: string;
   acquireeName: string;
-  purchasePrice: number;
-  cashConsideration?: number;
-  stockConsideration?: number;
-  contingentConsideration?: number;
-  fairValueNetAssets?: number;
-  goodwill?: number;
-  bargainPurchaseGain?: number;
+  purchasePrice: string;
+  cashConsideration?: string;
+  stockConsideration?: string;
+  contingentConsideration?: string;
+  fairValueNetAssets?: string;
+  goodwill?: string;
+  bargainPurchaseGain?: string;
   status: 'in_progress' | 'completed' | 'finalized';
   measurementPeriodEnd?: string;
   notes?: string;
@@ -29,9 +29,9 @@ export interface PPALineItemRow {
   acquisitionId: string;
   itemType: 'asset' | 'liability' | 'intangible';
   description: string;
-  bookValue?: number;
-  fairValue?: number;
-  fairValueAdjustment?: number;
+  bookValue?: string;
+  fairValue?: string;
+  fairValueAdjustment?: string;
   valuationMethod?: string;
   usefulLifeYears?: number;
   notes?: string;
@@ -44,10 +44,10 @@ export interface ContingentConsiderationRow {
   acquisitionId: string;
   earnOutType: 'revenue' | 'ebitda' | 'retention' | 'milestone';
   targetMetric?: string;
-  targetValue?: number;
-  maxPayout?: number;
-  fairValueAtAcquisition?: number;
-  currentFairValue?: number;
+  targetValue?: string;
+  maxPayout?: string;
+  fairValueAtAcquisition?: string;
+  currentFairValue?: string;
   probabilityWeighted: boolean;
   scenarios?: Array<{ probability: number; payout: number }>;
   notes?: string;
@@ -73,12 +73,12 @@ export async function getAcquisition(pool: Pool, tenantId: string, id: string): 
   const r = await pool.query('SELECT * FROM acquisitions WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
   if (!r.rows[0]) return null;
   const row = r.rows[0];
-  return { id: row.id, tenantId: row.tenant_id, acquisitionName: row.acquisition_name, acquisitionDate: row.acquisition_date, acquireeName: row.acquiree_name, purchasePrice: Number(row.purchase_price), cashConsideration: row.cash_consideration != null ? Number(row.cash_consideration) : undefined, stockConsideration: row.stock_consideration != null ? Number(row.stock_consideration) : undefined, contingentConsideration: row.contingent_consideration != null ? Number(row.contingent_consideration) : undefined, fairValueNetAssets: row.fair_value_net_assets != null ? Number(row.fair_value_net_assets) : undefined, goodwill: row.goodwill != null ? Number(row.goodwill) : undefined, bargainPurchaseGain: row.bargain_purchase_gain != null ? Number(row.bargain_purchase_gain) : undefined, status: row.status, measurementPeriodEnd: row.measurement_period_end, notes: row.notes, createdAt: row.created_at };
+  return { id: row.id, tenantId: row.tenant_id, acquisitionName: row.acquisition_name, acquisitionDate: row.acquisition_date, acquireeName: row.acquiree_name, purchasePrice: String(row.purchase_price), cashConsideration: row.cash_consideration != null ? String(row.cash_consideration) : undefined, stockConsideration: row.stock_consideration != null ? String(row.stock_consideration) : undefined, contingentConsideration: row.contingent_consideration != null ? String(row.contingent_consideration) : undefined, fairValueNetAssets: row.fair_value_net_assets != null ? String(row.fair_value_net_assets) : undefined, goodwill: row.goodwill != null ? String(row.goodwill) : undefined, bargainPurchaseGain: row.bargain_purchase_gain != null ? String(row.bargain_purchase_gain) : undefined, status: row.status, measurementPeriodEnd: row.measurement_period_end, notes: row.notes, createdAt: row.created_at };
 }
 
 export async function listAcquisitions(pool: Pool, tenantId: string): Promise<AcquisitionRow[]> {
   const r = await pool.query('SELECT * FROM acquisitions WHERE tenant_id = $1 ORDER BY acquisition_date DESC', [tenantId]);
-  return r.rows.map((row) => ({ id: row.id, tenantId: row.tenant_id, acquisitionName: row.acquisition_name, acquisitionDate: row.acquisition_date, acquireeName: row.acquiree_name, purchasePrice: Number(row.purchase_price), cashConsideration: row.cash_consideration != null ? Number(row.cash_consideration) : undefined, stockConsideration: row.stock_consideration != null ? Number(row.stock_consideration) : undefined, contingentConsideration: row.contingent_consideration != null ? Number(row.contingent_consideration) : undefined, fairValueNetAssets: row.fair_value_net_assets != null ? Number(row.fair_value_net_assets) : undefined, goodwill: row.goodwill != null ? Number(row.goodwill) : undefined, bargainPurchaseGain: row.bargain_purchase_gain != null ? Number(row.bargain_purchase_gain) : undefined, status: row.status, measurementPeriodEnd: row.measurement_period_end, notes: row.notes, createdAt: row.created_at }));
+  return r.rows.map((row) => ({ id: row.id, tenantId: row.tenant_id, acquisitionName: row.acquisition_name, acquisitionDate: row.acquisition_date, acquireeName: row.acquiree_name, purchasePrice: String(row.purchase_price), cashConsideration: row.cash_consideration != null ? String(row.cash_consideration) : undefined, stockConsideration: row.stock_consideration != null ? String(row.stock_consideration) : undefined, contingentConsideration: row.contingent_consideration != null ? String(row.contingent_consideration) : undefined, fairValueNetAssets: row.fair_value_net_assets != null ? String(row.fair_value_net_assets) : undefined, goodwill: row.goodwill != null ? String(row.goodwill) : undefined, bargainPurchaseGain: row.bargain_purchase_gain != null ? String(row.bargain_purchase_gain) : undefined, status: row.status, measurementPeriodEnd: row.measurement_period_end, notes: row.notes, createdAt: row.created_at }));
 }
 
 export async function deleteAcquisition(pool: Pool, tenantId: string, id: string): Promise<boolean> {
@@ -99,7 +99,7 @@ export async function addPPALineItem(pool: Pool, tenantId: string, item: Omit<PP
 
 export async function listPPALineItems(pool: Pool, tenantId: string, acquisitionId: string): Promise<PPALineItemRow[]> {
   const r = await pool.query('SELECT * FROM ppa_line_items WHERE tenant_id = $1 AND acquisition_id = $2 ORDER BY item_type, description', [tenantId, acquisitionId]);
-  return r.rows.map((row) => ({ id: row.id, tenantId: row.tenant_id, acquisitionId: row.acquisition_id, itemType: row.item_type, description: row.description, bookValue: row.book_value != null ? Number(row.book_value) : undefined, fairValue: row.fair_value != null ? Number(row.fair_value) : undefined, fairValueAdjustment: row.fair_value_adjustment != null ? Number(row.fair_value_adjustment) : undefined, valuationMethod: row.valuation_method, usefulLifeYears: row.useful_life_years != null ? Number(row.useful_life_years) : undefined, notes: row.notes, createdAt: row.created_at }));
+  return r.rows.map((row) => ({ id: row.id, tenantId: row.tenant_id, acquisitionId: row.acquisition_id, itemType: row.item_type, description: row.description, bookValue: row.book_value != null ? String(row.book_value) : undefined, fairValue: row.fair_value != null ? String(row.fair_value) : undefined, fairValueAdjustment: row.fair_value_adjustment != null ? String(row.fair_value_adjustment) : undefined, valuationMethod: row.valuation_method, usefulLifeYears: row.useful_life_years != null ? Number(row.useful_life_years) : undefined, notes: row.notes, createdAt: row.created_at }));
 }
 
 export async function addContingentConsideration(pool: Pool, tenantId: string, cc: Omit<ContingentConsiderationRow, 'id' | 'createdAt' | 'tenantId'>): Promise<ContingentConsiderationRow> {
@@ -115,5 +115,5 @@ export async function addContingentConsideration(pool: Pool, tenantId: string, c
 
 export async function listContingentConsideration(pool: Pool, tenantId: string, acquisitionId: string): Promise<ContingentConsiderationRow[]> {
   const r = await pool.query('SELECT * FROM contingent_consideration WHERE tenant_id = $1 AND acquisition_id = $2 ORDER BY created_at', [tenantId, acquisitionId]);
-  return r.rows.map((row) => ({ id: row.id, tenantId: row.tenant_id, acquisitionId: row.acquisition_id, earnOutType: row.earn_out_type, targetMetric: row.target_metric, targetValue: row.target_value != null ? Number(row.target_value) : undefined, maxPayout: row.max_payout != null ? Number(row.max_payout) : undefined, fairValueAtAcquisition: row.fair_value_at_acquisition != null ? Number(row.fair_value_at_acquisition) : undefined, currentFairValue: row.current_fair_value != null ? Number(row.current_fair_value) : undefined, probabilityWeighted: row.probability_weighted, scenarios: row.scenarios, notes: row.notes, createdAt: row.created_at }));
+  return r.rows.map((row) => ({ id: row.id, tenantId: row.tenant_id, acquisitionId: row.acquisition_id, earnOutType: row.earn_out_type, targetMetric: row.target_metric, targetValue: row.target_value != null ? String(row.target_value) : undefined, maxPayout: row.max_payout != null ? String(row.max_payout) : undefined, fairValueAtAcquisition: row.fair_value_at_acquisition != null ? String(row.fair_value_at_acquisition) : undefined, currentFairValue: row.current_fair_value != null ? String(row.current_fair_value) : undefined, probabilityWeighted: row.probability_weighted, scenarios: row.scenarios, notes: row.notes, createdAt: row.created_at }));
 }

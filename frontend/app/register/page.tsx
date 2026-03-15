@@ -60,24 +60,24 @@ export default function RegisterPage() {
   };
 
   const inputStyle = {
-    backgroundColor: 'var(--bg-input, #1A1D27)',
-    border: '1px solid var(--border-default, #2A2D37)',
-    color: 'var(--text-primary, #E8EAF0)',
+    backgroundColor: 'var(--bg-surface-sunken)',
+    border: '1px solid var(--border-default)',
+    color: 'var(--text-primary)',
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg-primary, #0C0E13)' }}>
-      <div className="w-full max-w-md p-8 rounded-xl" style={{ backgroundColor: 'var(--bg-surface, #14161D)', border: '1px solid var(--border-default, #2A2D37)' }}>
-        <h1 className="text-3xl font-display mb-1" style={{ color: 'var(--text-primary, #E8EAF0)', fontStyle: 'italic' }}>
+    <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg-base)' }}>
+      <div className="w-full max-w-md p-8 rounded-xl" style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)' }}>
+        <h1 className="text-3xl font-display mb-1" style={{ color: 'var(--text-primary)', fontStyle: 'italic' }}>
           Sabit
         </h1>
-        <p className="mb-8" style={{ color: 'var(--text-secondary, #9DA3B0)', fontSize: '14px' }}>
+        <p className="mb-8" style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
           Create your account
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-primary, #E8EAF0)' }}>
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
               Company Name
             </label>
             <input
@@ -92,7 +92,7 @@ export default function RegisterPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-primary, #E8EAF0)' }}>
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
               Full Name
             </label>
             <input
@@ -106,7 +106,7 @@ export default function RegisterPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-primary, #E8EAF0)' }}>
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
               Email
             </label>
             <input
@@ -121,7 +121,7 @@ export default function RegisterPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-primary, #E8EAF0)' }}>
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
               Password
             </label>
             <input
@@ -132,13 +132,13 @@ export default function RegisterPage() {
               className="w-full px-3 py-2 rounded-lg text-sm"
               style={inputStyle}
             />
-            <p className="mt-1 text-xs" style={{ color: 'var(--text-muted, #6B7280)' }}>
+            <p className="mt-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>
               Min 8 characters with uppercase, lowercase, number, and special character
             </p>
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-primary, #E8EAF0)' }}>
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
               Confirm Password
             </label>
             <input
@@ -152,7 +152,7 @@ export default function RegisterPage() {
           </div>
 
           {error && (
-            <div className="p-3 rounded-lg text-sm" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#EF4444' }}>
+            <div className="p-3 rounded-lg text-sm" style={{ backgroundColor: 'var(--status-error-bg)', color: 'var(--status-error)' }}>
               {error}
             </div>
           )}
@@ -162,17 +162,17 @@ export default function RegisterPage() {
             disabled={loading}
             className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors"
             style={{
-              backgroundColor: loading ? 'var(--accent-muted, #4A4FC7)' : 'var(--accent, #6366F1)',
-              color: '#FFFFFF',
+              backgroundColor: loading ? 'var(--interactive-primary-hover)' : 'var(--interactive-primary)',
+              color: 'var(--text-on-primary)',
             }}
           >
             {loading ? 'Creating account...' : 'Create account'}
           </button>
         </form>
 
-        <p className="mt-6 text-center text-sm" style={{ color: 'var(--text-secondary, #9DA3B0)' }}>
+        <p className="mt-6 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
           Already have an account?{' '}
-          <Link href="/login" style={{ color: 'var(--accent, #6366F1)' }} className="hover:underline">
+          <Link href="/login" style={{ color: 'var(--interactive-primary)' }} className="hover:underline">
             Sign in
           </Link>
         </p>

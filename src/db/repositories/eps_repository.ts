@@ -8,12 +8,12 @@ export interface EpsCalculationRow {
   id: string;
   tenantId: string;
   periodLabel: string;
-  basicIncomeAvailable: number;
-  basicWeightedShares: number;
-  basicEps: number;
-  dilutedIncomeAvailable: number;
-  dilutedWeightedShares: number;
-  dilutedEps: number;
+  basicIncomeAvailable: string;
+  basicWeightedShares: string;
+  basicEps: string;
+  dilutedIncomeAvailable: string;
+  dilutedWeightedShares: string;
+  dilutedEps: string;
   treasuryStockAdjustments?: unknown;
   convertibleAdjustments?: unknown;
   optionsWarrants?: unknown;
@@ -30,12 +30,12 @@ function rowToEps(row: Record<string, unknown>): EpsCalculationRow {
     id: row.id as string,
     tenantId: row.tenant_id as string,
     periodLabel: row.period_label as string,
-    basicIncomeAvailable: Number(row.basic_income_available),
-    basicWeightedShares: Number(row.basic_weighted_shares),
-    basicEps: Number(row.basic_eps),
-    dilutedIncomeAvailable: Number(row.diluted_income_available),
-    dilutedWeightedShares: Number(row.diluted_weighted_shares),
-    dilutedEps: Number(row.diluted_eps),
+    basicIncomeAvailable: String(row.basic_income_available),
+    basicWeightedShares: String(row.basic_weighted_shares),
+    basicEps: String(row.basic_eps),
+    dilutedIncomeAvailable: String(row.diluted_income_available),
+    dilutedWeightedShares: String(row.diluted_weighted_shares),
+    dilutedEps: String(row.diluted_eps),
     treasuryStockAdjustments: row.treasury_stock_adjustments as unknown | undefined,
     convertibleAdjustments: row.convertible_adjustments as unknown | undefined,
     optionsWarrants: row.options_warrants as unknown | undefined,

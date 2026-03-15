@@ -18,7 +18,8 @@ export const loginSchema = z.object({
 // Register
 // ============================================================================
 
-export const allowedRolesSchema = z.enum(['accountant', 'preparer', 'reviewer', 'approver', 'admin', 'operating_partner']);
+/** Roles allowed for self-registration. Admin/approver must be assigned by an existing admin. */
+export const allowedRolesSchema = z.enum(['accountant', 'preparer', 'reviewer']);
 
 const passwordComplexity = z
   .string()

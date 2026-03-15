@@ -66,13 +66,13 @@ export default function ImpairmentPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Impairment Testing</h1>
+        <h1 className="text-2xl font-display" style={{ color: 'var(--text-primary)' }}>Impairment Testing</h1>
         {!readOnly && (
           <div className="flex gap-2">
-            <button onClick={() => setShowCGUForm(!showCGUForm)} className="flex items-center gap-1 px-3 py-1.5 text-sm border rounded-md hover:bg-hover">
+            <button onClick={() => setShowCGUForm(!showCGUForm)} className="flex items-center gap-1 px-3 py-1.5 text-sm rounded-md hover:bg-hover" style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--border-default)' }}>
               <Plus className="w-4 h-4" /> Add CGU
             </button>
-            <button onClick={() => setShowTestForm(!showTestForm)} className="flex items-center gap-1 px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent/90">
+            <button onClick={() => setShowTestForm(!showTestForm)} className="flex items-center gap-1 px-3 py-1.5 text-sm text-white rounded-md hover:bg-accent/90" style={{ background: 'var(--interactive-primary)' }}>
               <Plus className="w-4 h-4" /> New Test
             </button>
           </div>
@@ -81,66 +81,66 @@ export default function ImpairmentPage() {
 
       {summary && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="p-4 border rounded-lg bg-surface">
-            <div className="text-sm text-text-secondary">Total Impairment Loss</div>
-            <div className="text-lg font-semibold text-red-600">{fmtMoney(summary.totalImpairmentLoss)}</div>
+          <div className="p-4 rounded-lg" style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}>
+            <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Total Impairment Loss</div>
+            <div className="text-lg font-semibold" style={{ color: 'var(--status-error)' }}>{fmtMoney(summary.totalImpairmentLoss)}</div>
           </div>
-          <div className="p-4 border rounded-lg bg-surface">
-            <div className="text-sm text-text-secondary">Tests Performed</div>
-            <div className="text-lg font-semibold">{summary.testCount}</div>
+          <div className="p-4 rounded-lg" style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}>
+            <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Tests Performed</div>
+            <div className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{summary.testCount}</div>
           </div>
-          <div className="p-4 border rounded-lg bg-surface">
-            <div className="text-sm text-text-secondary">CGUs Tested</div>
-            <div className="text-lg font-semibold">{summary.byCGU.length}</div>
+          <div className="p-4 rounded-lg" style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}>
+            <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>CGUs Tested</div>
+            <div className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{summary.byCGU.length}</div>
           </div>
         </div>
       )}
 
       {!readOnly && showCGUForm && (
-        <div className="p-4 border rounded-lg bg-surface space-y-3">
-          <h3 className="font-medium">New Cash Generating Unit</h3>
+        <div className="p-4 rounded-lg space-y-3" style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}>
+          <h3 className="font-medium" style={{ color: 'var(--text-primary)' }}>New Cash Generating Unit</h3>
           <div className="grid grid-cols-2 gap-3">
-            <input placeholder="CGU Name" value={cguForm.cguName} onChange={(e) => setCguForm({ ...cguForm, cguName: e.target.value })} className="border rounded px-2 py-1.5 text-sm" />
-            <input placeholder="Description" value={cguForm.description} onChange={(e) => setCguForm({ ...cguForm, description: e.target.value })} className="border rounded px-2 py-1.5 text-sm" />
+            <input placeholder="CGU Name" value={cguForm.cguName} onChange={(e) => setCguForm({ ...cguForm, cguName: e.target.value })} className="rounded-md px-2 py-1.5 text-sm" style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--border-default)', background: 'var(--bg-surface-sunken)', color: 'var(--text-primary)' }} />
+            <input placeholder="Description" value={cguForm.description} onChange={(e) => setCguForm({ ...cguForm, description: e.target.value })} className="rounded-md px-2 py-1.5 text-sm" style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--border-default)', background: 'var(--bg-surface-sunken)', color: 'var(--text-primary)' }} />
           </div>
           <div className="flex gap-2">
-            <button onClick={handleCreateCGU} disabled={createCGU.isPending} className="px-3 py-1.5 text-sm bg-accent text-white rounded-md disabled:opacity-50">Create</button>
-            <button onClick={() => setShowCGUForm(false)} className="px-3 py-1.5 text-sm border rounded-md">Cancel</button>
+            <button onClick={handleCreateCGU} disabled={createCGU.isPending} className="px-3 py-1.5 text-sm text-white rounded-md disabled:opacity-50" style={{ background: 'var(--interactive-primary)' }}>Create</button>
+            <button onClick={() => setShowCGUForm(false)} className="px-3 py-1.5 text-sm rounded-md" style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--border-default)', color: 'var(--text-secondary)' }}>Cancel</button>
           </div>
         </div>
       )}
 
       {!readOnly && showTestForm && (
-        <div className="p-4 border rounded-lg bg-surface space-y-3">
-          <h3 className="font-medium">New Impairment Test</h3>
+        <div className="p-4 rounded-lg space-y-3" style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}>
+          <h3 className="font-medium" style={{ color: 'var(--text-primary)' }}>New Impairment Test</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <input type="date" value={testForm.testDate} onChange={(e) => setTestForm({ ...testForm, testDate: e.target.value })} className="border rounded px-2 py-1.5 text-sm" />
-            <select value={testForm.assetType} onChange={(e) => setTestForm({ ...testForm, assetType: e.target.value })} className="border rounded px-2 py-1.5 text-sm">
+            <input type="date" value={testForm.testDate} onChange={(e) => setTestForm({ ...testForm, testDate: e.target.value })} className="rounded-md px-2 py-1.5 text-sm" style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--border-default)', background: 'var(--bg-surface-sunken)', color: 'var(--text-primary)' }} />
+            <select value={testForm.assetType} onChange={(e) => setTestForm({ ...testForm, assetType: e.target.value })} className="rounded-md px-2 py-1.5 text-sm" style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--border-default)', background: 'var(--bg-surface-sunken)', color: 'var(--text-primary)' }}>
               <option value="goodwill">Goodwill</option>
               <option value="intangible">Intangible</option>
               <option value="ppe">PP&E</option>
               <option value="investment">Investment</option>
             </select>
-            <select value={testForm.cguId} onChange={(e) => setTestForm({ ...testForm, cguId: e.target.value })} className="border rounded px-2 py-1.5 text-sm">
+            <select value={testForm.cguId} onChange={(e) => setTestForm({ ...testForm, cguId: e.target.value })} className="rounded-md px-2 py-1.5 text-sm" style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--border-default)', background: 'var(--bg-surface-sunken)', color: 'var(--text-primary)' }}>
               <option value="">No CGU</option>
               {(cgus ?? []).map((c) => <option key={c.id} value={c.id}>{c.cguName}</option>)}
             </select>
-            <select value={testForm.method} onChange={(e) => setTestForm({ ...testForm, method: e.target.value })} className="border rounded px-2 py-1.5 text-sm">
+            <select value={testForm.method} onChange={(e) => setTestForm({ ...testForm, method: e.target.value })} className="rounded-md px-2 py-1.5 text-sm" style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--border-default)', background: 'var(--bg-surface-sunken)', color: 'var(--text-primary)' }}>
               <option value="value_in_use">Value in Use</option>
               <option value="fair_value_less_costs">FV Less Costs</option>
             </select>
-            <input placeholder="Carrying Amount" type="number" value={testForm.carryingAmount} onChange={(e) => setTestForm({ ...testForm, carryingAmount: e.target.value })} className="border rounded px-2 py-1.5 text-sm" />
-            <input placeholder="Recoverable Amount" type="number" value={testForm.recoverableAmount} onChange={(e) => setTestForm({ ...testForm, recoverableAmount: e.target.value })} className="border rounded px-2 py-1.5 text-sm" />
+            <input placeholder="Carrying Amount" type="number" value={testForm.carryingAmount} onChange={(e) => setTestForm({ ...testForm, carryingAmount: e.target.value })} className="rounded-md px-2 py-1.5 text-sm" style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--border-default)', background: 'var(--bg-surface-sunken)', color: 'var(--text-primary)' }} />
+            <input placeholder="Recoverable Amount" type="number" value={testForm.recoverableAmount} onChange={(e) => setTestForm({ ...testForm, recoverableAmount: e.target.value })} className="rounded-md px-2 py-1.5 text-sm" style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--border-default)', background: 'var(--bg-surface-sunken)', color: 'var(--text-primary)' }} />
           </div>
           <div className="flex gap-2">
-            <button onClick={handleCreateTest} disabled={createTest.isPending} className="px-3 py-1.5 text-sm bg-accent text-white rounded-md disabled:opacity-50">Create</button>
-            <button onClick={() => setShowTestForm(false)} className="px-3 py-1.5 text-sm border rounded-md">Cancel</button>
+            <button onClick={handleCreateTest} disabled={createTest.isPending} className="px-3 py-1.5 text-sm text-white rounded-md disabled:opacity-50" style={{ background: 'var(--interactive-primary)' }}>Create</button>
+            <button onClick={() => setShowTestForm(false)} className="px-3 py-1.5 text-sm rounded-md" style={{ borderWidth: '1px', borderStyle: 'solid', borderColor: 'var(--border-default)', color: 'var(--text-secondary)' }}>Cancel</button>
           </div>
         </div>
       )}
 
       <div>
-        <h2 className="text-lg font-semibold mb-2">CGUs</h2>
+        <h2 className="text-lg font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>CGUs</h2>
         <DataTable<CashGeneratingUnit>
           rows={cgus ?? []}
           getRowId={(r) => r.id}
@@ -153,7 +153,7 @@ export default function ImpairmentPage() {
       </div>
 
       <div>
-        <h2 className="text-lg font-semibold mb-2">Impairment Tests</h2>
+        <h2 className="text-lg font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>Impairment Tests</h2>
         <DataTable<ImpairmentTest>
           rows={tests ?? []}
           getRowId={(r) => r.id}
@@ -167,7 +167,7 @@ export default function ImpairmentPage() {
             { id: 'impairmentLoss', header: 'Loss', cell: (r) => r.impairmentLoss ? <MoneyCell value={r.impairmentLoss} /> : '\u2014' },
             { id: 'method', header: 'Method', cell: (r) => METHOD_LABEL[r.method] ?? r.method },
             { id: 'evaluate', header: '', cell: (r) => (
-              !readOnly ? <button onClick={() => evaluateImpairment.mutate(r.id)} className="text-accent hover:underline text-xs">
+              !readOnly ? <button onClick={() => evaluateImpairment.mutate(r.id)} className="hover:underline text-xs" style={{ color: 'var(--interactive-primary)' }}>
                 <Play className="w-3 h-3 inline mr-1" />Evaluate
               </button> : null
             )},

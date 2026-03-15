@@ -145,7 +145,7 @@ function flattenToLines(
     lines.push({
       packageId,
       fsLineId,
-      amount,
+      amount: String(amount),
       statement,
       metadata: {
         label: opts.label,
@@ -391,6 +391,7 @@ export async function generateStatements(
   closeSessionId: string,
   opts?: { generatedBy?: string; status?: 'draft' | 'final'; ruleVersionsSnapshot?: Record<string, unknown> }
 ): Promise<StatementPackage> {
+  const generationStartedAt = new Date().toISOString();
   const session = await getSession(pool, tenantId, closeSessionId);
   if (!session) {
     throw new Error(`Close session not found: ${closeSessionId}`);
@@ -434,20 +435,18 @@ export async function generateStatements(
       validationResults,
     });
     const lines = flattenToLines(id, result.balanceSheet, result.profitAndLoss, cashFlowStatement, equityStatement);
-    for (const line of lines) {
-      await repo.insertStatementLine(tx, {
-        packageId: line.packageId,
-        fsLineId: line.fsLineId,
-        amount: line.amount,
-        statement: line.statement,
-        metadata: line.metadata,
-        displayOrder: line.displayOrder,
-        indentLevel: line.indentLevel,
-        isSubtotal: line.isSubtotal,
-        isGrandTotal: line.isGrandTotal,
-        sectionName: line.sectionName,
-      });
-    }
+    await repo.insertStatementLinesBatch(tx, lines.map((line) => ({
+      packageId: line.packageId,
+      fsLineId: line.fsLineId,
+      amount: Number(line.amount),
+      statement: line.statement,
+      metadata: line.metadata,
+      displayOrder: line.displayOrder,
+      indentLevel: line.indentLevel,
+      isSubtotal: line.isSubtotal,
+      isGrandTotal: line.isGrandTotal,
+      sectionName: line.sectionName,
+    })));
     const previousPackages = await repo.listStatementPackagesByCloseSessionId(tx, tenantId, closeSessionId, 2);
     const prevPkg = previousPackages.length >= 2 ? previousPackages[1] : undefined;
     if (prevPkg) {
@@ -456,7 +455,10 @@ export async function generateStatements(
       const diff = computeDiff(prevLines, nextLines);
       await repo.upsertStatementDiff(tx, prevPkg.id, id, diff);
     }
-    await clearStatementsStaleSince(tx, tenantId, closeSessionId);
+    const staleCleared = await clearStatementsStaleSince(tx, tenantId, closeSessionId, generationStartedAt);
+    if (!staleCleared) {
+      console.warn(`[STMT-WARN] Statements became stale during generation for session ${closeSessionId}. Regeneration needed.`);
+    }
 
     // Compute variances for period-over-period (after statement generation)
     const priorSessions = await listSessions(tx, { tenantId, entityId: session.entityId });
@@ -471,7 +473,7 @@ export async function generateStatements(
         const priorLines = await repo.listStatementLinesByPackageId(tx, priorPkgForVariance.id);
         priorLinesInput = priorLines.map((l) => ({
           fsLineId: l.fsLineId,
-          amount: l.amount,
+          amount: Number(l.amount),
           statement: l.statement,
           label: (l.metadata as { label?: string })?.label,
         }));
@@ -483,7 +485,7 @@ export async function generateStatements(
         const priorFlatLines = flattenToLines('__prior_derived__', priorResult.balanceSheet, priorResult.profitAndLoss, priorCF, priorEq);
         priorLinesInput = priorFlatLines.map((l) => ({
           fsLineId: l.fsLineId,
-          amount: l.amount,
+          amount: Number(l.amount),
           statement: l.statement,
           label: (l.metadata as { label?: string })?.label,
         }));
@@ -501,7 +503,7 @@ export async function generateStatements(
     {
       const currentLines = lines.map((l) => ({
         fsLineId: l.fsLineId,
-        amount: l.amount,
+        amount: Number(l.amount),
         statement: l.statement,
         label: (l.metadata as { label?: string })?.label,
       }));
@@ -548,12 +550,12 @@ export function computeDiff(prevLines: StatementLine[], nextLines: StatementLine
   for (const [key, next] of nextByKey) {
     const prev = prevByKey.get(key);
     if (!prev) {
-      added.push({ fsLineId: key, amount: next.amount, statement: next.statement, metadata: next.metadata });
-    } else if (Math.abs(prev.amount - next.amount) > 0.001) {
+      added.push({ fsLineId: key, amount: Number(next.amount), statement: next.statement, metadata: next.metadata });
+    } else if (Math.abs(Number(prev.amount) - Number(next.amount)) > 0.001) {
       changed.push({
         fsLineId: key,
-        prevAmount: prev.amount,
-        nextAmount: next.amount,
+        prevAmount: Number(prev.amount),
+        nextAmount: Number(next.amount),
         statement: next.statement,
         metadata: next.metadata,
       });
@@ -561,7 +563,7 @@ export function computeDiff(prevLines: StatementLine[], nextLines: StatementLine
   }
   for (const [key, prev] of prevByKey) {
     if (!nextByKey.has(key)) {
-      removed.push({ fsLineId: key, amount: prev.amount, statement: prev.statement, metadata: prev.metadata });
+      removed.push({ fsLineId: key, amount: Number(prev.amount), statement: prev.statement, metadata: prev.metadata });
     }
   }
   return { added, removed, changed };

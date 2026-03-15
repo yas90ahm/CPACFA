@@ -430,7 +430,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
       stmtOpts.loadContracts = async (tid: string) => {
         try {
           const rows = await listContracts(poolIngest as Pool, tid);
-          return rows.map((r) => ({ id: r.id, totalContractValue: r.totalContractValue, periodRecognizedRevenue: undefined }));
+          return rows.map((r) => ({ id: r.id, totalContractValue: String(r.totalContractValue), periodRecognizedRevenue: undefined }));
         } catch {
           return [];
         }

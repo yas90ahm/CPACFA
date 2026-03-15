@@ -1,0 +1,226 @@
+CRITICAL GAPS BUILD — COMPLETION REPORT
+========================================
+Date: 2026-03-12
+Backend Build: PASS (tsc — zero errors)
+Frontend Build: PASS (next build — all pages compiled)
+
+=============================================================================
+CRITICAL GAP 1: BUDGET DATA INGESTION AND ACTUAL VS BUDGET REPORTING — DONE
+=============================================================================
+
+BACKEND (5 files):
+- migrations/064_period_budgets.sql — tenant_period_budgets table with UNIQUE(tenant_id, entity_id, period_label, account_code)
+- src/types/budget.ts — BudgetEntry, BudgetVarianceItem types
+- src/db/repositories/budget_repository.ts — upsertBudgetEntries, getBudgetForPeriod, deleteBudgetForPeriod
+- src/services/budget_service.ts — parseBudgetCsv, uploadBudget, getBudgetForPeriod, getBudgetVariance (Decimal.js arithmetic)
+- src/routes/close/close_budget.ts — POST upload, GET budget, GET variance
+
+FRONTEND (3 new files, 2 modified):
+- lib/queries/budget.ts — useBudget, useBudgetVariance, useUploadBudget hooks
+- components/close/BudgetUploadZone.tsx — CSV upload component with drag-drop
+- statements/StatementTable.tsx — Added showBudget + budgetData props: Budget, Variance ($), Variance (%) columns
+- statements/page.tsx — "Show budget" checkbox, budget data fetch, budgetDataMap passed to all StatementTables
+
+=============================================================================
+CRITICAL GAP 2: EBITDA BRIDGE — DONE
+=============================================================================
+
+BACKEND (4 files):
+- migrations/065_ebitda_addbacks.sql — tenant_ebitda_addbacks table
+- src/types/ebitda_bridge.ts — EbitdaAddback, EbitdaBridgeLine, EbitdaBridgeResult types
+- src/db/repositories/ebitda_addbacks_repository.ts — CRUD for addbacks
+- src/services/ebitda_bridge_service.ts — computeEBITDABridge: extracts IS lines, sums with Decimal.js
+- src/routes/close/close_ebitda_bridge.ts — GET bridge, POST/DELETE addbacks
+
+FRONTEND (2 new files, 1 modified):
+- lib/queries/ebitda.ts — useEBITDABridge, useAddEbitdaAddback, useDeleteEbitdaAddback
+- statements/EBITDABridge.tsx — Waterfall: Net Income + Interest + Tax + D&A = EBITDA + Add-backs = Adjusted EBITDA
+- statements/page.tsx — Added 'ebitda' tab to TABS, renders EBITDABridge component
+
+=============================================================================
+CRITICAL GAP 3: SUBLEDGER/BANK STATEMENT INGESTION — DONE
+=============================================================================
+
+BACKEND (4 files):
+- migrations/066_recon_source_data.sql — tenant_recon_source_data table with JSONB entries
+- src/types/recon_source.ts — ReconSourceEntry, ReconSourceData, MatchResult types
+- src/db/repositories/recon_source_repository.ts — insertReconSource, getReconSourceByReconAndSession, etc.
+- src/services/recon_source_ingestion_service.ts — parseCsvSource, uploadReconSource, autoMatchEntries (amount + date proximity matching)
+- src/routes/close/close_recon_source.ts — POST source-upload, GET source-data, POST auto-match
+
+FRONTEND (2 new files, 1 modified):
+- lib/queries/recon-source.ts — useReconSourceData, useUploadReconSource, useAutoMatch
+- components/close/ReconSourcePanel.tsx — Upload zone, source entries table, auto-match button, matched/unmatched badges
+- reconciliation/[reconId]/page.tsx — Added ReconSourcePanel between balance comparison and reconciling items
+
+=============================================================================
+CRITICAL GAP 4: ENHANCED GL UPLOAD VALIDATION — DONE
+=============================================================================
+
+BACKEND (2 files modified):
+- src/services/gl_health_analysis_service.ts — Added 4 new checks:
+  1. completeness_check: Flags accounts missing vs prior period
+  2. reasonableness_check: Flags >200% balance changes
+  3. balance_direction_check: Flags asset accounts with credit balances & vice versa
+  4. activity_continuity_check: Flags accounts with zero activity vs prior period
+- src/routes/close/close_gl_health.ts — Accepts optional priorPeriodLabel parameter
+
+FRONTEND: No changes needed — GL health page renders checks dynamically from API response
+
+=============================================================================
+CRITICAL GAP 5: PRE-CERTIFICATION GATES — ALREADY BUILT (verified)
+=============================================================================
+
+=============================================================================
+CRITICAL GAP 6: CASH FLOW CLASSIFICATION MAPPING — DONE
+=============================================================================
+
+BACKEND (2 files):
+- migrations/067_cf_classification.sql — No-op (cash_flow_class column already existed)
+- src/services/cashFlow.ts — Updated to accept cfClassificationMap parameter; explicit classifications used before regex fallback
+
+FRONTEND (1 modified):
+- mapping/page.tsx — Added "CF Section" dropdown (Operating/Investing/Financing/Excluded) per mapped account
+
+=============================================================================
+CRITICAL GAP 7: RECURRING ENTRY AUTOMATION — ALREADY BUILT (verified)
+=============================================================================
+
+=============================================================================
+IMPORTANT GAP I1: PE REPORTING HIERARCHY — DONE
+=============================================================================
+
+BACKEND (5 files):
+- migrations/068_pe_hierarchy.sql — tenant_pe_hierarchy table + pe_line_id column on coa_mapping_rules
+- src/types/pe_hierarchy.ts — PEHierarchyLine, PEStatementLine, PEStatementResult types
+- src/db/repositories/pe_hierarchy_repository.ts — getHierarchy, upsertLine, deleteLine
+- src/services/pe_reporting_service.ts — generatePEStatements: re-aggregates TB using PE hierarchy
+- src/routes/close/close_pe_reporting.ts — GET pe-statements, CRUD pe-hierarchy
+- src/types/coa_mapping.ts — Added peLineId to CoaMappingRule
+- src/db/repositories/coa_mapping_rules_repository.ts — Added pe_line_id to queries
+
+=============================================================================
+IMPORTANT GAP I2: CONFIGURABLE STATEMENT HIERARCHY — DONE
+=============================================================================
+
+FRONTEND (1 modified):
+- settings/taxonomy/page.tsx — Added display order numbers, Hide/Show toggle (Eye icon) per line item
+
+=============================================================================
+IMPORTANT GAP I3: PORTFOLIO DASHBOARD METRICS AND ALERTS — DONE
+=============================================================================
+
+BACKEND (2 files):
+- src/services/portfolio_alerts_service.ts — getPortfolioAlerts (CLOSE_OVERDUE, VARIANCE_UNRESOLVED, GATE_FAILING), getPortfolioMetrics
+- src/routes/portfolio.ts — Added GET /alerts, GET /metrics endpoints
+
+FRONTEND (1 new, 1 modified):
+- lib/queries/portfolio-alerts.ts — usePortfolioAlerts, usePortfolioMetrics hooks
+- portfolio/page.tsx — AlertsSection at top (colored borders, dismiss), KPI metrics cards (EBITDA, Revenue, Avg Close Days, Certified count)
+
+=============================================================================
+IMPORTANT GAP I4: VARIANCE CLASSIFICATION — DONE
+=============================================================================
+
+BACKEND (3 files):
+- migrations/069_variance_classification.sql — Added variance_type, full_year_impact columns
+- src/services/variance_analysis_service.ts — Added classifyVariance, computeFullYearImpact functions
+- src/routes/close/close_variance_analysis.ts — Added POST classify endpoint
+
+FRONTEND (3 modified):
+- lib/types/variance.ts — Added classification, fullYearImpact, aiConfidence fields
+- lib/queries/variance.ts — Added useClassifyVariance mutation, extended mapper
+- variance/page.tsx — Classification dropdown (Timing/Permanent/Volume/Price/Mix/Other), full-year impact display
+
+=============================================================================
+IMPORTANT GAP I5: FULL-YEAR IMPACT — DONE (covered by I4)
+=============================================================================
+
+=============================================================================
+IMPORTANT GAP I6: POST-CERTIFICATION LOCKDOWN — ALREADY BUILT (verified)
+=============================================================================
+
+=============================================================================
+IMPORTANT GAP I7: EXCEL EXPORT — DONE
+=============================================================================
+
+BACKEND (2 files):
+- src/services/excel_export_service.ts — exportTrialBalance, exportStatements (4 sheets), exportReconciliations, exportVariances using xlsx library
+- src/routes/close/close_excel_export.ts — 4 GET endpoints returning .xlsx with proper Content-Type/Content-Disposition
+
+FRONTEND (4 modified):
+- trial-balance/page.tsx — Export Excel button
+- statements/page.tsx — Export Excel button
+- reconciliation/page.tsx — Export Excel button
+- variance/page.tsx — Export Excel button
+
+=============================================================================
+IMPORTANT GAP I8: COMPREHENSIVE AUDIT DATA ACCESS — DONE
+=============================================================================
+
+BACKEND (2 files):
+- src/services/audit_data_access_service.ts — getAuditSample (random GL entries), getAuditBinder (complete audit package)
+- src/routes/close/close_audit_data.ts — GET audit/sample, GET audit/binder
+
+=============================================================================
+IMPORTANT GAP I9: MULTI-ENTITY CONSOLIDATION — DONE
+=============================================================================
+
+BACKEND (1 modified):
+- src/services/consolidation_service.ts — Added detectIntercompanyEntries, generateEliminationEntries, intercompany elimination step in buildConsolidation
+
+=============================================================================
+IMPORTANT GAP I10: RECONCILING ITEM CARRY-FORWARD — DONE
+=============================================================================
+
+BACKEND (3 files):
+- migrations/150_recon_item_carry_forward.sql — Added carried_from_period, original_created_at, resolved_at columns + indexes
+- src/types/period_reconciliation.ts — Extended ReconItem with carry-forward fields
+- src/db/repositories/period_reconciliation_repository.ts — Added carryForwardUnresolvedItems, resolveReconItem
+- src/services/period_reconciliation_service.ts — Added carryForwardItems, resolveItem functions
+
+=============================================================================
+IMPORTANT GAP I11: AI CONFIDENCE SCORES AND VISUAL DISTINCTION — DONE
+=============================================================================
+
+FRONTEND: Already implemented. AISuggestionBadge with confidence % used on mapping page (line 609) and variance page (AI draft card). No additional changes needed.
+
+=============================================================================
+IMPORTANT GAP I12: ROLL-FORWARD RECONCILIATION FORMAT — DONE
+=============================================================================
+
+BACKEND (1 file + route additions):
+- src/services/roll_forward_recon_service.ts — isRollForwardAccount, computeRollForward (Beginning + Additions - Disposals +/- Adjustments = Ending)
+- src/routes/close/close_period_reconciliations.ts — Added GET roll-forward, POST carry-forward, POST resolve endpoints
+
+FRONTEND (1 new, 1 modified):
+- components/close/RollForwardView.tsx — Waterfall table with expandable JE lists, GL balance verification
+- reconciliation/[reconId]/page.tsx — Added RollForwardView below balance comparison
+
+=============================================================================
+ROUTE REGISTRATION
+=============================================================================
+src/routes/close/index.ts updated with imports and router.use() for:
+- closeBudgetRouter
+- closeEbitdaBridgeRouter
+- closeReconSourceRouter
+- closePeReportingRouter
+- closeExcelExportRouter
+- closeAuditDataRouter
+
+=============================================================================
+TOTAL FILES
+=============================================================================
+New migrations: 7 (064-070, 150)
+New backend types: 4
+New backend repositories: 4
+New backend services: 7
+New backend routes: 6
+Modified backend files: ~12
+New frontend query files: 4
+New frontend components: 4
+Modified frontend pages: 9
+
+All financial computations use Decimal.js.
+All new endpoints have auth via requireAuth middleware chain.
+All money values in API responses are strings.

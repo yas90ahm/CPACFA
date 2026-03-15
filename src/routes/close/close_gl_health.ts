@@ -63,7 +63,8 @@ router.post('/sessions/:sessionId/gl-health/run', async (req: Request, res: Resp
     }
 
     const periodLabel = sessionResult.rows[0].period_label;
-    const result = await runGLHealthAnalysis(pool, tenantId, req.params.sessionId, periodLabel);
+    const priorPeriodLabel = typeof req.body?.priorPeriodLabel === 'string' ? req.body.priorPeriodLabel : undefined;
+    const result = await runGLHealthAnalysis(pool, tenantId, req.params.sessionId, periodLabel, priorPeriodLabel);
     res.json({ analysis: result });
   } catch (err) {
     console.error('[GLHealth] run error:', err);

@@ -66,8 +66,8 @@ function rowToLine(row: JournalEntryLineRow): JournalEntryLine {
     jeId: row.je_id,
     lineIndex: row.line_index,
     accountRef: row.account_ref,
-    debit: Number(row.debit ?? '0'),
-    credit: Number(row.credit ?? '0'),
+    debit: row.debit ?? '0',
+    credit: row.credit ?? '0',
     description: row.description ?? undefined,
     amountProvenance:
       row.amount_provenance != null && typeof row.amount_provenance === 'object'
@@ -150,6 +150,19 @@ export async function listJournalEntries(
   return r.rows.map(rowToJE);
 }
 
+/**
+ * Status transition guards: prevent concurrent mutations from overwriting each other.
+ * The WHERE clause includes the expected current status so that two concurrent
+ * transitions (e.g. two approvals) cannot both succeed.
+ */
+const STATUS_TRANSITION_GUARD: Record<string, string | null> = {
+  proposed: 'draft',
+  approved: 'proposed',
+  rejected: 'proposed',
+  posted: 'approved',
+  exported: 'posted',
+};
+
 export async function updateJournalEntryStatus(
   pool: Pool,
   id: string,
@@ -163,6 +176,8 @@ export async function updateJournalEntryStatus(
     rejectedBy?: string;
     rejectedAt?: string;
     rejectionReason?: string;
+    /** Override the expected previous status for the WHERE guard. */
+    expectedStatus?: JournalEntryStatus;
   }
 ): Promise<JournalEntry | null> {
   const now = new Date().toISOString();
@@ -173,21 +188,36 @@ export async function updateJournalEntryStatus(
   const rejectedBy = patch?.rejectedBy ?? null;
   const rejectedAt = patch?.rejectedAt ?? now;
   const rejectionReason = patch?.rejectionReason ?? null;
+
+  // Determine the expected current status for the row-level guard
+  const expectedStatus = patch?.expectedStatus ?? STATUS_TRANSITION_GUARD[status] ?? null;
+
+  let result;
   if (status === 'rejected' && rejectionReason) {
-    await pool.query(
+    result = await pool.query(
       `UPDATE journal_entries SET status = $3, updated_at = $4,
          rejection_reason = $5, rejected_by = $6, rejected_at = $7
-       WHERE id = $1 AND tenant_id = $2`,
-      [id, tenantId, status, now, rejectionReason, rejectedBy, rejectedAt]
+       WHERE id = $1 AND tenant_id = $2
+         AND ($8::text IS NULL OR status = $8)`,
+      [id, tenantId, status, now, rejectionReason, rejectedBy, rejectedAt, expectedStatus]
     );
   } else {
-    await pool.query(
+    result = await pool.query(
       `UPDATE journal_entries SET status = $3, updated_at = $4,
          approved_by = COALESCE($5, approved_by), posted_at = COALESCE($6, posted_at),
          reversal_date = CASE WHEN $8 THEN $7::date ELSE reversal_date END
-       WHERE id = $1 AND tenant_id = $2`,
-      [id, tenantId, status, now, approvedBy, postedAt, reversalDate ?? null, setReversal]
+       WHERE id = $1 AND tenant_id = $2
+         AND ($9::text IS NULL OR status = $9)`,
+      [id, tenantId, status, now, approvedBy, postedAt, reversalDate ?? null, setReversal, expectedStatus]
     );
+  }
+
+  if ((result.rowCount ?? 0) === 0) {
+    // Row was not updated — either not found or status already changed
+    const current = await getJournalEntryById(pool, id, tenantId);
+    if (!current) return null;
+    // Status was already changed by a concurrent request
+    return null;
   }
   return getJournalEntryById(pool, id, tenantId);
 }
@@ -228,8 +258,8 @@ export async function insertJournalEntryLines(
       jeId,
       lineIndex: i,
       accountRef: l.accountRef,
-      debit,
-      credit,
+      debit: String(debit),
+      credit: String(credit),
       description: l.description,
       amountProvenance: l.amountProvenance,
     });

@@ -75,7 +75,7 @@ function rowToLine(row: LineRow): StatementLine {
   return {
     packageId: row.package_id,
     fsLineId: row.fs_line_id,
-    amount: Number(row.amount ?? '0'),
+    amount: row.amount ?? '0',
     statement: row.statement as StatementType,
     metadata: row.metadata != null && typeof row.metadata === 'object' ? (row.metadata as Record<string, unknown>) : undefined,
     displayOrder: row.display_order ?? 0,
@@ -205,6 +205,63 @@ export async function insertStatementLine(
       input.sectionName ?? null,
     ]
   );
+}
+
+/**
+ * Batch insert statement lines for a package. Uses multi-row INSERT for performance.
+ * Batches in groups of 500 to stay within PostgreSQL parameter limits (~65535 params, 10 params/row).
+ */
+export async function insertStatementLinesBatch(
+  pool: Pool,
+  lines: Array<{
+    packageId: string;
+    fsLineId: string;
+    amount: number;
+    statement: StatementType;
+    metadata?: Record<string, unknown>;
+    displayOrder?: number;
+    indentLevel?: number;
+    isSubtotal?: boolean;
+    isGrandTotal?: boolean;
+    sectionName?: string | null;
+  }>
+): Promise<void> {
+  if (lines.length === 0) return;
+
+  const BATCH_SIZE = 500;
+  const PARAMS_PER_ROW = 10;
+
+  for (let batchStart = 0; batchStart < lines.length; batchStart += BATCH_SIZE) {
+    const batch = lines.slice(batchStart, batchStart + BATCH_SIZE);
+    const valuesClauses: string[] = [];
+    const params: unknown[] = [];
+
+    batch.forEach((line, idx) => {
+      const offset = idx * PARAMS_PER_ROW;
+      valuesClauses.push(
+        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10})`
+      );
+      params.push(
+        line.packageId,
+        line.fsLineId,
+        line.amount,
+        line.statement,
+        line.metadata != null ? JSON.stringify(line.metadata) : null,
+        line.displayOrder ?? 0,
+        line.indentLevel ?? 0,
+        line.isSubtotal ?? false,
+        line.isGrandTotal ?? false,
+        line.sectionName ?? null,
+      );
+    });
+
+    await pool.query(
+      `INSERT INTO statement_lines (package_id, fs_line_id, amount, statement, metadata, display_order, indent_level, is_subtotal, is_grand_total, section_name)
+       VALUES ${valuesClauses.join(', ')}
+       ON CONFLICT (package_id, fs_line_id) DO UPDATE SET amount = EXCLUDED.amount, statement = EXCLUDED.statement, metadata = EXCLUDED.metadata, display_order = EXCLUDED.display_order, indent_level = EXCLUDED.indent_level, is_subtotal = EXCLUDED.is_subtotal, is_grand_total = EXCLUDED.is_grand_total, section_name = EXCLUDED.section_name`,
+      params
+    );
+  }
 }
 
 export async function listStatementLinesByPackageId(pool: Pool, packageId: string): Promise<StatementLine[]> {

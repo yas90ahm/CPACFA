@@ -9,10 +9,10 @@ export interface EquityMethodInvestmentRow {
   tenantId: string;
   investeeName: string;
   investmentDate: string;
-  ownershipPercent: number;
-  initialInvestment: number;
-  currentCarryingValue?: number;
-  basisDifference?: number;
+  ownershipPercent: string;
+  initialInvestment: string;
+  currentCarryingValue?: string;
+  basisDifference?: string;
   basisDifferenceComponents?: Array<{ description: string; amount: number; amortizationYears?: number }>;
   isSignificantInfluence: boolean;
   influenceBasis?: string;
@@ -25,13 +25,13 @@ export interface EquityMethodIncomeRow {
   tenantId: string;
   investmentId: string;
   periodLabel: string;
-  investeeNetIncome?: number;
-  shareOfIncome?: number;
-  dividendsReceived?: number;
-  basisDifferenceAmortization?: number;
-  impairmentLoss?: number;
-  netEquityIncome?: number;
-  carryingValueAfter?: number;
+  investeeNetIncome?: string;
+  shareOfIncome?: string;
+  dividendsReceived?: string;
+  basisDifferenceAmortization?: string;
+  impairmentLoss?: string;
+  netEquityIncome?: string;
+  carryingValueAfter?: string;
   createdAt: string;
 }
 
@@ -54,12 +54,12 @@ export async function getInvestment(pool: Pool, tenantId: string, id: string): P
   const r = await pool.query('SELECT * FROM equity_method_investments WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
   if (!r.rows[0]) return null;
   const row = r.rows[0];
-  return { id: row.id, tenantId: row.tenant_id, investeeName: row.investee_name, investmentDate: row.investment_date, ownershipPercent: Number(row.ownership_percent), initialInvestment: Number(row.initial_investment), currentCarryingValue: row.current_carrying_value != null ? Number(row.current_carrying_value) : undefined, basisDifference: row.basis_difference != null ? Number(row.basis_difference) : undefined, basisDifferenceComponents: row.basis_difference_components, isSignificantInfluence: row.is_significant_influence, influenceBasis: row.influence_basis, notes: row.notes, createdAt: row.created_at };
+  return { id: row.id, tenantId: row.tenant_id, investeeName: row.investee_name, investmentDate: row.investment_date, ownershipPercent: String(row.ownership_percent), initialInvestment: String(row.initial_investment), currentCarryingValue: row.current_carrying_value != null ? String(row.current_carrying_value) : undefined, basisDifference: row.basis_difference != null ? String(row.basis_difference) : undefined, basisDifferenceComponents: row.basis_difference_components, isSignificantInfluence: row.is_significant_influence, influenceBasis: row.influence_basis, notes: row.notes, createdAt: row.created_at };
 }
 
 export async function listInvestments(pool: Pool, tenantId: string): Promise<EquityMethodInvestmentRow[]> {
   const r = await pool.query('SELECT * FROM equity_method_investments WHERE tenant_id = $1 ORDER BY investee_name', [tenantId]);
-  return r.rows.map((row) => ({ id: row.id, tenantId: row.tenant_id, investeeName: row.investee_name, investmentDate: row.investment_date, ownershipPercent: Number(row.ownership_percent), initialInvestment: Number(row.initial_investment), currentCarryingValue: row.current_carrying_value != null ? Number(row.current_carrying_value) : undefined, basisDifference: row.basis_difference != null ? Number(row.basis_difference) : undefined, basisDifferenceComponents: row.basis_difference_components, isSignificantInfluence: row.is_significant_influence, influenceBasis: row.influence_basis, notes: row.notes, createdAt: row.created_at }));
+  return r.rows.map((row) => ({ id: row.id, tenantId: row.tenant_id, investeeName: row.investee_name, investmentDate: row.investment_date, ownershipPercent: String(row.ownership_percent), initialInvestment: String(row.initial_investment), currentCarryingValue: row.current_carrying_value != null ? String(row.current_carrying_value) : undefined, basisDifference: row.basis_difference != null ? String(row.basis_difference) : undefined, basisDifferenceComponents: row.basis_difference_components, isSignificantInfluence: row.is_significant_influence, influenceBasis: row.influence_basis, notes: row.notes, createdAt: row.created_at }));
 }
 
 export async function updateInvestment(pool: Pool, tenantId: string, id: string, patch: Partial<EquityMethodInvestmentRow>): Promise<EquityMethodInvestmentRow | null> {
@@ -92,5 +92,5 @@ export async function recordIncome(pool: Pool, tenantId: string, income: Omit<Eq
 
 export async function listIncome(pool: Pool, tenantId: string, investmentId: string): Promise<EquityMethodIncomeRow[]> {
   const r = await pool.query('SELECT * FROM equity_method_income WHERE tenant_id = $1 AND investment_id = $2 ORDER BY period_label', [tenantId, investmentId]);
-  return r.rows.map((row) => ({ id: row.id, tenantId: row.tenant_id, investmentId: row.investment_id, periodLabel: row.period_label, investeeNetIncome: row.investee_net_income != null ? Number(row.investee_net_income) : undefined, shareOfIncome: row.share_of_income != null ? Number(row.share_of_income) : undefined, dividendsReceived: row.dividends_received != null ? Number(row.dividends_received) : undefined, basisDifferenceAmortization: row.basis_difference_amortization != null ? Number(row.basis_difference_amortization) : undefined, impairmentLoss: row.impairment_loss != null ? Number(row.impairment_loss) : undefined, netEquityIncome: row.net_equity_income != null ? Number(row.net_equity_income) : undefined, carryingValueAfter: row.carrying_value_after != null ? Number(row.carrying_value_after) : undefined, createdAt: row.created_at }));
+  return r.rows.map((row) => ({ id: row.id, tenantId: row.tenant_id, investmentId: row.investment_id, periodLabel: row.period_label, investeeNetIncome: row.investee_net_income != null ? String(row.investee_net_income) : undefined, shareOfIncome: row.share_of_income != null ? String(row.share_of_income) : undefined, dividendsReceived: row.dividends_received != null ? String(row.dividends_received) : undefined, basisDifferenceAmortization: row.basis_difference_amortization != null ? String(row.basis_difference_amortization) : undefined, impairmentLoss: row.impairment_loss != null ? String(row.impairment_loss) : undefined, netEquityIncome: row.net_equity_income != null ? String(row.net_equity_income) : undefined, carryingValueAfter: row.carrying_value_after != null ? String(row.carrying_value_after) : undefined, createdAt: row.created_at }));
 }

@@ -3,6 +3,8 @@
  */
 
 import { callLLMWithFallback } from '../llm/callWithFallback.js';
+import { runInBoundaryScope, enterAdvisoryContext, exitAdvisoryContext } from '../lib/ai_boundary.js';
+import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import { classifyAccount } from './accountClassifier.js';
 import type { AccountType } from '../types/financial.js';
 
@@ -56,39 +58,50 @@ export async function suggestCoAMappingAgentic(
   const prompt = `Accounts:\n${accounts.map((a) => `${a.code}: ${a.name}`).join('\n')}\n\nRespond with JSON array of mappings (accountCode, suggestedType, reason optional).`;
   const fallback: CoAMappingResult = { mappings: fallbackCoAMapping(accounts) };
 
-  const raw = await callLLMWithFallback({
-    system: COA_SYSTEM,
-    prompt,
-    maxTokens: 1024,
-    parse: (r) => r?.trim() ?? '[]',
-    fallback: '[]',
-  });
+  return runInBoundaryScope(async () => {
+    enterAdvisoryContext();
+    try {
+      const raw = await callLLMWithFallback({
+        system: COA_SYSTEM,
+        prompt,
+        maxTokens: 1024,
+        parse: (r) => r?.trim() ?? '[]',
+        fallback: '[]',
+      });
 
-  if (!raw || raw === '[]') return fallback;
-  try {
-    const cleaned = raw.replace(/```json?\s*|\s*```/g, '').trim();
-    const parsed = JSON.parse(cleaned) as unknown;
-    if (!Array.isArray(parsed)) return fallback;
-    const validTypes: AccountType[] = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'];
-    const mappings: CoAMappingItem[] = [];
-    for (const item of parsed) {
-      if (!item || typeof item !== 'object') continue;
-      const o = item as Record<string, unknown>;
-      const code = typeof o.accountCode === 'string' ? o.accountCode : undefined;
-      const type = validTypes.includes(o.suggestedType as AccountType) ? (o.suggestedType as AccountType) : undefined;
-      if (code != null && type != null) {
-        mappings.push({
-          accountCode: code,
-          suggestedType: type,
-          reason: typeof o.reason === 'string' ? o.reason.slice(0, 200) : undefined,
-        });
+      if (!raw || raw === '[]') return fallback;
+      try {
+        const cleaned = raw.replace(/```json?\s*|\s*```/g, '').trim();
+        const parsed = JSON.parse(cleaned) as unknown;
+        if (!Array.isArray(parsed)) return fallback;
+
+        // Apply numeric guardrail on parsed LLM output
+        assertNoNumericAmountsInAgentOutput(parsed, 'agentic_onboarding_coa_mapping');
+
+        const validTypes: AccountType[] = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'];
+        const mappings: CoAMappingItem[] = [];
+        for (const item of parsed) {
+          if (!item || typeof item !== 'object') continue;
+          const o = item as Record<string, unknown>;
+          const code = typeof o.accountCode === 'string' ? o.accountCode : undefined;
+          const type = validTypes.includes(o.suggestedType as AccountType) ? (o.suggestedType as AccountType) : undefined;
+          if (code != null && type != null) {
+            mappings.push({
+              accountCode: code,
+              suggestedType: type,
+              reason: typeof o.reason === 'string' ? o.reason.slice(0, 200) : undefined,
+            });
+          }
+        }
+        if (mappings.length === 0) return fallback;
+        return { mappings };
+      } catch {
+        return fallback;
       }
+    } finally {
+      exitAdvisoryContext();
     }
-    if (mappings.length === 0) return fallback;
-    return { mappings };
-  } catch {
-    return fallback;
-  }
+  });
 }
 
 export interface FirstCloseStep {
@@ -113,37 +126,48 @@ export async function getFirstCloseGuideAgentic(params?: {
     : 'Return JSON array of 5-7 steps for a typical first month-end close.';
   const fallback: FirstCloseGuideResult = { steps: FIRST_CLOSE_STEPS };
 
-  const raw = await callLLMWithFallback({
-    system: FIRST_CLOSE_SYSTEM,
-    prompt,
-    maxTokens: 512,
-    parse: (r) => r?.trim() ?? '[]',
-    fallback: '[]',
-  });
+  return runInBoundaryScope(async () => {
+    enterAdvisoryContext();
+    try {
+      const raw = await callLLMWithFallback({
+        system: FIRST_CLOSE_SYSTEM,
+        prompt,
+        maxTokens: 512,
+        parse: (r) => r?.trim() ?? '[]',
+        fallback: '[]',
+      });
 
-  if (!raw || raw === '[]') return fallback;
-  try {
-    const cleaned = raw.replace(/```json?\s*|\s*```/g, '').trim();
-    const parsed = JSON.parse(cleaned) as unknown;
-    if (!Array.isArray(parsed)) return fallback;
-    const steps: FirstCloseStep[] = [];
-    for (const item of parsed) {
-      if (!item || typeof item !== 'object') continue;
-      const o = item as Record<string, unknown>;
-      const order = typeof o.order === 'number' ? o.order : steps.length + 1;
-      const label = typeof o.label === 'string' ? o.label : '';
-      if (label) {
-        steps.push({
-          order,
-          label,
-          description: typeof o.description === 'string' ? o.description.slice(0, 300) : undefined,
-        });
+      if (!raw || raw === '[]') return fallback;
+      try {
+        const cleaned = raw.replace(/```json?\s*|\s*```/g, '').trim();
+        const parsed = JSON.parse(cleaned) as unknown;
+        if (!Array.isArray(parsed)) return fallback;
+
+        // Apply numeric guardrail on parsed LLM output
+        assertNoNumericAmountsInAgentOutput(parsed, 'agentic_onboarding_first_close_guide');
+
+        const steps: FirstCloseStep[] = [];
+        for (const item of parsed) {
+          if (!item || typeof item !== 'object') continue;
+          const o = item as Record<string, unknown>;
+          const order = typeof o.order === 'number' ? o.order : steps.length + 1;
+          const label = typeof o.label === 'string' ? o.label : '';
+          if (label) {
+            steps.push({
+              order,
+              label,
+              description: typeof o.description === 'string' ? o.description.slice(0, 300) : undefined,
+            });
+          }
+        }
+        if (steps.length === 0) return fallback;
+        steps.sort((a, b) => a.order - b.order);
+        return { steps };
+      } catch {
+        return fallback;
       }
+    } finally {
+      exitAdvisoryContext();
     }
-    if (steps.length === 0) return fallback;
-    steps.sort((a, b) => a.order - b.order);
-    return { steps };
-  } catch {
-    return fallback;
-  }
+  });
 }

@@ -161,7 +161,7 @@ router.post('/statements', validateBody(statementsBodySchema), async (req: Reque
       stmtOptsStmt.loadContracts = async (tid: string) => {
         try {
           const rows = await listContracts(poolStmt as Pool, tid);
-          return rows.map((r) => ({ id: r.id, totalContractValue: r.totalContractValue, periodRecognizedRevenue: undefined }));
+          return rows.map((r) => ({ id: r.id, totalContractValue: String(r.totalContractValue), periodRecognizedRevenue: undefined }));
         } catch {
           return [];
         }
@@ -475,7 +475,7 @@ router.get(
         stmtOpts.loadContracts = async (tid: string) => {
           try {
             const rows = await listContracts(pool as Pool, tid);
-            return rows.map((r) => ({ id: r.id, totalContractValue: r.totalContractValue, periodRecognizedRevenue: undefined }));
+            return rows.map((r) => ({ id: r.id, totalContractValue: String(r.totalContractValue), periodRecognizedRevenue: undefined }));
           } catch {
             return [];
           }

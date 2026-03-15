@@ -160,8 +160,8 @@ export async function buildBoardPackage(
   const variances = await varianceRepo.listVariancesForSession(pool, tenantId, closeSessionId);
   const materialVariances: BoardPackageVariance[] = variances
     .filter((v) => {
-      const pct = v.changePercentage != null ? Math.abs(v.changePercentage) : 0;
-      const threshold = v.materialThresholdPct ?? 5;
+      const pct = v.changePercentage != null ? Math.abs(Number(v.changePercentage)) : 0;
+      const threshold = Number(v.materialThresholdPct ?? 5);
       return pct >= threshold;
     })
     .map((v) => ({

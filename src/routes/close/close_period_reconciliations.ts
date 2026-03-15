@@ -26,8 +26,11 @@ import {
   getPriorPeriodData,
   copyPriorPeriod,
   carryForwardReconItems,
+  carryForwardItems,
+  resolveItem,
   PeriodReconciliationError,
 } from '../../services/period_reconciliation_service.js';
+import { computeRollForward } from '../../services/roll_forward_recon_service.js';
 import { checkReconCompleteness } from '../../services/recon_completeness_gate.js';
 import type { ReconItemType } from '../../types/period_reconciliation.js';
 import {
@@ -527,6 +530,75 @@ router.put('/sessions/:periodId/reconciliations/:reconId/notes', async (req: Req
       return;
     }
     send500(res, e, 'Update recon notes failed');
+  }
+});
+
+/** GET /api/close/sessions/:sessionId/reconciliations/:reconId/roll-forward — roll-forward analysis (GAP I12) */
+router.get('/sessions/:sessionId/reconciliations/:reconId/roll-forward', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    const reconId = req.params.reconId ?? '';
+    const sessionId = req.params.sessionId ?? '';
+    if (!tenantId || !pool || !reconId || !sessionId) {
+      res.status(400).json({ error: 'Tenant context, sessionId, and reconId required' });
+      return;
+    }
+    const result = await computeRollForward(pool, tenantId, reconId, sessionId);
+    res.json(result);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes('not found')) {
+      res.status(404).json({ error: msg });
+      return;
+    }
+    send500(res, e, 'Roll-forward reconciliation failed');
+  }
+});
+
+/** POST /api/close/sessions/:periodId/reconciliations/carry-forward — carry forward unresolved items between sessions (GAP I10) */
+router.post('/sessions/:periodId/reconciliations/carry-forward', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    const periodId = req.params.periodId ?? '';
+    const body = req.body as { fromSessionId?: string };
+    if (!tenantId || !pool || !periodId) {
+      res.status(400).json({ error: 'Tenant context and periodId required' });
+      return;
+    }
+    if (!body?.fromSessionId) {
+      res.status(400).json({ error: 'fromSessionId is required in request body' });
+      return;
+    }
+    if (!await guardSessionWritable(res, pool, tenantId, periodId)) return;
+    const items = await carryForwardItems(pool, tenantId, body.fromSessionId, periodId);
+    res.json({ items, count: items.length });
+  } catch (e) {
+    send500(res, e, 'Carry forward items failed');
+  }
+});
+
+/** POST /api/close/sessions/:periodId/reconciliations/items/:itemId/resolve — resolve a reconciling item (GAP I10) */
+router.post('/sessions/:periodId/reconciliations/items/:itemId/resolve', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    const itemId = req.params.itemId ?? '';
+    const periodId = req.params.periodId ?? '';
+    if (!tenantId || !pool || !itemId) {
+      res.status(400).json({ error: 'Tenant context and itemId required' });
+      return;
+    }
+    if (!await guardSessionWritable(res, pool, tenantId, periodId)) return;
+    const resolved = await resolveItem(pool, tenantId, itemId);
+    res.json(resolved);
+  } catch (e) {
+    if (e instanceof PeriodReconciliationError && e.code === 'NOT_FOUND') {
+      res.status(404).json({ error: e.message });
+      return;
+    }
+    send500(res, e, 'Resolve recon item failed');
   }
 });
 

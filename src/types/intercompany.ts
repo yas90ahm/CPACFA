@@ -22,12 +22,12 @@ export interface IntercompanyReconciliationResult {
   pairId: string;
   periodLabel: string;
   /** Matched amount (min of A balance and B balance when both present) */
-  matchedAmount: number;
+  matchedAmount: string;
   /** Entity A balance (IC receivable) */
-  balanceA: number;
+  balanceA: string;
   /** Entity B balance (IC payable) */
-  balanceB: number;
-  variance: number;
+  balanceB: string;
+  variance: string;
   status: IntercompanyReconciliationStatus;
   varianceDetail?: string;
   resolution?: string;

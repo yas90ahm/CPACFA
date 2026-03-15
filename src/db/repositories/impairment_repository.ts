@@ -19,7 +19,7 @@ export interface GoodwillAllocationRow {
   tenantId: string;
   cguId: string;
   acquisitionDate?: string;
-  goodwillAmount: number;
+  goodwillAmount: string;
   allocationRationale?: string;
   createdAt: string;
 }
@@ -32,9 +32,9 @@ export interface ImpairmentTestRow {
   cguId?: string;
   assetType: 'goodwill' | 'intangible' | 'ppe' | 'investment';
   assetDescription?: string;
-  carryingAmount: number;
-  recoverableAmount: number;
-  impairmentLoss?: number;
+  carryingAmount: string;
+  recoverableAmount: string;
+  impairmentLoss?: string;
   method: 'value_in_use' | 'fair_value_less_costs' | 'value_in_use_and_fair_value_less_costs';
   assumptions?: { discountRate?: number; growthRate?: number; cashFlows?: number[] };
   qualitativeAssessment?: string;
@@ -125,18 +125,18 @@ export async function listGoodwillAllocations(pool: Pool, tenantId: string, cguI
     tenantId: row.tenant_id,
     cguId: row.cgu_id,
     acquisitionDate: row.acquisition_date ?? undefined,
-    goodwillAmount: Number(row.goodwill_amount),
+    goodwillAmount: String(row.goodwill_amount),
     allocationRationale: row.allocation_rationale ?? undefined,
     createdAt: row.created_at,
   }));
 }
 
-export async function getTotalGoodwillForCGU(pool: Pool, tenantId: string, cguId: string): Promise<number> {
+export async function getTotalGoodwillForCGU(pool: Pool, tenantId: string, cguId: string): Promise<string> {
   const r = await pool.query(
     'SELECT COALESCE(SUM(goodwill_amount), 0) as total FROM goodwill_allocation WHERE tenant_id = $1 AND cgu_id = $2',
     [tenantId, cguId]
   );
-  return Number(r.rows[0]?.total ?? 0);
+  return String(r.rows[0]?.total ?? '0');
 }
 
 // Impairment Tests
@@ -172,9 +172,9 @@ export async function getImpairmentTest(pool: Pool, tenantId: string, id: string
     cguId: row.cgu_id ?? undefined,
     assetType: row.asset_type,
     assetDescription: row.asset_description ?? undefined,
-    carryingAmount: Number(row.carrying_amount),
-    recoverableAmount: Number(row.recoverable_amount),
-    impairmentLoss: row.impairment_loss != null ? Number(row.impairment_loss) : undefined,
+    carryingAmount: String(row.carrying_amount),
+    recoverableAmount: String(row.recoverable_amount),
+    impairmentLoss: row.impairment_loss != null ? String(row.impairment_loss) : undefined,
     method: row.method,
     assumptions: row.assumptions ?? undefined,
     qualitativeAssessment: row.qualitative_assessment ?? undefined,
@@ -200,9 +200,9 @@ export async function listImpairmentTests(pool: Pool, tenantId: string, periodLa
     cguId: row.cgu_id ?? undefined,
     assetType: row.asset_type,
     assetDescription: row.asset_description ?? undefined,
-    carryingAmount: Number(row.carrying_amount),
-    recoverableAmount: Number(row.recoverable_amount),
-    impairmentLoss: row.impairment_loss != null ? Number(row.impairment_loss) : undefined,
+    carryingAmount: String(row.carrying_amount),
+    recoverableAmount: String(row.recoverable_amount),
+    impairmentLoss: row.impairment_loss != null ? String(row.impairment_loss) : undefined,
     method: row.method,
     assumptions: row.assumptions ?? undefined,
     qualitativeAssessment: row.qualitative_assessment ?? undefined,

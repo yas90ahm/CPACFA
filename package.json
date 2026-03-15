@@ -30,9 +30,12 @@
   "engines": {
     "node": ">=18"
   },
+  "_vulnerabilityNotes": {
+    "xlsx": "GHSA-4r6h-8v6p-xvw6 (prototype pollution, high) and GHSA-5pgg-2g8v-p4x9 (ReDoS, high). No upstream fix available. Flagged for replacement with exceljs. Used in: fileIngestion, gl_upload_service, excel_export_service, parse_xbrl_taxonomy."
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
-    "bcrypt": "^5.1.1",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "csv-parse": "^5.5.2",
     "decimal.js": "^10.6.0",
@@ -54,7 +57,7 @@
     "pdf-parse": "^1.1.1"
   },
   "devDependencies": {
-    "@types/bcrypt": "^5.0.2",
+    "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.19",
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.5",

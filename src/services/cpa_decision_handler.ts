@@ -17,7 +17,7 @@ import type { AuditLogContext } from './segregation_service.js';
 import { buildLinearRecognitionSchedule } from './revenue_recognition_service.js';
 import { depreciationScheduleSl, depreciationScheduleDdb } from './fixed_asset_service.js';
 import { computeDeferredTaxesStateless } from './deferred_tax_service.js';
-import { round2 } from '../utils/decimal.js';
+import { round2, from as decFrom } from '../utils/decimal.js';
 import { createBridgeAdjustmentJustification } from './justification_service.js';
 
 export interface AgentRecommendation {
@@ -97,9 +97,9 @@ async function runDeterministic(
 ): Promise<unknown> {
   switch (standard) {
     case 'Lease': {
-      const term = Number(params.term);
-      const rate = Number(params.rate);
-      const payment = Number(params.payment);
+      const term = decFrom(params.term as number | string).toNumber();
+      const rate = decFrom(params.rate as number | string).toNumber();
+      const payment = decFrom(params.payment as number | string).toNumber();
       const std = String(params.standard).toLowerCase() as 'asc842' | 'ifrs16';
       if (std !== 'asc842' && std !== 'ifrs16') {
         throw new Error('Lease standard must be asc842 or ifrs16');
@@ -121,29 +121,29 @@ async function runDeterministic(
       // return { ...pvResult, ...classification };
     }
     case 'Revenue': {
-      const amount = Number(params.amount);
-      const periods = Number(params.periods);
+      const amount = decFrom(params.amount as number | string).toNumber();
+      const periods = decFrom(params.periods as number | string).toNumber();
       const start_date = String(params.start_date ?? '').trim();
       if (!start_date) throw new Error('Revenue start_date is required');
       return buildLinearRecognitionSchedule(amount, Math.max(1, Math.round(periods)), start_date);
     }
     case 'FixedAsset': {
-      const cost = Number(params.cost);
-      const life = Number(params.life);
+      const cost = decFrom(params.cost as number | string).toNumber();
+      const life = decFrom(params.life as number | string).toNumber();
       const method = String(params.method ?? 'straight_line').toLowerCase();
       const start_date =
         typeof params.start_date === 'string' && params.start_date.trim()
           ? params.start_date.trim()
           : new Date().toISOString().slice(0, 10);
-      const salvageValue = params.salvageValue != null ? Number(params.salvageValue) : 0;
+      const salvageValue = params.salvageValue != null ? decFrom(params.salvageValue as number | string).toNumber() : 0;
       if (method === 'declining_balance' || method === 'ddb') {
         return depreciationScheduleDdb(cost, salvageValue, life, start_date, '', '');
       }
       return depreciationScheduleSl(cost, salvageValue, life, start_date, '', '');
     }
     case 'Tax': {
-      const temp_diff = Number(params.temp_diff);
-      const rate = Number(params.rate);
+      const temp_diff = decFrom(params.temp_diff as number | string).toNumber();
+      const rate = decFrom(params.rate as number | string).toNumber();
       const isDeductibleTemp = params.isDeductibleTemp !== false;
       const reportDate =
         typeof params.reportDate === 'string' && params.reportDate.trim()

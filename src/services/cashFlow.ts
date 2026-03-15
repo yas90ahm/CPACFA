@@ -1,9 +1,13 @@
 /**
  * Cash Flow Statement builder (indirect, minimal estimate).
  * Produces an estimated statement when only TB and P&L are available.
+ * When cfClassificationMap is provided, accounts with explicit cash_flow_class
+ * on their mapping rule are placed into the designated section; others fall back
+ * to the existing regex-based inference logic.
  */
 
 import type { TrialBalanceResult, ProfitAndLoss, CashFlowStatement, TrialBalanceEntry } from '../types/financial.js';
+import type { CashFlowClass } from '../types/coa_mapping.js';
 import { from, minus, plus, round2, sumRound2 } from '../utils/decimal.js';
 
 export interface CashTransaction {
@@ -19,22 +23,80 @@ export interface CashTransaction {
 export type CashFlowCategory = 'operating' | 'investing' | 'financing' | 'not_applicable';
 
 /**
+ * Map from account identifier (accountCode or accountName) to its explicit
+ * cash_flow_class from coa_mapping_rules. Null/undefined means use inference.
+ */
+export type CfClassificationMap = Map<string, CashFlowClass>;
+
+/**
  * Indirect method cash flow per ASC 230 (Statement of Cash Flows) / IAS 7.
  * Non-cash adjustments (D&A, DTA/DTL, unrealized FX, SBC) follow ASC 230-10-45-28.
+ *
+ * When cfClassificationMap is provided, entries with an explicit classification
+ * are separated first and placed into the correct section. Remaining entries
+ * fall through to the existing heuristic logic.
  */
 export function buildCashFlowStatement(
   trialBalance: TrialBalanceResult,
   profitAndLoss: ProfitAndLoss,
-  priorTrialBalance?: TrialBalanceResult
+  priorTrialBalance?: TrialBalanceResult,
+  cfClassificationMap?: CfClassificationMap
 ): CashFlowStatement {
   const endingCash = getNetAmount(trialBalance.entries, /cash|bank/i);
   const beginningCash = priorTrialBalance ? getNetAmount(priorTrialBalance.entries, /cash|bank/i) : undefined;
   const netIncome = profitAndLoss.netIncome ?? 0;
 
+  // --- Explicit cf_classification overrides ---
+  // Collect balance-sheet-delta lines that have an explicit cash_flow_class.
+  // These bypass the heuristic regex matching below.
+  const explicitOperating: CashFlowStatement['operating'] = [];
+  const explicitInvesting: CashFlowStatement['investing'] = [];
+  const explicitFinancing: CashFlowStatement['financing'] = [];
+  const explicitlyClassifiedKeys = new Set<string>();
+
+  if (cfClassificationMap && cfClassificationMap.size > 0 && priorTrialBalance) {
+    for (const entry of trialBalance.entries) {
+      const key = entry.accountCode ?? entry.accountName;
+      const cfClass = cfClassificationMap.get(key);
+      if (!cfClass || cfClass === 'not_applicable') continue;
+
+      // Compute delta for this specific account
+      const priorEntry = priorTrialBalance.entries.find(
+        (pe) => (pe.accountCode ?? pe.accountName) === key
+      );
+      const currentNet = normalizeNet(entry);
+      const priorNet = priorEntry ? normalizeNet(priorEntry) : 0;
+      const delta = minus(currentNet, priorNet);
+      if (delta === 0) continue;
+
+      const label = entry.accountName ?? key;
+      const line = { label, amount: delta };
+      if (cfClass === 'operating') explicitOperating.push(line);
+      else if (cfClass === 'investing') explicitInvesting.push(line);
+      else if (cfClass === 'financing') explicitFinancing.push(line);
+      explicitlyClassifiedKeys.add(key);
+    }
+  }
+
+  // --- Heuristic inference (existing logic) ---
+  // Filter out explicitly-classified entries so they are not double-counted.
+  const filterExplicit = (entries: TrialBalanceEntry[]): TrialBalanceEntry[] => {
+    if (explicitlyClassifiedKeys.size === 0) return entries;
+    return entries.filter((e) => !explicitlyClassifiedKeys.has(e.accountCode ?? e.accountName));
+  };
+
+  const filteredTB: TrialBalanceResult = {
+    ...trialBalance,
+    entries: filterExplicit(trialBalance.entries),
+  };
+  const filteredPriorTB: TrialBalanceResult | undefined = priorTrialBalance
+    ? { ...priorTrialBalance, entries: filterExplicit(priorTrialBalance.entries) }
+    : undefined;
+
   const depreciation = sumPLExpense(profitAndLoss, /depreciation|amort/i);
   // ASC 230-10-45-28: deferred tax (DTA/DTL) — change in balance; reversal sign for operating reconciliation
-  const changeDeferredTax = priorTrialBalance
-    ? deltaByRegex(priorTrialBalance, trialBalance, /deferred tax|DTA|DTL|tax asset|tax liability/i)
+  const changeDeferredTax = filteredPriorTB
+    ? deltaByRegex(filteredPriorTB, filteredTB, /deferred tax|DTA|DTL|tax asset|tax liability/i)
     : undefined;
   // ASC 230-10-45-28: unrealized FX — add back expense (reverse P&L effect)
   const unrealizedFX = sumPLExpense(
@@ -44,9 +106,9 @@ export function buildCashFlowStatement(
   // ASC 230-10-45-28: stock-based compensation — non-cash add-back
   const sbc = sumPLExpense(profitAndLoss, /stock.comp|option|RSU|restricted stock|SBC|share.based/i);
 
-  const changeAR = priorTrialBalance ? deltaByRegex(priorTrialBalance, trialBalance, /receivable/i) : undefined;
-  const changeInv = priorTrialBalance ? deltaByRegex(priorTrialBalance, trialBalance, /inventory/i) : undefined;
-  const changeAP = priorTrialBalance ? deltaByRegex(priorTrialBalance, trialBalance, /payable/i) : undefined;
+  const changeAR = filteredPriorTB ? deltaByRegex(filteredPriorTB, filteredTB, /receivable/i) : undefined;
+  const changeInv = filteredPriorTB ? deltaByRegex(filteredPriorTB, filteredTB, /inventory/i) : undefined;
+  const changeAP = filteredPriorTB ? deltaByRegex(filteredPriorTB, filteredTB, /payable/i) : undefined;
 
   // Operating section: ASC 230 indirect method — Net income, then non-cash adjustments, then working capital
   const operating: CashFlowStatement['operating'] = [
@@ -61,25 +123,27 @@ export function buildCashFlowStatement(
   if (changeAR != null) operating.push({ label: 'Change in accounts receivable', amount: -changeAR });
   if (changeInv != null) operating.push({ label: 'Change in inventory', amount: -changeInv });
   if (changeAP != null) operating.push({ label: 'Change in accounts payable', amount: changeAP });
+  // Append explicit operating overrides
+  operating.push(...explicitOperating);
 
   const investing: CashFlowStatement['investing'] = [];
   const financing: CashFlowStatement['financing'] = [];
-  if (priorTrialBalance) {
-    const changePPE = deltaByRegex(priorTrialBalance, trialBalance, /property|plant|equipment|fixed asset|capital/i);
+  if (filteredPriorTB) {
+    const changePPE = deltaByRegex(filteredPriorTB, filteredTB, /property|plant|equipment|fixed asset|capital/i);
     if (changePPE !== 0) {
       investing.push({
         label: changePPE > 0 ? 'Capital expenditures' : 'Proceeds from asset sales',
         amount: -changePPE,
       });
     }
-    const changeDebt = deltaByRegex(priorTrialBalance, trialBalance, /loan|note|debt|credit line|mortgage/i);
+    const changeDebt = deltaByRegex(filteredPriorTB, filteredTB, /loan|note|debt|credit line|mortgage/i);
     if (changeDebt !== 0) {
       financing.push({
         label: changeDebt > 0 ? 'Borrowings' : 'Debt repayments',
         amount: changeDebt,
       });
     }
-    const changeEquity = deltaByRegex(priorTrialBalance, trialBalance, /equity|capital|contribution|share/i);
+    const changeEquity = deltaByRegex(filteredPriorTB, filteredTB, /equity|capital|contribution|share/i);
     if (changeEquity !== 0) {
       financing.push({
         label: changeEquity > 0 ? 'Equity issued' : 'Distributions / buybacks',
@@ -87,6 +151,9 @@ export function buildCashFlowStatement(
       });
     }
   }
+  // Append explicit investing/financing overrides
+  investing.push(...explicitInvesting);
+  financing.push(...explicitFinancing);
 
   return {
     operating,

@@ -11,8 +11,8 @@ export type LeaseStandard = 'asc842' | 'ifrs16';
 export interface LeaseClassificationBasisJson {
   termMonths: number;
   economicLifeMonthsUsed: number;
-  pvOfPayments: number;
-  fairValueOfAsset?: number;
+  pvOfPayments: string;
+  fairValueOfAsset?: string;
   fairValueUsed: boolean;
   majorPartOfLife: boolean;
   pvVsFvTest: boolean;
@@ -26,9 +26,9 @@ export interface LeaseRow {
   commencementDate: string;
   termMonths: number;
   paymentFrequency: PaymentFrequency;
-  paymentAmount: number;
-  escalationPct: number;
-  discountRate: number;
+  paymentAmount: string;
+  escalationPct: string;
+  discountRate: string;
   currency: string;
   standard: LeaseStandard;
   classificationBasis?: LeaseClassificationBasisJson;
@@ -41,12 +41,12 @@ export interface LeaseScheduleRow {
   leaseId: string;
   periodStart: string;
   periodEnd: string;
-  leasePayment: number;
-  interestExpense: number;
-  liabilityReduction: number;
-  leaseLiability: number;
-  rouAsset: number;
-  rouAmortization: number;
+  leasePayment: string;
+  interestExpense: string;
+  liabilityReduction: string;
+  leaseLiability: string;
+  rouAsset: string;
+  rouAmortization: string;
   createdAt: string;
 }
 
@@ -63,9 +63,9 @@ function rowToLease(row: Record<string, unknown>): LeaseRow {
     commencementDate: (row.commencement_date as Date)?.toISOString?.()?.slice(0, 10) ?? String(row.commencement_date),
     termMonths: Number(row.term_months),
     paymentFrequency: row.payment_frequency as PaymentFrequency,
-    paymentAmount: Number(row.payment_amount),
-    escalationPct: Number(row.escalation_pct ?? 0),
-    discountRate: Number(row.discount_rate),
+    paymentAmount: String(row.payment_amount),
+    escalationPct: String(row.escalation_pct ?? 0),
+    discountRate: String(row.discount_rate),
     currency: (row.currency as string) ?? 'USD',
     standard: row.standard as LeaseStandard,
     createdAt: (row.created_at as Date)?.toISOString?.() ?? String(row.created_at),
@@ -79,12 +79,12 @@ function rowToSchedule(row: Record<string, unknown>): LeaseScheduleRow {
     leaseId: row.lease_id as string,
     periodStart: (row.period_start as Date)?.toISOString?.()?.slice(0, 10) ?? String(row.period_start),
     periodEnd: (row.period_end as Date)?.toISOString?.()?.slice(0, 10) ?? String(row.period_end),
-    leasePayment: Number(row.lease_payment),
-    interestExpense: Number(row.interest_expense),
-    liabilityReduction: Number(row.liability_reduction),
-    leaseLiability: Number(row.lease_liability),
-    rouAsset: Number(row.rou_asset),
-    rouAmortization: Number(row.rou_amortization),
+    leasePayment: String(row.lease_payment),
+    interestExpense: String(row.interest_expense),
+    liabilityReduction: String(row.liability_reduction),
+    leaseLiability: String(row.lease_liability),
+    rouAsset: String(row.rou_asset),
+    rouAmortization: String(row.rou_amortization),
     createdAt: (row.created_at as Date)?.toISOString?.() ?? String(row.created_at),
   };
 }
@@ -197,7 +197,7 @@ export async function getLeasePositionForPeriod(
   pool: Pool,
   tenantId: string,
   periodLabel: string
-): Promise<{ totalRouAsset: number; totalLeaseLiability: number }> {
+): Promise<{ totalRouAsset: string; totalLeaseLiability: string }> {
   const periodEnd = periodLabelToEnd(periodLabel);
   const r = await pool.query(
     `SELECT COALESCE(SUM(ls.rou_asset), 0) AS rou_asset, COALESCE(SUM(ls.lease_liability), 0) AS lease_liability
@@ -208,8 +208,8 @@ export async function getLeasePositionForPeriod(
   );
   const row = r.rows[0];
   return {
-    totalRouAsset: row ? Number(row.rou_asset) : 0,
-    totalLeaseLiability: row ? Number(row.lease_liability) : 0,
+    totalRouAsset: row ? String(row.rou_asset) : '0',
+    totalLeaseLiability: row ? String(row.lease_liability) : '0',
   };
 }
 

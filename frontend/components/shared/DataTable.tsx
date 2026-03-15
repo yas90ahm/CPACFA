@@ -26,6 +26,7 @@ export interface DataTableProps<T> {
   emptyMessage?: string;
   loading?: boolean;
   rowClassName?: (row: T) => string;
+  rowStyle?: (row: T) => React.CSSProperties;
 }
 
 export function DataTable<T>(props: DataTableProps<T>) {
@@ -43,6 +44,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
     emptyMessage = 'No data',
     loading = false,
     rowClassName,
+    rowStyle,
   } = props;
 
   if (loading) {
@@ -131,6 +133,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
                       onRowClick && 'cursor-pointer hover:bg-hover',
                       rowClassName?.(row)
                     )}
+                    style={rowStyle?.(row)}
                   >
                     {columns.map((col) => (
                       <td

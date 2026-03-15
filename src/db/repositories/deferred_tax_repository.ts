@@ -10,12 +10,12 @@ export interface DeferredTaxItemRow {
   periodLabel: string;
   itemType: 'temporary_difference' | 'nol_carryforward' | 'tax_credit';
   description: string;
-  bookBasis?: number;
-  taxBasis?: number;
-  temporaryDifference?: number;
-  taxRate?: number;
-  deferredTaxAsset?: number;
-  deferredTaxLiability?: number;
+  bookBasis?: string;
+  taxBasis?: string;
+  temporaryDifference?: string;
+  taxRate?: string;
+  deferredTaxAsset?: string;
+  deferredTaxLiability?: string;
   reversalPattern?: '1_year' | '2_5_years' | 'indefinite';
   sourceAccount?: string;
   notes?: string;
@@ -27,9 +27,9 @@ export interface ValuationAllowanceRow {
   id: string;
   tenantId: string;
   periodLabel: string;
-  deferredTaxAssetGross: number;
-  valuationAllowance: number;
-  deferredTaxAssetNet: number;
+  deferredTaxAssetGross: string;
+  valuationAllowance: string;
+  deferredTaxAssetNet: string;
   assessment: string;
   factors?: { positiveSources?: string[]; negativeSources?: string[]; rationale?: string };
   createdAt: string;
@@ -39,10 +39,10 @@ export interface RateChangeRow {
   id: string;
   tenantId: string;
   periodLabel: string;
-  oldRate?: number;
-  newRate?: number;
+  oldRate?: string;
+  newRate?: string;
   enactmentDate?: string;
-  impactAmount?: number;
+  impactAmount?: string;
   createdAt: string;
 }
 
@@ -57,12 +57,12 @@ function rowToItem(row: any): DeferredTaxItemRow {
     periodLabel: row.period_label,
     itemType: row.item_type,
     description: row.description,
-    bookBasis: row.book_basis != null ? Number(row.book_basis) : undefined,
-    taxBasis: row.tax_basis != null ? Number(row.tax_basis) : undefined,
-    temporaryDifference: row.temporary_difference != null ? Number(row.temporary_difference) : undefined,
-    taxRate: row.tax_rate != null ? Number(row.tax_rate) : undefined,
-    deferredTaxAsset: row.deferred_tax_asset != null ? Number(row.deferred_tax_asset) : undefined,
-    deferredTaxLiability: row.deferred_tax_liability != null ? Number(row.deferred_tax_liability) : undefined,
+    bookBasis: row.book_basis != null ? String(row.book_basis) : undefined,
+    taxBasis: row.tax_basis != null ? String(row.tax_basis) : undefined,
+    temporaryDifference: row.temporary_difference != null ? String(row.temporary_difference) : undefined,
+    taxRate: row.tax_rate != null ? String(row.tax_rate) : undefined,
+    deferredTaxAsset: row.deferred_tax_asset != null ? String(row.deferred_tax_asset) : undefined,
+    deferredTaxLiability: row.deferred_tax_liability != null ? String(row.deferred_tax_liability) : undefined,
     reversalPattern: row.reversal_pattern ?? undefined,
     sourceAccount: row.source_account ?? undefined,
     notes: row.notes ?? undefined,
@@ -163,9 +163,9 @@ export async function listValuationAllowances(pool: Pool, tenantId: string, peri
     id: row.id,
     tenantId: row.tenant_id,
     periodLabel: row.period_label,
-    deferredTaxAssetGross: Number(row.deferred_tax_asset_gross),
-    valuationAllowance: Number(row.valuation_allowance),
-    deferredTaxAssetNet: Number(row.deferred_tax_asset_net),
+    deferredTaxAssetGross: String(row.deferred_tax_asset_gross),
+    valuationAllowance: String(row.valuation_allowance),
+    deferredTaxAssetNet: String(row.deferred_tax_asset_net),
     assessment: row.assessment,
     factors: row.factors ?? undefined,
     createdAt: row.created_at,
@@ -194,10 +194,10 @@ export async function listRateChanges(pool: Pool, tenantId: string): Promise<Rat
     id: row.id,
     tenantId: row.tenant_id,
     periodLabel: row.period_label,
-    oldRate: row.old_rate != null ? Number(row.old_rate) : undefined,
-    newRate: row.new_rate != null ? Number(row.new_rate) : undefined,
+    oldRate: row.old_rate != null ? String(row.old_rate) : undefined,
+    newRate: row.new_rate != null ? String(row.new_rate) : undefined,
     enactmentDate: row.enactment_date ?? undefined,
-    impactAmount: row.impact_amount != null ? Number(row.impact_amount) : undefined,
+    impactAmount: row.impact_amount != null ? String(row.impact_amount) : undefined,
     createdAt: row.created_at,
   }));
 }

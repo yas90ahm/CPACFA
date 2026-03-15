@@ -38,17 +38,17 @@ function rowToLine(row: GLLineRow): GeneralLedgerLine {
     entry_date: row.entry_date,
     account_code: row.account_code,
     account_name: row.account_name ?? undefined,
-    debit: Number(row.debit ?? '0'),
-    credit: Number(row.credit ?? '0'),
+    debit: row.debit ?? '0',
+    credit: row.credit ?? '0',
     description: row.description ?? undefined,
     amount_provenance: row.amount_provenance ?? undefined,
     source: row.source,
     created_at: row.created_at,
     created_by: row.created_by ?? undefined,
     original_currency: row.original_currency ?? null,
-    original_debit: row.original_debit != null ? Number(row.original_debit) : null,
-    original_credit: row.original_credit != null ? Number(row.original_credit) : null,
-    exchange_rate: row.exchange_rate != null ? Number(row.exchange_rate) : null,
+    original_debit: row.original_debit ?? null,
+    original_credit: row.original_credit ?? null,
+    exchange_rate: row.exchange_rate ?? null,
   };
 }
 
@@ -68,6 +68,13 @@ export async function upsertGLForPeriod(
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // Advisory lock prevents two concurrent uploads for the same tenant+period from racing.
+    // The lock is automatically released when the transaction commits or rolls back.
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtext($1 || '::' || $2))`,
+      [tenantId, periodLabel]
+    );
 
     await client.query(
       'DELETE FROM core.general_ledger WHERE tenant_id = $1 AND period_label = $2',

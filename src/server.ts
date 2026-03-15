@@ -27,9 +27,8 @@ import trialBalanceRouter from './routes/trial-balance/index.js';
 import justificationRouter from './routes/justification.js';
 import auditRouter from './routes/audit/index.js';
 import exportRouter from './routes/export.js';
-// QUARANTINED — Knowledge base routes not in MVP architecture
-// import financialMemoryRouter from './routes/financial_memory.js';
-// import vectorStoreRouter from './routes/vector_store.js';
+import financialMemoryRouter from './routes/financial_memory.js';
+import vectorStoreRouter from './routes/vector_store.js';
 // QUARANTINED — Automated ingestion infrastructure not in MVP architecture
 // import ingestionRouter from './routes/ingestion.js';
 import hitlRouter from './routes/hitl.js';
@@ -56,6 +55,7 @@ import cpaRouter from './routes/cpa_index.js';
 import devDiagnosticsRouter from './routes/dev_diagnostics.js';
 import fxCurrencyRouter from './routes/fx_currency.js';
 import consolidationRouter from './routes/consolidation.js';
+import xbrlRouter from './routes/xbrl.js';
 // QUARANTINED — Automated ingestion infrastructure not in MVP architecture
 // import { startIngestionScheduler } from './services/ingestion_scheduler.js';
 import { runWorkerLoop } from './services/job_worker.js';
@@ -156,12 +156,10 @@ app.use('/api/audit', auditRouter);
 app.use('/api/export', exportRouter);
 
 // API: Financial Memory (three-tier: Global/Firm/Session, hybrid search, CPA invoice consistency)
-// QUARANTINED — Knowledge base routes not in MVP architecture
-// app.use('/api/knowledge-base', financialMemoryRouter);
+app.use('/api/knowledge-base', financialMemoryRouter);
 
-// API: RAG Vector Store (Intelligent Context — ingestion, precedent, citation with document title + page number)
-// QUARANTINED — Knowledge base routes not in MVP architecture
-// app.use('/api/vector-store', vectorStoreRouter);
+// API: RAG Vector Store — pgvector-backed GAAP/IFRS/Tax semantic search
+app.use('/api/vector-store', vectorStoreRouter);
 
 // QUARANTINED — Automated ingestion infrastructure not in MVP architecture
 // app.use('/api/ingestion', ingestionRouter);
@@ -231,6 +229,9 @@ app.use('/api/fx', fxCurrencyRouter);
 // API: Multi-entity consolidation — stateless (no tenant/DB)
 app.use('/api/consolidation', consolidationRouter);
 
+// API: XBRL Taxonomy — search, stats, element lookup, classify
+app.use('/api/xbrl', xbrlRouter);
+
 // CPA module: optional grouping under /api/cpa when CPA_ENABLED=true (same handlers as above)
 const cpaEnabled = process.env.CPA_ENABLED === 'true';
 if (cpaEnabled) {
@@ -272,11 +273,15 @@ async function start(): Promise<void> {
       console.error('[seed_demo] You can create a session via the UI or retry: npx tsx src/scripts/seed_demo.ts');
     }
   }
+  // Register financial event handlers (async AI sidecar)
+  const { registerEventHandlers } = await import('./events/event_handlers.js');
+  registerEventHandlers();
+
   app.listen(PORT, () => {
     console.log(`FinOS Agent API listening on http://localhost:${PORT}`);
     if (getMode() === 'demo') {
       console.log(`Demo ready at http://localhost:${PORT}`);
-      console.log('  Login: demo@cloudmetrics.io / DemoPass2026!');
+      console.log('  Demo user seeded — check your .env or seed_demo output for credentials.');
     }
     console.log('  POST /api/trial-balance/ingest — upload CSV/XLSX Trial Balance');
     console.log('  POST /api/trial-balance/statements — JSON Trial Balance → BS + P&L');

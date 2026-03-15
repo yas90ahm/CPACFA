@@ -796,15 +796,15 @@ export function groupAndNumberLines(rows: GLUploadRow[]): GeneralLedgerLine[] {
         entry_date: row.entry_date,
         account_code: row.account_code,
         account_name: row.account_name,
-        debit: finalDebit,
-        credit: finalCredit,
+        debit: String(finalDebit),
+        credit: String(finalCredit),
         description: row.description,
         tenant_id: '',
         period_label: '',
         original_currency: originalCurrency,
-        original_debit: originalDebit,
-        original_credit: originalCredit,
-        exchange_rate: exchangeRate,
+        original_debit: originalDebit != null ? String(originalDebit) : null,
+        original_credit: originalCredit != null ? String(originalCredit) : null,
+        exchange_rate: exchangeRate != null ? String(exchangeRate) : null,
       });
     });
   });
@@ -868,8 +868,8 @@ export function autoAdjustTranslationRounding(lines: GeneralLedgerLine[]): { lin
 
   const adjustedLines = [...lines];
   for (const [entryId, entryLines] of entries) {
-    const totalDebits = entryLines.reduce((sum, l) => sum + (l.debit ?? 0), 0);
-    const totalCredits = entryLines.reduce((sum, l) => sum + (l.credit ?? 0), 0);
+    const totalDebits = entryLines.reduce((sum, l) => sum + Number(l.debit ?? 0), 0);
+    const totalCredits = entryLines.reduce((sum, l) => sum + Number(l.credit ?? 0), 0);
     const diff = round2(totalDebits - totalCredits);
     const absDiff = Math.abs(diff);
 
@@ -880,10 +880,10 @@ export function autoAdjustTranslationRounding(lines: GeneralLedgerLine[]): { lin
       if (idx >= 0) {
         if (diff > 0) {
           // Debits exceed credits — add to last line's credit
-          adjustedLines[idx] = { ...lastLine, credit: round2((lastLine.credit ?? 0) + absDiff) };
+          adjustedLines[idx] = { ...lastLine, credit: String(round2(Number(lastLine.credit ?? 0) + absDiff)) };
         } else {
           // Credits exceed debits — add to last line's debit
-          adjustedLines[idx] = { ...lastLine, debit: round2((lastLine.debit ?? 0) + absDiff) };
+          adjustedLines[idx] = { ...lastLine, debit: String(round2(Number(lastLine.debit ?? 0) + absDiff)) };
         }
         warnings.push(`Entry ${entryId}: $${absDiff.toFixed(2)} translation rounding auto-adjusted.`);
       }
@@ -920,8 +920,8 @@ export async function validateGLEntries(
 
   if (isRegisterFormat) {
     // Account register format: each row is independent. Validate only total D=C.
-    const totalDebits = sumRound2(lines.map((l) => l.debit ?? 0));
-    const totalCredits = sumRound2(lines.map((l) => l.credit ?? 0));
+    const totalDebits = sumRound2(lines.map((l) => Number(l.debit ?? 0)));
+    const totalCredits = sumRound2(lines.map((l) => Number(l.credit ?? 0)));
     if (absGt(totalDebits, totalCredits, tolerance)) {
       console.warn(
         `[GL Register] Total debits (${totalDebits.toFixed(2)}) ≠ total credits (${totalCredits.toFixed(2)}). Difference: ${Math.abs(minus(totalDebits, totalCredits)).toFixed(2)} — this is normal for GL registers with opening balances.`
@@ -934,8 +934,8 @@ export async function validateGLEntries(
   } else {
     // JE format: each entry_id group must balance individually.
     for (const entry of entries) {
-      const totalDebits = sumRound2(entry.lines.map((line) => line.debit ?? 0));
-      const totalCredits = sumRound2(entry.lines.map((line) => line.credit ?? 0));
+      const totalDebits = sumRound2(entry.lines.map((line) => Number(line.debit ?? 0)));
+      const totalCredits = sumRound2(entry.lines.map((line) => Number(line.credit ?? 0)));
       const imbalance = Math.abs(minus(totalDebits, totalCredits));
 
       if (absGt(totalDebits, totalCredits, tolerance)) {
@@ -951,7 +951,7 @@ export async function validateGLEntries(
     }
   }
 
-  const dualLines = lines.filter((l) => (l.debit ?? 0) > 0 && (l.credit ?? 0) > 0);
+  const dualLines = lines.filter((l) => Number(l.debit ?? 0) > 0 && Number(l.credit ?? 0) > 0);
   if (dualLines.length > 0) {
     errors.push(
       `${dualLines.length} line(s) have both debit and credit (must be one or the other)`
@@ -1245,8 +1245,8 @@ export async function uploadGLForPeriod(
             lines: ie.entry.lines.map((l) => ({
               line_number: l.line_number,
               account_code: l.account_code,
-              debit: l.debit ?? 0,
-              credit: l.credit ?? 0,
+              debit: Number(l.debit ?? 0),
+              credit: Number(l.credit ?? 0),
               description: l.description,
             })),
             totalDebits: ie.totalDebits,

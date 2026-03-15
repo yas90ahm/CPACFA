@@ -1,3 +1,4 @@
+-- Renumbered from 093 to 170 to resolve duplicate prefix
 -- Rollback for 093_ai_boundary_schemas.sql
 -- Move tables back to public; drop roles and schemas.
 -- Run manually if needed: psql $DATABASE_URL -f migrations/093_ai_boundary_schemas_down.sql

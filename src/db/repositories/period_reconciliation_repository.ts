@@ -53,6 +53,9 @@ interface ItemRow {
   aje_id: string | null;
   created_at: string;
   created_by: string | null;
+  carried_from_period: string | null;
+  original_created_at: string | null;
+  resolved_at: string | null;
 }
 
 const RECON_COLS = `recon_id, tenant_id, period_id, entity_id, requirement_id, account_code,
@@ -107,6 +110,9 @@ function rowToItem(r: ItemRow): ReconItem {
     ajeId: r.aje_id,
     createdAt: r.created_at,
     createdBy: r.created_by,
+    carriedFromPeriod: r.carried_from_period ?? null,
+    originalCreatedAt: r.original_created_at ?? null,
+    resolvedAt: r.resolved_at ?? null,
   };
 }
 
@@ -264,6 +270,8 @@ export async function updateReconStatus(
     preparedAt?: string | null;
     reviewedBy?: string | null;
     reviewedAt?: string | null;
+    /** Expected current status — row-level guard to prevent concurrent overwrites. */
+    expectedStatus?: PeriodReconStatus;
   } = {}
 ): Promise<PeriodReconciliation | null> {
   const now = new Date().toISOString();
@@ -283,10 +291,13 @@ export async function updateReconStatus(
     params.push(extra.reviewedBy, extra.reviewedAt ?? now);
   }
   params.push(tenantId, reconId);
-  const r = await pool.query(
-    `UPDATE tenant_period_reconciliations SET ${sets.join(', ')} WHERE tenant_id = $${i} AND recon_id = $${i + 1}`,
-    params
-  );
+  let sql = `UPDATE tenant_period_reconciliations SET ${sets.join(', ')} WHERE tenant_id = $${i} AND recon_id = $${i + 1}`;
+  if (extra.expectedStatus) {
+    i += 2;
+    sql += ` AND status = $${i}`;
+    params.push(extra.expectedStatus);
+  }
+  const r = await pool.query(sql, params);
   if ((r.rowCount ?? 0) === 0) return null;
   return getPeriodReconciliationById(pool, tenantId, reconId);
 }
@@ -411,7 +422,8 @@ export async function insertReconItem(
 
 export async function getReconItemById(pool: Pool, itemId: string): Promise<ReconItem | null> {
   const r = await pool.query<ItemRow>(
-    `SELECT item_id, recon_id, description, amount, item_type, needs_aje, aje_id, created_at, created_by
+    `SELECT item_id, recon_id, description, amount, item_type, needs_aje, aje_id, created_at, created_by,
+            carried_from_period, original_created_at, resolved_at
      FROM tenant_recon_items WHERE item_id = $1`,
     [itemId]
   );
@@ -421,7 +433,8 @@ export async function getReconItemById(pool: Pool, itemId: string): Promise<Reco
 
 export async function listReconItemsByReconId(pool: Pool, reconId: string): Promise<ReconItem[]> {
   const r = await pool.query<ItemRow>(
-    `SELECT item_id, recon_id, description, amount, item_type, needs_aje, aje_id, created_at, created_by
+    `SELECT item_id, recon_id, description, amount, item_type, needs_aje, aje_id, created_at, created_by,
+            carried_from_period, original_created_at, resolved_at
      FROM tenant_recon_items WHERE recon_id = $1 ORDER BY created_at`,
     [reconId]
   );
@@ -472,4 +485,87 @@ export async function copyReconItemsFromPrior(
     created.push(newItem);
   }
   return created;
+}
+
+/**
+ * Carry forward unresolved items from one session's recons to another session's recons.
+ * Only copies items where resolved_at IS NULL. Sets carried_from_period and original_created_at.
+ */
+export async function carryForwardUnresolvedItems(
+  pool: Pool,
+  tenantId: string,
+  fromSessionId: string,
+  toSessionId: string
+): Promise<ReconItem[]> {
+  // Get all recons for source session
+  const fromRecons = await listPeriodReconciliationsByPeriod(pool, tenantId, fromSessionId);
+  const toRecons = await listPeriodReconciliationsByPeriod(pool, tenantId, toSessionId);
+  const toByAccount = new Map(toRecons.map((r) => [r.accountCode, r]));
+
+  // Get the source session's period label
+  const sessResult = await pool.query<{ period_end: string | null }>(
+    `SELECT period_end FROM close_sessions WHERE id = $1 AND tenant_id = $2`,
+    [fromSessionId, tenantId]
+  );
+  const fromPeriodLabel = (sessResult.rows[0]?.period_end ?? '').slice(0, 7);
+
+  const created: ReconItem[] = [];
+
+  for (const fromRecon of fromRecons) {
+    const toRecon = toByAccount.get(fromRecon.accountCode);
+    if (!toRecon) continue; // No matching recon in target session
+
+    // Get unresolved items from source recon
+    const items = await listReconItemsByReconId(pool, fromRecon.reconId);
+    const unresolvedItems = items.filter((i) => i.resolvedAt === null);
+
+    for (const item of unresolvedItems) {
+      const newId = crypto.randomUUID();
+      const originalCreatedAt = item.originalCreatedAt ?? item.createdAt;
+      await pool.query(
+        `INSERT INTO tenant_recon_items
+           (item_id, recon_id, description, amount, item_type, needs_aje, created_by,
+            carried_from_period, original_created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [
+          newId,
+          toRecon.reconId,
+          `[Carried forward] ${item.description.replace(/^\[Carried forward\] /, '')}`,
+          item.amount,
+          item.itemType,
+          false, // AJE links are period-specific, clear them
+          item.createdBy,
+          fromPeriodLabel,
+          originalCreatedAt,
+        ]
+      );
+      const newItem = await getReconItemById(pool, newId);
+      if (newItem) created.push(newItem);
+    }
+  }
+  return created;
+}
+
+/**
+ * Resolve (clear) a reconciling item by setting resolved_at.
+ */
+export async function resolveReconItem(
+  pool: Pool,
+  tenantId: string,
+  itemId: string
+): Promise<ReconItem | null> {
+  // Verify the item belongs to a recon owned by this tenant
+  const itemResult = await pool.query<{ recon_id: string }>(
+    `SELECT ri.recon_id FROM tenant_recon_items ri
+     JOIN tenant_period_reconciliations r ON r.recon_id = ri.recon_id
+     WHERE ri.item_id = $1 AND r.tenant_id = $2`,
+    [itemId, tenantId]
+  );
+  if (itemResult.rows.length === 0) return null;
+
+  await pool.query(
+    `UPDATE tenant_recon_items SET resolved_at = NOW() WHERE item_id = $1`,
+    [itemId]
+  );
+  return getReconItemById(pool, itemId);
 }

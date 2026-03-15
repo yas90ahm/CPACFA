@@ -8,6 +8,8 @@ import type { Pool } from 'pg';
 import type { VarianceRecord, ComputeVariancesInput } from '../types/variance_analysis.js';
 import * as repo from '../db/repositories/variance_analysis_repository.js';
 import { appendEntry } from '../db/repositories/audit_ledger_repository.js';
+import { financialEvents, buildEventPacket } from '../events/financial_event_emitter.js';
+import { mul, round2 } from '../utils/decimal.js';
 
 export interface VarianceCompletenessResult {
   passes: boolean;
@@ -30,8 +32,8 @@ export async function computeVariances(
   for (const curr of input.currentLines) {
     const key = `${curr.statement}:${curr.fsLineId}`;
     const prior = priorMap.get(key);
-    const priorAmount = prior?.amount ?? 0;
-    const currentAmount = curr.amount;
+    const priorAmount: number = prior?.amount ?? 0;
+    const currentAmount: number = curr.amount;
     const id = randomUUID();
     const rec = await repo.upsertVariance(pool, id, {
       tenantId: input.tenantId,
@@ -45,6 +47,34 @@ export async function computeVariances(
       materialThresholdPct: materialPct,
     });
     results.push(rec);
+
+    // Emit event for material variances
+    const isMaterial = priorAmount === 0
+      ? Math.abs(currentAmount) > 0.01
+      : Math.abs(Number(rec.changePercentage ?? 0)) >= materialPct;
+    if (isMaterial) {
+      financialEvents.emit('VARIANCE_DETECTED', buildEventPacket('VARIANCE_DETECTED', {
+        errorCode: 'MATERIAL_VARIANCE',
+        conflictingData: { currentAmount, priorAmount, changeAmount: rec.changeAmount, changePercentage: rec.changePercentage },
+        metadata: {
+          tenantId: input.tenantId,
+          closeSessionId: input.closeSessionId,
+          periodLabel: input.periodLabel,
+          accountCodes: [curr.fsLineId],
+        },
+        data: {
+          varianceId: rec.id,
+          fsLineId: curr.fsLineId,
+          lineItemName: curr.label ?? curr.fsLineId,
+          statement: curr.statement,
+          currentAmount,
+          priorAmount,
+          changeAmount: Number(rec.changeAmount ?? 0),
+          changePercentage: Number(rec.changePercentage ?? 0),
+          materialThresholdPct: materialPct,
+        },
+      }));
+    }
   }
   return results;
 }
@@ -105,11 +135,11 @@ export async function approveVariance(
 /** Generate a deterministic draft variance explanation. Advisory; human edits and submits. */
 export function generateVarianceDraftExplanation(v: VarianceRecord): string {
   const lineName = v.label ?? v.fsLineId ?? 'Line item';
-  const direction = v.changeAmount >= 0 ? 'increased' : 'decreased';
-  const absChange = Math.abs(v.changeAmount).toLocaleString();
-  const absPct = v.changePercentage != null ? Math.abs(v.changePercentage).toFixed(1) : '';
-  const currentStr = v.currentAmount.toLocaleString();
-  const priorStr = v.priorAmount.toLocaleString();
+  const direction = Number(v.changeAmount) >= 0 ? 'increased' : 'decreased';
+  const absChange = Math.abs(Number(v.changeAmount)).toLocaleString();
+  const absPct = v.changePercentage != null ? Math.abs(Number(v.changePercentage)).toFixed(1) : '';
+  const currentStr = Number(v.currentAmount).toLocaleString();
+  const priorStr = Number(v.priorAmount).toLocaleString();
   let draft = `${lineName} ${direction} by $${absChange}`;
   if (absPct) draft += ` (${absPct}%)`;
   draft += ` compared to the prior period. Current period balance: $${currentStr}. Prior period balance: $${priorStr}. [Please provide specific drivers for this change.]`;
@@ -148,6 +178,43 @@ export async function getVarianceAiDraft(
   }
 }
 
+/**
+ * Classify a variance with a type label and optionally compute full-year impact.
+ * fullYearImpact = monthlyVariance x remainingMonths (uses Decimal.js).
+ */
+export async function classifyVariance(
+  pool: Pool,
+  tenantId: string,
+  varianceId: string,
+  varianceType: string,
+  fullYearImpact?: number | null
+): Promise<VarianceRecord | null> {
+  return repo.classifyVariance(pool, tenantId, varianceId, varianceType, fullYearImpact ?? null);
+}
+
+/**
+ * Compute the projected full-year impact for a variance.
+ * fullYearImpact = monthlyVariance x remainingMonths.
+ * periodLabel is YYYY-MM; fiscal year end month defaults to 12 (December).
+ */
+export function computeFullYearImpact(
+  monthlyVariance: number,
+  periodLabel: string,
+  fiscalYearEndMonth: number = 12
+): number {
+  const currentMonth = parseInt(periodLabel.slice(5, 7), 10) || 1;
+  // Remaining months in the fiscal year (inclusive of current)
+  let remaining: number;
+  if (currentMonth <= fiscalYearEndMonth) {
+    remaining = fiscalYearEndMonth - currentMonth;
+  } else {
+    remaining = 12 - currentMonth + fiscalYearEndMonth;
+  }
+  // At minimum 0 remaining months
+  if (remaining < 0) remaining = 0;
+  return mul(monthlyVariance, remaining);
+}
+
 /** Check if material variances are explained and (optionally) approved. */
 export async function checkVarianceCompleteness(
   pool: Pool,
@@ -156,9 +223,9 @@ export async function checkVarianceCompleteness(
 ): Promise<VarianceCompletenessResult> {
   const all = await repo.listVariancesForSession(pool, tenantId, closeSessionId);
   const material = all.filter((v) => {
-    if (v.priorAmount === 0) return Math.abs(v.changeAmount) > 0.01;
-    const pct = v.changePercentage ?? 0;
-    return Math.abs(pct) >= v.materialThresholdPct;
+    if (Number(v.priorAmount) === 0) return Math.abs(Number(v.changeAmount)) > 0.01;
+    const pct = Number(v.changePercentage ?? 0);
+    return Math.abs(pct) >= Number(v.materialThresholdPct);
   });
   const explained = material.filter((v) => v.explanation != null && v.explanation.trim().length > 0);
   const approved = material.filter((v) => v.approvedAt != null);

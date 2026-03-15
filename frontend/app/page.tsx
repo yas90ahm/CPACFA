@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useAuth } from '@/lib/auth';
 import { useRouter } from 'next/navigation';
+import { getDefaultLandingPage } from '@/lib/permissions';
 
 const FALLBACK_REDIRECT_MS = 2000;
 
@@ -29,11 +30,7 @@ export default function HomePage() {
       fallbackRef.current = null;
     }
     if (!user) return;
-    if (user.role === 'operating_partner' || user.role === 'admin') {
-      router.push('/portfolio');
-    } else {
-      router.push('/close');
-    }
+    router.push(getDefaultLandingPage(user.role));
   }, [user, token, isLoading, router]);
 
   return (

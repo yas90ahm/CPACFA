@@ -1,11 +1,13 @@
 /**
  * Financial Memory — Tier 1 (Global): FASB, IFRS, and Tax Codes.
- * Integrates with existing RAG handbook and adds Tax chunks.
+ * Primary: pgvector semantic search (when DB available).
+ * Fallback: in-memory keyword scoring for Tax chunks + no-DB environments.
  */
 
 import type { MemoryEntry } from '../types.js';
-// QUARANTINED — rag_handbook not in MVP architecture
-// import { getDefaultRAGStore, getHandbookChunks } from '../../services/rag_handbook.js';
+import { isDbConfigured, getPool } from '../../db/index.js';
+import { queryVectorStore, type VectorChunk } from '../vector_store/pg_vector_store.js';
+import { log } from '../../lib/logger.js';
 
 /** Tax code sample chunks (expand with real IRC/regulations in production). */
 const TAX_CHUNKS: MemoryEntry[] = [
@@ -62,7 +64,23 @@ export function getGlobalEntries(): MemoryEntry[] {
 
 type GlobalFramework = 'FASB' | 'IFRS' | 'Tax';
 
-/** Query Tier 1 via existing RAG store (FASB/IFRS) and append Tax matches by keyword. */
+/** Convert a pgvector VectorChunk to a MemoryEntry for uniform consumption. */
+function chunkToMemoryEntry(c: VectorChunk): MemoryEntry {
+  return {
+    id: c.id,
+    tier: 'global',
+    source: c.framework ?? 'FASB',
+    text: [c.citation, c.section, c.chunkText].filter(Boolean).join(' — '),
+    payload: { citation: c.citation, section: c.section, similarity: c.similarity },
+    storedAt: c.createdAt,
+  };
+}
+
+/**
+ * Query Tier 1 via pgvector semantic search (primary) with in-memory keyword fallback.
+ * When DB + pgvector are available, returns semantically ranked FASB/IFRS/Tax chunks.
+ * Falls back to keyword scoring when DB is unavailable.
+ */
 export async function queryGlobal(
   query: string,
   options?: { topK?: number; framework?: GlobalFramework }
@@ -70,38 +88,45 @@ export async function queryGlobal(
   const topK = options?.topK ?? 10;
   const framework: GlobalFramework | undefined = options?.framework;
 
+  // Primary path: pgvector semantic search
+  if (isDbConfigured()) {
+    try {
+      const pool = getPool();
+      const pgFramework = framework === 'Tax' ? 'TAX' : framework;
+      const chunks = await queryVectorStore(pool, query, {
+        topK,
+        framework: pgFramework,
+        tier: 'tier1_global',
+      });
+      if (chunks.length > 0) {
+        const entries = chunks.map(chunkToMemoryEntry);
+        // If no framework filter, also append in-memory Tax keyword matches (Tax may be sparse in pgvector)
+        if (!framework) {
+          const taxKeyword = keywordScoreAndTake(
+            getGlobalEntries().filter((e) => e.source === 'Tax'),
+            query,
+            Math.max(2, Math.floor(topK / 3))
+          );
+          for (const t of taxKeyword) {
+            if (!entries.find((e) => e.id === t.id)) entries.push(t);
+          }
+          return entries.slice(0, topK);
+        }
+        return entries;
+      }
+      // If pgvector returned 0 results (e.g. table empty / not seeded), fall through to keyword
+    } catch (err) {
+      log('warn', 'pgvector query failed, falling back to keyword search', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Fallback: in-memory keyword search
   if (framework === 'Tax') {
-    const taxOnly = getGlobalEntries().filter((e) => e.source === 'Tax');
-    return keywordScoreAndTake(taxOnly, query, topK);
+    return keywordScoreAndTake(getGlobalEntries().filter((e) => e.source === 'Tax'), query, topK);
   }
-
-  // QUARANTINED — rag_handbook not in MVP architecture
-  // const store = getDefaultRAGStore();
-  // const result = await store.query(query, {
-  //   topK,
-  //   framework: framework === 'FASB' || framework === 'IFRS' ? framework : undefined,
-  // });
-  const result = { chunks: [], query: query };
-  const fromRag = result.chunks.map((c: any) => ({
-    id: c.id,
-    tier: 'global' as const,
-    source: c.framework,
-    text: [c.citation, c.section, c.text].filter(Boolean).join(' — '),
-    payload: { citation: c.citation, section: c.section },
-    storedAt: new Date().toISOString(),
-  }));
-
-  if (framework) return fromRag;
-  const taxMatches = keywordScoreAndTake(
-    getGlobalEntries().filter((e) => e.source === 'Tax'),
-    query,
-    Math.max(2, Math.floor(topK / 3))
-  );
-  const combined: MemoryEntry[] = [...fromRag];
-  for (const t of taxMatches) {
-    if (!combined.find((c) => c.id === t.id)) combined.push(t);
-  }
-  return combined.slice(0, topK);
+  return keywordScoreAndTake(getGlobalEntries(), query, topK);
 }
 
 function keywordScoreAndTake(entries: MemoryEntry[], query: string, k: number): MemoryEntry[] {

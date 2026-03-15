@@ -6,8 +6,15 @@ import { z } from 'zod';
 
 export const ClassifierResultItemSchema = z.object({
   source_id: z.string(),
-  object_type: z.string(),
-  fs_placement: z.string(),
+  object_type: z.enum([
+    'expense', 'asset', 'liability', 'revenue', 'equity',
+    'contra_asset', 'contra_liability', 'contra_equity', 'contra_revenue',
+    'unknown', 'lease_candidate',
+  ]),
+  fs_placement: z.string().regex(
+    /^(pnl\.|bs\.|cf\.|oci\.|unknown)/,
+    'Must start with statement prefix (pnl., bs., cf., oci., or unknown)'
+  ),
   suggested_accounts: z.array(z.string()),
   rule_tags: z.array(z.string()),
   missing_inputs: z.array(z.string()),

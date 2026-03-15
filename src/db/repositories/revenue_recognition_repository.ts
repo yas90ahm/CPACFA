@@ -13,7 +13,7 @@ export interface RevenueContractRow {
   customerName?: string;
   startDate: string;
   endDate: string;
-  totalContractValue: number;
+  totalContractValue: string;
   currency: string;
   status: RevRecStatus;
   allocation?: Record<string, number>;
@@ -29,12 +29,12 @@ export interface PerformanceObligationRow {
   name: string;
   description?: string;
   satisfiedOverTime: boolean;
-  allocationPercent?: number;
-  allocationAmount?: number;
+  allocationPercent?: string;
+  allocationAmount?: string;
   schedule?: RecognitionScheduleEntry[];
   scheduleType?: RevenueScheduleType;
-  costToCostTotalEstimated?: number;
-  costToCostCostsToDate?: number;
+  costToCostTotalEstimated?: string;
+  costToCostCostsToDate?: string;
   milestoneAmounts?: { date: string; amount: number }[];
   createdAt: string;
   updatedAt: string;
@@ -47,8 +47,8 @@ export interface RevenueScheduleRow {
   pobId: string;
   periodStart: string;
   periodEnd: string;
-  amount: number;
-  cumulativeAmount?: number;
+  amount: string;
+  cumulativeAmount?: string;
   recognized: boolean;
   createdAt: string;
 }
@@ -66,7 +66,7 @@ function rowToContract(row: Record<string, unknown>): RevenueContractRow {
     customerName: row.customer_name as string | undefined,
     startDate: (row.start_date as Date)?.toISOString?.()?.slice(0, 10) ?? String(row.start_date),
     endDate: (row.end_date as Date)?.toISOString?.()?.slice(0, 10) ?? String(row.end_date),
-    totalContractValue: Number(row.total_contract_value),
+    totalContractValue: String(row.total_contract_value),
     currency: row.currency as string,
     status: (row.status as RevRecStatus) ?? 'draft',
     allocation: row.allocation != null ? (row.allocation as Record<string, number>) : undefined,
@@ -83,12 +83,12 @@ function rowToPob(row: Record<string, unknown>): PerformanceObligationRow {
     name: row.name as string,
     description: row.description as string | undefined,
     satisfiedOverTime: Boolean(row.satisfied_over_time),
-    allocationPercent: row.allocation_percent != null ? Number(row.allocation_percent) : undefined,
-    allocationAmount: row.allocation_amount != null ? Number(row.allocation_amount) : undefined,
+    allocationPercent: row.allocation_percent != null ? String(row.allocation_percent) : undefined,
+    allocationAmount: row.allocation_amount != null ? String(row.allocation_amount) : undefined,
     schedule: row.schedule != null ? (row.schedule as RecognitionScheduleEntry[]) : undefined,
     scheduleType: (row.schedule_type as RevenueScheduleType) ?? undefined,
-    costToCostTotalEstimated: row.cost_to_cost_total_estimated != null ? Number(row.cost_to_cost_total_estimated) : undefined,
-    costToCostCostsToDate: row.cost_to_cost_costs_to_date != null ? Number(row.cost_to_cost_costs_to_date) : undefined,
+    costToCostTotalEstimated: row.cost_to_cost_total_estimated != null ? String(row.cost_to_cost_total_estimated) : undefined,
+    costToCostCostsToDate: row.cost_to_cost_costs_to_date != null ? String(row.cost_to_cost_costs_to_date) : undefined,
     milestoneAmounts: row.milestone_amounts != null ? (row.milestone_amounts as { date: string; amount: number }[]) : undefined,
     createdAt: (row.created_at as Date)?.toISOString?.() ?? String(row.created_at),
     updatedAt: (row.updated_at as Date)?.toISOString?.() ?? String(row.updated_at),
@@ -103,8 +103,8 @@ function rowToSchedule(row: Record<string, unknown>): RevenueScheduleRow {
     pobId: row.pob_id as string,
     periodStart: (row.period_start as Date)?.toISOString?.()?.slice(0, 10) ?? String(row.period_start),
     periodEnd: (row.period_end as Date)?.toISOString?.()?.slice(0, 10) ?? String(row.period_end),
-    amount: Number(row.amount),
-    cumulativeAmount: row.cumulative_amount != null ? Number(row.cumulative_amount) : undefined,
+    amount: String(row.amount),
+    cumulativeAmount: row.cumulative_amount != null ? String(row.cumulative_amount) : undefined,
     recognized: Boolean(row.recognized),
     createdAt: (row.created_at as Date)?.toISOString?.() ?? String(row.created_at),
   };

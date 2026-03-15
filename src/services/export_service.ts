@@ -9,6 +9,8 @@
 
 import { createHash } from 'crypto';
 import { generateText } from '../llm/provider.js';
+import { enterAdvisoryContext, exitAdvisoryContext } from '../lib/ai_boundary.js';
+import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import { round2, normalizeMoney } from '../utils/decimal.js';
 
 /** One step in the Reasoning Chain (Thought or Action from ReAct). */
@@ -150,12 +152,16 @@ OVERVIEW: [Optional 1-2 sentences]
 HIGHLIGHTS: [Optional bullet points, one per line starting with - ]
 If you omit OVERVIEW or HIGHLIGHTS, write "OVERVIEW: " or "HIGHLIGHTS: " with nothing after.`;
 
+  enterAdvisoryContext();
   try {
     const text = await generateText({
       model: 'claude-sonnet-4-5-20250929',
       maxTokens: 1024,
       prompt,
     });
+
+    // Apply numeric guardrail on raw text (narrative output)
+    assertNoNumericAmountsInAgentOutput({ text }, 'export_service_narrative');
 
     const execMatch = text.match(/EXECUTIVE_SUMMARY:\s*([\s\S]*?)(?=OVERVIEW:|HIGHLIGHTS:|$)/i);
     const overviewMatch = text.match(/OVERVIEW:\s*([\s\S]*?)(?=HIGHLIGHTS:|$)/i);
@@ -176,6 +182,8 @@ If you omit OVERVIEW or HIGHLIGHTS, write "OVERVIEW: " or "HIGHLIGHTS: " with no
       overview: undefined,
       highlights: undefined,
     };
+  } finally {
+    exitAdvisoryContext();
   }
 }
 

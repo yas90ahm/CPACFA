@@ -73,7 +73,7 @@ function StatementTable({
   }>;
 }) {
   if (lines.length === 0) {
-    return <p className="text-sm text-text-secondary italic py-4">No data available.</p>;
+    return <p className="text-sm italic py-4" style={{ color: 'var(--text-secondary)' }}>No data available.</p>;
   }
 
   let lastSection: string | null = null;
@@ -88,10 +88,11 @@ function StatementTable({
             return (
               <>
                 {showSection && (
-                  <tr key={`sec-${idx}`} className="bg-surface-alt">
+                  <tr key={`sec-${idx}`} style={{ background: 'var(--bg-surface-sunken)' }}>
                     <td
                       colSpan={2}
-                      className="py-2 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wider"
+                      className="py-2 px-3 text-xs font-semibold uppercase tracking-wider"
+                      style={{ color: 'var(--text-secondary)' }}
                     >
                       {line.sectionName}
                     </td>
@@ -100,14 +101,18 @@ function StatementTable({
                 <tr
                   key={idx}
                   className={cn(
-                    'border-b border-border-light',
-                    line.isGrandTotal && 'border-t-2 border-t-border bg-surface-alt font-semibold',
-                    line.isSubtotal && !line.isGrandTotal && 'border-t border-t-border-light font-medium'
+                    line.isGrandTotal && 'font-semibold',
+                    line.isSubtotal && !line.isGrandTotal && 'font-medium'
                   )}
+                  style={{
+                    borderBottom: '1px solid var(--border-default)',
+                    ...(line.isGrandTotal ? { borderTop: '2px solid var(--border-default)', background: 'var(--bg-surface-sunken)' } : {}),
+                    ...(line.isSubtotal && !line.isGrandTotal ? { borderTop: '1px solid var(--border-default)' } : {}),
+                  }}
                 >
                   <td
-                    className="py-1.5 px-3 text-primary"
-                    style={{ paddingLeft: `${12 + (line.indentLevel ?? 0) * 16}px` }}
+                    className="py-1.5 px-3"
+                    style={{ paddingLeft: `${12 + (line.indentLevel ?? 0) * 16}px`, color: 'var(--text-primary)' }}
                   >
                     {line.name}
                   </td>
@@ -277,13 +282,13 @@ export default function BoardPackagePage() {
   const statusBadge = useMemo(() => {
     switch (currentState) {
       case 'LOCKED':
-        return { label: 'Locked', className: 'bg-status-green-dim text-status-green border border-status-green/30' };
+        return { label: 'Locked', style: { background: 'var(--status-success-bg)', color: 'var(--status-success)', border: '1px solid var(--status-success)' } };
       case 'CERTIFIED':
-        return { label: 'Certified', className: 'bg-certified-dim text-certified border border-certified/30' };
+        return { label: 'Certified', style: { background: 'var(--status-success-bg)', color: 'var(--status-success)', border: '1px solid var(--status-success)' } };
       case 'UNDER_REVIEW':
-        return { label: 'Under Review', className: 'bg-status-amber-dim text-status-amber border border-status-amber/30' };
+        return { label: 'Under Review', style: { background: 'var(--status-warning-bg)', color: 'var(--status-warning)', border: '1px solid var(--status-warning)' } };
       default:
-        return { label: 'In Progress', className: 'bg-surface-alt text-text-secondary border border-border' };
+        return { label: 'In Progress', style: { background: 'var(--bg-surface-sunken)', color: 'var(--text-secondary)', border: '1px solid var(--border-default)' } };
     }
   }, [currentState]);
 
@@ -335,11 +340,11 @@ export default function BoardPackagePage() {
 
       {/* Draft banner — shown for any non-certified session */}
       {!isCertified && (
-        <div className="bg-status-amber-dim border border-status-amber rounded-card p-4 flex items-center gap-3">
-          <AlertCircle className="w-5 h-5 text-status-amber shrink-0" />
+        <div className="rounded-lg p-4 flex items-center gap-3" style={{ background: 'var(--status-warning-bg)', border: '1px solid var(--status-warning)' }}>
+          <AlertCircle className="w-5 h-5 shrink-0" style={{ color: 'var(--status-warning)' }} />
           <div className="flex-1">
-            <span className="font-medium text-status-amber">Draft</span>
-            <span className="text-sm text-text-secondary ml-2">
+            <span className="font-medium" style={{ color: 'var(--status-warning)' }}>Draft</span>
+            <span className="text-sm ml-2" style={{ color: 'var(--text-secondary)' }}>
               — this package has not been certified. Data shown reflects current in-progress work.
             </span>
           </div>
@@ -348,25 +353,25 @@ export default function BoardPackagePage() {
 
       {/* Download error */}
       {downloadError && (
-        <div className="bg-status-red-dim border border-status-red rounded-card p-4 flex items-center gap-3">
-          <AlertCircle className="w-5 h-5 text-status-red shrink-0" />
-          <div className="flex-1 text-sm text-status-red">{downloadError}</div>
-          <button type="button" onClick={() => setDownloadError(null)} className="text-status-red hover:opacity-70">
+        <div className="rounded-lg p-4 flex items-center gap-3" style={{ background: 'var(--status-error-bg)', border: '1px solid var(--status-error)' }}>
+          <AlertCircle className="w-5 h-5 shrink-0" style={{ color: 'var(--status-error)' }} />
+          <div className="flex-1 text-sm" style={{ color: 'var(--status-error)' }}>{downloadError}</div>
+          <button type="button" onClick={() => setDownloadError(null)} className="hover:opacity-70" style={{ color: 'var(--status-error)' }}>
             <XCircle className="w-4 h-4" />
           </button>
         </div>
       )}
 
       {/* Cover Section */}
-      <div className="bg-surface border border-border rounded-card p-6">
+      <div className="rounded-lg p-6" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)' }}>
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-input bg-accent/10 flex items-center justify-center shrink-0">
-              <BookOpen className="w-5 h-5 text-accent" />
+            <div className="w-10 h-10 rounded-md flex items-center justify-center shrink-0" style={{ background: 'var(--interactive-primary-bg, rgba(59,130,246,0.1))' }}>
+              <BookOpen className="w-5 h-5" style={{ color: 'var(--interactive-primary)' }} />
             </div>
             <div>
-              <h1 className="text-2xl font-display text-primary">Board Package</h1>
-              <p className="text-text-secondary text-sm mt-0.5">
+              <h1 className="text-2xl font-display" style={{ color: 'var(--text-primary)' }}>Board Package</h1>
+              <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
                 {boardPackage?.entityName ?? session?.entityName ?? '—'}
               </p>
             </div>
@@ -377,7 +382,8 @@ export default function BoardPackagePage() {
             <select
               value={periodType}
               onChange={(e) => setPeriodType(e.target.value as PeriodType)}
-              className="text-sm border border-border rounded-input px-3 py-1.5 bg-surface text-primary focus:outline-none focus:ring-2 focus:ring-accent/30"
+              className="text-sm rounded-md px-3 py-1.5 focus:outline-none"
+              style={{ border: '1px solid var(--border-default)', background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
             >
               <option value="monthly">Monthly</option>
               <option value="QTD">Quarter-to-Date</option>
@@ -389,7 +395,8 @@ export default function BoardPackagePage() {
               type="button"
               onClick={handleDownloadCsv}
               disabled={!boardPackage?.statements}
-              className="flex items-center gap-2 px-4 py-1.5 rounded-input border border-border text-sm text-text-secondary hover:bg-hover hover:text-primary transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 px-4 py-1.5 rounded-md text-sm transition-colors disabled:opacity-50"
+              style={{ border: '1px solid var(--border-default)', color: 'var(--text-secondary)' }}
             >
               <Download className="w-4 h-4" />
               Export CSV
@@ -398,7 +405,8 @@ export default function BoardPackagePage() {
               type="button"
               onClick={handleDownloadPdf}
               disabled={downloading}
-              className="flex items-center gap-2 px-4 py-1.5 rounded-input border border-border text-sm text-text-secondary hover:bg-hover hover:text-primary transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 px-4 py-1.5 rounded-md text-sm transition-colors disabled:opacity-50"
+              style={{ border: '1px solid var(--border-default)', color: 'var(--text-secondary)' }}
             >
               {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
               {downloading ? 'Downloading…' : 'Download PDF'}
@@ -409,24 +417,24 @@ export default function BoardPackagePage() {
         {/* Cover details row */}
         <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div>
-            <div className="text-xs text-text-tertiary uppercase tracking-wider mb-1">Period</div>
-            <div className="text-sm font-medium text-primary">
+            <div className="text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>Period</div>
+            <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
               {boardPackage?.periodLabel ?? session?.periodLabel ?? '—'}
             </div>
           </div>
           <div>
-            <div className="text-xs text-text-tertiary uppercase tracking-wider mb-1">Period Type</div>
-            <div className="text-sm font-medium text-primary capitalize">
+            <div className="text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>Period Type</div>
+            <div className="text-sm font-medium capitalize" style={{ color: 'var(--text-primary)' }}>
               {periodType === 'monthly' ? 'Monthly' : periodType}
             </div>
           </div>
           <div>
-            <div className="text-xs text-text-tertiary uppercase tracking-wider mb-1">Preparation Date</div>
-            <div className="text-sm font-medium text-primary">{prepDate}</div>
+            <div className="text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>Preparation Date</div>
+            <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{prepDate}</div>
           </div>
           <div>
-            <div className="text-xs text-text-tertiary uppercase tracking-wider mb-1">Status</div>
-            <span className={cn('inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium', statusBadge.className)}>
+            <div className="text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>Status</div>
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" style={statusBadge.style}>
               {statusBadge.label}
             </span>
           </div>
@@ -434,66 +442,65 @@ export default function BoardPackagePage() {
       </div>
 
       {/* Financial Highlights */}
-      <div className="bg-surface border border-border rounded-card p-6">
-        <h2 className="text-lg font-display text-primary mb-4 flex items-center gap-2">
+      <div className="rounded-lg p-6" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)' }}>
+        <h2 className="text-lg font-display mb-4 flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
           <TrendingUp className="w-5 h-5" />
           Financial Highlights
         </h2>
         {boardLoading ? (
           <div className="flex flex-wrap gap-3">
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="min-w-[140px] border border-border rounded-card p-3 animate-pulse">
-                <div className="h-3 bg-surface-alt rounded w-16 mb-2" />
-                <div className="h-5 bg-surface-alt rounded w-24" />
+              <div key={i} className="min-w-[140px] rounded-lg p-3 animate-pulse" style={{ border: '1px solid var(--border-default)' }}>
+                <div className="h-3 rounded w-16 mb-2" style={{ background: 'var(--bg-surface-sunken)' }} />
+                <div className="h-5 rounded w-24" style={{ background: 'var(--bg-surface-sunken)' }} />
               </div>
             ))}
           </div>
         ) : financialHighlights.length > 0 ? (
           <div className="flex flex-wrap gap-3">
             {financialHighlights.map((m) => (
-              <div key={m.label} className="min-w-[150px] border border-border rounded-card p-3">
-                <div className="text-xs text-text-secondary mb-1">{m.label}</div>
+              <div key={m.label} className="min-w-[150px] rounded-lg p-3" style={{ border: '1px solid var(--border-default)' }}>
+                <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{m.label}</div>
                 {m.format === 'money' ? (
-                  <div className="text-lg font-medium text-primary">
+                  <div className="text-lg font-medium" style={{ color: 'var(--text-primary)' }}>
                     <MoneyCell value={m.value} showDollar className="text-lg font-medium" />
                   </div>
                 ) : m.format === 'percent' ? (
-                  <div className="text-lg font-medium text-primary">{m.value}%</div>
+                  <div className="text-lg font-medium" style={{ color: 'var(--text-primary)' }}>{m.value}%</div>
                 ) : (
-                  <div className="text-lg font-medium text-primary">{m.value}</div>
+                  <div className="text-lg font-medium" style={{ color: 'var(--text-primary)' }}>{m.value}</div>
                 )}
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-sm text-text-secondary italic">
+          <p className="text-sm italic" style={{ color: 'var(--text-secondary)' }}>
             No financial highlights available. Generate statements to populate this section.
           </p>
         )}
       </div>
 
       {/* Financial Statements — Tabbed Layout */}
-      <div className="bg-surface border border-border rounded-card overflow-hidden">
+      <div className="rounded-lg overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)' }}>
         <div className="flex items-center justify-between px-6 pt-6 pb-0">
-          <h2 className="text-lg font-display text-primary flex items-center gap-2">
+          <h2 className="text-lg font-display flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
             <FileText className="w-5 h-5" />
             Financial Statements
           </h2>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-border mt-4 px-6 gap-1">
+        <div className="flex mt-4 px-6 gap-1" style={{ borderBottom: '1px solid var(--border-default)' }}>
           {statementTabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                'px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px',
-                activeTab === tab.id
-                  ? 'border-accent text-accent'
-                  : 'border-transparent text-text-secondary hover:text-primary hover:border-border'
-              )}
+              className="px-4 py-2 text-sm font-medium transition-colors -mb-px"
+              style={{
+                borderBottom: activeTab === tab.id ? '2px solid var(--interactive-primary)' : '2px solid transparent',
+                color: activeTab === tab.id ? 'var(--interactive-primary)' : 'var(--text-secondary)',
+              }}
             >
               {tab.label}
             </button>
@@ -505,8 +512,8 @@ export default function BoardPackagePage() {
             <div className="space-y-2 animate-pulse">
               {[1, 2, 3, 4, 5, 6].map((i) => (
                 <div key={i} className="flex justify-between">
-                  <div className="h-4 bg-surface-alt rounded w-48" />
-                  <div className="h-4 bg-surface-alt rounded w-24" />
+                  <div className="h-4 rounded w-48" style={{ background: 'var(--bg-surface-sunken)' }} />
+                  <div className="h-4 rounded w-24" style={{ background: 'var(--bg-surface-sunken)' }} />
                 </div>
               ))}
             </div>
@@ -515,7 +522,7 @@ export default function BoardPackagePage() {
           ) : fallbackLines !== null ? (
             <FallbackStatementTable lines={fallbackLines} />
           ) : (
-            <p className="text-sm text-text-secondary italic py-4">
+            <p className="text-sm italic py-4" style={{ color: 'var(--text-secondary)' }}>
               No statement data available. Generate financial statements first.
             </p>
           )}
@@ -523,41 +530,41 @@ export default function BoardPackagePage() {
       </div>
 
       {/* Material Variances Summary */}
-      <div className="bg-surface border border-border rounded-card p-6">
-        <h2 className="text-lg font-display text-primary mb-4 flex items-center gap-2">
+      <div className="rounded-lg p-6" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)' }}>
+        <h2 className="text-lg font-display mb-4 flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
           <AlertCircle className="w-5 h-5" />
           Material Variances
           {materialVariances.length > 0 && (
-            <span className="ml-1 px-2 py-0.5 text-xs rounded-full bg-status-amber-dim text-status-amber font-normal">
+            <span className="ml-1 px-2 py-0.5 text-xs rounded-full font-normal" style={{ background: 'var(--status-warning-bg)', color: 'var(--status-warning)' }}>
               {materialVariances.length}
             </span>
           )}
         </h2>
 
         {materialVariances.length === 0 ? (
-          <div className="flex items-center gap-2 text-sm text-text-secondary">
-            <CheckCircle2 className="w-4 h-4 text-status-green shrink-0" />
+          <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+            <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: 'var(--status-success)' }} />
             No material variances requiring explanation.
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
               <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left py-2 px-3 font-medium text-text-secondary">Line Item</th>
-                  <th className="text-left py-2 px-3 font-medium text-text-secondary">Statement</th>
-                  <th className="text-right py-2 px-3 font-medium text-text-secondary">Current</th>
-                  <th className="text-right py-2 px-3 font-medium text-text-secondary">Prior</th>
-                  <th className="text-right py-2 px-3 font-medium text-text-secondary">Change</th>
-                  <th className="text-right py-2 px-3 font-medium text-text-secondary">Change%</th>
-                  <th className="text-left py-2 px-3 font-medium text-text-secondary">Explanation</th>
+                <tr style={{ borderBottom: '1px solid var(--border-default)' }}>
+                  <th className="text-left py-2 px-3 font-medium" style={{ color: 'var(--text-secondary)' }}>Line Item</th>
+                  <th className="text-left py-2 px-3 font-medium" style={{ color: 'var(--text-secondary)' }}>Statement</th>
+                  <th className="text-right py-2 px-3 font-medium" style={{ color: 'var(--text-secondary)' }}>Current</th>
+                  <th className="text-right py-2 px-3 font-medium" style={{ color: 'var(--text-secondary)' }}>Prior</th>
+                  <th className="text-right py-2 px-3 font-medium" style={{ color: 'var(--text-secondary)' }}>Change</th>
+                  <th className="text-right py-2 px-3 font-medium" style={{ color: 'var(--text-secondary)' }}>Change%</th>
+                  <th className="text-left py-2 px-3 font-medium" style={{ color: 'var(--text-secondary)' }}>Explanation</th>
                 </tr>
               </thead>
               <tbody>
                 {materialVariances.map((mv, idx) => (
-                  <tr key={idx} className="border-b border-border-light hover:bg-hover/50 transition-colors">
-                    <td className="py-2 px-3 font-medium text-primary">{mv.lineItem}</td>
-                    <td className="py-2 px-3 text-text-secondary capitalize text-xs">
+                  <tr key={idx} className="transition-colors" style={{ borderBottom: '1px solid var(--border-default)' }}>
+                    <td className="py-2 px-3 font-medium" style={{ color: 'var(--text-primary)' }}>{mv.lineItem}</td>
+                    <td className="py-2 px-3 capitalize text-xs" style={{ color: 'var(--text-secondary)' }}>
                       {mv.statement?.replace(/_/g, ' ')}
                     </td>
                     <td className="py-2 px-3 text-right font-mono">
@@ -569,14 +576,14 @@ export default function BoardPackagePage() {
                     <td className="py-2 px-3 text-right font-mono">
                       <MoneyCell value={mv.changeAmount} />
                     </td>
-                    <td className="py-2 px-3 text-right text-text-secondary text-xs">
+                    <td className="py-2 px-3 text-right text-xs" style={{ color: 'var(--text-secondary)' }}>
                       {mv.changePercent != null ? `${mv.changePercent}%` : '—'}
                     </td>
-                    <td className="py-2 px-3 text-text-secondary text-xs max-w-[240px]">
+                    <td className="py-2 px-3 text-xs max-w-[240px]" style={{ color: 'var(--text-secondary)' }}>
                       {mv.explanation ? (
                         <span>{mv.explanation}</span>
                       ) : (
-                        <span className="text-status-amber italic flex items-center gap-1">
+                        <span className="italic flex items-center gap-1" style={{ color: 'var(--status-warning)' }}>
                           <AlertCircle className="w-3 h-3 shrink-0" />
                           Pending explanation
                         </span>
@@ -590,15 +597,15 @@ export default function BoardPackagePage() {
         )}
 
         {boardPackage?.cumulativeNote && (
-          <p className="text-xs text-text-tertiary italic mt-4 border-t border-border-light pt-3">
+          <p className="text-xs italic mt-4 pt-3" style={{ color: 'var(--text-tertiary)', borderTop: '1px solid var(--border-default)' }}>
             {boardPackage.cumulativeNote}
           </p>
         )}
       </div>
 
       {/* Certification Record */}
-      <div className="bg-surface border border-border rounded-card p-6">
-        <h2 className="text-lg font-display text-primary mb-4 flex items-center gap-2">
+      <div className="rounded-lg p-6" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)' }}>
+        <h2 className="text-lg font-display mb-4 flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
           <Shield className="w-5 h-5" />
           Certification Record
         </h2>
@@ -607,17 +614,17 @@ export default function BoardPackagePage() {
           <div className="space-y-4">
             {/* Certified status row */}
             <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-5 h-5 text-status-green shrink-0" />
-              <span className="font-medium text-status-green">Period Certified</span>
+              <CheckCircle2 className="w-5 h-5 shrink-0" style={{ color: 'var(--status-success)' }} />
+              <span className="font-medium" style={{ color: 'var(--status-success)' }}>Period Certified</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-2">
               <div>
-                <div className="text-xs text-text-tertiary uppercase tracking-wider mb-1 flex items-center gap-1">
+                <div className="text-xs uppercase tracking-wider mb-1 flex items-center gap-1" style={{ color: 'var(--text-tertiary)' }}>
                   <Clock className="w-3 h-3" />
                   Certified At
                 </div>
-                <div className="text-sm font-medium text-primary">
+                <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
                   {certification.certifiedAt
                     ? new Date(certification.certifiedAt).toLocaleString('en-US', {
                         year: 'numeric', month: 'long', day: 'numeric',
@@ -628,21 +635,21 @@ export default function BoardPackagePage() {
               </div>
 
               <div>
-                <div className="text-xs text-text-tertiary uppercase tracking-wider mb-1 flex items-center gap-1">
+                <div className="text-xs uppercase tracking-wider mb-1 flex items-center gap-1" style={{ color: 'var(--text-tertiary)' }}>
                   <ChevronRight className="w-3 h-3" />
                   Certified By
                 </div>
-                <div className="text-sm font-medium text-primary">
+                <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
                   {certification.certifiedBy ?? boardPackage?.certifiedBy ?? '—'}
                 </div>
               </div>
 
               <div className="sm:col-span-2 lg:col-span-1">
-                <div className="text-xs text-text-tertiary uppercase tracking-wider mb-1 flex items-center gap-1">
+                <div className="text-xs uppercase tracking-wider mb-1 flex items-center gap-1" style={{ color: 'var(--text-tertiary)' }}>
                   <Hash className="w-3 h-3" />
                   Snapshot Hash
                 </div>
-                <div className="text-xs font-mono text-text-secondary break-all">
+                <div className="text-xs font-mono break-all" style={{ color: 'var(--text-secondary)' }}>
                   {certification.snapshotHash
                     ? `${certification.snapshotHash.slice(0, 32)}...`
                     : '—'}
@@ -652,11 +659,11 @@ export default function BoardPackagePage() {
 
             {/* Signature field */}
             {certification.signature && (
-              <div className="pt-3 border-t border-border-light">
-                <div className="text-xs text-text-tertiary uppercase tracking-wider mb-1">
+              <div className="pt-3" style={{ borderTop: '1px solid var(--border-default)' }}>
+                <div className="text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>
                   Ed25519 Signature
                 </div>
-                <div className="text-xs font-mono text-text-secondary break-all bg-surface-alt rounded-input px-3 py-2">
+                <div className="text-xs font-mono break-all rounded-md px-3 py-2" style={{ color: 'var(--text-secondary)', background: 'var(--bg-surface-sunken)' }}>
                   {certification.signature.slice(0, 64)}...
                 </div>
               </div>
@@ -664,19 +671,19 @@ export default function BoardPackagePage() {
 
             {/* Validation results from certification */}
             {certification.validationResults?.length > 0 && (
-              <div className="pt-3 border-t border-border-light">
-                <div className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">
+              <div className="pt-3" style={{ borderTop: '1px solid var(--border-default)' }}>
+                <div className="text-xs font-medium uppercase tracking-wide mb-2" style={{ color: 'var(--text-secondary)' }}>
                   Validation Checks
                 </div>
                 <div className="space-y-1.5">
                   {certification.validationResults.map((v, idx) => (
                     <div key={idx} className="flex items-center gap-2 text-sm">
                       {v.passed ? (
-                        <CheckCircle2 className="w-4 h-4 text-status-green shrink-0" />
+                        <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: 'var(--status-success)' }} />
                       ) : (
-                        <XCircle className="w-4 h-4 text-status-red shrink-0" />
+                        <XCircle className="w-4 h-4 shrink-0" style={{ color: 'var(--status-error)' }} />
                       )}
-                      <span className={v.passed ? 'text-text-secondary' : 'text-status-red'}>
+                      <span style={{ color: v.passed ? 'var(--text-secondary)' : 'var(--status-error)' }}>
                         {v.check}
                       </span>
                     </div>
@@ -687,12 +694,12 @@ export default function BoardPackagePage() {
           </div>
         ) : (
           <div className="flex items-center gap-3 py-2">
-            <div className="w-8 h-8 rounded-full bg-surface-alt border border-border flex items-center justify-center shrink-0">
-              <Clock className="w-4 h-4 text-text-tertiary" />
+            <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: 'var(--bg-surface-sunken)', border: '1px solid var(--border-default)' }}>
+              <Clock className="w-4 h-4" style={{ color: 'var(--text-tertiary)' }} />
             </div>
             <div>
-              <div className="font-medium text-text-secondary">Pending Certification</div>
-              <div className="text-sm text-text-tertiary mt-0.5">
+              <div className="font-medium" style={{ color: 'var(--text-secondary)' }}>Pending Certification</div>
+              <div className="text-sm mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
                 This package will be certified once the period moves to CERTIFIED state.
                 Navigate to <span className="font-medium">Review &amp; Certify</span> to complete this step.
               </div>

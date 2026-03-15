@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
-import { ChevronDown, ChevronRight, Plus, X, Pencil, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, X, Pencil, Trash2, Eye, EyeOff } from 'lucide-react';
 
 interface TaxonomyLine {
   id: string;
@@ -13,6 +13,8 @@ interface TaxonomyLine {
   parentId?: string;
   normalBalance?: string;
   isCustom?: boolean;
+  displayOrder?: number;
+  hidden?: boolean;
 }
 
 interface TaxonomyNode {
@@ -22,6 +24,8 @@ interface TaxonomyNode {
   parentId?: string;
   normalBalance?: string;
   isCustom?: boolean;
+  displayOrder?: number;
+  hidden?: boolean;
   children?: TaxonomyNode[];
 }
 
@@ -41,7 +45,7 @@ function buildTaxonomyTree(lines: TaxonomyLine[]): TaxonomyNode[] {
   if (!lines.length) return [];
   const map = new Map<string, TaxonomyNode>();
   for (const l of lines) {
-    map.set(l.id, { id: l.id, label: l.name, statement: l.statement, parentId: l.parentId, normalBalance: l.normalBalance, isCustom: !STANDARD_IDS.has(l.id), children: [] });
+    map.set(l.id, { id: l.id, label: l.name, statement: l.statement, parentId: l.parentId, normalBalance: l.normalBalance, isCustom: !STANDARD_IDS.has(l.id), displayOrder: l.displayOrder, hidden: l.hidden, children: [] });
   }
   const roots: TaxonomyNode[] = [];
   for (const l of lines) {
@@ -64,13 +68,14 @@ const STATEMENT_OPTIONS = [
   { value: 'OCI', label: 'Equity / OCI' },
 ];
 
-function TaxonomyTree({ nodes, depth = 0, openIds, toggle, onEdit, onDelete }: {
+function TaxonomyTree({ nodes, depth = 0, openIds, toggle, onEdit, onDelete, onToggleHidden }: {
   nodes: TaxonomyNode[];
   depth?: number;
   openIds: Set<string>;
   toggle: (id: string) => void;
   onEdit: (node: TaxonomyNode) => void;
   onDelete: (id: string) => void;
+  onToggleHidden: (id: string, hidden: boolean) => void;
 }) {
   return (
     <ul className="list-none pl-0">
@@ -93,21 +98,34 @@ function TaxonomyTree({ nodes, depth = 0, openIds, toggle, onEdit, onDelete }: {
                 ) : (
                   <span className="w-4 shrink-0" />
                 )}
-                <span className="text-sm text-primary">{node.label}</span>
-                {node.isCustom && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-accent/10 text-accent">Custom</span>}
+                {node.displayOrder != null && (
+                  <span className="text-xs font-mono text-text-tertiary w-5 text-right shrink-0">{node.displayOrder}</span>
+                )}
+                <span className={`text-sm ${node.hidden ? 'text-text-tertiary line-through' : 'text-primary'}`}>{node.label}</span>
+                {node.isCustom && <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-accent/10 text-accent">Custom</span>}
+                {node.hidden && <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-text-muted/20 text-text-muted">Hidden</span>}
               </span>
-              {node.isCustom && (
-                <span className="hidden group-hover:flex items-center gap-1">
-                  <button onClick={(e) => { e.stopPropagation(); onEdit(node); }} className="p-1 rounded hover:bg-accent/10 text-text-tertiary hover:text-accent" title="Edit">
-                    <Pencil className="w-3.5 h-3.5" />
-                  </button>
-                  <button onClick={(e) => { e.stopPropagation(); onDelete(node.id); }} className="p-1 rounded hover:bg-red-50 text-text-tertiary hover:text-red-600" title="Delete">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </span>
-              )}
+              <span className="hidden group-hover:flex items-center gap-1">
+                <button
+                  onClick={(e) => { e.stopPropagation(); onToggleHidden(node.id, !node.hidden); }}
+                  className="p-1 rounded hover:bg-accent/10 text-text-tertiary hover:text-accent"
+                  title={node.hidden ? 'Show line item' : 'Hide line item'}
+                >
+                  {node.hidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+                {node.isCustom && (
+                  <>
+                    <button onClick={(e) => { e.stopPropagation(); onEdit(node); }} className="p-1 rounded hover:bg-accent/10 text-text-tertiary hover:text-accent" title="Edit">
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); onDelete(node.id); }} className="p-1 rounded hover:bg-red-50 text-text-tertiary hover:text-red-600" title="Delete">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                )}
+              </span>
             </div>
-            {hasChildren && isOpen && <TaxonomyTree nodes={node.children!} depth={depth + 1} openIds={openIds} toggle={toggle} onEdit={onEdit} onDelete={onDelete} />}
+            {hasChildren && isOpen && <TaxonomyTree nodes={node.children!} depth={depth + 1} openIds={openIds} toggle={toggle} onEdit={onEdit} onDelete={onDelete} onToggleHidden={onToggleHidden} />}
           </li>
         );
       })}
@@ -166,6 +184,18 @@ export default function TaxonomySettingsPage() {
       setDeleteConfirmId(null);
     },
   });
+
+  const toggleHiddenMutation = useMutation({
+    mutationFn: ({ id, hidden }: { id: string; hidden: boolean }) =>
+      apiFetch(`/api/coa-mapping/taxonomy/${id}`, { method: 'PATCH', body: { hidden } }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['taxonomy'] });
+    },
+  });
+
+  const handleToggleHidden = (id: string, hidden: boolean) => {
+    toggleHiddenMutation.mutate({ id, hidden });
+  };
 
   const resetForm = () => {
     setShowForm(false);
@@ -232,7 +262,7 @@ export default function TaxonomySettingsPage() {
         ) : tree.length === 0 ? (
           <p className="text-text-secondary text-sm">No taxonomy lines configured.</p>
         ) : (
-          <TaxonomyTree nodes={tree} openIds={openIds} toggle={toggle} onEdit={handleEdit} onDelete={handleDelete} />
+          <TaxonomyTree nodes={tree} openIds={openIds} toggle={toggle} onEdit={handleEdit} onDelete={handleDelete} onToggleHidden={handleToggleHidden} />
         )}
       </div>
 

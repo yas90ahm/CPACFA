@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -24,9 +25,19 @@ import {
   GitMerge,
   BookOpen,
   HeartPulse,
+  Search,
+  Brain,
+  Shield,
+  ListChecks,
+  ChevronDown,
+  ChevronRight,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Sparkles,
+  CheckCircle2,
 } from 'lucide-react';
 
-const navItems: {
+interface NavItem {
   href: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
@@ -35,27 +46,86 @@ const navItems: {
   stale?: boolean;
   phaseComplete?: boolean;
   external?: boolean;
-}[] = [
-  { href: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: 'trial-balance', label: 'Trial Balance', icon: Table },
-  { href: 'gl-health', label: 'GL Health', icon: HeartPulse },
-  { href: 'mapping', label: 'Mapping', icon: ArrowRightLeft },
-  { href: 'reconciliation', label: 'Reconciliation', icon: ShieldCheck, badgeProp: 'recon' },
-  { href: 'adjustments', label: 'Adjustments', icon: PenLine, badgeProp: 'adjustments' },
-  { href: 'fixed-assets', label: 'Fixed Assets', icon: Building2 },
-  { href: 'deferred-tax', label: 'Deferred Tax', icon: Calculator },
-  { href: 'stock-compensation', label: 'Equity Comp', icon: Star },
-  { href: 'impairment', label: 'Impairment', icon: AlertTriangle },
-  { href: 'segments', label: 'Segments', icon: PieChart },
-  { href: 'fx-translation', label: 'FX Translation', icon: Globe },
-  { href: 'consolidation', label: 'Consolidation', icon: GitMerge },
-  { href: 'statements', label: 'Statements', icon: FileText, stale: false },
-  { href: 'variance', label: 'Variance', icon: TrendingUp, badge: 2 },
-  { href: 'board-package', label: 'Board Package', icon: BookOpen },
-  { href: 'review', label: 'Review & Certify', icon: Award },
-  { href: 'audit-trail', label: 'Audit Trail', icon: History },
-  { href: '/settings', label: 'Settings', icon: Settings, external: true },
+}
+
+interface NavGroup {
+  label: string;
+  defaultOpen: boolean;
+  items: NavItem[];
+}
+
+const navGroups: NavGroup[] = [
+  {
+    label: 'Close Pipeline',
+    defaultOpen: true,
+    items: [
+      { href: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+      { href: 'trial-balance', label: 'Trial Balance', icon: Table },
+      { href: 'gl-quality', label: 'GL Quality', icon: Sparkles },
+      { href: 'mapping', label: 'Mapping', icon: ArrowRightLeft },
+      { href: 'reconciliation', label: 'Reconciliation', icon: ShieldCheck, badgeProp: 'recon' },
+      { href: 'adjustments', label: 'Adjustments', icon: PenLine, badgeProp: 'adjustments' },
+    ],
+  },
+  {
+    label: 'Statements & Analysis',
+    defaultOpen: true,
+    items: [
+      { href: 'statements', label: 'Statements', icon: FileText, stale: false },
+      { href: 'variance', label: 'Variance', icon: TrendingUp, badge: 2 },
+      { href: 'gl-health', label: 'GL Health', icon: HeartPulse },
+      { href: 'discrepancies', label: 'Discrepancies', icon: Search },
+    ],
+  },
+  {
+    label: 'Specialized Modules',
+    defaultOpen: false,
+    items: [
+      { href: 'fixed-assets', label: 'Fixed Assets', icon: Building2 },
+      { href: 'deferred-tax', label: 'Deferred Tax', icon: Calculator },
+      { href: 'stock-compensation', label: 'Equity Comp', icon: Star },
+      { href: 'impairment', label: 'Impairment', icon: AlertTriangle },
+      { href: 'segments', label: 'Segments', icon: PieChart },
+      { href: 'fx-translation', label: 'FX Translation', icon: Globe },
+      { href: 'consolidation', label: 'Consolidation', icon: GitMerge },
+    ],
+  },
+  {
+    label: 'Governance',
+    defaultOpen: true,
+    items: [
+      { href: 'ai-review', label: 'AI Review', icon: Brain },
+      { href: 'controls', label: 'Controls', icon: Shield },
+      { href: 'checklist', label: 'Checklist', icon: ListChecks },
+      { href: 'board-package', label: 'Board Package', icon: BookOpen },
+      { href: 'review', label: 'Review & Certify', icon: Award },
+      { href: 'audit-trail', label: 'Audit Trail', icon: History },
+    ],
+  },
 ];
+
+const STORAGE_KEY_GROUPS = 'sabit-sidebar-groups';
+
+const settingsItem: NavItem = { href: '/settings', label: 'Settings', icon: Settings, external: true };
+
+function loadGroupState(): Record<string, boolean> | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY_GROUPS);
+    if (stored) return JSON.parse(stored);
+  } catch {
+    // ignore parse errors
+  }
+  return null;
+}
+
+function saveGroupState(state: Record<string, boolean>) {
+  try {
+    localStorage.setItem(STORAGE_KEY_GROUPS, JSON.stringify(state));
+  } catch {
+    // ignore storage errors
+  }
+}
 
 export function Sidebar({
   sessionId,
@@ -64,8 +134,13 @@ export function Sidebar({
   adjustmentsBadge = 0,
   statementsStale = false,
   varianceUnexplainedCount = 0,
+  glQualityPending = 0,
+  glQualityDone = false,
+  glQualityGrade,
   sessionState,
   userRole,
+  collapsed = false,
+  onToggleCollapse,
 }: {
   sessionId: string;
   unmappedCount?: number;
@@ -73,67 +148,272 @@ export function Sidebar({
   adjustmentsBadge?: number;
   statementsStale?: boolean;
   varianceUnexplainedCount?: number;
+  glQualityPending?: number;
+  glQualityDone?: boolean;
+  glQualityGrade?: string;
   sessionState?: string;
   userRole?: string;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }) {
   const pathname = usePathname();
   const base = `/close/${sessionId}`;
   const isUnderReview = sessionState === 'UNDER_REVIEW';
   const role = userRole ?? 'controller';
 
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
+    const saved = loadGroupState();
+    if (saved) return saved;
+    const init: Record<string, boolean> = {};
+    for (const g of navGroups) init[g.label] = g.defaultOpen;
+    return init;
+  });
+
+  const toggleGroup = useCallback((label: string) => {
+    setOpenGroups((prev) => {
+      const next = { ...prev, [label]: !prev[label] };
+      saveGroupState(next);
+      return next;
+    });
+  }, []);
+
+  const renderItemCollapsed = (item: NavItem) => {
+    const href = item.external ? item.href : `${base}/${item.href}`;
+    const isActive = pathname === href || (item.href !== 'dashboard' && pathname?.startsWith(href));
+    const isPromotedReview = item.href === 'review' && isUnderReview && !isActive;
+
+    return (
+      <Link
+        key={item.href}
+        href={href}
+        className="flex items-center justify-center w-10 h-10 mx-auto rounded-md transition-colors"
+        style={{
+          ...(isActive
+            ? {
+                background: 'var(--bg-table-row-selected)',
+                color: 'var(--interactive-primary)',
+              }
+            : isPromotedReview
+              ? {
+                  background: 'var(--status-info-bg)',
+                  color: 'var(--interactive-primary)',
+                }
+              : {
+                  color: 'var(--text-secondary)',
+                }),
+        }}
+        title={item.label}
+      >
+        <item.icon className="w-5 h-5" />
+      </Link>
+    );
+  };
+
+  const renderItem = (item: NavItem) => {
+    if (collapsed) return renderItemCollapsed(item);
+
+    const href = item.external ? item.href : `${base}/${item.href}`;
+    const isActive = pathname === href || (item.href !== 'dashboard' && pathname?.startsWith(href));
+
+    return (
+      <Link
+        key={item.href}
+        href={href}
+        className={cn(
+          'flex items-center gap-3 px-4 py-2 mx-2 rounded-input text-sm transition-colors border-l-3 border-transparent',
+          !isActive && !(item.href === 'review' && isUnderReview) && 'hover:bg-hover hover:text-primary',
+          !isActive && item.href === 'review' && isUnderReview && 'font-medium'
+        )}
+        style={{
+          borderLeftWidth: '3px',
+          ...(isActive
+            ? {
+                background: 'var(--bg-table-row-selected)',
+                color: 'var(--interactive-primary)',
+                borderLeftColor: 'var(--interactive-primary)',
+              }
+            : item.href === 'review' && isUnderReview
+              ? {
+                  background: 'var(--status-info-bg)',
+                  color: 'var(--interactive-primary)',
+                  borderLeftColor: 'var(--interactive-primary)',
+                }
+              : {
+                  color: 'var(--text-secondary)',
+                }),
+          ...(!isActive && item.phaseComplete
+            ? { borderLeftColor: 'var(--status-success)' }
+            : {}),
+        }}
+      >
+        <item.icon className="w-4 h-4 shrink-0" />
+        <span className="flex-1 truncate">{item.label}</span>
+        {item.href === 'trial-balance' && unmappedCount > 0 && (
+          <span className="px-1.5 py-0.5 text-xs rounded" style={{ background: 'var(--status-warning-bg)', color: 'var(--status-warning)' }}>{unmappedCount}</span>
+        )}
+        {item.href === 'mapping' && unmappedCount > 0 && (
+          <span className="px-1.5 py-0.5 text-xs rounded" style={{ background: 'var(--status-warning-bg)', color: 'var(--status-warning)' }}>{unmappedCount}</span>
+        )}
+        {item.badgeProp === 'recon' && reconIncompleteCount > 0 && (
+          <span className="px-1.5 py-0.5 text-xs rounded" style={{ background: 'var(--status-warning-bg)', color: 'var(--status-warning)' }}>{reconIncompleteCount}</span>
+        )}
+        {item.badgeProp === 'adjustments' && adjustmentsBadge > 0 && (
+          <span className="px-1.5 py-0.5 text-xs rounded" style={{ background: 'var(--status-warning-bg)', color: 'var(--status-warning)' }}>{adjustmentsBadge}</span>
+        )}
+        {item.href === 'variance' && varianceUnexplainedCount > 0 && (
+          <span className="px-1.5 py-0.5 text-xs rounded" style={{ background: 'var(--status-warning-bg)', color: 'var(--status-warning)' }}>{varianceUnexplainedCount}</span>
+        )}
+        {item.href === 'gl-quality' && glQualityGrade && (
+          <div
+            className="rounded-full shrink-0"
+            style={{
+              width: 8,
+              height: 8,
+              backgroundColor:
+                glQualityGrade === 'A' || glQualityGrade === 'B'
+                  ? 'var(--status-success)'
+                  : glQualityGrade === 'C'
+                    ? 'var(--status-warning)'
+                    : 'var(--status-error)',
+            }}
+            title={`GL Quality: ${glQualityGrade}`}
+          />
+        )}
+        {item.href === 'gl-quality' && !glQualityGrade && glQualityDone && glQualityPending === 0 && (
+          <CheckCircle2 className="w-3.5 h-3.5" style={{ color: 'var(--status-success)' }} />
+        )}
+        {item.href === 'gl-quality' && glQualityPending > 0 && (
+          <span className="px-1.5 py-0.5 text-xs rounded" style={{ background: 'var(--status-warning-bg)', color: 'var(--status-warning)' }}>{glQualityPending}</span>
+        )}
+        {item.href === 'statements' && statementsStale && (
+          <span className="text-xs" style={{ color: 'var(--status-warning)' }}>STALE</span>
+        )}
+      </Link>
+    );
+  };
+
+  const showSettings = role !== 'operating_partner' && role !== 'auditor';
+
   return (
-    <aside className="fixed left-0 top-[56px] w-[240px] h-[calc(100vh-56px)] bg-surface border-r border-border flex flex-col z-30 print:hidden">
-      <nav className="flex-1 py-3 overflow-y-auto space-y-0.5">
-        {navItems.filter((item) => {
-          if (item.external && item.href === '/settings') {
-            return role !== 'operating_partner' && role !== 'auditor';
-          }
-          return isSidebarItemVisible(role, item.href);
-        }).map((item, idx) => {
-          const href = item.external ? item.href : `${base}/${item.href}`;
-          const isActive = pathname === href || (item.href !== 'dashboard' && pathname?.startsWith(href));
-          const isSeparator = item.label === 'Audit Trail' || item.label === 'Fixed Assets' || item.label === 'Statements';
-          return (
-            <div key={item.href}>
-              {isSeparator && <div className="my-2 border-t border-border-light" />}
+    <aside
+      className="fixed left-0 top-[56px] h-[calc(100vh-56px)] border-r flex flex-col z-30 print:hidden transition-[width] duration-200"
+      style={{
+        width: collapsed ? '64px' : '240px',
+        background: 'var(--bg-nav)',
+        borderColor: 'var(--border-default)',
+      }}
+    >
+      <nav className="flex-1 py-2 overflow-y-auto">
+        {/* UNDER_REVIEW promoted link */}
+        {isUnderReview && (
+          <div className={collapsed ? 'flex justify-center mb-2' : 'mx-2 mb-2'}>
+            {collapsed ? (
               <Link
-                href={href}
-                className={cn(
-                  'flex items-center gap-3 px-4 py-2.5 mx-2 rounded-input text-sm transition-colors border-l-3 border-transparent',
-                  isActive
-                    ? 'bg-accent-dim text-accent border-l-accent'
-                    : item.href === 'review' && isUnderReview
-                      ? 'bg-accent-dim/50 text-accent border-l-accent font-medium'
-                      : 'text-text-secondary hover:bg-hover hover:text-primary',
-                  !isActive && item.phaseComplete && 'border-l-status-green'
-                )}
-                style={{ borderLeftWidth: '3px' }}
+                href={`${base}/review`}
+                className="relative flex items-center justify-center w-10 h-10 rounded-md transition-colors hover:opacity-90"
+                style={{
+                  background: 'var(--interactive-primary)',
+                  color: 'white',
+                  ...(pathname === `${base}/review`
+                    ? { boxShadow: '0 0 0 2px rgba(26,95,180,0.3)' }
+                    : {}),
+                }}
+                title="Review & Certify"
               >
-                <item.icon className="w-5 h-5 shrink-0" />
-                <span className="flex-1 truncate">{item.label}</span>
-                {item.href === 'trial-balance' && unmappedCount > 0 && (
-                  <span className="px-1.5 py-0.5 text-xs rounded bg-status-amber-dim text-status-amber">{unmappedCount}</span>
-                )}
-                {item.href === 'mapping' && unmappedCount > 0 && (
-                  <span className="px-1.5 py-0.5 text-xs rounded bg-status-amber-dim text-status-amber">{unmappedCount}</span>
-                )}
-                {item.badgeProp === 'recon' && reconIncompleteCount > 0 && (
-                  <span className="px-1.5 py-0.5 text-xs rounded bg-status-amber-dim text-status-amber">{reconIncompleteCount}</span>
-                )}
-                {item.badgeProp === 'adjustments' && adjustmentsBadge > 0 && (
-                  <span className="px-1.5 py-0.5 text-xs rounded bg-status-amber-dim text-status-amber">{adjustmentsBadge}</span>
-                )}
-                {item.href === 'variance' && varianceUnexplainedCount > 0 && (
-                  <span className="px-1.5 py-0.5 text-xs rounded bg-status-amber-dim text-status-amber">{varianceUnexplainedCount}</span>
-                )}
-                {item.href === 'statements' && statementsStale && (
-                  <span className="text-xs text-status-amber">STALE</span>
-                )}
+                <Award className="w-5 h-5" />
+                <span
+                  className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2"
+                  style={{
+                    background: 'var(--status-warning)',
+                    borderColor: 'var(--bg-nav)',
+                  }}
+                />
               </Link>
+            ) : (
+              <Link
+                href={`${base}/review`}
+                className="flex items-center gap-3 px-4 py-2.5 rounded-input text-sm font-semibold transition-colors hover:opacity-90"
+                style={{
+                  background: 'var(--interactive-primary)',
+                  color: 'white',
+                  ...(pathname === `${base}/review`
+                    ? { boxShadow: '0 0 0 2px rgba(26,95,180,0.3)' }
+                    : {}),
+                }}
+              >
+                <Award className="w-4 h-4 shrink-0" />
+                <span className="flex-1">Review & Certify</span>
+              </Link>
+            )}
+          </div>
+        )}
+
+        {/* Navigation groups */}
+        {navGroups.map((group) => {
+          const visibleItems = group.items.filter((item) => isSidebarItemVisible(role, item.href));
+          if (visibleItems.length === 0) return null;
+          const isOpen = openGroups[group.label] ?? group.defaultOpen;
+
+          if (collapsed) {
+            // In collapsed mode, show all items as icons (no group headers, always expanded)
+            return (
+              <div key={group.label} className="mb-1 space-y-1 py-1">
+                {visibleItems.map(renderItem)}
+              </div>
+            );
+          }
+
+          return (
+            <div key={group.label} className="mb-1">
+              <button
+                onClick={() => toggleGroup(group.label)}
+                className="flex items-center gap-2 w-full px-4 py-1.5 text-xs font-semibold uppercase tracking-wider hover:text-primary transition-colors"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                {isOpen
+                  ? <ChevronDown className="w-3 h-3 shrink-0" />
+                  : <ChevronRight className="w-3 h-3 shrink-0" />
+                }
+                <span>{group.label}</span>
+              </button>
+              {isOpen && (
+                <div className="space-y-0.5">
+                  {visibleItems.map(renderItem)}
+                </div>
+              )}
             </div>
           );
         })}
+
+        {/* Settings */}
+        {showSettings && (
+          <div
+            className={collapsed ? 'mt-2 pt-2 border-t' : 'mt-2 pt-2 border-t'}
+            style={{ borderColor: 'var(--border-subtle)' }}
+          >
+            {renderItem(settingsItem)}
+          </div>
+        )}
       </nav>
+
+      {/* Collapse toggle button */}
+      <div
+        className="border-t py-2 flex justify-center print:hidden"
+        style={{ borderColor: 'var(--border-subtle)' }}
+      >
+        <button
+          onClick={onToggleCollapse}
+          className="flex items-center justify-center w-8 h-8 rounded-md transition-colors"
+          style={{ color: 'var(--text-tertiary)' }}
+          title={collapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)'}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {collapsed
+            ? <PanelLeftOpen className="w-4 h-4" />
+            : <PanelLeftClose className="w-4 h-4" />
+          }
+        </button>
+      </div>
     </aside>
   );
 }

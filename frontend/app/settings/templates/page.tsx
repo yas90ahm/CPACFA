@@ -7,7 +7,9 @@ import { SlideOverPanel } from '@/components/shared/SlideOverPanel';
 import { MoneyInput } from '@/components/shared/MoneyInput';
 import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { Plus, Pencil, Power, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
+import { fmtMoney } from '@/lib/money';
+import { Plus, Pencil, Power, Trash2, ChevronDown, ChevronRight, FileText } from 'lucide-react';
+import { EmptyState } from '@/components/shared/EmptyState';
 
 interface TemplateLine {
   accountRef: string;
@@ -28,10 +30,7 @@ interface Template {
 }
 
 function formatMoney(v: string | number | null | undefined): string {
-  if (v == null) return '$0.00';
-  const n = typeof v === 'number' ? v : parseFloat(v);
-  if (Number.isNaN(n)) return '$0.00';
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n);
+  return fmtMoney(v, { dollar: true, dash: false });
 }
 
 export default function TemplatesSettingsPage() {
@@ -137,6 +136,15 @@ export default function TemplatesSettingsPage() {
         <Link href="/close" className="text-accent hover:underline">View close sessions</Link>
       </p>
 
+      {templates.length === 0 ? (
+        <EmptyState
+          icon={FileText}
+          title="No Templates"
+          description="Create a recurring entry template to automate common adjustments like depreciation and accruals."
+          actionLabel="New Template"
+          onAction={() => { setEditingTemplate(null); setNewName(''); setNewMemo(''); setNewFreq('monthly'); setNewLines([{ accountRef: '', debit: '0', credit: undefined }, { accountRef: '', debit: undefined, credit: '0' }]); setPanelOpen(true); }}
+        />
+      ) : (
       <div className="bg-surface border border-border rounded-card overflow-hidden">
         <table className="w-full text-sm">
           <thead>
@@ -191,6 +199,7 @@ export default function TemplatesSettingsPage() {
           </tbody>
         </table>
       </div>
+      )}
 
       {toast && (
         <div

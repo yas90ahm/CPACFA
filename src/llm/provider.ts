@@ -51,6 +51,106 @@ const AI_MOCK_RESPONSE =
  * Tool-calling is not handled here (use provider-specific flows for tool use).
  * When AI_MOCK=true (dev only; forced false in prod/staging/demo), returns mock string (no network call).
  */
+/** Extended result with optional token usage for observability. */
+export interface TextGenerationResult {
+  text: string;
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
+/**
+ * Generate text with token usage metadata (when available from provider).
+ * Same as generateText but returns usage info for cost estimation.
+ */
+export async function generateTextWithUsage(input: TextGenerationInput): Promise<TextGenerationResult> {
+  enterAdvisoryContext();
+  try {
+    if (aiMock()) {
+      return { text: AI_MOCK_RESPONSE };
+    }
+    const provider = getProviderFromEnv();
+    const maxTokens = input.maxTokens ?? 1024;
+    const prompt = input.prompt;
+    const system = input.system ?? '';
+
+    if (provider === 'anthropic') {
+      const apiKey = getApiKey('anthropic');
+      const { default: Anthropic } = await import('@anthropic-ai/sdk');
+      const client = new Anthropic({ apiKey });
+      const response = await client.messages.create({
+        model: input.model ?? 'claude-sonnet-4-5-20250929',
+        max_tokens: maxTokens,
+        system: system || undefined,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      const text = response.content
+        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+        .map((b) => b.text)
+        .join('\n')
+        .trim();
+      return {
+        text,
+        inputTokens: response.usage?.input_tokens,
+        outputTokens: response.usage?.output_tokens,
+      };
+    }
+
+    // For OpenAI / Mistral, delegate to generateText (no usage extraction yet)
+    const text = await _generateTextCore(input, provider, maxTokens, prompt, system);
+    return { text };
+  } finally {
+    exitAdvisoryContext();
+  }
+}
+
+/** Internal helper shared between generateText and generateTextWithUsage for non-Anthropic providers. */
+async function _generateTextCore(
+  input: TextGenerationInput,
+  provider: LLMProvider,
+  maxTokens: number,
+  prompt: string,
+  system: string,
+): Promise<string> {
+  if (provider === 'openai') {
+    const apiKey = getApiKey('openai');
+    const mod = await import('openai').catch(() => null);
+    if (!mod?.default) {
+      throw new Error('OpenAI SDK not installed. Add "openai" to dependencies.');
+    }
+    const client = new mod.default({ apiKey });
+    const response = await client.chat.completions.create({
+      model: input.model ?? 'gpt-4o-mini',
+      max_tokens: maxTokens,
+      messages: [
+        ...(system ? [{ role: 'system' as const, content: system }] : []),
+        { role: 'user' as const, content: prompt },
+      ],
+    });
+    const content = response.choices?.[0]?.message?.content;
+    return typeof content === 'string' ? content.trim() : '';
+  }
+
+  // Mistral
+  const apiKey = getApiKey('mistral');
+  const mod = await import('@mistralai/mistralai').catch(() => null);
+  if (!mod) {
+    throw new Error('Mistral SDK not installed. Add "@mistralai/mistralai" to dependencies.');
+  }
+  const client = new mod.Mistral({ apiKey });
+  const response = await client.chat.complete({
+    model: input.model ?? 'mistral-large-latest',
+    maxTokens,
+    messages: [
+      ...(system ? [{ role: 'system' as const, content: system }] : []),
+      { role: 'user' as const, content: prompt },
+    ],
+  });
+  const content = response.choices?.[0]?.message?.content;
+  if (typeof content === 'string') return content.trim();
+  if (Array.isArray(content)) return content.map((c) => (typeof c === 'string' ? c : (c as { text?: string }).text ?? '')).join('').trim();
+  return '';
+}
+
 export async function generateText(input: TextGenerationInput): Promise<string> {
   enterAdvisoryContext();
   try {

@@ -6,6 +6,8 @@
 
 import type { Pool } from 'pg';
 import { callLLMWithFallback } from '../llm/callWithFallback.js';
+import { runInBoundaryScope, enterAdvisoryContext, exitAdvisoryContext } from '../lib/ai_boundary.js';
+import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import * as repo from '../db/repositories/revenue_recognition_repository.js';
 import { minus as decMinus, plus as decPlus, round2 } from '../utils/decimal.js';
 import type {
@@ -20,12 +22,12 @@ function toPerformanceObligation(row: repo.PerformanceObligationRow): Performanc
     name: row.name,
     description: row.description,
     satisfiedOverTime: row.satisfiedOverTime,
-    allocationPercent: row.allocationPercent,
-    allocationAmount: row.allocationAmount,
+    allocationPercent: row.allocationPercent != null ? Number(row.allocationPercent) : undefined,
+    allocationAmount: row.allocationAmount != null ? Number(row.allocationAmount) : undefined,
     schedule: row.schedule,
     scheduleType: row.scheduleType,
-    costToCostTotalEstimated: row.costToCostTotalEstimated,
-    costToCostCostsToDate: row.costToCostCostsToDate,
+    costToCostTotalEstimated: row.costToCostTotalEstimated != null ? Number(row.costToCostTotalEstimated) : undefined,
+    costToCostCostsToDate: row.costToCostCostsToDate != null ? Number(row.costToCostCostsToDate) : undefined,
     milestoneAmounts: row.milestoneAmounts,
   };
 }
@@ -42,7 +44,7 @@ function toContract(
     customerName: contract.customerName,
     startDate: contract.startDate,
     endDate: contract.endDate,
-    totalContractValue: contract.totalContractValue,
+    totalContractValue: Number(contract.totalContractValue),
     currency: contract.currency,
     status: contract.status,
     allocation: contract.allocation,
@@ -74,7 +76,7 @@ export function createContract(
       customerName: input.customerName,
       startDate: input.startDate,
       endDate: input.endDate,
-      totalContractValue: input.totalContractValue,
+      totalContractValue: String(input.totalContractValue),
       currency: input.currency,
       status: 'draft',
     });
@@ -82,12 +84,12 @@ export function createContract(
       name: p.name,
       description: p.description,
       satisfiedOverTime: p.satisfiedOverTime,
-      allocationPercent: p.allocationPercent,
-      allocationAmount: p.allocationAmount,
+      allocationPercent: p.allocationPercent != null ? String(p.allocationPercent) : undefined,
+      allocationAmount: p.allocationAmount != null ? String(p.allocationAmount) : undefined,
       schedule: p.schedule,
       scheduleType: p.scheduleType ?? 'linear',
-      costToCostTotalEstimated: p.costToCostTotalEstimated,
-      costToCostCostsToDate: p.costToCostCostsToDate,
+      costToCostTotalEstimated: p.costToCostTotalEstimated != null ? String(p.costToCostTotalEstimated) : undefined,
+      costToCostCostsToDate: p.costToCostCostsToDate != null ? String(p.costToCostCostsToDate) : undefined,
       milestoneAmounts: p.milestoneAmounts,
     }));
     const pobRows = await repo.createPerformanceObligations(
@@ -184,28 +186,41 @@ Allocate the transaction price across POBs (percent or amount). Return JSON: { "
         ? round2(total / n)
         : total - Object.values(fallback).reduce((a, b) => a + b, 0);
   });
-  const result = await callLLMWithFallback({
-    system:
-      'You are a revenue recognition specialist (IFRS 15/ASC 606). Output only valid JSON object of POB id to allocated amount.',
-    prompt,
-    maxTokens: 400,
-    parse: (raw) => parseAllocation(raw, contract.performanceObligations, contract.totalContractValue),
-    fallback,
-  });
-  const usedFallback = result === fallback;
-  if (result && Object.keys(result).length > 0 && !usedFallback) {
-    await repo.updateContract(pool, tenantId, contractId, { allocation: result });
-    for (const p of contract.performanceObligations) {
-      const amount = result[p.id];
-      if (amount != null) {
-        await repo.updatePerformanceObligation(pool, tenantId, p.id, { allocationAmount: amount });
+  return runInBoundaryScope(async () => {
+    enterAdvisoryContext();
+    try {
+      const result = await callLLMWithFallback({
+        system:
+          'You are a revenue recognition specialist (IFRS 15/ASC 606). Output only valid JSON object of POB id to allocated amount.',
+        prompt,
+        maxTokens: 400,
+        parse: (raw) => parseAllocation(raw, contract.performanceObligations, contract.totalContractValue),
+        fallback,
+      });
+
+      // Apply numeric guardrail on parsed LLM output
+      const usedFallback = result === fallback;
+      if (!usedFallback && result) {
+        assertNoNumericAmountsInAgentOutput(result, 'revenue_recognition_allocation');
       }
+
+      if (result && Object.keys(result).length > 0 && !usedFallback) {
+        await repo.updateContract(pool, tenantId, contractId, { allocation: result });
+        for (const p of contract.performanceObligations) {
+          const amount = result[p.id];
+          if (amount != null) {
+            await repo.updatePerformanceObligation(pool, tenantId, p.id, { allocationAmount: String(amount) });
+          }
+        }
+      }
+      return {
+        allocation: result && Object.keys(result).length > 0 ? result : null,
+        allocationSource: usedFallback ? 'fallback' : 'agentic',
+      };
+    } finally {
+      exitAdvisoryContext();
     }
-  }
-  return {
-    allocation: result && Object.keys(result).length > 0 ? result : null,
-    allocationSource: usedFallback ? 'fallback' : 'agentic',
-  };
+  });
 }
 
 /** Persist allocation (e.g. after user confirms suggested or fallback allocation). Use for recognition in reports. */
@@ -225,7 +240,7 @@ export async function setContractAllocation(
   for (const p of contract.performanceObligations) {
     const amount = allocation[p.id];
     if (amount != null) {
-      await repo.updatePerformanceObligation(pool, tenantId, p.id, { allocationAmount: amount });
+      await repo.updatePerformanceObligation(pool, tenantId, p.id, { allocationAmount: String(amount) });
     }
   }
   return getContract(tenantId, pool, contractId);
@@ -412,13 +427,27 @@ export async function suggestRecognitionScheduleAgentic(
     const prompt = `Contract ${contract.contractNumber}. POB: ${pob.name}. Allocated amount: ${amount} ${contract.currency}. Period: ${contract.startDate} to ${contract.endDate}.
 Suggest monthly recognition schedule (straight-line or as per pattern). Return JSON array: [ { periodStart, periodEnd, amount, cumulativeAmount?, recognized?: false } ].`;
     const fallback = linearSchedule(contract.startDate, contract.endDate, amount);
-    result = await callLLMWithFallback({
-      system:
-        'You are a revenue recognition specialist. Output only valid JSON array of period entries.',
-      prompt,
-      maxTokens: 600,
-      parse: (raw) => parseSchedule(raw, contract.startDate, contract.endDate, amount),
-      fallback,
+    result = await runInBoundaryScope(async () => {
+      enterAdvisoryContext();
+      try {
+        const llmResult = await callLLMWithFallback({
+          system:
+            'You are a revenue recognition specialist. Output only valid JSON array of period entries.',
+          prompt,
+          maxTokens: 600,
+          parse: (raw) => parseSchedule(raw, contract.startDate, contract.endDate, amount),
+          fallback,
+        });
+
+        // Apply numeric guardrail on parsed LLM output
+        if (llmResult && llmResult !== fallback) {
+          assertNoNumericAmountsInAgentOutput(llmResult, 'revenue_recognition_schedule');
+        }
+
+        return llmResult;
+      } finally {
+        exitAdvisoryContext();
+      }
     });
   }
 
@@ -455,21 +484,35 @@ Include: contract balances, performance obligation allocation, and timing of rec
     summary: `Revenue from contracts: ${summary.contractCount} contract(s), ${summary.totalContractValue.toLocaleString()} ${summary.currency}.`,
   };
 
-  return callLLMWithFallback({
-    system: systemPrompt,
-    prompt: userContent,
-    maxTokens: 800,
-    parse: (raw: string) => {
-      try {
-        const parsed = JSON.parse(raw);
-        return {
-          footnote: typeof parsed.footnote === 'string' ? parsed.footnote : fallback.footnote,
-          summary: typeof parsed.summary === 'string' ? parsed.summary : fallback.summary,
-        };
-      } catch {
-        return fallback;
+  return runInBoundaryScope(async () => {
+    enterAdvisoryContext();
+    try {
+      const result = await callLLMWithFallback({
+        system: systemPrompt,
+        prompt: userContent,
+        maxTokens: 800,
+        parse: (raw: string) => {
+          try {
+            const parsed = JSON.parse(raw);
+            return {
+              footnote: typeof parsed.footnote === 'string' ? parsed.footnote : fallback.footnote,
+              summary: typeof parsed.summary === 'string' ? parsed.summary : fallback.summary,
+            };
+          } catch {
+            return fallback;
+          }
+        },
+        fallback,
+      });
+
+      // Apply numeric guardrail on parsed LLM output
+      if (result !== fallback) {
+        assertNoNumericAmountsInAgentOutput(result, 'revenue_recognition_footnote');
       }
-    },
-    fallback,
+
+      return result;
+    } finally {
+      exitAdvisoryContext();
+    }
   });
 }

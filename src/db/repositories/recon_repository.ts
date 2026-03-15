@@ -78,7 +78,7 @@ function rowToItem(row: ReconItemRow): ReconItem {
     id: row.id,
     reconRunId: row.recon_run_id,
     source: row.source as ReconItemSource,
-    amount: Number(row.amount ?? '0'),
+    amount: row.amount ?? '0',
     itemDate: row.item_date ?? undefined,
     description: row.description ?? undefined,
     ref: row.ref != null && typeof row.ref === 'object' ? (row.ref as Record<string, unknown>) : undefined,
@@ -91,7 +91,7 @@ function rowToMatchGroup(row: ReconMatchGroupRow): ReconMatchGroup {
     id: row.id,
     reconRunId: row.recon_run_id,
     status: row.status as MatchGroupStatus,
-    matchConfidence: row.match_confidence != null ? Number(row.match_confidence) : undefined,
+    matchConfidence: row.match_confidence ?? undefined,
     decisionRecordId: row.decision_record_id ?? undefined,
     createdAt: row.created_at,
   };

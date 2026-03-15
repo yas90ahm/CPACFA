@@ -73,6 +73,10 @@ Output STRICT JSON only (no markdown fence, no extra text). Schema:
 
 Rules: if amount present → amountProvenance required. If amountProvenance=SOURCE_LINE_AMOUNT → sourceRef required. Proposals only; never finalized entries.
 
+## EXAMPLE OUTPUT
+{"prompt_version":"${ADVISOR_PROMPT_VERSION}","proposals":[{"proposal_id":"prop-recon-var-001","type":"other","rationale":"The AR aging report shows $16,412,000 but the GL control account shows $16,399,600. Recommend reviewing credit memos entered in the AR module during the last 3 business days that may not have synced to the GL.","rule_ids":["ASC 310-10-35"],"confidence":0.78,"requires_human_confirmation":true,"lines":[],"missing_inputs":["Credit memo detail from AR subledger for last 3 business days","GL posting log for AR control account"]}]}
+Note: This example shows a reconciliation_variance proposal. The type field should match the nature of the issue (reclass, accrual_candidate, deferral_candidate, lease_candidate, mapping_fix, or other).
+
 Context: tenantId=${context.tenantId}, periodLabel=${context.periodLabel}.
 
 Classified source lines (amounts here may be copied with sourceRef.tbRowId = source_id):

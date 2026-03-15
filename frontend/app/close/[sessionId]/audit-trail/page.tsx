@@ -28,27 +28,28 @@ import {
   User,
   FileDown,
 } from 'lucide-react';
+import { Breadcrumb } from '@/components/shared/Breadcrumb';
 
-// Event type labels and icons
+// Event type labels and icons — colors are now CSS variable values for inline styles
 const EVENT_TYPE_CONFIG: Record<
   AuditEventType,
-  { label: string; icon: React.ComponentType<{ className?: string }>; color: string }
+  { label: string; icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>; color: string }
 > = {
-  close_state_change: { label: 'Close State Change', icon: History, color: 'text-status-blue' },
-  je_created: { label: 'Journal Entry', icon: FileText, color: 'text-accent' },
-  je_proposed: { label: 'Journal Entry', icon: FileText, color: 'text-accent' },
-  je_approved: { label: 'Journal Entry', icon: CheckCircle, color: 'text-status-green' },
-  je_posted: { label: 'Journal Entry', icon: CheckCircle, color: 'text-status-green' },
-  je_rejected: { label: 'Journal Entry', icon: XCircle, color: 'text-status-red' },
-  recon_completed: { label: 'Reconciliation', icon: CheckCircle, color: 'text-status-green' },
-  recon_approved: { label: 'Reconciliation', icon: Shield, color: 'text-status-blue' },
-  mapping_changed: { label: 'Mapping', icon: MapPin, color: 'text-status-amber' },
-  evidence_uploaded: { label: 'Evidence', icon: Upload, color: 'text-status-blue' },
-  variance_explained: { label: 'Variance', icon: TrendingUp, color: 'text-status-amber' },
-  variance_approved: { label: 'Variance', icon: CheckCircle, color: 'text-status-green' },
-  certification: { label: 'Certification', icon: Shield, color: 'text-status-green' },
-  lock: { label: 'Lock', icon: Lock, color: 'text-status-red' },
-  reopen: { label: 'Reopen', icon: Unlock, color: 'text-status-amber' },
+  close_state_change: { label: 'Close State Change', icon: History, color: 'var(--interactive-primary)' },
+  je_created: { label: 'Journal Entry', icon: FileText, color: 'var(--interactive-primary)' },
+  je_proposed: { label: 'Journal Entry', icon: FileText, color: 'var(--interactive-primary)' },
+  je_approved: { label: 'Journal Entry', icon: CheckCircle, color: 'var(--status-success)' },
+  je_posted: { label: 'Journal Entry', icon: CheckCircle, color: 'var(--status-success)' },
+  je_rejected: { label: 'Journal Entry', icon: XCircle, color: 'var(--status-error)' },
+  recon_completed: { label: 'Reconciliation', icon: CheckCircle, color: 'var(--status-success)' },
+  recon_approved: { label: 'Reconciliation', icon: Shield, color: 'var(--interactive-primary)' },
+  mapping_changed: { label: 'Mapping', icon: MapPin, color: 'var(--status-warning)' },
+  evidence_uploaded: { label: 'Evidence', icon: Upload, color: 'var(--interactive-primary)' },
+  variance_explained: { label: 'Variance', icon: TrendingUp, color: 'var(--status-warning)' },
+  variance_approved: { label: 'Variance', icon: CheckCircle, color: 'var(--status-success)' },
+  certification: { label: 'Certification', icon: Shield, color: 'var(--status-success)' },
+  lock: { label: 'Lock', icon: Lock, color: 'var(--status-error)' },
+  reopen: { label: 'Reopen', icon: Unlock, color: 'var(--status-warning)' },
 };
 
 const EVENT_TYPE_GROUPS: Record<string, AuditEventType[]> = {
@@ -83,14 +84,20 @@ function truncateHash(hash: string): string {
 // Render JSON state as readable key-value pairs
 function renderState(state: Record<string, unknown> | null): React.ReactNode {
   if (!state || Object.keys(state).length === 0) {
-    return <span className="text-text-tertiary italic">N/A</span>;
+    return (
+      <span className="italic font-mono" style={{ color: 'var(--text-tertiary)' }}>
+        N/A
+      </span>
+    );
   }
   return (
-    <div className="space-y-1">
+    <div className="space-y-1 font-mono">
       {Object.entries(state).map(([key, value]) => (
         <div key={key} className="text-sm">
-          <span className="text-text-secondary font-medium">{key}:</span>{' '}
-          <span className="text-primary">
+          <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>
+            {key}:
+          </span>{' '}
+          <span style={{ color: 'var(--text-primary)' }}>
             {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
           </span>
         </div>
@@ -127,7 +134,11 @@ interface EventCardProps {
 }
 
 function EventCard({ event, isExpanded, onToggle }: EventCardProps) {
-  const config = EVENT_TYPE_CONFIG[event.eventType] ?? { icon: AlertCircle, color: 'text-text-secondary', label: event.eventType };
+  const config = EVENT_TYPE_CONFIG[event.eventType] ?? {
+    icon: AlertCircle,
+    color: 'var(--text-secondary)',
+    label: event.eventType,
+  };
   const Icon = config.icon;
   const diff = useMemo(
     () => computeDiff(event.beforeState, event.afterState),
@@ -135,34 +146,74 @@ function EventCard({ event, isExpanded, onToggle }: EventCardProps) {
   );
 
   return (
-    <div className="border border-border rounded-card bg-surface">
+    <div
+      className="border font-mono"
+      style={{
+        backgroundColor: 'var(--bg-surface)',
+        borderColor: 'var(--border-default)',
+        borderRadius: 'var(--radius-lg)',
+      }}
+    >
       <button
         type="button"
         onClick={onToggle}
-        className="w-full p-4 text-left hover:bg-hover transition-colors rounded-card"
+        className="w-full p-4 text-left transition-colors"
+        style={{ borderRadius: 'var(--radius-lg)' }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-table-row-hover)';
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+        }}
       >
         <div className="flex items-start gap-3">
-          <div className={cn('mt-0.5', config.color)}>
+          <div className="mt-0.5" style={{ color: config.color }}>
             <Icon className="w-5 h-5" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-4 mb-1">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-sm font-medium text-text-secondary">{config.label}</span>
-                  <span className="text-xs text-text-tertiary">{formatTimestamp(event.timestamp)}</span>
+                  <span
+                    className="text-sm font-medium"
+                    style={{ color: 'var(--text-secondary)' }}
+                  >
+                    {config.label}
+                  </span>
+                  <span
+                    className="text-xs font-mono"
+                    style={{ color: 'var(--text-tertiary)' }}
+                  >
+                    {formatTimestamp(event.timestamp)}
+                  </span>
                 </div>
-                <div className="text-sm text-primary font-medium mb-1">{event.description}</div>
-                <div className="flex items-center gap-4 text-xs text-text-tertiary">
+                <div
+                  className="text-sm font-medium mb-1"
+                  style={{ color: 'var(--text-primary)' }}
+                >
+                  {event.description}
+                </div>
+                <div className="flex items-center gap-4 text-xs" style={{ color: 'var(--text-tertiary)' }}>
                   <span className="flex items-center gap-1">
                     <User className="w-3 h-3" />
                     {event.userName}
                   </span>
-                  <span className="font-mono">Hash: {truncateHash(event.hash)}</span>
+                  <span className="font-mono" style={{ color: 'var(--text-secondary)' }}>
+                    Hash: {truncateHash(event.hash)}
+                  </span>
                   {event.previousHash && (
-                    <span className="font-mono">Prev: {truncateHash(event.previousHash)}</span>
+                    <span className="font-mono" style={{ color: 'var(--text-secondary)' }}>
+                      Prev: {truncateHash(event.previousHash)}
+                    </span>
                   )}
-                  <span className={cn('flex items-center gap-1', event.chainValid ? 'text-status-green' : 'text-status-red')}>
+                  <span
+                    className="flex items-center gap-1"
+                    style={{
+                      color: event.chainValid
+                        ? 'var(--status-success)'
+                        : 'var(--status-error)',
+                    }}
+                  >
                     {event.chainValid ? (
                       <>
                         <Check className="w-3 h-3" />
@@ -177,11 +228,11 @@ function EventCard({ event, isExpanded, onToggle }: EventCardProps) {
                   </span>
                 </div>
               </div>
-              <div className="shrink-0">
+              <div className="shrink-0" style={{ color: 'var(--text-tertiary)' }}>
                 {isExpanded ? (
-                  <ChevronUp className="w-5 h-5 text-text-tertiary" />
+                  <ChevronUp className="w-5 h-5" />
                 ) : (
-                  <ChevronDown className="w-5 h-5 text-text-tertiary" />
+                  <ChevronDown className="w-5 h-5" />
                 )}
               </div>
             </div>
@@ -190,29 +241,71 @@ function EventCard({ event, isExpanded, onToggle }: EventCardProps) {
       </button>
 
       {isExpanded && (
-        <div className="px-4 pb-4 pt-0 border-t border-border mt-2 pt-4 space-y-4">
+        <div
+          className="px-4 pb-4 pt-4 mt-2 space-y-4 border-t"
+          style={{ borderColor: 'var(--border-default)' }}
+        >
           <div>
-            <h4 className="text-sm font-medium text-text-secondary mb-2">Before State</h4>
-            <div className="bg-elevated rounded-input p-3">{renderState(event.beforeState)}</div>
+            <h4
+              className="text-sm font-medium mb-2"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              Before State
+            </h4>
+            <div
+              className="p-3"
+              style={{
+                backgroundColor: 'var(--bg-surface-sunken)',
+                borderRadius: 'var(--radius-md)',
+              }}
+            >
+              {renderState(event.beforeState)}
+            </div>
           </div>
           <div>
-            <h4 className="text-sm font-medium text-text-secondary mb-2">After State</h4>
-            <div className="bg-elevated rounded-input p-3">{renderState(event.afterState)}</div>
+            <h4
+              className="text-sm font-medium mb-2"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              After State
+            </h4>
+            <div
+              className="p-3"
+              style={{
+                backgroundColor: 'var(--bg-surface-sunken)',
+                borderRadius: 'var(--radius-md)',
+              }}
+            >
+              {renderState(event.afterState)}
+            </div>
           </div>
           {diff.length > 0 && (
             <div>
-              <h4 className="text-sm font-medium text-text-secondary mb-2">Changes</h4>
-              <div className="bg-elevated rounded-input p-3 space-y-2">
+              <h4
+                className="text-sm font-medium mb-2"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                Changes
+              </h4>
+              <div
+                className="p-3 space-y-2 font-mono"
+                style={{
+                  backgroundColor: 'var(--bg-surface-sunken)',
+                  borderRadius: 'var(--radius-md)',
+                }}
+              >
                 {diff.map((change) => (
                   <div key={change.key} className="text-sm">
-                    <span className="text-text-secondary font-medium">{change.key}:</span>
+                    <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>
+                      {change.key}:
+                    </span>
                     <div className="ml-4 mt-1">
-                      <div className="text-status-red line-through">
+                      <div className="line-through" style={{ color: 'var(--status-error)' }}>
                         {typeof change.before === 'object'
                           ? JSON.stringify(change.before, null, 2)
                           : String(change.before ?? 'null')}
                       </div>
-                      <div className="text-status-green">
+                      <div style={{ color: 'var(--status-success)' }}>
                         {typeof change.after === 'object'
                           ? JSON.stringify(change.after, null, 2)
                           : String(change.after ?? 'null')}
@@ -224,19 +317,38 @@ function EventCard({ event, isExpanded, onToggle }: EventCardProps) {
             </div>
           )}
           <div>
-            <h4 className="text-sm font-medium text-text-secondary mb-2">Hash Chain</h4>
-            <div className="bg-elevated rounded-input p-3 space-y-1 text-xs font-mono">
+            <h4
+              className="text-sm font-medium mb-2"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              Hash Chain
+            </h4>
+            <div
+              className="p-3 space-y-1 text-xs font-mono"
+              style={{
+                backgroundColor: 'var(--bg-surface-sunken)',
+                borderRadius: 'var(--radius-md)',
+              }}
+            >
               <div>
-                <span className="text-text-secondary">Hash:</span> <span className="text-primary">{event.hash}</span>
+                <span style={{ color: 'var(--text-secondary)' }}>Hash:</span>{' '}
+                <span style={{ color: 'var(--text-primary)' }}>{event.hash}</span>
               </div>
               {event.previousHash && (
                 <div>
-                  <span className="text-text-secondary">Previous Hash:</span>{' '}
-                  <span className="text-primary">{event.previousHash}</span>
+                  <span style={{ color: 'var(--text-secondary)' }}>Previous Hash:</span>{' '}
+                  <span style={{ color: 'var(--text-primary)' }}>{event.previousHash}</span>
                 </div>
               )}
-              <div className={cn('mt-2', event.chainValid ? 'text-status-green' : 'text-status-red')}>
-                Chain Status: {event.chainValid ? '✓ Valid' : '✗ Invalid'}
+              <div
+                className="mt-2"
+                style={{
+                  color: event.chainValid
+                    ? 'var(--status-success)'
+                    : 'var(--status-error)',
+                }}
+              >
+                Chain Status: {event.chainValid ? '\u2713 Valid' : '\u2717 Invalid'}
               </div>
             </div>
           </div>
@@ -341,12 +453,21 @@ export default function AuditTrailPage() {
   }, []);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 font-mono">
+      <Breadcrumb items={[
+        { label: 'Close', href: `/close/${sessionId}/dashboard` },
+        { label: 'Audit Trail' },
+      ]} />
       {/* Page Header */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-display text-primary">Audit Trail</h1>
-          <p className="text-text-secondary text-sm mt-0.5">
+          <h1
+            className="text-2xl font-display"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            Audit Trail
+          </h1>
+          <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
             Complete record of all actions — hash-chain verified
           </p>
         </div>
@@ -367,75 +488,134 @@ export default function AuditTrailPage() {
               document.body.removeChild(a);
               URL.revokeObjectURL(url);
             }}
-            className="px-3 py-1.5 rounded-input border border-border text-sm text-text-secondary hover:bg-hover"
+            className="px-3 py-1.5 border text-sm transition-colors"
+            style={{
+              borderColor: 'var(--border-default)',
+              color: 'var(--text-secondary)',
+              borderRadius: 'var(--radius-md)',
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-table-row-hover)';
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+            }}
           >
             <FileDown className="w-4 h-4 inline mr-1" />
             Export CSV
           </button>
-          <span className="text-sm text-text-secondary">{events.length} events</span>
+          <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+            {events.length} events
+          </span>
         </div>
       </div>
 
-      {/* Hash Chain Status Banner */}
+      {/* Hash Chain Status Banner — Shield badge */}
       <div
-        className={cn(
-          'rounded-card border p-4',
-          hashChainStatus.isValid
-            ? 'bg-status-green-dim border-status-green/30'
-            : 'bg-status-red-dim border-status-red/30'
-        )}
+        className="border p-4 flex items-center gap-2"
+        style={{
+          borderRadius: 'var(--radius-lg)',
+          backgroundColor: hashChainStatus.isValid
+            ? 'var(--status-success-bg)'
+            : 'var(--status-error-bg)',
+          borderColor: hashChainStatus.isValid
+            ? 'var(--status-success)'
+            : 'var(--status-error)',
+        }}
       >
-        <div className="flex items-center gap-2">
-          {hashChainStatus.isValid ? (
-            <>
-              <Check className="w-5 h-5 text-status-green" />
-              <span className="text-sm font-medium text-status-green">
-                Hash chain integrity: ✓ Verified ({hashChainStatus.totalEvents} events)
-              </span>
-            </>
-          ) : (
-            <>
-              <AlertCircle className="w-5 h-5 text-status-red" />
-              <span className="text-sm font-medium text-status-red">
-                ⚠ Hash chain break detected ({hashChainStatus.invalidCount} invalid event
-                {hashChainStatus.invalidCount !== 1 ? 's' : ''})
-              </span>
-            </>
-          )}
-        </div>
+        {hashChainStatus.isValid ? (
+          <>
+            <Shield
+              className="w-5 h-5"
+              style={{ color: 'var(--status-success)' }}
+            />
+            <span
+              className="text-sm font-medium"
+              style={{ color: 'var(--status-success)' }}
+            >
+              Chain Integrity: Verified \u2713 ({hashChainStatus.totalEvents} events)
+            </span>
+          </>
+        ) : (
+          <>
+            <Shield
+              className="w-5 h-5"
+              style={{ color: 'var(--status-error)' }}
+            />
+            <span
+              className="text-sm font-medium"
+              style={{ color: 'var(--status-error)' }}
+            >
+              Chain Integrity: BROKEN ({hashChainStatus.invalidCount} invalid event
+              {hashChainStatus.invalidCount !== 1 ? 's' : ''})
+            </span>
+          </>
+        )}
       </div>
 
       {/* Filters */}
-      <div className="bg-surface border border-border rounded-card p-4 space-y-4">
-        <div className="flex items-center gap-2 text-sm font-medium text-text-secondary">
+      <div
+        className="border p-4 space-y-4"
+        style={{
+          backgroundColor: 'var(--bg-surface)',
+          borderColor: 'var(--border-default)',
+          borderRadius: 'var(--radius-lg)',
+        }}
+      >
+        <div
+          className="flex items-center gap-2 text-sm font-medium"
+          style={{ color: 'var(--text-secondary)' }}
+        >
           <Filter className="w-4 h-4" />
           Filters
         </div>
 
         {/* Event Type Filter */}
         <div>
-          <label className="block text-xs text-text-secondary mb-2">Event Type</label>
+          <label
+            className="block text-xs mb-2"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            Event Type
+          </label>
           <div className="flex flex-wrap gap-2">
             {Object.entries(EVENT_TYPE_GROUPS).map(([groupLabel, types]) => (
               <div key={groupLabel} className="flex flex-wrap gap-2">
                 {types.map((type) => {
-                  const config = EVENT_TYPE_CONFIG[type];
-                  const Icon = config.icon;
+                  const typeConfig = EVENT_TYPE_CONFIG[type];
+                  const TypeIcon = typeConfig.icon;
                   const isSelected = eventTypeFilter.has(type);
                   return (
                     <button
                       key={type}
                       type="button"
                       onClick={() => toggleEventType(type)}
-                      className={cn(
-                        'flex items-center gap-1.5 px-3 py-1.5 rounded-input text-xs border transition-colors',
-                        isSelected
-                          ? 'border-accent bg-accent-dim text-accent'
-                          : 'border-border text-text-secondary hover:bg-hover'
-                      )}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs border transition-colors"
+                      style={{
+                        borderRadius: 'var(--radius-md)',
+                        borderColor: isSelected
+                          ? 'var(--interactive-primary)'
+                          : 'var(--border-default)',
+                        color: isSelected
+                          ? 'var(--interactive-primary)'
+                          : 'var(--text-secondary)',
+                        backgroundColor: isSelected
+                          ? 'var(--interactive-primary-hover)'
+                          : 'transparent',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isSelected) {
+                          (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-table-row-hover)';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isSelected) {
+                          (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+                        }
+                      }}
                     >
-                      <Icon className="w-3.5 h-3.5" />
-                      {config.label}
+                      <TypeIcon className="w-3.5 h-3.5" />
+                      {typeConfig.label}
                     </button>
                   );
                 })}
@@ -446,11 +626,22 @@ export default function AuditTrailPage() {
 
         {/* User Filter */}
         <div>
-          <label className="block text-xs text-text-secondary mb-2">User</label>
+          <label
+            className="block text-xs mb-2"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            User
+          </label>
           <select
             value={userFilter || ''}
             onChange={(e) => setUserFilter(e.target.value || null)}
-            className="w-full max-w-xs bg-input border border-border rounded-input px-3 py-2 text-sm text-primary focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
+            className="w-full max-w-xs border px-3 py-2 text-sm focus:outline-none focus:ring-2"
+            style={{
+              backgroundColor: 'var(--bg-surface-sunken)',
+              borderColor: 'var(--border-default)',
+              borderRadius: 'var(--radius-md)',
+              color: 'var(--text-primary)',
+            }}
           >
             <option value="">All Users</option>
             {uniqueUsers.map((user) => (
@@ -464,26 +655,54 @@ export default function AuditTrailPage() {
         {/* Date Range Filter */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs text-text-secondary mb-2">From Date</label>
+            <label
+              className="block text-xs mb-2"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              From Date
+            </label>
             <div className="relative">
-              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary pointer-events-none" />
+              <Calendar
+                className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"
+                style={{ color: 'var(--text-tertiary)' }}
+              />
               <input
                 type="date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                className="w-full bg-input border border-border rounded-input pl-10 pr-3 py-2 text-sm text-primary focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
+                className="w-full border pl-10 pr-3 py-2 text-sm focus:outline-none focus:ring-2"
+                style={{
+                  backgroundColor: 'var(--bg-surface-sunken)',
+                  borderColor: 'var(--border-default)',
+                  borderRadius: 'var(--radius-md)',
+                  color: 'var(--text-primary)',
+                }}
               />
             </div>
           </div>
           <div>
-            <label className="block text-xs text-text-secondary mb-2">To Date</label>
+            <label
+              className="block text-xs mb-2"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              To Date
+            </label>
             <div className="relative">
-              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary pointer-events-none" />
+              <Calendar
+                className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"
+                style={{ color: 'var(--text-tertiary)' }}
+              />
               <input
                 type="date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                className="w-full bg-input border border-border rounded-input pl-10 pr-3 py-2 text-sm text-primary focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
+                className="w-full border pl-10 pr-3 py-2 text-sm focus:outline-none focus:ring-2"
+                style={{
+                  backgroundColor: 'var(--bg-surface-sunken)',
+                  borderColor: 'var(--border-default)',
+                  borderRadius: 'var(--radius-md)',
+                  color: 'var(--text-primary)',
+                }}
               />
             </div>
           </div>
@@ -491,15 +710,29 @@ export default function AuditTrailPage() {
 
         {/* Search */}
         <div>
-          <label className="block text-xs text-text-secondary mb-2">Search Description</label>
+          <label
+            className="block text-xs mb-2"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            Search Description
+          </label>
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary pointer-events-none" />
+            <Search
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"
+              style={{ color: 'var(--text-tertiary)' }}
+            />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search by description..."
-              className="w-full bg-input border border-border rounded-input pl-10 pr-3 py-2 text-sm text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
+              className="w-full border pl-10 pr-3 py-2 text-sm focus:outline-none focus:ring-2"
+              style={{
+                backgroundColor: 'var(--bg-surface-sunken)',
+                borderColor: 'var(--border-default)',
+                borderRadius: 'var(--radius-md)',
+                color: 'var(--text-primary)',
+              }}
             />
           </div>
         </div>
@@ -507,13 +740,24 @@ export default function AuditTrailPage() {
 
       {/* Event List Header with Sort */}
       <div className="flex items-center justify-between">
-        <div className="text-sm text-text-secondary">
+        <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
           Showing {filteredEvents.length} of {events.length} events
         </div>
         <button
           type="button"
           onClick={() => setSortOrder((prev) => (prev === 'newest' ? 'oldest' : 'newest'))}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-input border border-border text-sm text-text-secondary hover:bg-hover transition-colors"
+          className="flex items-center gap-2 px-3 py-1.5 border text-sm transition-colors"
+          style={{
+            borderColor: 'var(--border-default)',
+            color: 'var(--text-secondary)',
+            borderRadius: 'var(--radius-md)',
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-table-row-hover)';
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+          }}
         >
           <ArrowUpDown className="w-4 h-4" />
           {sortOrder === 'newest' ? 'Newest First' : 'Oldest First'}
@@ -522,11 +766,27 @@ export default function AuditTrailPage() {
 
       {/* Event List */}
       {isLoading ? (
-        <div className="text-center py-12 text-text-secondary">Loading audit trail...</div>
+        <div
+          className="text-center py-12"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          Loading audit trail...
+        </div>
       ) : filteredEvents.length === 0 ? (
-        <div className="text-center py-12 text-text-secondary">No events found matching filters.</div>
+        <div
+          className="text-center py-12"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          No events found matching filters.
+        </div>
       ) : (
-        <div className="space-y-3">
+        <div
+          className="space-y-3 p-4"
+          style={{
+            backgroundColor: 'var(--bg-surface-sunken)',
+            borderRadius: 'var(--radius-lg)',
+          }}
+        >
           {filteredEvents.map((event) => (
             <EventCard
               key={event.id}

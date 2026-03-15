@@ -15,6 +15,8 @@ import { requireValidTenantId } from '../../middleware/validationMiddleware.js';
 import { send500 } from '../../lib/errorHandler.js';
 import { sumRound2 } from '../../utils/decimal.js';
 import { runGLHealthAnalysis } from '../../services/gl_health_analysis_service.js';
+import { analyzeAccountsLegacy, type AccountInput, type AccountIntelligence, type LegacyAccountFlag } from '../../services/account_intelligence_service.js';
+import { getCloseSessionById } from '../../db/repositories/close_session_repository.js';
 
 const router = Router();
 
@@ -355,8 +357,8 @@ router.get('/entries/:entryId', requireValidTenantId, async (req: Request, res: 
       return;
     }
 
-    const totalDebits = sumRound2(lines.map((l) => l.debit ?? 0));
-    const totalCredits = sumRound2(lines.map((l) => l.credit ?? 0));
+    const totalDebits = sumRound2(lines.map((l) => Number(l.debit ?? 0)));
+    const totalCredits = sumRound2(lines.map((l) => Number(l.credit ?? 0)));
 
     res.status(200).json({
       entry: {
@@ -373,5 +375,169 @@ router.get('/entries/:entryId', requireValidTenantId, async (req: Request, res: 
     send500(res, err instanceof Error ? err : new Error('Failed to fetch entry'), 'Failed to fetch entry');
   }
 });
+
+/**
+ * POST /api/gl/analyze-quality
+ * Run account intelligence analysis on GL data for a session.
+ * Body: { sessionId: string }
+ */
+router.post(
+  '/analyze-quality',
+  requireValidTenantId,
+  async (req: Request, res: Response) => {
+    try {
+      const tenantId = getTenantId(req);
+      const pool = getTenantPool(req);
+      if (!tenantId || !pool) {
+        res.status(400).json({ error: 'Tenant context required' });
+        return;
+      }
+
+      const { sessionId, period } = req.body as { sessionId?: string; period?: string };
+      if (!sessionId) {
+        res.status(400).json({ error: 'sessionId is required' });
+        return;
+      }
+
+      // Resolve period label: use provided period, else derive from session dates
+      let periodLabel = period;
+      if (!periodLabel) {
+        const session = await getCloseSessionById(pool, tenantId, sessionId);
+        if (!session) {
+          res.status(404).json({ error: 'Session not found' });
+          return;
+        }
+        // Find the most recent period_label for this tenant in GL
+        const { rows: periodRows } = await pool.query<{ period_label: string }>(
+          `SELECT DISTINCT period_label FROM core.general_ledger
+           WHERE tenant_id = $1 ORDER BY period_label DESC LIMIT 1`,
+          [tenantId]
+        );
+        periodLabel = periodRows[0]?.period_label ?? session.periodEnd ?? '';
+      }
+
+      // Fetch distinct accounts from GL for this period
+      const { rows: glAccounts } = await pool.query<{
+        account_code: string;
+        account_name: string;
+        total_debit: string;
+        total_credit: string;
+      }>(
+        `SELECT account_code,
+                COALESCE(MAX(account_name), account_code) AS account_name,
+                COALESCE(SUM(debit), 0)::text AS total_debit,
+                COALESCE(SUM(credit), 0)::text AS total_credit
+         FROM core.general_ledger
+         WHERE tenant_id = $1 AND period_label = $2
+         GROUP BY account_code`,
+        [tenantId, periodLabel]
+      );
+
+      // Look up account types from COA
+      const { rows: coaRows } = await pool.query<{
+        account_code: string;
+        account_type: string;
+      }>(
+        `SELECT account_code, account_type FROM core.tenant_chart_of_accounts WHERE tenant_id = $1`,
+        [tenantId]
+      );
+      const coaTypeMap = new Map(coaRows.map((r) => [r.account_code, r.account_type]));
+
+      const accounts: AccountInput[] = glAccounts.map((r) => ({
+        code: r.account_code,
+        name: r.account_name,
+        type: coaTypeMap.get(r.account_code)?.toLowerCase(),
+        debitBalance: parseFloat(r.total_debit),
+        creditBalance: parseFloat(r.total_credit),
+      }));
+
+      const flaggedAccounts = await analyzeAccountsLegacy(pool, tenantId, accounts);
+      const cleanAccounts = accounts.length - flaggedAccounts.length;
+
+      // Build summary counts
+      const summary = {
+        junk: 0,
+        suspense: 0,
+        duplicates: 0,
+        contras: 0,
+        balanceMismatch: 0,
+        inactive: 0,
+        intercompany: 0,
+      };
+
+      for (const fa of flaggedAccounts) {
+        if (fa.flags.includes('junk_account') || fa.flags.includes('test_account')) summary.junk++;
+        if (fa.flags.includes('suspense_clearing')) summary.suspense++;
+        if (fa.flags.includes('duplicate_candidate')) summary.duplicates++;
+        if (fa.flags.includes('contra_undetected')) summary.contras++;
+        if (fa.flags.includes('balance_direction_mismatch')) summary.balanceMismatch++;
+        if (fa.flags.includes('inactive') || fa.flags.includes('zero_balance_zero_activity')) summary.inactive++;
+        if (fa.flags.includes('intercompany')) summary.intercompany++;
+      }
+
+      res.json({
+        totalAccounts: accounts.length,
+        flaggedAccounts,
+        cleanAccounts,
+        summary,
+      });
+    } catch (err) {
+      send500(res, err instanceof Error ? err : new Error('Quality analysis failed'), 'Quality analysis failed');
+    }
+  }
+);
+
+/**
+ * POST /api/gl/exclude-accounts
+ * Exclude accounts from mapping and financial statement generation.
+ * Body: { sessionId: string, accountCodes: string[], reason: string }
+ */
+router.post(
+  '/exclude-accounts',
+  requireValidTenantId,
+  async (req: Request, res: Response) => {
+    try {
+      const tenantId = getTenantId(req);
+      const pool = getTenantPool(req);
+      if (!tenantId || !pool) {
+        res.status(400).json({ error: 'Tenant context required' });
+        return;
+      }
+
+      const { sessionId, accountCodes, reason } = req.body as {
+        sessionId?: string;
+        accountCodes?: string[];
+        reason?: string;
+      };
+
+      if (!sessionId) {
+        res.status(400).json({ error: 'sessionId is required' });
+        return;
+      }
+      if (!Array.isArray(accountCodes) || accountCodes.length === 0) {
+        res.status(400).json({ error: 'accountCodes[] is required and must not be empty' });
+        return;
+      }
+      if (!reason || reason.trim().length === 0) {
+        res.status(400).json({ error: 'reason is required' });
+        return;
+      }
+
+      // Update mapping_status on tenant_chart_of_accounts
+      const result = await pool.query(
+        `UPDATE core.tenant_chart_of_accounts
+         SET mapping_status = 'EXCLUDED', updated_at = NOW()
+         WHERE tenant_id = $1 AND account_code = ANY($2)`,
+        [tenantId, accountCodes]
+      );
+
+      const excluded = result.rowCount ?? 0;
+
+      res.json({ excluded });
+    } catch (err) {
+      send500(res, err instanceof Error ? err : new Error('Exclude accounts failed'), 'Exclude accounts failed');
+    }
+  }
+);
 
 export default router;

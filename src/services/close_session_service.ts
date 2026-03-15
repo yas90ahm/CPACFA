@@ -384,8 +384,8 @@ export async function certifyCloseSession(
         lines: entry.lines.map((line) => ({
           line_number: line.line_number,
           account_code: line.account_code,
-          debit: line.debit ?? 0,
-          credit: line.credit ?? 0,
+          debit: Number(line.debit ?? 0),
+          credit: Number(line.credit ?? 0),
           description: line.description,
         })),
       }));

@@ -1,0 +1,115 @@
+FRONTEND REBUILD — PHASE 4: CFO/REVIEWER JOURNEY — COMPLETION REPORT
+=====================================================================
+Date: 2026-03-12
+Frontend Build: PASS (next build — 40 routes compiled, zero errors)
+
+=====================================================================
+FILE 1: ReviewerDashboard.tsx (RESTYLED)
+=====================================================================
+File: frontend/components/dashboards/ReviewerDashboard.tsx
+
+- All hardcoded hex colors replaced with CSS custom properties
+- Loading skeleton: var(--bg-surface-sunken) and var(--bg-surface)
+- Header h1: var(--text-primary), subtitle: var(--text-secondary)
+- Sign & Certify button: var(--interactive-primary) background, white text
+- Awaiting My Action section:
+  - Pending items: var(--status-warning-bg) background, var(--status-warning-border) border
+  - All clear: var(--status-success-bg) background, var(--status-success-border) border
+  - AlertCircle: var(--status-warning), CheckCircle2: var(--status-success)
+  - Action links: var(--bg-surface) background, var(--text-secondary) text
+  - Arrow icons: var(--text-tertiary)
+- Certification Readiness card:
+  - Card: var(--bg-surface) background, var(--border-default) border
+  - ListChecks icon: var(--interactive-primary)
+  - Checklist done: GateIndicator with 'passed' status (replaced raw CheckCircle2)
+  - Checklist pending: GateIndicator with 'not-evaluated' status (replaced empty circle div)
+  - Certified banner: var(--status-success-bg), var(--status-success) text
+- AI Justifications card:
+  - Brain icon: var(--ai-primary)
+  - Pending items: var(--bg-surface-sunken) background
+  - Warning dots: var(--status-warning)
+  - Review All link: var(--border-default), var(--interactive-primary) text
+- Digital Signature Status card:
+  - Signed: var(--status-success-bg), var(--status-success-border), var(--status-success) text
+  - Hash: font-mono, var(--text-tertiary)
+  - Not signed: Clock var(--text-tertiary)
+- Recent Activity section:
+  - View all: var(--interactive-primary) text
+  - Activity icon: var(--text-tertiary)
+  - Event text: var(--text-secondary), user: var(--text-tertiary)
+  - Dividers: var(--border-subtle)
+- GateIndicator imported and used for certification checklist items
+- All existing logic preserved (hooks, computed values, conditional rendering)
+
+=====================================================================
+FILE 2: Sidebar.tsx (RESTYLED)
+=====================================================================
+File: frontend/components/shell/Sidebar.tsx
+
+- UNDER_REVIEW promoted link: var(--interactive-primary) background, white text
+  - Active state: boxShadow ring using rgba(26,95,180,0.3)
+- Active nav item: var(--bg-table-row-selected) background, var(--interactive-primary) text/border
+- UNDER_REVIEW non-active review link: var(--status-info-bg) background, var(--interactive-primary) text/border
+- Normal inactive: var(--text-secondary) color
+- All badge spans: var(--status-warning-bg) background, var(--status-warning) text
+- STALE text: var(--status-warning)
+- Aside element: var(--bg-nav) background, var(--border-default) border
+- Group header button: var(--text-secondary)
+- Settings divider: var(--border-subtle)
+- Phase complete border: var(--status-success) borderLeftColor
+- All structural Tailwind preserved (flex, gap, px, py, rounded, text-sm, etc.)
+- All existing logic preserved (toggleGroup, renderItem, openGroups state, role-based filtering)
+
+=====================================================================
+FILE 3: CloseSession Layout (UPDATED)
+=====================================================================
+File: frontend/app/close/[sessionId]/layout.tsx
+
+- Existing read-only banner converted to design tokens:
+  var(--status-info-bg) background, var(--status-info-border) border, var(--status-info) text
+- NEW reviewer-specific banner added:
+  "Reviewing as CFO — approval actions are available on pending items"
+  Visible when role === 'reviewer' and NOT readOnly
+  Same design token styling as read-only banner
+- Main element paddingTop adjusted to account for reviewer banner:
+  (readOnly || role === 'reviewer') → adds 32px for banner height
+- All existing logic preserved (route protection, issue panel, sidebar props, etc.)
+
+=====================================================================
+VERIFICATION CHECKLIST
+=====================================================================
+[PASS] npm run build — 40 routes compiled, zero type errors
+[PASS] ReviewerDashboard uses design tokens exclusively (no hardcoded hex colors)
+[PASS] Sidebar uses design tokens exclusively (no Tailwind color utilities remain)
+[PASS] Reviewer info banner shows for reviewer role with approval action note
+[PASS] Read-only banner uses proper design tokens (var(--status-info-*))
+[PASS] GateIndicator used for certification checklist items in ReviewerDashboard
+[PASS] All existing auth/API/data logic preserved unchanged
+
+=====================================================================
+FILES SUMMARY
+=====================================================================
+Restyled (3 files):
+  frontend/components/dashboards/ReviewerDashboard.tsx
+  frontend/components/shell/Sidebar.tsx
+  frontend/app/close/[sessionId]/layout.tsx
+
+Total: 3 files updated, all using Phase 1 design tokens
+
+=====================================================================
+BUILD OUTPUT
+=====================================================================
+Route sizes (Phase 4 affected pages):
+  /close/[sessionId]/dashboard    26.8 kB    149 kB First Load
+
+=====================================================================
+CUMULATIVE PROGRESS
+=====================================================================
+Phase 1: Design System Foundation (tokens.css, typography.css, ThemeProvider, etc.)
+Phase 2: 12 Shared Components (MoneyCell, StatusBadge, GateIndicator, etc.)
+Phase 3A: 6 Controller Journey Screens (Login through Mapping)
+Phase 3B: 7 Controller Journey Screens (Reconciliation through Audit Trail)
+Phase 4: 3 CFO/Reviewer Journey files (ReviewerDashboard, Sidebar, Layout)
+
+Total rebuilt/restyled: 28 files across 4 phases, all zero-error builds
+=====================================================================

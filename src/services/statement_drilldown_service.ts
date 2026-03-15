@@ -156,8 +156,8 @@ export async function getEntriesForAccount(
           id: `${je.id}-${jel.lineIndex}`,
           date: je.postedAt ?? je.createdAt ?? '',
           description: jel.description ?? je.memo ?? null,
-          debit: jel.debit ?? 0,
-          credit: jel.credit ?? 0,
+          debit: Number(jel.debit ?? 0),
+          credit: Number(jel.credit ?? 0),
           jeId: je.id,
           jeNumber: je.id,
         });

@@ -41,13 +41,13 @@ export default function SegmentsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Segment Reporting</h1>
+        <h1 className="text-2xl font-display" style={{ color: 'var(--text-primary)' }}>Segment Reporting</h1>
         {!readOnly && (
           <div className="flex gap-2">
-            <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1 px-3 py-1.5 text-sm border rounded-md hover:bg-hover">
+            <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1 px-3 py-1.5 text-sm rounded-md hover:bg-hover" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid' }}>
               <Plus className="w-4 h-4" /> Add Segment
             </button>
-            <button onClick={handleReportabilityCheck} disabled={reportabilityCheck.isPending} className="flex items-center gap-1 px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent/90 disabled:opacity-50">
+            <button onClick={handleReportabilityCheck} disabled={reportabilityCheck.isPending} className="flex items-center gap-1 px-3 py-1.5 text-sm text-white rounded-md disabled:opacity-50" style={{ background: 'var(--interactive-primary)' }}>
               <Play className="w-4 h-4" /> {reportabilityCheck.isPending ? 'Checking...' : 'Run Reportability Check'}
             </button>
           </div>
@@ -55,32 +55,32 @@ export default function SegmentsPage() {
       </div>
 
       {!readOnly && showForm && (
-        <div className="p-4 border rounded-lg bg-surface space-y-3">
+        <div className="p-4 rounded-lg space-y-3" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface)' }}>
           <h3 className="font-medium">New Operating Segment</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <input placeholder="Segment Name" value={form.segmentName} onChange={(e) => setForm({ ...form, segmentName: e.target.value })} className="border rounded px-2 py-1.5 text-sm" />
-            <input placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="border rounded px-2 py-1.5 text-sm" />
-            <input placeholder="CODM Report Basis" value={form.codmReportBasis} onChange={(e) => setForm({ ...form, codmReportBasis: e.target.value })} className="border rounded px-2 py-1.5 text-sm" />
+            <input placeholder="Segment Name" value={form.segmentName} onChange={(e) => setForm({ ...form, segmentName: e.target.value })} className="rounded px-2 py-1.5 text-sm" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }} />
+            <input placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="rounded px-2 py-1.5 text-sm" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }} />
+            <input placeholder="CODM Report Basis" value={form.codmReportBasis} onChange={(e) => setForm({ ...form, codmReportBasis: e.target.value })} className="rounded px-2 py-1.5 text-sm" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }} />
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={form.isReportable} onChange={(e) => setForm({ ...form, isReportable: e.target.checked })} />
               Is Reportable
             </label>
           </div>
           <div className="flex gap-2">
-            <button onClick={handleCreate} disabled={createSegment.isPending} className="px-3 py-1.5 text-sm bg-accent text-white rounded-md disabled:opacity-50">Create</button>
-            <button onClick={() => setShowForm(false)} className="px-3 py-1.5 text-sm border rounded-md">Cancel</button>
+            <button onClick={handleCreate} disabled={createSegment.isPending} className="px-3 py-1.5 text-sm text-white rounded-md disabled:opacity-50" style={{ background: 'var(--interactive-primary)' }}>Create</button>
+            <button onClick={() => setShowForm(false)} className="px-3 py-1.5 text-sm rounded-md" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid' }}>Cancel</button>
           </div>
         </div>
       )}
 
       {reportability && (
-        <div className="p-4 border rounded-lg bg-surface space-y-3">
+        <div className="p-4 rounded-lg space-y-3" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface)' }}>
           <div className="flex items-center gap-2">
             <h3 className="font-medium">Reportability Results (ASC 280)</h3>
             {reportability.aggregateTestPassed ? (
-              <span className="flex items-center gap-1 text-green-600 text-sm"><CheckCircle className="w-4 h-4" /> 75% test passed</span>
+              <span className="flex items-center gap-1 text-sm" style={{ color: 'var(--status-success)' }}><CheckCircle className="w-4 h-4" /> 75% test passed</span>
             ) : (
-              <span className="flex items-center gap-1 text-red-600 text-sm"><XCircle className="w-4 h-4" /> 75% test failed ({reportability.aggregateRevenuePercent}%)</span>
+              <span className="flex items-center gap-1 text-sm" style={{ color: 'var(--status-error)' }}><XCircle className="w-4 h-4" /> 75% test failed ({reportability.aggregateRevenuePercent}%)</span>
             )}
           </div>
           <DataTable<ReportabilityResult['segments'][number]>
@@ -91,7 +91,7 @@ export default function SegmentsPage() {
               { id: 'revenuePercent', header: 'Revenue %', cell: (r) => `${r.revenuePercent}%` },
               { id: 'profitLossPercent', header: 'P&L %', cell: (r) => `${r.profitLossPercent}%` },
               { id: 'assetsPercent', header: 'Assets %', cell: (r) => `${r.assetsPercent}%` },
-              { id: 'isReportable', header: 'Reportable', cell: (r) => r.isReportable ? <CheckCircle className="w-4 h-4 text-green-600" /> : <XCircle className="w-4 h-4 text-gray-400" /> },
+              { id: 'isReportable', header: 'Reportable', cell: (r) => r.isReportable ? <CheckCircle className="w-4 h-4" style={{ color: 'var(--status-success)' }} /> : <XCircle className="w-4 h-4" style={{ color: 'var(--text-tertiary)' }} /> },
               { id: 'thresholdsMet', header: 'Thresholds Met', cell: (r) => (r.thresholdsMet ?? []).join(', ') || '\u2014' },
             ]}
           />
@@ -108,7 +108,7 @@ export default function SegmentsPage() {
             { id: 'segmentName', header: 'Name', cell: (r) => r.segmentName },
             { id: 'description', header: 'Description', cell: (r) => r.description ?? '\u2014' },
             { id: 'codmReportBasis', header: 'CODM Basis', cell: (r) => r.codmReportBasis ?? '\u2014' },
-            { id: 'isReportable', header: 'Reportable', cell: (r) => r.isReportable ? <CheckCircle className="w-4 h-4 text-green-600" /> : <XCircle className="w-4 h-4 text-gray-400" /> },
+            { id: 'isReportable', header: 'Reportable', cell: (r) => r.isReportable ? <CheckCircle className="w-4 h-4" style={{ color: 'var(--status-success)' }} /> : <XCircle className="w-4 h-4" style={{ color: 'var(--text-tertiary)' }} /> },
           ]}
         />
       </div>

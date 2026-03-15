@@ -145,8 +145,17 @@ export async function recordLegacyCertifiedSourceUsed(
 }
 
 /**
- * Verify hash chain for tenant. Used by export gate before allowing PDF/CSV and by audit binder for cryptographic verification.
+ * Verify hash chain for tenant (incremental, using checkpoints).
+ * Used by export gate before allowing PDF/CSV and by audit binder for cryptographic verification.
  */
 export async function verifyChain(pool: Pool, tenantId: string): Promise<import('../types/audit_ledger.js').AuditLedgerVerifyResult> {
   return auditLedgerRepo.verifyChain(pool, tenantId);
+}
+
+/**
+ * Verify the full hash chain from the beginning (ignoring checkpoints).
+ * Use for periodic full audits or when checkpoint integrity is suspect.
+ */
+export async function verifyFullChain(pool: Pool, tenantId: string): Promise<import('../types/audit_ledger.js').AuditLedgerVerifyResult> {
+  return auditLedgerRepo.verifyFullChain(pool, tenantId);
 }

@@ -4,6 +4,8 @@
  */
 
 import type { Pool } from 'pg';
+import { from, round2, plus, minus } from '../utils/decimal.js';
+import { financialEvents, buildEventPacket } from '../events/financial_event_emitter.js';
 
 /* ── Interfaces ─────────────────────────────────────────────────── */
 
@@ -95,21 +97,21 @@ function parsePeriodBounds(periodLabel: string): { start: Date; end: Date } | nu
 /* ── Individual checks ──────────────────────────────────────────── */
 
 function checkBalance(rows: GLRow[]): HealthCheck {
-  const entryTotals = new Map<string, { debit: number; credit: number }>();
+  const entryTotals = new Map<string, { debit: import('decimal.js').default; credit: import('decimal.js').default }>();
   for (const r of rows) {
-    const t = entryTotals.get(r.entry_id) ?? { debit: 0, credit: 0 };
-    t.debit += parseFloat(r.debit);
-    t.credit += parseFloat(r.credit);
+    const t = entryTotals.get(r.entry_id) ?? { debit: from(0), credit: from(0) };
+    t.debit = t.debit.plus(from(r.debit));
+    t.credit = t.credit.plus(from(r.credit));
     entryTotals.set(r.entry_id, t);
   }
 
   const findings: Finding[] = [];
   for (const [entryId, t] of entryTotals) {
-    const diff = Math.abs(Math.round((t.debit - t.credit) * 100) / 100);
+    const diff = t.debit.minus(t.credit).abs().toDecimalPlaces(2).toNumber();
     if (diff > 0.004) {
       findings.push({
         severity: 'critical',
-        message: `Entry ${entryId} is imbalanced: debits=${t.debit.toFixed(2)}, credits=${t.credit.toFixed(2)}, diff=${diff.toFixed(2)}`,
+        message: `Entry ${entryId} is imbalanced: debits=${t.debit.toDecimalPlaces(2).toFixed(2)}, credits=${t.credit.toDecimalPlaces(2).toFixed(2)}, diff=${diff.toFixed(2)}`,
         entryId,
         amount: diff.toFixed(2),
       });
@@ -133,7 +135,7 @@ function checkBalance(rows: GLRow[]): HealthCheck {
 
 function checkSuspenseAccounts(rows: GLRow[]): HealthCheck {
   const keywords = ['suspense', 'clearing', 'intercompany', 'due to', 'due from'];
-  const accountBalances = new Map<string, { code: string; name: string; balance: number }>();
+  const accountBalances = new Map<string, { code: string; name: string; balance: import('decimal.js').default }>();
 
   for (const r of rows) {
     const code = r.account_code.toLowerCase();
@@ -141,20 +143,21 @@ function checkSuspenseAccounts(rows: GLRow[]): HealthCheck {
     const combined = `${code} ${name}`;
     if (keywords.some((kw) => combined.includes(kw))) {
       const key = r.account_code;
-      const acct = accountBalances.get(key) ?? { code: r.account_code, name: r.account_name ?? '', balance: 0 };
-      acct.balance += parseFloat(r.debit) - parseFloat(r.credit);
+      const acct = accountBalances.get(key) ?? { code: r.account_code, name: r.account_name ?? '', balance: from(0) };
+      acct.balance = acct.balance.plus(from(r.debit).minus(from(r.credit)));
       accountBalances.set(key, acct);
     }
   }
 
   const findings: Finding[] = [];
   for (const [, acct] of accountBalances) {
-    if (Math.abs(acct.balance) > 0.004) {
+    const balNum = acct.balance.toDecimalPlaces(2).toNumber();
+    if (Math.abs(balNum) > 0.004) {
       findings.push({
         severity: 'warning',
-        message: `Suspense/clearing account ${acct.code} (${acct.name}) has balance $${acct.balance.toFixed(2)}`,
+        message: `Suspense/clearing account ${acct.code} (${acct.name}) has balance $${balNum.toFixed(2)}`,
         accountCode: acct.code,
-        amount: acct.balance.toFixed(2),
+        amount: balNum.toFixed(2),
       });
     }
   }
@@ -179,16 +182,17 @@ function checkRoundNumbers(rows: GLRow[]): HealthCheck {
   const roundLines: Finding[] = [];
 
   for (const r of rows) {
-    const debit = parseFloat(r.debit);
-    const credit = parseFloat(r.credit);
-    const amt = debit > 0 ? debit : credit;
-    if (amt >= threshold && amt % 1000 === 0) {
+    const debit = from(r.debit);
+    const credit = from(r.credit);
+    const amt = debit.greaterThan(0) ? debit : credit;
+    const amtNum = amt.toNumber();
+    if (amtNum >= threshold && amtNum % 1000 === 0) {
       roundLines.push({
         severity: 'info',
-        message: `Entry ${r.entry_id} line ${r.line_number}: $${amt.toFixed(2)} is a round number`,
+        message: `Entry ${r.entry_id} line ${r.line_number}: $${amt.toDecimalPlaces(2).toFixed(2)} is a round number`,
         entryId: r.entry_id,
         accountCode: r.account_code,
-        amount: amt.toFixed(2),
+        amount: amt.toDecimalPlaces(2).toFixed(2),
       });
     }
   }
@@ -218,17 +222,18 @@ function checkThresholdPatterns(rows: GLRow[]): HealthCheck {
 
   const findings: Finding[] = [];
   for (const r of rows) {
-    const debit = parseFloat(r.debit);
-    const credit = parseFloat(r.credit);
-    const amt = debit > 0 ? debit : credit;
+    const debit = from(r.debit);
+    const credit = from(r.credit);
+    const amt = debit.greaterThan(0) ? debit : credit;
+    const amtNum = amt.toNumber();
     for (const [low, high] of ranges) {
-      if (amt >= low && amt <= high) {
+      if (amtNum >= low && amtNum <= high) {
         findings.push({
           severity: 'warning',
-          message: `Entry ${r.entry_id} line ${r.line_number}: $${amt.toFixed(2)} is just under approval threshold ($${high + 1})`,
+          message: `Entry ${r.entry_id} line ${r.line_number}: $${amt.toDecimalPlaces(2).toFixed(2)} is just under approval threshold ($${high + 1})`,
           entryId: r.entry_id,
           accountCode: r.account_code,
-          amount: amt.toFixed(2),
+          amount: amt.toDecimalPlaces(2).toFixed(2),
         });
         break;
       }
@@ -253,10 +258,10 @@ function checkThresholdPatterns(rows: GLRow[]): HealthCheck {
 function checkDuplicates(rows: GLRow[]): HealthCheck {
   const seen = new Map<string, GLRow[]>();
   for (const r of rows) {
-    const debit = parseFloat(r.debit);
-    const credit = parseFloat(r.credit);
-    const amt = debit > 0 ? debit : credit;
-    const key = `${r.entry_date}|${r.account_code}|${amt.toFixed(2)}`;
+    const debit = from(r.debit);
+    const credit = from(r.credit);
+    const amt = debit.greaterThan(0) ? debit : credit;
+    const key = `${r.entry_date}|${r.account_code}|${amt.toDecimalPlaces(2).toFixed(2)}`;
     const arr = seen.get(key) ?? [];
     arr.push(r);
     seen.set(key, arr);
@@ -266,14 +271,14 @@ function checkDuplicates(rows: GLRow[]): HealthCheck {
   for (const [, group] of seen) {
     if (group.length > 1) {
       const r = group[0]!;
-      const debit = parseFloat(r.debit);
-      const credit = parseFloat(r.credit);
-      const amt = debit > 0 ? debit : credit;
+      const debit = from(r.debit);
+      const credit = from(r.credit);
+      const amt = debit.greaterThan(0) ? debit : credit;
       findings.push({
         severity: 'warning',
-        message: `${group.length} lines with same date (${r.entry_date}), account (${r.account_code}), amount ($${amt.toFixed(2)})`,
+        message: `${group.length} lines with same date (${r.entry_date}), account (${r.account_code}), amount ($${amt.toDecimalPlaces(2).toFixed(2)})`,
         accountCode: r.account_code,
-        amount: amt.toFixed(2),
+        amount: amt.toDecimalPlaces(2).toFixed(2),
       });
     }
   }
@@ -337,11 +342,11 @@ function checkOutOfPeriod(rows: GLRow[], periodLabel: string): HealthCheck {
 }
 
 function checkUnusualActivity(rows: GLRow[]): HealthCheck {
-  const accountStats = new Map<string, { count: number; total: number; code: string; name: string }>();
+  const accountStats = new Map<string, { count: number; total: import('decimal.js').default; code: string; name: string }>();
   for (const r of rows) {
-    const s = accountStats.get(r.account_code) ?? { count: 0, total: 0, code: r.account_code, name: r.account_name ?? '' };
+    const s = accountStats.get(r.account_code) ?? { count: 0, total: from(0), code: r.account_code, name: r.account_name ?? '' };
     s.count++;
-    s.total += parseFloat(r.debit) + parseFloat(r.credit);
+    s.total = s.total.plus(from(r.debit)).plus(from(r.credit));
     accountStats.set(r.account_code, s);
   }
 
@@ -359,13 +364,17 @@ function checkUnusualActivity(rows: GLRow[]): HealthCheck {
     };
   }
 
+  // Convert totals to numbers for statistical calculations (outlier detection is tolerance-safe)
+  const totalNums = accounts.map((a) => a.total.toDecimalPlaces(2).toNumber());
   const meanCount = accounts.reduce((s, a) => s + a.count, 0) / accounts.length;
   const stdCount = Math.sqrt(accounts.reduce((s, a) => s + (a.count - meanCount) ** 2, 0) / accounts.length);
-  const meanTotal = accounts.reduce((s, a) => s + a.total, 0) / accounts.length;
-  const stdTotal = Math.sqrt(accounts.reduce((s, a) => s + (a.total - meanTotal) ** 2, 0) / accounts.length);
+  const meanTotal = totalNums.reduce((s, v) => s + v, 0) / totalNums.length;
+  const stdTotal = Math.sqrt(totalNums.reduce((s, v) => s + (v - meanTotal) ** 2, 0) / totalNums.length);
 
   const findings: Finding[] = [];
-  for (const a of accounts) {
+  for (let idx = 0; idx < accounts.length; idx++) {
+    const a = accounts[idx]!;
+    const totalNum = totalNums[idx]!;
     if (stdCount > 0 && (a.count - meanCount) / stdCount > 3) {
       findings.push({
         severity: 'info',
@@ -373,12 +382,12 @@ function checkUnusualActivity(rows: GLRow[]): HealthCheck {
         accountCode: a.code,
       });
     }
-    if (stdTotal > 0 && (a.total - meanTotal) / stdTotal > 3) {
+    if (stdTotal > 0 && (totalNum - meanTotal) / stdTotal > 3) {
       findings.push({
         severity: 'info',
-        message: `Account ${a.code} (${a.name}) has unusually high total amount: $${a.total.toFixed(2)} (mean: $${meanTotal.toFixed(2)})`,
+        message: `Account ${a.code} (${a.name}) has unusually high total amount: $${a.total.toDecimalPlaces(2).toFixed(2)} (mean: $${meanTotal.toFixed(2)})`,
         accountCode: a.code,
-        amount: a.total.toFixed(2),
+        amount: a.total.toDecimalPlaces(2).toFixed(2),
       });
     }
   }
@@ -405,15 +414,15 @@ function checkRelatedParty(rows: GLRow[]): HealthCheck {
   for (const r of rows) {
     const desc = (r.description ?? '').toLowerCase();
     if (desc && keywords.some((kw) => desc.includes(kw))) {
-      const debit = parseFloat(r.debit);
-      const credit = parseFloat(r.credit);
-      const amt = debit > 0 ? debit : credit;
+      const debit = from(r.debit);
+      const credit = from(r.credit);
+      const amt = debit.greaterThan(0) ? debit : credit;
       findings.push({
         severity: 'warning',
         message: `Entry ${r.entry_id}: "${r.description}" — possible related party transaction`,
         entryId: r.entry_id,
         accountCode: r.account_code,
-        amount: amt.toFixed(2),
+        amount: amt.toDecimalPlaces(2).toFixed(2),
       });
     }
   }
@@ -443,14 +452,14 @@ function checkRevenueFlags(rows: GLRow[], periodLabel: string): HealthCheck {
     if (!isRevenue) continue;
 
     // Revenue reversal: credit side of a revenue account is normal; debit is reversal
-    const debit = parseFloat(r.debit);
-    if (debit > 0) {
+    const debit = from(r.debit);
+    if (debit.greaterThan(0)) {
       findings.push({
         severity: 'warning',
-        message: `Revenue reversal: Entry ${r.entry_id}, account ${r.account_code}, debit $${debit.toFixed(2)}`,
+        message: `Revenue reversal: Entry ${r.entry_id}, account ${r.account_code}, debit $${debit.toDecimalPlaces(2).toFixed(2)}`,
         entryId: r.entry_id,
         accountCode: r.account_code,
-        amount: debit.toFixed(2),
+        amount: debit.toDecimalPlaces(2).toFixed(2),
       });
     }
 
@@ -459,14 +468,14 @@ function checkRevenueFlags(rows: GLRow[], periodLabel: string): HealthCheck {
       const d = new Date(r.entry_date);
       const daysFromEnd = (bounds.end.getTime() - d.getTime()) / (1000 * 60 * 60 * 24);
       if (daysFromEnd >= 0 && daysFromEnd < 3) {
-        const credit = parseFloat(r.credit);
-        if (credit > 0) {
+        const credit = from(r.credit);
+        if (credit.greaterThan(0)) {
           findings.push({
             severity: 'info',
-            message: `Late-period revenue: Entry ${r.entry_id}, account ${r.account_code}, $${credit.toFixed(2)} on ${r.entry_date} (last 3 days)`,
+            message: `Late-period revenue: Entry ${r.entry_id}, account ${r.account_code}, $${credit.toDecimalPlaces(2).toFixed(2)} on ${r.entry_date} (last 3 days)`,
             entryId: r.entry_id,
             accountCode: r.account_code,
-            amount: credit.toFixed(2),
+            amount: credit.toDecimalPlaces(2).toFixed(2),
           });
         }
       }
@@ -543,6 +552,260 @@ function checkUnusualDescriptions(rows: GLRow[]): HealthCheck {
   };
 }
 
+/* ── Prior-period account summary (shared by new checks) ─────────── */
+
+interface AccountSummary {
+  accountCode: string;
+  accountName: string;
+  balance: number; // debit - credit
+  lineCount: number;
+}
+
+function summarizeByAccount(rows: GLRow[]): Map<string, AccountSummary> {
+  const map = new Map<string, AccountSummary>();
+  for (const r of rows) {
+    const existing = map.get(r.account_code);
+    const net = from(r.debit).minus(r.credit).toDecimalPlaces(2).toNumber();
+    if (existing) {
+      existing.balance = plus(existing.balance, net);
+      existing.lineCount++;
+    } else {
+      map.set(r.account_code, {
+        accountCode: r.account_code,
+        accountName: r.account_name ?? '',
+        balance: net,
+        lineCount: 1,
+      });
+    }
+  }
+  return map;
+}
+
+/* ── Check 11: Completeness Check ────────────────────────────────── */
+
+function checkCompleteness(
+  currentAccounts: Map<string, AccountSummary>,
+  priorAccounts: Map<string, AccountSummary> | null
+): HealthCheck {
+  if (!priorAccounts) {
+    return {
+      id: 'completeness_check',
+      name: 'Account Completeness',
+      status: 'pass',
+      score: 100,
+      weight: 10,
+      findingCount: 0,
+      findings: [],
+      description: 'No prior period data available.',
+    };
+  }
+
+  const findings: Finding[] = [];
+  for (const [code, prior] of priorAccounts) {
+    if (!currentAccounts.has(code)) {
+      findings.push({
+        severity: 'warning',
+        message: `Account ${code} '${prior.accountName}' existed in prior period but is missing`,
+        accountCode: code,
+      });
+    }
+  }
+
+  const score = findings.length === 0 ? 100 : Math.max(0, 100 - findings.length * 10);
+  return {
+    id: 'completeness_check',
+    name: 'Account Completeness',
+    status: findings.length === 0 ? 'pass' : 'warn',
+    score,
+    weight: 10,
+    findingCount: findings.length,
+    findings: cap(findings),
+    description: findings.length === 0
+      ? 'All prior period accounts are present in the current period.'
+      : `${findings.length} accounts from the prior period are missing in the current period.`,
+  };
+}
+
+/* ── Check 12: Reasonableness Check ──────────────────────────────── */
+
+function checkReasonableness(
+  currentAccounts: Map<string, AccountSummary>,
+  priorAccounts: Map<string, AccountSummary> | null
+): HealthCheck {
+  if (!priorAccounts) {
+    return {
+      id: 'reasonableness_check',
+      name: 'Balance Reasonableness',
+      status: 'pass',
+      score: 100,
+      weight: 10,
+      findingCount: 0,
+      findings: [],
+      description: 'No prior period data available.',
+    };
+  }
+
+  const findings: Finding[] = [];
+  for (const [code, current] of currentAccounts) {
+    const prior = priorAccounts.get(code);
+    if (!prior) continue;
+
+    const priorBal = from(prior.balance);
+    const currentBal = from(current.balance);
+
+    // Skip if prior balance is zero or near-zero (avoid division by zero)
+    if (priorBal.abs().lessThanOrEqualTo(0.01)) continue;
+
+    const change = currentBal.minus(priorBal);
+    const pctChange = change.abs().dividedBy(priorBal.abs()).times(100);
+
+    if (pctChange.greaterThan(200)) {
+      const pctStr = pctChange.toDecimalPlaces(0).toString();
+      findings.push({
+        severity: 'warning',
+        message: `Account ${code} changed from $${prior.balance.toFixed(2)} to $${current.balance.toFixed(2)} (${pctStr}% change)`,
+        accountCode: code,
+        amount: current.balance.toFixed(2),
+      });
+    }
+  }
+
+  const score = findings.length === 0 ? 100 : Math.max(0, 100 - findings.length * 10);
+  return {
+    id: 'reasonableness_check',
+    name: 'Balance Reasonableness',
+    status: findings.length === 0 ? 'pass' : 'warn',
+    score,
+    weight: 10,
+    findingCount: findings.length,
+    findings: cap(findings),
+    description: findings.length === 0
+      ? 'All account balances are within reasonable range of prior period.'
+      : `${findings.length} accounts changed more than 200% from prior period.`,
+  };
+}
+
+/* ── Check 13: Negative Balance / Balance Direction Check ────────── */
+
+interface CoaAccountRow {
+  account_code: string;
+  account_name: string;
+  account_type: string;
+}
+
+function checkBalanceDirection(
+  currentAccounts: Map<string, AccountSummary>,
+  coaAccounts: CoaAccountRow[]
+): HealthCheck {
+  const coaMap = new Map<string, CoaAccountRow>();
+  for (const a of coaAccounts) {
+    coaMap.set(a.account_code, a);
+  }
+
+  const findings: Finding[] = [];
+  for (const [code, acct] of currentAccounts) {
+    const coa = coaMap.get(code);
+    if (!coa) continue;
+
+    const accountType = coa.account_type.toUpperCase();
+    const balance = acct.balance;
+
+    // Asset accounts should have debit (positive) balances
+    if ((accountType === 'ASSET' || accountType === 'CURRENT_ASSET' || accountType === 'NON_CURRENT_ASSET') && balance < -0.004) {
+      findings.push({
+        severity: 'warning',
+        message: `Asset account ${code} '${acct.accountName}' has a credit (negative) balance: $${balance.toFixed(2)}`,
+        accountCode: code,
+        amount: balance.toFixed(2),
+      });
+    }
+
+    // Liability accounts should have credit (negative) balances (debit - credit < 0)
+    if ((accountType === 'LIABILITY' || accountType === 'CURRENT_LIABILITY' || accountType === 'NON_CURRENT_LIABILITY') && balance > 0.004) {
+      findings.push({
+        severity: 'warning',
+        message: `Liability account ${code} '${acct.accountName}' has a debit (positive) balance: $${balance.toFixed(2)}`,
+        accountCode: code,
+        amount: balance.toFixed(2),
+      });
+    }
+  }
+
+  const score = findings.length === 0 ? 100 : Math.max(0, 100 - findings.length * 10);
+  return {
+    id: 'balance_direction_check',
+    name: 'Balance Direction',
+    status: findings.length === 0 ? 'pass' : 'warn',
+    score,
+    weight: 10,
+    findingCount: findings.length,
+    findings: cap(findings),
+    description: findings.length === 0
+      ? 'All accounts have balances in the expected direction for their type.'
+      : `${findings.length} accounts have balances opposite to their expected direction.`,
+  };
+}
+
+/* ── Check 14: Zero Activity / Activity Continuity ───────────────── */
+
+function checkActivityContinuity(
+  currentAccounts: Map<string, AccountSummary>,
+  priorAccounts: Map<string, AccountSummary> | null
+): HealthCheck {
+  if (!priorAccounts) {
+    return {
+      id: 'activity_continuity_check',
+      name: 'Activity Continuity',
+      status: 'pass',
+      score: 100,
+      weight: 5,
+      findingCount: 0,
+      findings: [],
+      description: 'No prior period data available.',
+    };
+  }
+
+  const findings: Finding[] = [];
+  for (const [code, prior] of priorAccounts) {
+    // Prior period had non-zero activity (at least some lines)
+    if (prior.lineCount === 0) continue;
+    if (from(prior.balance).abs().lessThanOrEqualTo(0.004)) continue;
+
+    const current = currentAccounts.get(code);
+    // Account exists in current but has zero activity
+    if (current && current.lineCount === 0) {
+      findings.push({
+        severity: 'info',
+        message: `Account ${code} '${prior.accountName}' had activity in prior period but zero activity in current period`,
+        accountCode: code,
+      });
+    }
+    // Account exists but balance is zero and it had non-zero balance before
+    if (current && from(current.balance).abs().lessThanOrEqualTo(0.004) && from(prior.balance).abs().greaterThan(0.004)) {
+      findings.push({
+        severity: 'info',
+        message: `Account ${code} '${prior.accountName}' had balance $${prior.balance.toFixed(2)} in prior period but zero balance in current period`,
+        accountCode: code,
+        amount: '0.00',
+      });
+    }
+  }
+
+  const score = findings.length === 0 ? 100 : Math.max(0, 100 - findings.length * 5);
+  return {
+    id: 'activity_continuity_check',
+    name: 'Activity Continuity',
+    status: findings.length === 0 ? 'pass' : findings.length > 5 ? 'warn' : 'pass',
+    score,
+    weight: 5,
+    findingCount: findings.length,
+    findings: cap(findings),
+    description: findings.length === 0
+      ? 'All previously active accounts continue to show activity.'
+      : `${findings.length} accounts with prior period activity show zero activity in the current period.`,
+  };
+}
+
 /* ── Scoring ────────────────────────────────────────────────────── */
 
 function computeGrade(score: number): string {
@@ -559,7 +822,8 @@ export async function runGLHealthAnalysis(
   pool: Pool,
   tenantId: string,
   sessionId: string,
-  periodLabel: string
+  periodLabel: string,
+  priorPeriodLabel?: string
 ): Promise<HealthAnalysisResult> {
   // Fetch GL lines
   const { rows } = await pool.query<GLRow>(
@@ -571,7 +835,33 @@ export async function runGLHealthAnalysis(
     [tenantId, periodLabel]
   );
 
-  // Run all 10 checks
+  // Fetch prior period GL lines (if prior period provided)
+  let priorAccounts: Map<string, AccountSummary> | null = null;
+  if (priorPeriodLabel) {
+    const { rows: priorRows } = await pool.query<GLRow>(
+      `SELECT id, entry_id, line_number, entry_date::text, account_code, account_name,
+              debit::text, credit::text, description
+       FROM core.general_ledger
+       WHERE tenant_id = $1 AND period_label = $2
+       ORDER BY entry_id, line_number`,
+      [tenantId, priorPeriodLabel]
+    );
+    if (priorRows.length > 0) {
+      priorAccounts = summarizeByAccount(priorRows);
+    }
+  }
+
+  const currentAccounts = summarizeByAccount(rows);
+
+  // Fetch COA for balance direction check
+  const { rows: coaRows } = await pool.query<CoaAccountRow>(
+    `SELECT account_code, account_name, account_type
+     FROM core.tenant_chart_of_accounts
+     WHERE tenant_id = $1`,
+    [tenantId]
+  );
+
+  // Run all 14 checks
   const checks: HealthCheck[] = [
     checkBalance(rows),
     checkSuspenseAccounts(rows),
@@ -583,6 +873,10 @@ export async function runGLHealthAnalysis(
     checkRelatedParty(rows),
     checkRevenueFlags(rows, periodLabel),
     checkUnusualDescriptions(rows),
+    checkCompleteness(currentAccounts, priorAccounts),
+    checkReasonableness(currentAccounts, priorAccounts),
+    checkBalanceDirection(currentAccounts, coaRows),
+    checkActivityContinuity(currentAccounts, priorAccounts),
   ];
 
   // Weighted average
@@ -601,6 +895,32 @@ export async function runGLHealthAnalysis(
      DO UPDATE SET period_label = $3, overall_grade = $4, overall_score = $5, checks = $6, finding_count = $7, created_at = NOW()`,
     [tenantId, sessionId, periodLabel, overallGrade, overallScore, JSON.stringify(checks), findingCount]
   );
+
+  // Emit event for critical/warning findings
+  const criticalFindings = checks
+    .filter((c) => c.findings.some((f: Finding) => f.severity === 'critical' || f.severity === 'warning'))
+    .map((c) => ({
+      checkName: c.name,
+      severity: c.findings.some((f: Finding) => f.severity === 'critical') ? 'critical' : 'warning',
+      findingCount: c.findingCount,
+    }));
+  if (criticalFindings.length > 0) {
+    financialEvents.emit('GL_HEALTH_ANOMALY', buildEventPacket('GL_HEALTH_ANOMALY', {
+      errorCode: `GL_HEALTH_${overallGrade}`,
+      conflictingData: { overallGrade, overallScore, findingCount },
+      metadata: {
+        tenantId,
+        closeSessionId: sessionId,
+        periodLabel,
+      },
+      data: {
+        overallGrade,
+        overallScore,
+        findingCount,
+        criticalFindings,
+      },
+    }));
+  }
 
   return { overallGrade, overallScore, checks, findingCount };
 }

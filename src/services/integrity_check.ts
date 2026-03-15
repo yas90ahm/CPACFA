@@ -12,6 +12,7 @@ import {
   type SuspiciousPlugResult,
 } from './integrity_gate_service.js';
 import { sumRound2 } from '../utils/decimal.js';
+import { financialEvents, buildEventPacket } from '../events/financial_event_emitter.js';
 
 export interface FinalIntegrityCheckInput {
   trialBalance: IntegrityGateInput['trialBalance'];
@@ -65,6 +66,21 @@ export function finalIntegrityCheck(input: FinalIntegrityCheckInput): FinalInteg
       { threshold: 0.9 }
     );
     if (plugResult.isSuspicious) {
+      financialEvents.emit('SUSPICIOUS_PLUG', buildEventPacket('SUSPICIOUS_PLUG', {
+        errorCode: 'SUSPICIOUS_PLUG_DETECTED',
+        conflictingData: { plugAccountNames: plugResult.plugAccountNames, plugShare: plugResult.plugShare },
+        metadata: {
+          tenantId: 'system',
+          accountCodes: plugResult.plugAccountNames ?? [],
+        },
+        data: {
+          plugAccountNames: plugResult.plugAccountNames ?? [],
+          plugAmount: plugResult.plugAmount ?? 0,
+          plugShare: plugResult.plugShare ?? 0,
+          totalNetActivity: totalDebits_ + totalCredits_,
+          threshold: 0.9,
+        },
+      }));
       return {
         passed: false,
         error:

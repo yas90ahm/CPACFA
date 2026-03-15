@@ -14,6 +14,10 @@ export interface InsertCallLogParams {
   responseJson: Record<string, unknown> | null;
   ok: boolean;
   error: string | null;
+  latencyMs?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  estimatedCostUsd?: number | null;
 }
 
 export async function insertCallLog(
@@ -23,8 +27,9 @@ export async function insertCallLog(
   const r = await pool.query<{ id: string }>(
     `INSERT INTO ai_call_log (
       tenant_id, pillar, prompt_version, model, request_json,
-      response_raw, response_json, ok, error
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      response_raw, response_json, ok, error,
+      latency_ms, input_tokens, output_tokens, estimated_cost_usd
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
     RETURNING id`,
     [
       params.tenantId,
@@ -36,6 +41,10 @@ export async function insertCallLog(
       params.responseJson ? JSON.stringify(params.responseJson) : null,
       params.ok,
       params.error ?? null,
+      params.latencyMs ?? null,
+      params.inputTokens ?? null,
+      params.outputTokens ?? null,
+      params.estimatedCostUsd ?? null,
     ]
   );
   const row = r.rows[0];

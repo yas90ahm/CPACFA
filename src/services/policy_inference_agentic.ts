@@ -3,6 +3,8 @@
  */
 
 import { callLLMWithFallback } from '../llm/callWithFallback.js';
+import { runInBoundaryScope, enterAdvisoryContext, exitAdvisoryContext } from '../lib/ai_boundary.js';
+import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import type { BalanceSheet, ProfitAndLoss } from '../types/financial.js';
 import type { QualityCheck } from './quality_checks.js';
 import type { DataGap } from '../agents/cpa_brain.js';
@@ -46,12 +48,24 @@ export async function proposePolicyChangesAgentic(input: {
     `dataGaps=${JSON.stringify(input.dataGaps)}`,
     'Return JSON only.',
   ].join('\n');
-  return callLLMWithFallback({
-    system: SYSTEM,
-    prompt,
-    maxTokens: 500,
-    parse: parseProposals,
-    fallback: [],
+  return runInBoundaryScope(async () => {
+    enterAdvisoryContext();
+    try {
+      const result = await callLLMWithFallback({
+        system: SYSTEM,
+        prompt,
+        maxTokens: 500,
+        parse: parseProposals,
+        fallback: [],
+      });
+
+      // Apply numeric guardrail on parsed LLM output
+      assertNoNumericAmountsInAgentOutput(result, 'policy_inference_agentic');
+
+      return result;
+    } finally {
+      exitAdvisoryContext();
+    }
   });
 }
 

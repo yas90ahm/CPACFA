@@ -17,16 +17,16 @@ export interface StockGrantRow {
   grantType: 'rsu' | 'option' | 'espp' | 'sar';
   recipientId?: string;
   recipientName?: string;
-  sharesGranted: number;
-  grantPrice?: number;
-  fairValuePerShare?: number;
+  sharesGranted: string;
+  grantPrice?: string;
+  fairValuePerShare?: string;
   vestingType: 'time' | 'performance' | 'market';
   vestingSchedule: VestingScheduleEntry[];
   expirationDate?: string;
   status: 'active' | 'vested' | 'forfeited' | 'exercised';
   forfeitureDate?: string;
   exerciseDate?: string;
-  exercisePrice?: number;
+  exercisePrice?: string;
   notes?: string;
   createdAt: string;
   updatedAt: string;
@@ -38,7 +38,7 @@ export interface StockValuationRow {
   grantId: string;
   valuationDate: string;
   method: 'black_scholes' | 'grant_date_price' | 'monte_carlo';
-  fairValuePerShare: number;
+  fairValuePerShare: string;
   parameters?: { volatility?: number; riskFreeRate?: number; expectedTerm?: number; dividendYield?: number };
   createdAt: string;
 }
@@ -48,9 +48,9 @@ export interface StockExpenseRow {
   tenantId: string;
   grantId: string;
   periodLabel: string;
-  expenseAmount: number;
-  cumulativeExpense: number;
-  sharesVested: number;
+  expenseAmount: string;
+  cumulativeExpense: string;
+  sharesVested: string;
   createdAt: string;
 }
 
@@ -66,16 +66,16 @@ function rowToGrant(row: any): StockGrantRow {
     grantType: row.grant_type,
     recipientId: row.recipient_id ?? undefined,
     recipientName: row.recipient_name ?? undefined,
-    sharesGranted: Number(row.shares_granted),
-    grantPrice: row.grant_price != null ? Number(row.grant_price) : undefined,
-    fairValuePerShare: row.fair_value_per_share != null ? Number(row.fair_value_per_share) : undefined,
+    sharesGranted: String(row.shares_granted),
+    grantPrice: row.grant_price != null ? String(row.grant_price) : undefined,
+    fairValuePerShare: row.fair_value_per_share != null ? String(row.fair_value_per_share) : undefined,
     vestingType: row.vesting_type,
     vestingSchedule: row.vesting_schedule ?? [],
     expirationDate: row.expiration_date ?? undefined,
     status: row.status,
     forfeitureDate: row.forfeiture_date ?? undefined,
     exerciseDate: row.exercise_date ?? undefined,
-    exercisePrice: row.exercise_price != null ? Number(row.exercise_price) : undefined,
+    exercisePrice: row.exercise_price != null ? String(row.exercise_price) : undefined,
     notes: row.notes ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -163,7 +163,7 @@ export async function recordValuation(
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [id, tenantId, valuation.grantId, valuation.valuationDate, valuation.method, valuation.fairValuePerShare, valuation.parameters ? JSON.stringify(valuation.parameters) : null, now]
   );
-  return { id, tenantId, grantId: valuation.grantId, valuationDate: valuation.valuationDate, method: valuation.method as StockValuationRow['method'], fairValuePerShare: valuation.fairValuePerShare, parameters: valuation.parameters, createdAt: now };
+  return { id, tenantId, grantId: valuation.grantId, valuationDate: valuation.valuationDate, method: valuation.method as StockValuationRow['method'], fairValuePerShare: String(valuation.fairValuePerShare), parameters: valuation.parameters, createdAt: now };
 }
 
 export async function listValuations(pool: Pool, tenantId: string, grantId: string): Promise<StockValuationRow[]> {
@@ -174,7 +174,7 @@ export async function listValuations(pool: Pool, tenantId: string, grantId: stri
     grantId: row.grant_id,
     valuationDate: row.valuation_date,
     method: row.method,
-    fairValuePerShare: Number(row.fair_value_per_share),
+    fairValuePerShare: String(row.fair_value_per_share),
     parameters: row.parameters ?? undefined,
     createdAt: row.created_at,
   }));
@@ -193,7 +193,7 @@ export async function recordExpense(
      ON CONFLICT DO NOTHING`,
     [id, tenantId, expense.grantId, expense.periodLabel, expense.expenseAmount, expense.cumulativeExpense, expense.sharesVested, now]
   );
-  return { id, tenantId, grantId: expense.grantId, periodLabel: expense.periodLabel, expenseAmount: expense.expenseAmount, cumulativeExpense: expense.cumulativeExpense, sharesVested: expense.sharesVested, createdAt: now };
+  return { id, tenantId, grantId: expense.grantId, periodLabel: expense.periodLabel, expenseAmount: String(expense.expenseAmount), cumulativeExpense: String(expense.cumulativeExpense), sharesVested: String(expense.sharesVested), createdAt: now };
 }
 
 export async function listExpenses(pool: Pool, tenantId: string, periodLabel?: string): Promise<StockExpenseRow[]> {
@@ -210,17 +210,17 @@ export async function listExpenses(pool: Pool, tenantId: string, periodLabel?: s
     tenantId: row.tenant_id,
     grantId: row.grant_id,
     periodLabel: row.period_label,
-    expenseAmount: Number(row.expense_amount),
-    cumulativeExpense: Number(row.cumulative_expense),
-    sharesVested: Number(row.shares_vested),
+    expenseAmount: String(row.expense_amount),
+    cumulativeExpense: String(row.cumulative_expense),
+    sharesVested: String(row.shares_vested),
     createdAt: row.created_at,
   }));
 }
 
-export async function getTotalExpenseForPeriod(pool: Pool, tenantId: string, periodLabel: string): Promise<number> {
+export async function getTotalExpenseForPeriod(pool: Pool, tenantId: string, periodLabel: string): Promise<string> {
   const r = await pool.query(
     'SELECT COALESCE(SUM(expense_amount), 0) as total FROM stock_expense_schedule WHERE tenant_id = $1 AND period_label = $2',
     [tenantId, periodLabel]
   );
-  return Number(r.rows[0]?.total ?? 0);
+  return String(r.rows[0]?.total ?? '0');
 }

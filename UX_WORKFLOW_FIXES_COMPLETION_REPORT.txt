@@ -1,0 +1,79 @@
+UX WORKFLOW FIXES — COMPLETION REPORT
+======================================
+Date: 2026-03-11
+Build Status: PASS (npm run build — all pages compiled successfully)
+
+BATCH 1: MONEY FORMATTING — COMPLETE
+--------------------------------------
+Replaced ALL local money formatters with shared fmtMoney/MoneyCell across:
+- StatementTable.tsx: Removed local formatGaapAmount(), replaced with fmtMoney() + isMoneyNegative()
+- settings/templates/page.tsx: Replaced Intl.NumberFormat formatter with fmtMoney()
+- dashboard/GLUploadFlow.tsx: Replaced Intl.NumberFormat formatter with fmtMoney()
+- dashboard/TBUploadFlow.tsx: Replaced Intl.NumberFormat formatter with fmtMoney()
+- consolidation/page.tsx: Replaced toLocaleString formatter with fmtMoney()
+- fx-translation/page.tsx: Replaced toLocaleString formatter with fmtMoney()
+- variance/page.tsx: Replaced Number().toLocaleString() with fmtMoney()
+Format: $1,234.56 positive, ($1,234.56) negative, 2 decimals, dollar sign.
+
+BATCH 2: CFO REVIEW QUEUE — COMPLETE
+--------------------------------------
+ReviewerDashboard.tsx already has "Items Awaiting Your Review" section with pending
+JE/recon/variance counts and direct links. No changes needed — verified existing implementation.
+
+BATCH 3: SIDEBAR ORGANIZATION — COMPLETE
+-----------------------------------------
+Sidebar.tsx: Added UNDER_REVIEW promotion block — when session is UNDER_REVIEW, a
+prominent "Review & Certify" link appears at the top of the sidebar with accent
+styling (bg-accent text-white) and Award icon.
+
+BATCH 4: VARIANCE CHARACTER COUNTER — COMPLETE
+------------------------------------------------
+variance/page.tsx: Character counter below textarea turns red (text-status-red)
+when explanation is below 20 characters. Save button disabled until minimum met.
+
+BATCH 5: AI VISUAL DISTINCTION — COMPLETE
+-------------------------------------------
+New components created:
+- AISuggestionBadge.tsx: Inline badge with purple bg/border, sparkle icon,
+  optional confidence %, optional model name. Used across all AI surfaces.
+- AISuggestionCard.tsx: Updated title prop to accept ReactNode for badge embedding.
+
+Applied to:
+- mapping/page.tsx: AI suggestion cards show AISuggestionBadge with confidence %
+- variance/page.tsx: AI draft explanations labeled with AISuggestionBadge "AI Draft"
+- discrepancies/page.tsx: Shadow audit findings labeled with AISuggestionBadge "Shadow Auditor"
+- ai-review/page.tsx: HITL staging items show AISuggestionBadge "AI Justification" with confidence
+
+BATCH 6: EMPTY STATES — COMPLETE
+----------------------------------
+New component created:
+- EmptyState.tsx: Centered card with icon, title, description, optional CTA button/link.
+
+Applied to:
+- mapping/page.tsx: "Upload a general ledger to see accounts for mapping"
+- reconciliation/page.tsx: "Complete account mapping first, then reconciliations will be initialized"
+  with CTA link to mapping page
+- statements/page.tsx: "Complete reconciliation and adjustments, then generate financial statements"
+  with CTA to prepare statements
+- variance/page.tsx: "Generate financial statements to see period-over-period variance analysis"
+  (two empty states: no variances at all, and no filter matches)
+- discrepancies/page.tsx: "No discrepancies found — your close is clean" / filter-aware empty state
+- ai-review/page.tsx: Filter-aware empty state for AI review queue
+
+FILES MODIFIED (16 total):
+- frontend/components/shared/AISuggestionBadge.tsx (NEW)
+- frontend/components/shared/AISuggestionCard.tsx (MODIFIED)
+- frontend/components/shared/EmptyState.tsx (NEW)
+- frontend/components/shell/Sidebar.tsx (MODIFIED)
+- frontend/app/close/[sessionId]/statements/StatementTable.tsx (MODIFIED)
+- frontend/app/close/[sessionId]/statements/page.tsx (MODIFIED)
+- frontend/app/close/[sessionId]/mapping/page.tsx (MODIFIED)
+- frontend/app/close/[sessionId]/variance/page.tsx (MODIFIED)
+- frontend/app/close/[sessionId]/discrepancies/page.tsx (MODIFIED)
+- frontend/app/close/[sessionId]/ai-review/page.tsx (MODIFIED)
+- frontend/app/close/[sessionId]/reconciliation/page.tsx (MODIFIED)
+- frontend/app/close/[sessionId]/consolidation/page.tsx (MODIFIED)
+- frontend/app/close/[sessionId]/fx-translation/page.tsx (MODIFIED)
+- frontend/app/close/[sessionId]/dashboard/GLUploadFlow.tsx (MODIFIED)
+- frontend/app/close/[sessionId]/dashboard/TBUploadFlow.tsx (MODIFIED)
+- frontend/app/settings/templates/page.tsx (MODIFIED)

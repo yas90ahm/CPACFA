@@ -11,6 +11,7 @@ import { send500 } from '../lib/errorHandler.js';
 import * as teamService from '../services/team_service.js';
 import { recordAuditLogAction } from '../services/audit_service.js';
 import type { AuthRequest } from '../auth/middleware.js';
+import { requireRole } from '../middleware/requireRole.js';
 
 const router = Router();
 
@@ -107,7 +108,7 @@ router.post('/invite', async (req: Request, res: Response) => {
 });
 
 /** PUT /api/settings/team/:userId/role — change a user's role */
-router.put('/:userId/role', async (req: Request, res: Response) => {
+router.put('/:userId/role', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
@@ -153,7 +154,7 @@ router.put('/:userId/role', async (req: Request, res: Response) => {
 });
 
 /** PUT /api/settings/team/:userId/deactivate */
-router.put('/:userId/deactivate', async (req: Request, res: Response) => {
+router.put('/:userId/deactivate', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
@@ -192,7 +193,7 @@ router.put('/:userId/deactivate', async (req: Request, res: Response) => {
 });
 
 /** PUT /api/settings/team/:userId/reactivate */
-router.put('/:userId/reactivate', async (req: Request, res: Response) => {
+router.put('/:userId/reactivate', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
@@ -224,7 +225,7 @@ router.put('/:userId/reactivate', async (req: Request, res: Response) => {
 });
 
 /** DELETE /api/settings/team/:userId — soft delete (deactivate) */
-router.delete('/:userId', async (req: Request, res: Response) => {
+router.delete('/:userId', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);

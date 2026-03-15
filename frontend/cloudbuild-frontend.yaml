@@ -1,0 +1,11 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_API_URL=https://sabit-backend-577604067574.us-central1.run.app'
+      - '-t'
+      - 'gcr.io/sabit-staging-v1/sabit-frontend'
+      - '.'
+images:
+  - 'gcr.io/sabit-staging-v1/sabit-frontend'

@@ -116,10 +116,11 @@ export function IssuePanel({ issues, sessionId, open, onClose, onOpenRequest, ca
               onClick={() => setShowCreateForm(!showCreateForm)}
               className="p-1.5 rounded-input text-text-secondary hover:text-primary hover:bg-hover"
               title="Flag new issue"
+              aria-label="Expand issue details"
             >
               <Plus className="w-4 h-4" />
             </button>
-            <button type="button" onClick={onClose} className="p-2 text-text-secondary hover:text-primary">
+            <button type="button" onClick={onClose} className="p-2 text-text-secondary hover:text-primary" aria-label="Close issues panel">
               <X className="w-5 h-5" />
             </button>
           </div>

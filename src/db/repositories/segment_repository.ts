@@ -20,20 +20,20 @@ export interface SegmentFinancialsRow {
   tenantId: string;
   segmentId: string;
   periodLabel: string;
-  revenue?: number;
-  intersegmentRevenue?: number;
-  externalRevenue?: number;
-  profitLoss?: number;
-  assets?: number;
-  liabilities?: number;
-  capitalExpenditures?: number;
-  depreciation?: number;
+  revenue?: string;
+  intersegmentRevenue?: string;
+  externalRevenue?: string;
+  profitLoss?: string;
+  assets?: string;
+  liabilities?: string;
+  capitalExpenditures?: string;
+  depreciation?: string;
   createdAt: string;
 }
 
 export interface ReconcilingItem {
   description: string;
-  amount: number;
+  amount: string;
 }
 
 export interface SegmentReconciliationRow {
@@ -41,8 +41,8 @@ export interface SegmentReconciliationRow {
   tenantId: string;
   periodLabel: string;
   itemType: 'revenue' | 'profit' | 'assets';
-  segmentTotal: number;
-  consolidatedTotal: number;
+  segmentTotal: string;
+  consolidatedTotal: string;
   reconcilingItems: ReconcilingItem[];
   createdAt: string;
 }
@@ -154,14 +154,14 @@ export async function listSegmentFinancials(pool: Pool, tenantId: string, period
     tenantId: row.tenant_id,
     segmentId: row.segment_id,
     periodLabel: row.period_label,
-    revenue: row.revenue != null ? Number(row.revenue) : undefined,
-    intersegmentRevenue: row.intersegment_revenue != null ? Number(row.intersegment_revenue) : undefined,
-    externalRevenue: row.external_revenue != null ? Number(row.external_revenue) : undefined,
-    profitLoss: row.profit_loss != null ? Number(row.profit_loss) : undefined,
-    assets: row.assets != null ? Number(row.assets) : undefined,
-    liabilities: row.liabilities != null ? Number(row.liabilities) : undefined,
-    capitalExpenditures: row.capital_expenditures != null ? Number(row.capital_expenditures) : undefined,
-    depreciation: row.depreciation != null ? Number(row.depreciation) : undefined,
+    revenue: row.revenue != null ? String(row.revenue) : undefined,
+    intersegmentRevenue: row.intersegment_revenue != null ? String(row.intersegment_revenue) : undefined,
+    externalRevenue: row.external_revenue != null ? String(row.external_revenue) : undefined,
+    profitLoss: row.profit_loss != null ? String(row.profit_loss) : undefined,
+    assets: row.assets != null ? String(row.assets) : undefined,
+    liabilities: row.liabilities != null ? String(row.liabilities) : undefined,
+    capitalExpenditures: row.capital_expenditures != null ? String(row.capital_expenditures) : undefined,
+    depreciation: row.depreciation != null ? String(row.depreciation) : undefined,
     createdAt: row.created_at,
   }));
 }
@@ -196,8 +196,8 @@ export async function listReconciliations(pool: Pool, tenantId: string, periodLa
     tenantId: row.tenant_id,
     periodLabel: row.period_label,
     itemType: row.item_type,
-    segmentTotal: Number(row.segment_total),
-    consolidatedTotal: Number(row.consolidated_total),
+    segmentTotal: String(row.segment_total),
+    consolidatedTotal: String(row.consolidated_total),
     reconcilingItems: row.reconciling_items ?? [],
     createdAt: row.created_at,
   }));

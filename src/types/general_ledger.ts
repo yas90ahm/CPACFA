@@ -11,8 +11,8 @@ export interface GeneralLedgerLine {
   entry_date: Date | string;
   account_code: string;
   account_name?: string;
-  debit: number;
-  credit: number;
+  debit: string;
+  credit: string;
   description?: string;
   amount_provenance?: string;
   source?: string;
@@ -21,11 +21,11 @@ export interface GeneralLedgerLine {
   /** ISO currency code of original transaction (null = functional currency) */
   original_currency?: string | null;
   /** Debit in original currency before translation */
-  original_debit?: number | null;
+  original_debit?: string | null;
   /** Credit in original currency before translation */
-  original_credit?: number | null;
+  original_credit?: string | null;
   /** Exchange rate used: 1 original = rate * functional */
-  exchange_rate?: number | null;
+  exchange_rate?: string | null;
 }
 
 export interface JournalEntry {

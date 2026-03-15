@@ -10,6 +10,7 @@ import type { Pool } from 'pg';
 import { callClaude } from '../ai/adapters/claude_adapter.js';
 import { insertCallLog } from '../ai/ai_call_log_repository.js';
 import { enterAdvisoryContext, exitAdvisoryContext } from '../lib/ai_boundary.js';
+import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import { validateNumberProvenance } from '../lib/number_provenance_validator.js';
 import type {
   ChatParams,
@@ -132,6 +133,10 @@ async function callAIForText(
       responseJson: null,
       ok: result.ok,
       error: result.error ?? null,
+      latencyMs: result.latencyMs ?? null,
+      inputTokens: result.inputTokens ?? null,
+      outputTokens: result.outputTokens ?? null,
+      estimatedCostUsd: result.estimatedCostUsd ?? null,
     });
 
     return {
@@ -184,6 +189,9 @@ export async function generateVarianceExplanation(
   const firstResult = await callAIForText(pool, tenantId, SYSTEM_PROMPT, fullUserPrompt, requestJson);
 
   if (firstResult.ok && firstResult.rawText) {
+    // Apply numeric guardrail on raw AI output
+    assertNoNumericAmountsInAgentOutput({ text: firstResult.rawText }, 'variance_chat_service');
+
     const provenance = validateNumberProvenance(
       firstResult.rawText,
       investigationResult,
@@ -210,6 +218,9 @@ export async function generateVarianceExplanation(
     );
 
     if (retryResult.ok && retryResult.rawText) {
+      // Apply numeric guardrail on retry output
+      assertNoNumericAmountsInAgentOutput({ text: retryResult.rawText }, 'variance_chat_service_retry');
+
       const retryProvenance = validateNumberProvenance(
         retryResult.rawText,
         investigationResult,

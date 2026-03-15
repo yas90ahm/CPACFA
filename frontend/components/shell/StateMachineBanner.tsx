@@ -87,7 +87,7 @@ export function StateMachineBanner({
             );
           })}
           {gatesRemaining > 0 && currentState === 'IN_PROGRESS' && (
-            <span className="ml-3 text-[10px] font-mono text-text-tertiary">{gatesRemaining} gates remaining</span>
+            <span className="ml-3 text-xs font-mono text-text-tertiary">{gatesRemaining} gates remaining</span>
           )}
         </div>
         <div className="flex items-center gap-2">

@@ -25,6 +25,15 @@ export function ColumnMapper({
     return requiredFields.filter((f) => f.required).every((f) => value[f.fieldId]?.trim());
   }, [requiredFields, value]);
 
+  // Derive preview columns from actual data keys (accounts summary may use different keys than raw CSV headers)
+  const previewColumns = useMemo(() => {
+    if (previewData.length === 0) return columns;
+    const dataKeys = Object.keys(previewData[0]);
+    // If data keys match CSV headers, use CSV headers; otherwise use data's own keys
+    const hasMatch = columns.some((c) => dataKeys.includes(c));
+    return hasMatch ? columns : dataKeys;
+  }, [previewData, columns]);
+
   const updateMapping = (fieldId: string, column: string) => {
     onChange({ ...value, [fieldId]: column });
   };
@@ -60,12 +69,12 @@ export function ColumnMapper({
       <p className="text-xs text-text-tertiary">* Required fields</p>
 
       <div className="border-t border-border pt-4">
-        <p className="text-sm font-medium text-text-secondary mb-2">Data preview (first {previewData.length} rows)</p>
+        <p className="text-sm font-medium text-text-secondary mb-2">Data preview (first {Math.min(previewData.length, 10)} rows)</p>
         <div className="overflow-x-auto rounded-input border border-border">
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr className="border-b border-border bg-surface-alt">
-                {columns.map((col) => (
+                {previewColumns.map((col) => (
                   <th key={col} className="text-left py-2 px-3 font-medium text-text-secondary">
                     {col}
                   </th>
@@ -75,7 +84,7 @@ export function ColumnMapper({
             <tbody>
               {previewData.slice(0, 10).map((row, i) => (
                 <tr key={i} className="border-b border-border-light">
-                  {columns.map((col) => (
+                  {previewColumns.map((col) => (
                     <td key={col} className="py-1.5 px-3 font-mono text-xs">
                       {row[col] ?? '—'}
                     </td>

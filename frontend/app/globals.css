@@ -2,44 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Base styles using CSS variables so layout is always styled even if Tailwind purges */
 @layer base {
-  :root {
-    --bg-primary: #0B0F1A;
-    --bg-surface: #141829;
-    --bg-surface-alt: #1A1F35;
-    --bg-elevated: #232845;
-    --bg-hover: #2A3050;
-    --bg-input: #111525;
-    --border-default: #262C48;
-    --border-light: #1E2340;
-    --border-focus: #7C5CFC;
-    --text-primary: #F1F1F4;
-    --text-secondary: #8B90A7;
-    --text-tertiary: #5C6280;
-    --text-muted: #3D4260;
-    --accent: #7C5CFC;
-    --accent-hover: #6B4FE0;
-    --accent-dim: rgba(124,92,252,0.10);
-    --status-green: #34D399;
-    --status-green-dim: rgba(52,211,153,0.10);
-    --status-amber: #FBBF24;
-    --status-amber-dim: rgba(251,191,36,0.10);
-    --status-red: #F87171;
-    --status-red-dim: rgba(248,113,113,0.10);
-    --status-blue: #60A5FA;
-    --status-blue-dim: rgba(96,165,250,0.10);
-    --certified-gold: #eab308;
-    --certified-gold-dim: rgba(234,179,8,0.10);
-    --ai-purple: #A78BFA;
-    --ai-purple-dim: rgba(167,139,250,0.06);
-    --ai-purple-border: rgba(167,139,250,0.20);
-    --radius-card: 12px;
-    --radius-input: 8px;
-  }
-
   * {
-    @apply border-border;
+    border-color: var(--border-default);
   }
 
   html {
@@ -49,9 +14,9 @@
   }
 
   body {
-    background-color: var(--bg-primary) !important;
-    color: var(--text-primary) !important;
-    font-family: var(--font-sans), 'Inter', 'DM Sans', system-ui, sans-serif;
+    background-color: var(--bg-base);
+    color: var(--text-primary);
+    font-family: var(--font-sans), 'Inter', system-ui, sans-serif;
     min-height: 100vh;
     letter-spacing: -0.01em;
   }
@@ -59,12 +24,12 @@
   .font-mono,
   .tabular-nums,
   [data-currency] {
-    font-variant-numeric: tabular-nums;
+    font-variant-numeric: tabular-nums lining-nums;
     font-family: var(--font-mono), 'JetBrains Mono', ui-monospace, monospace;
   }
 }
 
-/* Form fallbacks so login is always styled */
+/* Form styles using design tokens */
 input[type="email"],
 input[type="password"],
 input[type="text"],
@@ -72,36 +37,35 @@ input[type="date"],
 input[type="number"],
 select,
 textarea {
-  background-color: var(--bg-input);
+  background-color: var(--bg-surface-sunken);
   color: var(--text-primary);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-input);
+  border-radius: var(--radius-md);
   padding: 0.625rem 0.875rem;
   font-size: 0.875rem;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 input:focus,
 select:focus,
 textarea:focus {
   border-color: var(--border-focus);
-  box-shadow: 0 0 0 3px var(--accent-dim);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-primary) 12%, transparent);
   outline: none;
 }
 
 button[type="submit"] {
-  background-color: var(--accent);
+  background-color: var(--interactive-primary);
   color: white;
-  border-radius: 9999px;
+  border-radius: var(--radius-lg);
   padding: 0.625rem 1.5rem;
   font-weight: 500;
   font-size: 0.875rem;
-  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+  transition: background-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 button[type="submit"]:hover {
-  background-color: var(--accent-hover);
-  box-shadow: 0 0 20px rgba(124,92,252,0.15);
+  background-color: var(--interactive-primary-hover);
 }
 
 /* Scrollbar styling */
@@ -117,18 +81,25 @@ button[type="submit"]:hover {
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-tertiary);
+  background: var(--border-strong);
 }
 
-/* Utility: landing-page style primary CTA button */
+/* Utility button classes */
 @layer utilities {
   .btn-primary {
-    @apply inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-accent text-white text-sm font-medium transition-all;
+    @apply inline-flex items-center gap-2 px-6 py-2.5 rounded-lg text-white text-sm font-medium transition-all;
+    background-color: var(--interactive-primary);
   }
   .btn-primary:hover {
-    @apply bg-accent-hover shadow-glow-accent;
+    background-color: var(--interactive-primary-hover);
   }
   .btn-secondary {
-    @apply inline-flex items-center gap-2 px-5 py-2 rounded-full border border-border text-text-secondary text-sm font-medium transition-all hover:bg-hover hover:text-primary;
+    @apply inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all;
+    border: 1px solid var(--border-default);
+    color: var(--text-secondary);
+  }
+  .btn-secondary:hover {
+    background-color: var(--bg-table-row-hover);
+    color: var(--text-primary);
   }
 }

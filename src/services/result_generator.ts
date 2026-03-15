@@ -217,7 +217,7 @@ export async function step1CPA(
         stmtOpts.tenantId = context.tenantId;
         stmtOpts.loadContracts = async (tid: string) => {
           const rows = await listContracts(context.pool, tid);
-          return rows.map((r) => ({ id: r.id, totalContractValue: r.totalContractValue, periodRecognizedRevenue: undefined }));
+          return rows.map((r) => ({ id: r.id, totalContractValue: String(r.totalContractValue), periodRecognizedRevenue: undefined }));
         };
       }
       const res = await generateStatements(trialBalance, standard, stmtOpts);

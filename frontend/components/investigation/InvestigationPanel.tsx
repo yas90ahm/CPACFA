@@ -144,7 +144,7 @@ export function InvestigationPanel({
       {view !== 'loading' && (
         <div className="flex items-center gap-2 mb-4 -mt-2">
           {view === 'drilldown' && (
-            <button type="button" onClick={() => setView('results')} className="p-1 rounded hover:bg-hover text-text-secondary">
+            <button type="button" onClick={() => setView('results')} className="p-1 rounded hover:bg-hover text-text-secondary" aria-label="Close investigation panel">
               <ArrowLeft className="w-4 h-4" />
             </button>
           )}

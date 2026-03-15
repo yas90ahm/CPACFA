@@ -20,7 +20,7 @@ export interface ReconItem {
   id: string;
   reconRunId: string;
   source: ReconItemSource;
-  amount: number;
+  amount: string;
   itemDate?: string;
   description?: string;
   ref?: Record<string, unknown>;
@@ -31,7 +31,7 @@ export interface ReconMatchGroup {
   id: string;
   reconRunId: string;
   status: MatchGroupStatus;
-  matchConfidence?: number;
+  matchConfidence?: string;
   decisionRecordId?: string;
   createdAt: string;
 }

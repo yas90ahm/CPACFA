@@ -95,4 +95,10 @@ export interface ReconItem {
   ajeId: string | null;
   createdAt: string;
   createdBy: string | null;
+  /** Period label from which this item was carried forward (null if created fresh). */
+  carriedFromPeriod: string | null;
+  /** Original creation timestamp when this item was first created (before carry-forward). */
+  originalCreatedAt: string | null;
+  /** Timestamp when this reconciling item was resolved/cleared. Null if still outstanding. */
+  resolvedAt: string | null;
 }

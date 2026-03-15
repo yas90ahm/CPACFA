@@ -40,7 +40,7 @@ export type StatementType = 'balance_sheet' | 'profit_and_loss' | 'cash_flow' | 
 export interface StatementLine {
   packageId: string;
   fsLineId: string;
-  amount: number;
+  amount: string;
   statement: StatementType;
   metadata?: Record<string, unknown>;
   /** Display order for frontend rendering. */

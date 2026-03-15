@@ -1,0 +1,181 @@
+FRONTEND REBUILD — PHASE 3B: CONTROLLER JOURNEY (Reconciliation through Certification) — COMPLETION REPORT
+=============================================================================================================
+Date: 2026-03-12
+Frontend Build: PASS (next build — 40 routes compiled, zero errors)
+
+=============================================================================================================
+SCREEN 7: RECONCILIATION LIST (RESTYLED)
+=============================================================================================================
+File: frontend/app/close/[sessionId]/reconciliation/page.tsx
+
+- Page title changed to "Balance Sheet Reconciliation"
+- All Tailwind color utilities replaced with CSS custom properties
+- Summary bar now uses StatusBadge components for Complete/In Progress/Not Started/Over Tolerance counts
+- Progress bar: var(--interactive-primary) fill on var(--bg-surface-sunken) track
+- Over-tolerance rows: borderLeft 3px var(--status-error), background var(--status-error-bg)
+- Complete rows: borderLeft 3px var(--status-success)
+- Completed-not-approved rows: borderLeft 3px var(--status-warning)
+- Batch mode banner: var(--bg-surface) with var(--interactive-primary) border
+- Save All button: var(--interactive-primary) background when active
+- SaveIndicator: var(--text-tertiary) spinner, var(--status-success) saved, var(--status-error) error
+- Batch input fields: inline styles for border, background, focus ring
+- DataTable.tsx updated with rowStyle prop for inline style objects per row
+- All existing logic preserved (batch mode, filtering, sorting, mutations)
+
+=============================================================================================================
+SCREEN 8: RECONCILIATION DETAIL (RESTYLED)
+=============================================================================================================
+File: frontend/app/close/[sessionId]/reconciliation/[reconId]/page.tsx
+
+- Two-column layout changed to 60/40 split (lg:grid-cols-[3fr_2fr])
+- All Tailwind color utilities replaced with CSS custom properties
+- Balance comparison card: GL Balance read-only, Supporting Balance editable, Variance computed
+- Over-tolerance variance: var(--status-error), within-tolerance: var(--status-success)
+- Reconciling items table with MoneyCell for amounts
+- Carried forward items: amber badge for 45+ days, red for 90+ days
+- Evidence section with SHA-256 hashes in font-mono
+- Approval section for reviewers with approve/reject buttons
+- History timeline on right column
+- Navigation: Back arrow, Previous/Next account arrows
+- All existing logic preserved (mutations, evidence upload, copy prior, complete, approve)
+
+=============================================================================================================
+SCREEN 9: ADJUSTMENTS (RESTYLED)
+=============================================================================================================
+File: frontend/app/close/[sessionId]/adjustments/page.tsx
+
+- Page title changed to "Adjusting Journal Entries"
+- All Tailwind color utilities replaced with CSS custom properties
+- Summary bar uses StatusBadge components for Draft/Pending/Approved/Posted counts
+- Tab styling: active var(--interactive-primary) border-bottom + text, inactive var(--text-secondary)
+- Reject dialog overlay: var(--bg-overlay)
+- Toast: success var(--status-success-bg)/var(--status-success), error var(--status-error-bg)/var(--status-error)
+- Post success notification: var(--bg-surface), var(--border-default), var(--shadow-lg)
+- All existing logic preserved (create, propose, approve, reject, post, delete, templates)
+
+=============================================================================================================
+SCREEN 10: FINANCIAL STATEMENTS (RESTYLED)
+=============================================================================================================
+File: frontend/app/close/[sessionId]/statements/page.tsx
+
+- All Tailwind color utilities replaced with CSS custom properties
+- Stale banner: var(--status-warning-bg) background, var(--status-warning) border/text
+- Tab styling: active var(--interactive-primary) border/text, inactive var(--text-secondary)
+- Period toggle: active var(--interactive-primary) bg + white text, inactive var(--border-default) border
+- Generate/Reprepare button: var(--interactive-primary) background
+- Cumulative banner: var(--interactive-primary) accent
+- Validation table: header var(--text-secondary), pass var(--status-success), fail var(--status-error)
+- Export buttons: secondary style var(--border-default) border, var(--text-secondary) text
+- Toast: success var(--status-success-bg), warning var(--status-warning-bg)
+- All existing logic preserved (generate, export CSV/Excel/PDF, cumulative, budget, validation)
+
+=============================================================================================================
+SCREEN 11: VARIANCE ANALYSIS (RESTYLED)
+=============================================================================================================
+File: frontend/app/close/[sessionId]/variance/page.tsx
+
+- All Tailwind color utilities replaced with CSS custom properties
+- Added colorStyle() helper mapping favorable/unfavorable/neutral to design tokens
+- Material variance rows: borderLeft 3px var(--status-error), background var(--status-error-bg)
+- Explained variance rows: borderLeft 3px var(--status-success)
+- Draft All button: var(--interactive-primary) bg, white text
+- Period view toggle: active var(--interactive-primary) bg, inactive var(--border-default) border
+- Classification dropdown: var(--bg-surface-sunken) bg, var(--border-default) border
+- Favorable: var(--status-success), Unfavorable: var(--status-error), Neutral: var(--text-secondary)
+- Toast: success/error with proper design token colors
+- AISuggestionCard usage preserved for AI drafts
+- All existing logic preserved (drafting, saving, approving, classification, investigation, cumulative)
+
+=============================================================================================================
+SCREEN 12: REVIEW & CERTIFY (RESTYLED)
+=============================================================================================================
+File: frontend/app/close/[sessionId]/review/page.tsx
+
+- All Tailwind color utilities replaced with CSS custom properties
+- Certification button: var(--cert-primary) green with white text
+- Post-certification gold banner: var(--bg-certified) background, var(--cert-primary) text
+- Certification seal: 64px circle with border 3px double var(--cert-primary) (gold double-ring)
+- Attestation text: Source Serif 4 font, 15px, line-height 1.65, var(--cert-primary) color
+- Hash displays: var(--text-secondary) in font-mono (JetBrains Mono)
+- A = L + E verification badge: var(--status-success-bg) background, var(--status-success) text
+- Submit for Review: var(--interactive-primary) background
+- Lock/Reopen buttons: var(--status-error) styling (destructive)
+- GateIndicator usage for certification gates
+- MoneyCell for all financial highlights (Revenue, Net Income, Total Assets, etc.)
+- All existing logic preserved (submit, certify, lock, reopen, board package, evidence manifest)
+
+=============================================================================================================
+SCREEN 13: AUDIT TRAIL (RESTYLED)
+=============================================================================================================
+File: frontend/app/close/[sessionId]/audit-trail/page.tsx
+
+- All Tailwind color utilities replaced with CSS custom properties
+- Page title: "Audit Trail"
+- Chain Integrity banner: Shield icon + "Verified" in var(--status-success), or "BROKEN" in var(--status-error)
+- ALL content in font-mono (JetBrains Mono) — monospace signals machine-generated data
+- Log area background: var(--bg-surface-sunken)
+- Event cards: var(--bg-surface), var(--border-default) border
+- Timestamps: var(--text-tertiary) in font-mono
+- Hash display: font-mono, var(--text-secondary), truncated
+- Chain valid: var(--status-success) for valid, var(--status-error) for invalid
+- EVENT_TYPE_CONFIG colors converted from Tailwind classes to CSS custom property values
+- Filter inputs: var(--bg-surface-sunken), var(--border-default)
+- Export button: secondary style
+- All existing logic preserved (filtering, sorting, expansion, hash chain validation)
+
+=============================================================================================================
+ADDITIONAL FILE MODIFIED
+=============================================================================================================
+File: frontend/components/shared/DataTable.tsx
+- Added rowStyle prop to support per-row inline style objects (used by reconciliation page)
+
+=============================================================================================================
+VERIFICATION CHECKLIST
+=============================================================================================================
+[PASS] npm run build — 40 routes compiled, zero type errors
+[PASS] All 7 pages use design tokens exclusively (no hardcoded hex colors)
+[PASS] Reconciliation list shows batch mode with inline editing and per-row save indicators
+[PASS] Reconciliation detail has two-column (60/40) view with evidence and history
+[PASS] Adjustments page has JE creation form with balance validation (via sub-components)
+[PASS] Statements page shows all 6 tabs with proper GAAP typography hierarchy (via StatementTable)
+[PASS] EBITDA Bridge tab available (via EBITDABridge sub-component)
+[PASS] Variance page shows AI explanations in AISuggestionCard with classification
+[PASS] Review page has full certification ceremony with serif attestation and progress sequence
+[PASS] Certification seal: 64px circle, double-ring gold border, var(--cert-primary)
+[PASS] Audit trail uses JetBrains Mono throughout with chain integrity badge
+[PASS] ALL MoneyCell for money display (no local formatMoney in page components)
+[PASS] ALL StatusBadge for status indicators (no inline badge styling)
+[PASS] ALL AISuggestionCard for AI content
+[PASS] Keyboard navigation preserved on all interactive elements
+[PASS] All existing auth/API/data logic preserved unchanged
+
+=============================================================================================================
+FILES SUMMARY
+=============================================================================================================
+Restyled (7 page files + 1 shared component):
+  frontend/app/close/[sessionId]/reconciliation/page.tsx
+  frontend/app/close/[sessionId]/reconciliation/[reconId]/page.tsx
+  frontend/app/close/[sessionId]/adjustments/page.tsx
+  frontend/app/close/[sessionId]/statements/page.tsx
+  frontend/app/close/[sessionId]/variance/page.tsx
+  frontend/app/close/[sessionId]/review/page.tsx
+  frontend/app/close/[sessionId]/audit-trail/page.tsx
+  frontend/components/shared/DataTable.tsx (rowStyle prop added)
+
+Total: 7 screens + 1 shared component update, all using Phase 1 design tokens
+
+=============================================================================================================
+BUILD OUTPUT
+=============================================================================================================
+Route sizes (Phase 3B pages):
+  /close/[sessionId]/reconciliation            12.6 kB    125 kB First Load
+  /close/[sessionId]/reconciliation/[reconId]  15.3 kB    130 kB First Load
+  /close/[sessionId]/adjustments               9.69 kB    137 kB First Load
+  /close/[sessionId]/statements                9.52 kB    137 kB First Load
+  /close/[sessionId]/variance                  17.7 kB    129 kB First Load
+  /close/[sessionId]/review                    12.9 kB    135 kB First Load
+  /close/[sessionId]/audit-trail               6.95 kB    102 kB First Load
+
+=============================================================================================================
+NEXT: Phase 3C or additional screens as needed
+=============================================================================================================

@@ -105,6 +105,53 @@ router.post('/variances/:id/approve', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * POST /api/close/sessions/:closeSessionId/variances/:varianceId/classify
+ * Classify a variance with type and optionally compute full-year impact.
+ * Body: { varianceType: string, fullYearImpact?: number }
+ */
+router.post('/sessions/:closeSessionId/variances/:varianceId/classify', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const { closeSessionId, varianceId } = req.params;
+    if (!await guardSessionWritable(res, pool, tenantId, closeSessionId)) return;
+
+    const body = req.body as { varianceType?: string; fullYearImpact?: number };
+    if (!body.varianceType || typeof body.varianceType !== 'string') {
+      res.status(400).json({ error: 'varianceType string required' });
+      return;
+    }
+
+    // If fullYearImpact not provided, attempt to compute from changeAmount and period
+    let fullYearImpact = body.fullYearImpact ?? null;
+    if (fullYearImpact == null) {
+      const existing = await repo.getVarianceById(pool, tenantId, varianceId);
+      if (existing) {
+        fullYearImpact = varianceService.computeFullYearImpact(
+          Number(existing.changeAmount),
+          existing.periodLabel
+        );
+      }
+    }
+
+    const variance = await varianceService.classifyVariance(
+      pool, tenantId, varianceId, body.varianceType, fullYearImpact
+    );
+    if (!variance) {
+      res.status(404).json({ error: 'Variance not found' });
+      return;
+    }
+    res.json({ variance });
+  } catch (e) {
+    send500(res, e, 'Classify variance failed');
+  }
+});
+
 /** GET /api/close/sessions/:closeSessionId/variance-status — gate status */
 router.get('/sessions/:closeSessionId/variance-status', async (req: Request, res: Response) => {
   try {

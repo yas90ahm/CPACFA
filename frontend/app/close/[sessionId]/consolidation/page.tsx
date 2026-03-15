@@ -8,6 +8,7 @@ import type { ConsolidationEntity, EliminationRule, ConsolidationResult, Consoli
 import { Plus, Play, GitMerge, CheckCircle, AlertTriangle, Check, Loader2, X } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
+import { fmtMoney } from '@/lib/money';
 
 export default function ConsolidationPage() {
   const params = useParams();
@@ -83,11 +84,11 @@ export default function ConsolidationPage() {
     });
   };
 
-  const fmtNum = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2 });
+  const fmtNum = (n: number) => fmtMoney(n, { dash: false });
 
   type EliminationJE = ConsolidationResult['eliminationJournalEntries'][number];
 
-  if (configLoading) return <div className="text-text-secondary">Loading...</div>;
+  if (configLoading) return <div style={{ color: 'var(--text-secondary)' }}>Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -95,20 +96,20 @@ export default function ConsolidationPage() {
         <h1 className="text-xl font-semibold flex items-center gap-2">
           <GitMerge className="w-5 h-5" /> Consolidation
         </h1>
-        <span className="text-xs text-text-secondary flex items-center gap-1">
+        <span className="text-xs flex items-center gap-1" style={{ color: 'var(--text-secondary)' }}>
           {saveConfig.isPending && <><Loader2 className="w-3 h-3 animate-spin" /> Saving...</>}
-          {saveConfig.isSuccess && !saveConfig.isPending && <><Check className="w-3 h-3 text-green-600" /> Saved</>}
+          {saveConfig.isSuccess && !saveConfig.isPending && <><Check className="w-3 h-3" style={{ color: 'var(--status-success)' }} /> Saved</>}
         </span>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="p-4 border rounded-lg bg-surface space-y-3">
+        <div className="p-4 rounded-lg space-y-3" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface)' }}>
           <h3 className="font-medium">Entities</h3>
           <div className="flex gap-2">
-            <input placeholder="Entity Name" value={entityForm.name} onChange={(e) => setEntityForm({ ...entityForm, name: e.target.value })} className="border rounded px-2 py-1.5 text-sm flex-1" />
-            <input placeholder="Currency" value={entityForm.currency} onChange={(e) => setEntityForm({ ...entityForm, currency: e.target.value })} className="border rounded px-2 py-1.5 text-sm w-20" />
+            <input placeholder="Entity Name" value={entityForm.name} onChange={(e) => setEntityForm({ ...entityForm, name: e.target.value })} className="rounded px-2 py-1.5 text-sm flex-1" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }} />
+            <input placeholder="Currency" value={entityForm.currency} onChange={(e) => setEntityForm({ ...entityForm, currency: e.target.value })} className="rounded px-2 py-1.5 text-sm w-20" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }} />
             {!readOnly && (
-              <button onClick={addEntity} disabled={!entityForm.name} className="px-3 py-1.5 text-sm border rounded-md hover:bg-hover disabled:opacity-50">
+              <button onClick={addEntity} disabled={!entityForm.name} className="px-3 py-1.5 text-sm rounded-md hover:bg-hover disabled:opacity-50" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid' }}>
                 <Plus className="w-4 h-4" />
               </button>
             )}
@@ -117,9 +118,9 @@ export default function ConsolidationPage() {
             <div key={e.id} className="flex items-center justify-between p-2 bg-hover rounded text-sm group">
               <span>{e.name}</span>
               <div className="flex items-center gap-2">
-                <span className="text-text-secondary">{e.currency}</span>
+                <span style={{ color: 'var(--text-secondary)' }}>{e.currency}</span>
                 {!readOnly && (
-                  <button type="button" onClick={() => setEntities(entities.filter((x) => x.id !== e.id))} className="text-text-tertiary hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity" title="Remove entity">
+                  <button type="button" onClick={() => setEntities(entities.filter((x) => x.id !== e.id))} className="opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: 'var(--text-tertiary)' }} title="Remove entity">
                     <X className="w-3.5 h-3.5" />
                   </button>
                 )}
@@ -128,23 +129,23 @@ export default function ConsolidationPage() {
           ))}
         </div>
 
-        <div className="p-4 border rounded-lg bg-surface space-y-3">
+        <div className="p-4 rounded-lg space-y-3" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface)' }}>
           <h3 className="font-medium">Elimination Rules</h3>
           <div className="grid grid-cols-2 gap-2">
-            <input placeholder="Rule Name" value={ruleForm.name} onChange={(e) => setRuleForm({ ...ruleForm, name: e.target.value })} className="border rounded px-2 py-1.5 text-sm" />
-            <select value={ruleForm.amountType} onChange={(e) => setRuleForm({ ...ruleForm, amountType: e.target.value as 'balance' | 'fixed' | 'formula' })} className="border rounded px-2 py-1.5 text-sm">
+            <input placeholder="Rule Name" value={ruleForm.name} onChange={(e) => setRuleForm({ ...ruleForm, name: e.target.value })} className="rounded px-2 py-1.5 text-sm" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }} />
+            <select value={ruleForm.amountType} onChange={(e) => setRuleForm({ ...ruleForm, amountType: e.target.value as 'balance' | 'fixed' | 'formula' })} className="rounded px-2 py-1.5 text-sm" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }}>
               <option value="balance">Balance</option>
               <option value="fixed">Fixed</option>
               <option value="formula">Formula</option>
             </select>
-            <input placeholder="Debit Account" value={ruleForm.debitAccount} onChange={(e) => setRuleForm({ ...ruleForm, debitAccount: e.target.value })} className="border rounded px-2 py-1.5 text-sm" />
-            <input placeholder="Credit Account" value={ruleForm.creditAccount} onChange={(e) => setRuleForm({ ...ruleForm, creditAccount: e.target.value })} className="border rounded px-2 py-1.5 text-sm" />
+            <input placeholder="Debit Account" value={ruleForm.debitAccount} onChange={(e) => setRuleForm({ ...ruleForm, debitAccount: e.target.value })} className="rounded px-2 py-1.5 text-sm" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }} />
+            <input placeholder="Credit Account" value={ruleForm.creditAccount} onChange={(e) => setRuleForm({ ...ruleForm, creditAccount: e.target.value })} className="rounded px-2 py-1.5 text-sm" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }} />
             {ruleForm.amountType === 'fixed' && (
-              <input placeholder="Amount" type="number" value={ruleForm.amount} onChange={(e) => setRuleForm({ ...ruleForm, amount: e.target.value })} className="border rounded px-2 py-1.5 text-sm" />
+              <input placeholder="Amount" type="number" value={ruleForm.amount} onChange={(e) => setRuleForm({ ...ruleForm, amount: e.target.value })} className="rounded px-2 py-1.5 text-sm" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }} />
             )}
           </div>
           {!readOnly && (
-            <button onClick={addRule} disabled={!ruleForm.name || !ruleForm.debitAccount || !ruleForm.creditAccount} className="px-3 py-1.5 text-sm border rounded-md hover:bg-hover disabled:opacity-50">
+            <button onClick={addRule} disabled={!ruleForm.name || !ruleForm.debitAccount || !ruleForm.creditAccount} className="px-3 py-1.5 text-sm rounded-md hover:bg-hover disabled:opacity-50" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid' }}>
               <Plus className="w-4 h-4 inline mr-1" /> Add Rule
             </button>
           )}
@@ -152,9 +153,9 @@ export default function ConsolidationPage() {
             <div key={r.id} className="flex items-center justify-between p-2 bg-hover rounded text-sm group">
               <span>{r.name}</span>
               <div className="flex items-center gap-2">
-                <span className="text-text-secondary">{r.debitAccount} / {r.creditAccount} ({r.amountType})</span>
+                <span style={{ color: 'var(--text-secondary)' }}>{r.debitAccount} / {r.creditAccount} ({r.amountType})</span>
                 {!readOnly && (
-                  <button type="button" onClick={() => setRules(rules.filter((x) => x.id !== r.id))} className="text-text-tertiary hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity" title="Remove rule">
+                  <button type="button" onClick={() => setRules(rules.filter((x) => x.id !== r.id))} className="opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: 'var(--text-tertiary)' }} title="Remove rule">
                     <X className="w-3.5 h-3.5" />
                   </button>
                 )}
@@ -166,15 +167,15 @@ export default function ConsolidationPage() {
 
       <div className="flex items-end gap-3">
         <div>
-          <label className="block text-sm text-text-secondary mb-1">Reporting Currency</label>
-          <input value={reportingCurrency} onChange={(e) => setReportingCurrency(e.target.value)} className="border rounded px-2 py-1.5 text-sm w-24" />
+          <label className="block text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>Reporting Currency</label>
+          <input value={reportingCurrency} onChange={(e) => setReportingCurrency(e.target.value)} className="rounded px-2 py-1.5 text-sm w-24" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }} />
         </div>
         <div>
-          <label className="block text-sm text-text-secondary mb-1">Period Label</label>
-          <input value={periodLabel} onChange={(e) => setPeriodLabel(e.target.value)} placeholder="2026-01-01..2026-01-31" className="border rounded px-2 py-1.5 text-sm w-56" />
+          <label className="block text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>Period Label</label>
+          <input value={periodLabel} onChange={(e) => setPeriodLabel(e.target.value)} placeholder="2026-01-01..2026-01-31" className="rounded px-2 py-1.5 text-sm w-56" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface-sunken)' }} />
         </div>
         {!readOnly && (
-          <button onClick={handleBuild} disabled={buildConsolidation.isPending || entities.length === 0} className="flex items-center gap-1 px-4 py-2 bg-accent text-white rounded-md hover:bg-accent/90 disabled:opacity-50">
+          <button onClick={handleBuild} disabled={buildConsolidation.isPending || entities.length === 0} className="flex items-center gap-1 px-4 py-2 text-white rounded-md disabled:opacity-50" style={{ background: 'var(--interactive-primary)' }}>
             <Play className="w-4 h-4" /> {buildConsolidation.isPending ? 'Building...' : 'Run Consolidation'}
           </button>
         )}
@@ -183,23 +184,23 @@ export default function ConsolidationPage() {
       {result && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-4 border rounded-lg bg-surface">
-              <div className="text-sm text-text-secondary">Balance Check</div>
+            <div className="p-4 rounded-lg" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface)' }}>
+              <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Balance Check</div>
               <div className="flex items-center gap-2">
-                {result.balances ? <CheckCircle className="w-5 h-5 text-green-600" /> : <AlertTriangle className="w-5 h-5 text-red-600" />}
+                {result.balances ? <CheckCircle className="w-5 h-5" style={{ color: 'var(--status-success)' }} /> : <AlertTriangle className="w-5 h-5" style={{ color: 'var(--status-error)' }} />}
                 <span className="text-lg font-semibold">{result.balances ? 'Balanced' : 'Imbalanced'}</span>
               </div>
-              {result.roundingGap != null && <div className="text-sm text-text-secondary mt-1">Gap: {result.roundingGap.toFixed(2)}</div>}
+              {result.roundingGap != null && <div className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Gap: {result.roundingGap.toFixed(2)}</div>}
             </div>
             {result.nciShareOfEquity != null && (
-              <div className="p-4 border rounded-lg bg-surface">
-                <div className="text-sm text-text-secondary">NCI — Equity</div>
+              <div className="p-4 rounded-lg" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface)' }}>
+                <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>NCI — Equity</div>
                 <div className="text-lg font-semibold">{fmtNum(result.nciShareOfEquity)}</div>
               </div>
             )}
             {result.nciShareOfNetIncome != null && (
-              <div className="p-4 border rounded-lg bg-surface">
-                <div className="text-sm text-text-secondary">NCI — Net Income</div>
+              <div className="p-4 rounded-lg" style={{ borderColor: 'var(--border-default)', borderWidth: '1px', borderStyle: 'solid', background: 'var(--bg-surface)' }}>
+                <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>NCI — Net Income</div>
                 <div className="text-lg font-semibold">{fmtNum(result.nciShareOfNetIncome)}</div>
               </div>
             )}
@@ -213,8 +214,8 @@ export default function ConsolidationPage() {
               columns={[
                 { id: 'accountName', header: 'Account', cell: (r) => r.accountName },
                 { id: 'amount', header: 'Amount', cell: (r) => fmtNum(r.amount) },
-                { id: 'side', header: 'Side', cell: (r) => <span className={r.side === 'debit' ? 'text-blue-600' : 'text-green-600'}>{r.side}</span> },
-                { id: 'source', header: 'Source', cell: (r) => <span className={`px-1.5 py-0.5 rounded text-xs ${r.source === 'elimination' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>{r.source}</span> },
+                { id: 'side', header: 'Side', cell: (r) => <span style={{ color: r.side === 'debit' ? 'var(--status-info)' : 'var(--status-success)' }}>{r.side}</span> },
+                { id: 'source', header: 'Source', cell: (r) => <span className="px-1.5 py-0.5 rounded text-xs" style={r.source === 'elimination' ? { background: 'var(--status-error-bg)', color: 'var(--status-error)' } : { background: 'var(--status-neutral-bg)', color: 'var(--text-tertiary)' }}>{r.source}</span> },
               ]}
             />
           </div>

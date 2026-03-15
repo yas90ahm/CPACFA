@@ -288,32 +288,129 @@ type VerifyRow = {
   hash_version: number;
 };
 
+/**
+ * Verify the full audit chain from the beginning (ignoring checkpoints).
+ * Use for periodic full audits or when checkpoint integrity is suspect.
+ */
+export async function verifyFullChain(pool: Queryable, tenantId: string): Promise<AuditLedgerVerifyResult> {
+  return verifyChainInternal(pool, tenantId, { useCheckpoint: false });
+}
+
+/**
+ * Verify the audit chain with checkpoint support for incremental verification.
+ * On success, saves/updates the checkpoint for future incremental runs.
+ */
 export async function verifyChain(pool: Queryable, tenantId: string): Promise<AuditLedgerVerifyResult> {
+  return verifyChainInternal(pool, tenantId, { useCheckpoint: true });
+}
+
+interface CheckpointRow {
+  last_verified_entry_id: string;
+  last_verified_hash: string;
+  entries_verified: number;
+}
+
+async function verifyChainInternal(
+  pool: Queryable,
+  tenantId: string,
+  opts: { useCheckpoint: boolean }
+): Promise<AuditLedgerVerifyResult> {
   const verifiedAt = new Date().toISOString();
   const baseSelect = `id, tenant_id, period_label, event_type, deterministic_flag_snapshot, agent_dissent_snapshot,
     user_prompt_rationale, previous_entry_hash, entry_hash, created_at`;
-  let rows: VerifyRow[];
-  try {
-    const r = await pool.query<VerifyRow>(
-      `SELECT ${baseSelect}, COALESCE(hash_version, 1) AS hash_version
-       FROM audit_ledger WHERE tenant_id = $1 ORDER BY created_at ASC`,
-      [tenantId]
-    );
-    rows = r.rows;
-  } catch (err: unknown) {
-    const code = err && typeof err === 'object' && 'code' in err ? (err as { code: string }).code : '';
-    if (code === '42703') {
-      const r = await pool.query<Omit<VerifyRow, 'hash_version'>>(
-        `SELECT ${baseSelect} FROM audit_ledger WHERE tenant_id = $1 ORDER BY created_at ASC`,
+
+  // Check for existing checkpoint
+  let checkpoint: CheckpointRow | null = null;
+  let checkpointEntriesVerified = 0;
+  if (opts.useCheckpoint) {
+    try {
+      const cpResult = await pool.query<CheckpointRow>(
+        `SELECT last_verified_entry_id, last_verified_hash, entries_verified
+         FROM audit_chain_checkpoints WHERE tenant_id = $1`,
         [tenantId]
       );
-      rows = r.rows.map((row) => ({ ...row, hash_version: HASH_VERSION_V1 }));
-    } else {
-      throw err;
+      if (cpResult.rows.length > 0) {
+        checkpoint = cpResult.rows[0];
+        checkpointEntriesVerified = checkpoint.entries_verified;
+      }
+    } catch {
+      // Table may not exist yet — fall through to full verification
     }
   }
+
+  let rows: VerifyRow[];
   let prevHash: string | null = null;
-  for (const row of rows) {
+
+  if (checkpoint) {
+    // Incremental: fetch only entries after the checkpoint
+    prevHash = checkpoint.last_verified_hash;
+    try {
+      // Get the created_at of the checkpoint entry to filter subsequent rows
+      const cpEntryResult = await pool.query<{ created_at: string | Date }>(
+        `SELECT created_at FROM audit_ledger WHERE id = $1 AND tenant_id = $2`,
+        [checkpoint.last_verified_entry_id, tenantId]
+      );
+      if (cpEntryResult.rows.length === 0) {
+        // Checkpoint entry no longer exists — fall through to full verification
+        checkpoint = null;
+        checkpointEntriesVerified = 0;
+        prevHash = null;
+      } else {
+        const cpCreatedAt = cpEntryResult.rows[0].created_at;
+        try {
+          const r = await pool.query<VerifyRow>(
+            `SELECT ${baseSelect}, COALESCE(hash_version, 1) AS hash_version
+             FROM audit_ledger WHERE tenant_id = $1 AND created_at > $2 ORDER BY created_at ASC`,
+            [tenantId, cpCreatedAt]
+          );
+          rows = r.rows;
+        } catch (err: unknown) {
+          const code = err && typeof err === 'object' && 'code' in err ? (err as { code: string }).code : '';
+          if (code === '42703') {
+            const r = await pool.query<Omit<VerifyRow, 'hash_version'>>(
+              `SELECT ${baseSelect} FROM audit_ledger WHERE tenant_id = $1 AND created_at > $2 ORDER BY created_at ASC`,
+              [tenantId, cpCreatedAt]
+            );
+            rows = r.rows.map((row) => ({ ...row, hash_version: HASH_VERSION_V1 }));
+          } else {
+            throw err;
+          }
+        }
+      }
+    } catch {
+      // Fall through to full verification
+      checkpoint = null;
+      checkpointEntriesVerified = 0;
+      prevHash = null;
+    }
+  }
+
+  // Full verification (no checkpoint or checkpoint invalid)
+  if (!checkpoint) {
+    try {
+      const r = await pool.query<VerifyRow>(
+        `SELECT ${baseSelect}, COALESCE(hash_version, 1) AS hash_version
+         FROM audit_ledger WHERE tenant_id = $1 ORDER BY created_at ASC`,
+        [tenantId]
+      );
+      rows = r.rows;
+    } catch (err: unknown) {
+      const code = err && typeof err === 'object' && 'code' in err ? (err as { code: string }).code : '';
+      if (code === '42703') {
+        const r = await pool.query<Omit<VerifyRow, 'hash_version'>>(
+          `SELECT ${baseSelect} FROM audit_ledger WHERE tenant_id = $1 ORDER BY created_at ASC`,
+          [tenantId]
+        );
+        rows = r.rows.map((row) => ({ ...row, hash_version: HASH_VERSION_V1 }));
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  const totalEntries = checkpointEntriesVerified + rows!.length;
+
+  for (const row of rows!) {
     const version = row.hash_version === HASH_VERSION_V2 ? HASH_VERSION_V2 : HASH_VERSION_V1;
     const createdAtRaw = row.created_at;
     const createdAt =
@@ -332,19 +429,43 @@ export async function verifyChain(pool: Queryable, tenantId: string): Promise<Au
     };
     const computed = version === HASH_VERSION_V2 ? computeEntryHashV2(payload) : computeEntryHashV1(payload);
     if (computed !== row.entry_hash) {
-      return { valid: false, brokenAtEntryId: row.id, message: 'Hash mismatch', entryCount: rows.length, verifiedAt };
+      return { valid: false, brokenAtEntryId: row.id, message: 'Hash mismatch', entryCount: totalEntries, verifiedAt };
     }
     if (row.previous_entry_hash !== prevHash) {
-      return { valid: false, brokenAtEntryId: row.id, message: 'Chain link broken (previous_entry_hash)', entryCount: rows.length, verifiedAt };
+      return { valid: false, brokenAtEntryId: row.id, message: 'Chain link broken (previous_entry_hash)', entryCount: totalEntries, verifiedAt };
     }
     prevHash = row.entry_hash;
   }
-  const last = rows[rows.length - 1];
+
+  const allRows = rows!;
+  const last = allRows.length > 0 ? allRows[allRows.length - 1] : null;
+  const lastEntryId = last?.id ?? checkpoint?.last_verified_entry_id;
+  const lastEntryHash = last?.entry_hash ?? checkpoint?.last_verified_hash;
+
+  // Save/update checkpoint on successful verification
+  if (opts.useCheckpoint && lastEntryId && lastEntryHash) {
+    try {
+      await pool.query(
+        `INSERT INTO audit_chain_checkpoints (tenant_id, last_verified_entry_id, last_verified_hash, entries_verified, verified_at)
+         VALUES ($1, $2::uuid, $3, $4, $5)
+         ON CONFLICT (tenant_id) DO UPDATE SET
+           last_verified_entry_id = $2::uuid,
+           last_verified_hash = $3,
+           entries_verified = $4,
+           verified_at = $5`,
+        [tenantId, lastEntryId, lastEntryHash, totalEntries, verifiedAt]
+      );
+    } catch {
+      // Checkpoint table may not exist yet — non-fatal, verification result is still valid
+    }
+  }
+
   return {
     valid: true,
-    entryCount: rows.length,
+    entryCount: totalEntries,
     verifiedAt,
-    ...(last ? { latestEntryHash: last.entry_hash, latestEntryId: last.id } : {}),
+    ...(lastEntryHash ? { latestEntryHash: lastEntryHash } : {}),
+    ...(lastEntryId ? { latestEntryId: lastEntryId } : {}),
   };
 }
 

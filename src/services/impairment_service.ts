@@ -40,7 +40,7 @@ export async function evaluateImpairment(
   const test = await repo.getImpairmentTest(pool, tenantId, testId);
   if (!test) throw new Error('Impairment test not found');
 
-  const impairmentLoss = round2(Math.max(0, test.carryingAmount - test.recoverableAmount));
+  const impairmentLoss = String(round2(Math.max(0, Number(test.carryingAmount) - Number(test.recoverableAmount))));
 
   // Update the test with computed loss by creating a new record (append-only pattern)
   // Since the repo doesn't have update, we return the test with computed loss
@@ -63,7 +63,7 @@ export async function getImpairmentSummary(
   const byCGUMap = new Map<string, { cguName: string; totalLoss: number; testCount: number }>();
 
   for (const test of tests) {
-    const loss = test.impairmentLoss ?? Math.max(0, test.carryingAmount - test.recoverableAmount);
+    const loss = Number(test.impairmentLoss ?? 0) || Math.max(0, Number(test.carryingAmount) - Number(test.recoverableAmount));
     totalImpairmentLoss += loss;
 
     const cguId = test.cguId ?? 'unassigned';
@@ -75,7 +75,7 @@ export async function getImpairmentSummary(
       const cgu = cguMap.get(cguId);
       byCGUMap.set(cguId, {
         cguName: cgu?.cguName ?? 'Unassigned',
-        totalLoss: loss,
+        totalLoss: Number(loss),
         testCount: 1,
       });
     }

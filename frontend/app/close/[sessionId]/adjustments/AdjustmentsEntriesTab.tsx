@@ -12,7 +12,7 @@ import { StatusBadge } from '@/components/shared/StatusBadge';
 import { cn } from '@/lib/utils';
 import { sumMoneyStrings, moneyAbs } from '@/lib/money';
 import type { JournalEntry, JournalEntryStatus } from '@/lib/types/journal-entry';
-import { Paperclip } from 'lucide-react';
+import { Paperclip, RotateCcw } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { canCreateJE, canProposeJE, canApproveJE, canPostJE, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
@@ -44,6 +44,7 @@ export interface AdjustmentsEntriesTabProps {
   onReject: (je: JournalEntry) => void;
   onPost: (je: JournalEntry) => void;
   onDelete: (je: JournalEntry) => void;
+  onReverse?: (jeId: string) => void;
   statusFilter: JournalEntryStatus | 'all';
   onStatusFilterChange: (v: JournalEntryStatus | 'all') => void;
   search: string;
@@ -63,6 +64,7 @@ export function AdjustmentsEntriesTab({
   onReject,
   onPost,
   onDelete,
+  onReverse,
   statusFilter,
   onStatusFilterChange,
   search,
@@ -167,7 +169,7 @@ export function AdjustmentsEntriesTab({
         if (row.status === 'draft') return <>{canCreate && <button type="button" className="text-sm text-accent hover:underline mr-2" onClick={() => onEdit(row)}>Edit</button>}{canPropose && <button type="button" className="text-sm text-accent hover:underline mr-2" onClick={() => onPropose(row)}>Propose</button>}{canCreate && <button type="button" className="text-sm text-status-red hover:underline" onClick={() => onDelete(row)}>Delete</button>}</>;
         if (row.status === 'proposed') return <><button type="button" className="text-sm text-accent hover:underline mr-2" onClick={() => onView(row)}>View</button>{canApproveThis && <button type="button" className="text-sm text-status-green hover:underline mr-2" onClick={() => onApprove(row)}>Approve</button>}{canApproveThis && <button type="button" className="text-sm text-status-red hover:underline" onClick={() => onReject(row)}>Reject</button>}</>;
         if (row.status === 'approved') return <><button type="button" className="text-sm text-accent hover:underline mr-2" onClick={() => onView(row)}>View</button>{canPost && <button type="button" className="text-sm text-status-green hover:underline" onClick={() => onPost(row)}>Post</button>}</>;
-        if (row.status === 'posted') return <button type="button" className="text-sm text-accent hover:underline" onClick={() => onView(row)}>View</button>;
+        if (row.status === 'posted') return <><button type="button" className="text-sm text-accent hover:underline mr-2" onClick={() => onView(row)}>View</button>{onReverse && <button type="button" className="inline-flex items-center gap-1 text-sm hover:underline" style={{ color: 'var(--interactive-primary)' }} onClick={() => onReverse(row.id)}><RotateCcw className="w-3.5 h-3.5" />Reverse</button>}</>;
         if (row.status === 'rejected') return <>{canCreate && <button type="button" className="text-sm text-accent hover:underline mr-2" onClick={() => onEdit(row)}>Edit</button>}{canCreate && <button type="button" className="text-sm text-status-red hover:underline" onClick={() => onDelete(row)}>Delete</button>}</>;
         return null;
       },

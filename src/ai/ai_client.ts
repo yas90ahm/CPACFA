@@ -90,6 +90,10 @@ async function _callAIWithSchemaImpl<T>(params: CallAIWithSchemaParams<T>): Prom
     responseJson,
     ok,
     error,
+    latencyMs: adapterOut.latencyMs ?? null,
+    inputTokens: adapterOut.inputTokens ?? null,
+    outputTokens: adapterOut.outputTokens ?? null,
+    estimatedCostUsd: adapterOut.estimatedCostUsd ?? null,
   });
 
   return {

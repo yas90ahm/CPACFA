@@ -12,8 +12,12 @@ import { AdjustmentsEntriesTab } from './AdjustmentsEntriesTab';
 import { JournalEntryForm } from './JournalEntryForm';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { MoneyCell } from '@/components/shared/MoneyCell';
+import { StatusBadge } from '@/components/shared/StatusBadge';
+import { EmptyState } from '@/components/shared/EmptyState';
 import { cn } from '@/lib/utils';
+import { ContinueToNextStep } from '@/components/shared/ContinueToNextStep';
 import { sumMoneyStrings } from '@/lib/money';
+import { FileEdit } from 'lucide-react';
 import type { JournalEntry, JournalEntryStatus, AJETemplate } from '@/lib/types/journal-entry';
 
 const displayUser = (user: { userId: string; email?: string } | null) => user?.email ?? user?.userId ?? 'Unknown';
@@ -86,6 +90,23 @@ export default function AdjustmentsPage() {
     },
     onError: (err) => showToast('error', err instanceof Error ? err.message : 'Failed to post entry'),
   });
+
+  const reversalMutation = useMutation({
+    mutationFn: (jeId: string) =>
+      apiFetch(`/api/close/journal-entries/${jeId}/reverse`, { method: 'POST' }).then(r => r as unknown as { id: string }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+      queryClient.invalidateQueries({ queryKey: ['trial-balance'] });
+      queryClient.invalidateQueries({ queryKey: ['readiness'] });
+      queryClient.invalidateQueries({ queryKey: ['reconciliations'] });
+      showToast('success', 'Reversing entry created.');
+    },
+    onError: (err) => showToast('error', err instanceof Error ? err.message : 'Failed to create reversing entry'),
+  });
+
+  const handleCreateReversal = useCallback((jeId: string) => {
+    reversalMutation.mutate(jeId);
+  }, [reversalMutation]);
 
   const applyTemplateMutation = useMutation({
     mutationFn: (params: { applicationId: string; closeSessionId: string }) =>
@@ -361,34 +382,83 @@ export default function AdjustmentsPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="font-display text-2xl text-primary">Journal Entries</h1>
-        <p className="text-text-secondary text-sm mt-0.5">Templates and journal entries for this period</p>
+        <h1
+          className="font-display text-2xl"
+          style={{ color: 'var(--text-primary)' }}
+        >
+          Adjusting Journal Entries
+        </h1>
+        <p
+          className="text-sm mt-0.5"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          Templates and journal entries for this period
+        </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-4 py-3 px-4 rounded-input bg-surface border border-border">
-        <span className="text-text-secondary text-sm">Total Entries: {allEntries.length}</span>
-        <span className="text-text-muted text-sm">Draft: {draftCount}</span>
-        <span className="text-accent text-sm">Pending Approval: {proposedCount}</span>
-        <span className="text-status-amber text-sm">Approved: {approvedCount}</span>
-        <span className="text-status-green text-sm">Posted: {postedCount}</span>
-        <span className="font-mono text-sm">Total Debit Impact: <MoneyCell value={totalDebitImpact} showDollar /></span>
-        <span className={pendingTemplatesCount > 0 ? 'text-status-amber text-sm' : 'text-status-green text-sm'}>
-          Templates: {pendingTemplatesCount > 0 ? `${pendingTemplatesCount} pending` : 'All resolved ✓'}
+      {allEntries.length === 0 && templates.length === 0 && (
+        <EmptyState
+          icon={FileEdit}
+          title="No Adjusting Entries"
+          description="Create a journal entry or apply a recurring template to get started with adjustments."
+          actionLabel="New Journal Entry"
+          onAction={openCreate}
+        />
+      )}
+
+      {(allEntries.length > 0 || templates.length > 0) && (<>
+      <div
+        className="flex flex-wrap items-center gap-4 py-3 px-4 border"
+        style={{
+          backgroundColor: 'var(--bg-surface)',
+          borderColor: 'var(--border-default)',
+          borderRadius: 'var(--radius-md)',
+        }}
+      >
+        <span
+          className="text-sm"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          Total Entries: {allEntries.length}
+        </span>
+        <StatusBadge variant="neutral" label={`Draft: ${draftCount}`} size="sm" />
+        <StatusBadge variant="warning" label={`Pending: ${proposedCount}`} size="sm" />
+        <StatusBadge variant="success" label={`Approved: ${approvedCount}`} size="sm" />
+        <StatusBadge status="complete" label={`Posted: ${postedCount}`} size="sm" />
+        <span className="font-mono text-sm" style={{ color: 'var(--text-primary)' }}>
+          Total Debit Impact: <MoneyCell value={totalDebitImpact} showDollar />
+        </span>
+        <span
+          className="text-sm"
+          style={{ color: pendingTemplatesCount > 0 ? 'var(--status-warning)' : 'var(--status-success)' }}
+        >
+          Templates: {pendingTemplatesCount > 0 ? `${pendingTemplatesCount} pending` : 'All resolved \u2713'}
         </span>
       </div>
 
-      <div className="flex border-b border-border">
+      <div
+        className="flex border-b"
+        style={{ borderColor: 'var(--border-default)' }}
+      >
         <button
           type="button"
           onClick={() => setTab('entries')}
-          className={cn('px-4 py-2 text-sm font-medium border-b-2 -mb-px', tab === 'entries' ? 'border-accent text-accent' : 'border-transparent text-text-secondary hover:text-primary')}
+          className="px-4 py-2 text-sm font-medium border-b-2 -mb-px"
+          style={{
+            borderColor: tab === 'entries' ? 'var(--interactive-primary)' : 'transparent',
+            color: tab === 'entries' ? 'var(--interactive-primary)' : 'var(--text-secondary)',
+          }}
         >
           Journal Entries
         </button>
         <button
           type="button"
           onClick={() => setTab('templates')}
-          className={cn('px-4 py-2 text-sm font-medium border-b-2 -mb-px', tab === 'templates' ? 'border-accent text-accent' : 'border-transparent text-text-secondary hover:text-primary')}
+          className="px-4 py-2 text-sm font-medium border-b-2 -mb-px"
+          style={{
+            borderColor: tab === 'templates' ? 'var(--interactive-primary)' : 'transparent',
+            color: tab === 'templates' ? 'var(--interactive-primary)' : 'var(--text-secondary)',
+          }}
         >
           Templates
         </button>
@@ -420,6 +490,7 @@ export default function AdjustmentsPage() {
           onReject={handleReject}
           onPost={handlePost}
           onDelete={handleDelete}
+          onReverse={handleCreateReversal}
           statusFilter={statusFilter}
           onStatusFilterChange={setStatusFilter}
           search={search}
@@ -442,18 +513,63 @@ export default function AdjustmentsPage() {
 
       {rejectJeId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/50" onClick={() => setRejectJeId(null)} />
-          <div className="relative bg-surface border border-border rounded-card p-6 max-w-md w-full">
-            <h3 className="font-display text-lg text-primary mb-2">Reason for rejection</h3>
+          <div
+            className="fixed inset-0"
+            style={{ backgroundColor: 'var(--bg-overlay)' }}
+            onClick={() => setRejectJeId(null)}
+          />
+          <div
+            className="relative p-6 max-w-md w-full border"
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              borderColor: 'var(--border-default)',
+              borderRadius: 'var(--radius-lg)',
+            }}
+          >
+            <h3
+              className="font-display text-lg mb-2"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              Reason for rejection
+            </h3>
             <textarea
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}
-              className="w-full px-3 py-2 rounded-input border border-border bg-input text-sm min-h-[80px]"
-              placeholder="Min 10 characters…"
+              className="w-full px-3 py-2 border text-sm min-h-[80px]"
+              style={{
+                borderColor: 'var(--border-default)',
+                backgroundColor: 'var(--bg-surface-sunken)',
+                borderRadius: 'var(--radius-md)',
+                color: 'var(--text-primary)',
+              }}
+              placeholder="Min 10 characters..."
             />
             <div className="flex gap-2 mt-4">
-              <button type="button" className="px-4 py-2 rounded-input border border-border text-sm" onClick={() => setRejectJeId(null)}>Cancel</button>
-              <button type="button" className="px-4 py-2 rounded-input bg-status-red text-white text-sm" disabled={rejectReason.trim().length < 10} onClick={confirmReject}>Submit Rejection</button>
+              <button
+                type="button"
+                className="px-4 py-2 border text-sm"
+                style={{
+                  borderColor: 'var(--border-default)',
+                  borderRadius: 'var(--radius-md)',
+                  color: 'var(--text-primary)',
+                }}
+                onClick={() => setRejectJeId(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 text-sm"
+                style={{
+                  backgroundColor: 'var(--status-error)',
+                  color: '#fff',
+                  borderRadius: 'var(--radius-md)',
+                }}
+                disabled={rejectReason.trim().length < 10}
+                onClick={confirmReject}
+              >
+                Submit Rejection
+              </button>
             </div>
           </div>
         </div>
@@ -465,28 +581,64 @@ export default function AdjustmentsPage() {
         onConfirm={confirmPost}
         title={`Post Journal Entry #${postConfirmJe?.jeNumber}?`}
         message="This will:"
-        detail={`• Update the adjusted trial balance\n• Mark financial statements as stale (regeneration required)\n• Refresh reconciliation GL balances\n• This action cannot be undone — posted entries are immutable`}
+        detail={`\u2022 Update the adjusted trial balance\n\u2022 Mark financial statements as stale (regeneration required)\n\u2022 Refresh reconciliation GL balances\n\u2022 This action cannot be undone \u2014 posted entries are immutable`}
         confirmLabel="Post Entry"
       />
 
       {postSuccessJe && (
-        <div className="fixed bottom-4 right-4 z-50 bg-surface border border-border rounded-card shadow-lg p-4 max-w-sm">
-          <p className="font-medium text-status-green">JE #{postSuccessJe.jeNumber} posted successfully</p>
-          <p className="text-sm text-text-secondary mt-2">Cascade effects: Adjusted TB updated, statements marked stale, reconciliation GL balances refreshed.</p>
-          <button type="button" className="mt-3 text-sm text-accent hover:underline" onClick={() => setPostSuccessJe(null)}>Dismiss</button>
+        <div
+          className="fixed bottom-4 right-4 z-50 p-4 max-w-sm border"
+          style={{
+            backgroundColor: 'var(--bg-surface)',
+            borderColor: 'var(--border-default)',
+            borderRadius: 'var(--radius-lg)',
+            boxShadow: 'var(--shadow-lg)',
+          }}
+        >
+          <p
+            className="font-medium"
+            style={{ color: 'var(--status-success)' }}
+          >
+            JE #{postSuccessJe.jeNumber} posted successfully
+          </p>
+          <p
+            className="text-sm mt-2"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            Cascade effects: Adjusted TB updated, statements marked stale, reconciliation GL balances refreshed.
+          </p>
+          <button
+            type="button"
+            className="mt-3 text-sm hover:underline"
+            style={{ color: 'var(--interactive-primary)' }}
+            onClick={() => setPostSuccessJe(null)}
+          >
+            Dismiss
+          </button>
         </div>
       )}
 
+      <ContinueToNextStep
+        currentStep="Adjustments"
+        nextStep={{ label: 'Statements', href: `/close/${sessionId}/statements` }}
+        gatesPassed={allEntries.length > 0 && draftCount === 0 && proposedCount === 0 && pendingTemplatesCount === 0}
+        gateSummary={`All ${allEntries.length} journal entries resolved, ${postedCount} posted`}
+      />
+
       {toast && (
         <div
-          className={cn(
-            'fixed bottom-4 right-4 px-4 py-3 rounded-card border text-sm font-medium z-50',
-            toast.type === 'success' ? 'border-status-green bg-status-green-dim text-status-green' : 'border-status-red bg-status-red-dim text-status-red'
-          )}
+          className="fixed bottom-4 right-4 px-4 py-3 border text-sm font-medium z-50"
+          style={{
+            borderRadius: 'var(--radius-lg)',
+            borderColor: toast.type === 'success' ? 'var(--status-success)' : 'var(--status-error)',
+            backgroundColor: toast.type === 'success' ? 'var(--status-success-bg)' : 'var(--status-error-bg)',
+            color: toast.type === 'success' ? 'var(--status-success)' : 'var(--status-error)',
+          }}
         >
           {toast.message}
         </div>
       )}
+      </>)}
     </div>
   );
 }

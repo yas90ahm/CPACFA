@@ -209,15 +209,15 @@ async function aggregateStatementLines(
       // Opening from first, closing from last, activity summed
       if (templateLine.fsLineId === 'eq_opening') {
         const firstLine = allLines[0].lines.find((l) => l.fsLineId === 'eq_opening');
-        result.push({ ...templateLine, amount: firstLine?.amount ?? 0 });
+        result.push({ ...templateLine, amount: firstLine?.amount ?? '0' });
       } else if (templateLine.fsLineId === 'eq_closing') {
         result.push(templateLine); // latest period's closing
       } else {
-        const summed = sumRound2(allLines.map((p) => p.lines.find((l) => l.fsLineId === templateLine.fsLineId)?.amount ?? 0));
+        const summed = String(sumRound2(allLines.map((p) => Number(p.lines.find((l) => l.fsLineId === templateLine.fsLineId)?.amount ?? 0))));
         result.push({ ...templateLine, amount: summed });
       }
     } else if (FLOW_STATEMENTS.has(templateLine.statement)) {
-      const summed = sumRound2(allLines.map((p) => p.lines.find((l) => l.fsLineId === templateLine.fsLineId)?.amount ?? 0));
+      const summed = String(sumRound2(allLines.map((p) => Number(p.lines.find((l) => l.fsLineId === templateLine.fsLineId)?.amount ?? 0))));
       result.push({ ...templateLine, amount: summed });
     } else {
       result.push(templateLine);

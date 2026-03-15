@@ -10,6 +10,8 @@ import { apiUpload } from '@/lib/api';
 import type { FieldMapping } from '@/lib/types/ingest';
 import type { GLParseResult, ValidationResult, TBPreview } from '@/lib/types/ingest';
 import { Check, AlertTriangle, X, Download } from 'lucide-react';
+import { fmtMoney } from '@/lib/money';
+import { cn } from '@/lib/utils';
 
 /** Backend ingest response shape (for 207 partial success) */
 interface IngestResponse {
@@ -115,9 +117,7 @@ function csvEscape(value: string): string {
 }
 
 function formatMoney(s: string): string {
-  const n = parseFloat(s);
-  if (Number.isNaN(n)) return s;
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n);
+  return fmtMoney(s, { dollar: true, dash: false });
 }
 
 export interface GLUploadFlowProps {
@@ -391,14 +391,17 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
   if (step === 'parsing') {
     return (
       <div className="max-w-2xl space-y-6">
-        <div className="flex items-center gap-3 text-text-secondary">
-          <div className="w-8 h-8 rounded-full bg-accent-dim flex items-center justify-center">
-            <span className="inline-block w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+        <div className="flex items-center gap-3" style={{ color: 'var(--text-secondary)' }}>
+          <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: 'var(--interactive-primary-bg)' }}>
+            <span
+              className="inline-block w-4 h-4 border-2 border-t-transparent rounded-full animate-spin"
+              style={{ borderColor: 'var(--interactive-primary)', borderTopColor: 'transparent' }}
+            />
           </div>
           <span>Reading file...</span>
         </div>
         {file && (
-          <div className="text-sm text-text-secondary">
+          <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
             {file.name} ({(file.size / 1024).toFixed(1)} KB)
           </div>
         )}
@@ -409,8 +412,8 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
   if (step === 'mapping' && parseResult) {
     return (
       <div className="max-w-3xl space-y-6">
-        <h2 className="text-lg font-display text-primary">GL Upload — Column Mapping</h2>
-        <p className="text-sm text-text-secondary">
+        <h2 className="text-lg font-display" style={{ color: 'var(--text-primary)' }}>GL Upload — Column Mapping</h2>
+        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
           File: {file?.name} ({(file && (file.size / 1024 / 1024).toFixed(1))} MB, {parseResult.rowCount} rows)
         </p>
         <ColumnMapper
@@ -422,14 +425,29 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
           onChange={setMappings}
         />
         <div className="flex gap-3">
-          <button type="button" onClick={onBack} className="px-4 py-2 rounded-input border border-border text-sm font-medium hover:bg-hover">
+          <button
+            type="button"
+            onClick={onBack}
+            className="px-4 py-2 text-sm font-medium"
+            style={{
+              border: '1px solid var(--border-default)',
+              backgroundColor: 'var(--bg-surface)',
+              color: 'var(--text-primary)',
+              borderRadius: 'var(--radius-md)',
+            }}
+          >
             Back
           </button>
           <button
             type="button"
             onClick={runValidation}
             disabled={!allRequiredMapped}
-            className="px-4 py-2 rounded-input bg-accent text-accent-contrast text-sm font-medium disabled:opacity-50 hover:enabled:opacity-90"
+            className={cn('px-4 py-2 text-sm font-medium', !allRequiredMapped && 'opacity-50')}
+            style={{
+              backgroundColor: 'var(--interactive-primary)',
+              color: 'white',
+              borderRadius: 'var(--radius-md)',
+            }}
           >
             Continue to Validation →
           </button>
@@ -441,7 +459,7 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
   if (step === 'validating') {
     return (
       <div className="max-w-2xl space-y-6">
-        <h2 className="text-lg font-display text-primary">Processing general ledger...</h2>
+        <h2 className="text-lg font-display" style={{ color: 'var(--text-primary)' }}>Processing general ledger...</h2>
         <StepProgress
           steps={[
             { label: `Parsed ${parseResult?.rowCount?.toLocaleString() ?? '—'} entries`, status: 'complete' },
@@ -465,8 +483,13 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
     let inPeriodCount = 0;
     let outOfPeriodCount = 0;
     if (dateRange && bounds) {
-      const earliest = new Date(dateRange.earliest);
-      const latest = new Date(dateRange.latest);
+      // Parse dates as local midnight to avoid UTC timezone offset issues
+      const parseLocal = (s: string) => {
+        const parts = s.split(/[-T]/);
+        return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+      };
+      const earliest = parseLocal(dateRange.earliest);
+      const latest = parseLocal(dateRange.latest);
       const allIn = earliest >= bounds.start && latest <= bounds.end;
       const allOut = latest < bounds.start || earliest > bounds.end;
       if (allIn) {
@@ -487,24 +510,24 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
 
     return (
       <div className="max-w-4xl space-y-8">
-        <h2 className="text-lg font-display text-primary">Validation Results</h2>
-        <div className="bg-surface border border-border rounded-card p-5 space-y-2">
-          <p className="flex items-center gap-2 text-sm text-status-green">
+        <h2 className="text-lg font-display" style={{ color: 'var(--text-primary)' }}>Validation Results</h2>
+        <div className="rounded-card p-5 space-y-2" style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)' }}>
+          <p className="flex items-center gap-2 text-sm" style={{ color: 'var(--status-success)' }}>
             <Check className="w-4 h-4 shrink-0" /> File parsed successfully ({parseResult?.rowCount ?? 0} entries)
           </p>
-          <p className="flex items-center gap-2 text-sm text-status-green">
+          <p className="flex items-center gap-2 text-sm" style={{ color: 'var(--status-success)' }}>
             <Check className="w-4 h-4 shrink-0" /> {tbPreview.accountCount} unique accounts identified
           </p>
 
           {/* Date validation */}
           {dateStatus === 'all_in' && (
-            <p className="flex items-center gap-2 text-sm text-status-green">
+            <p className="flex items-center gap-2 text-sm" style={{ color: 'var(--status-success)' }}>
               <Check className="w-4 h-4 shrink-0" /> All {dateRange?.totalWithDates} entries are within {periodLabel}
             </p>
           )}
           {dateStatus === 'some_out' && (
             <div className="space-y-2">
-              <p className="flex items-start gap-2 text-sm text-status-amber">
+              <p className="flex items-start gap-2 text-sm" style={{ color: 'var(--status-warning)' }}>
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>
                   Entries have dates outside {periodLabel} (earliest: {dateRange?.earliest}, latest: {dateRange?.latest}).
@@ -513,18 +536,18 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
               </p>
               <div className="ml-6 flex gap-3">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="importMode" checked={importMode === 'all'} onChange={() => setImportMode('all')} className="accent-accent" />
+                  <input type="radio" name="importMode" checked={importMode === 'all'} onChange={() => setImportMode('all')} style={{ accentColor: 'var(--interactive-primary)' }} />
                   Import All Entries
                 </label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="importMode" checked={importMode === 'period_only'} onChange={() => setImportMode('period_only')} className="accent-accent" />
+                  <input type="radio" name="importMode" checked={importMode === 'period_only'} onChange={() => setImportMode('period_only')} style={{ accentColor: 'var(--interactive-primary)' }} />
                   Import {periodLabel} Only
                 </label>
               </div>
             </div>
           )}
           {dateStatus === 'all_out' && (
-            <p className="flex items-start gap-2 text-sm text-status-red">
+            <p className="flex items-start gap-2 text-sm" style={{ color: 'var(--status-error)' }}>
               <X className="w-4 h-4 shrink-0 mt-0.5" />
               <span>
                 No entries found within {periodLabel}. All dates range from {dateRange?.earliest} to {dateRange?.latest}.
@@ -533,18 +556,18 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
             </p>
           )}
           {dateStatus === 'unknown' && (
-            <p className="flex items-center gap-2 text-sm text-text-secondary">
+            <p className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
               <AlertTriangle className="w-4 h-4 shrink-0" /> Date validation not available (no date column mapped or period not recognized)
             </p>
           )}
 
           {/* Balance check */}
           {isBalanced ? (
-            <p className="flex items-center gap-2 text-sm text-status-green">
+            <p className="flex items-center gap-2 text-sm" style={{ color: 'var(--status-success)' }}>
               <Check className="w-4 h-4 shrink-0" /> Trial balance balances: Debits = Credits
             </p>
           ) : (
-            <p className="flex items-start gap-2 text-sm text-status-red">
+            <p className="flex items-start gap-2 text-sm" style={{ color: 'var(--status-error)' }}>
               <X className="w-4 h-4 shrink-0 mt-0.5" />
               <span>
                 Trial balance is NOT balanced. Debits: {formatMoney(tbPreview.totalDebits)}, Credits: {formatMoney(tbPreview.totalCredits)}, Difference: {formatMoney(diff.toFixed(2))}
@@ -554,22 +577,49 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
         </div>
 
         <div>
-          <h3 className="text-sm font-medium text-primary mb-2">
+          <h3 className="text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
             Trial Balance Preview — {tbPreview.accountCount} accounts | Total Debits: {formatMoney(tbPreview.totalDebits)} | Total Credits: {formatMoney(tbPreview.totalCredits)} | {isBalanced ? 'Balanced \u2713' : 'NOT Balanced \u2717'}
           </h3>
-          <div className="overflow-x-auto rounded-input border border-border">
+          <div className="overflow-x-auto" style={{ borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)' }}>
             <table className="w-full text-sm border-collapse">
               <thead>
-                <tr className="border-b border-border bg-surface-alt">
-                  <th className="text-left py-2 px-3 font-medium text-text-secondary">Account Code</th>
-                  <th className="text-left py-2 px-3 font-medium text-text-secondary">Account Name</th>
-                  <th className="text-right py-2 px-3 font-medium text-text-secondary">Debit</th>
-                  <th className="text-right py-2 px-3 font-medium text-text-secondary">Credit</th>
+                <tr style={{ backgroundColor: 'var(--bg-surface-sunken)', borderBottom: '2px solid var(--border-table-header)' }}>
+                  <th
+                    className="text-left py-2 px-3 font-semibold"
+                    style={{ color: 'var(--text-secondary)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em', height: '44px' }}
+                  >
+                    Account Code
+                  </th>
+                  <th
+                    className="text-left py-2 px-3 font-semibold"
+                    style={{ color: 'var(--text-secondary)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em', height: '44px' }}
+                  >
+                    Account Name
+                  </th>
+                  <th
+                    className="text-right py-2 px-3 font-semibold"
+                    style={{ color: 'var(--text-secondary)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em', height: '44px' }}
+                  >
+                    Debit
+                  </th>
+                  <th
+                    className="text-right py-2 px-3 font-semibold"
+                    style={{ color: 'var(--text-secondary)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em', height: '44px' }}
+                  >
+                    Credit
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {displayRows.map((r, i) => (
-                  <tr key={i} className="border-b border-border-light">
+                  <tr
+                    key={i}
+                    style={{
+                      borderBottom: '1px solid var(--border-subtle)',
+                      backgroundColor: i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-table-row-alt)',
+                      height: '40px',
+                    }}
+                  >
                     <td className="py-1.5 px-3 font-mono">{r.accountCode}</td>
                     <td className="py-1.5 px-3">{r.accountName}</td>
                     <td className="py-1.5 px-3 text-right font-mono">{r.debit !== '0' ? formatMoney(r.debit) : '—'}</td>
@@ -578,7 +628,13 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
                 ))}
               </tbody>
               <tfoot>
-                <tr className="border-t-2 border-border bg-surface-alt font-medium">
+                <tr
+                  className="font-bold"
+                  style={{
+                    borderTop: '2px solid var(--border-default)',
+                    backgroundColor: 'var(--bg-surface-sunken)',
+                  }}
+                >
                   <td className="py-2 px-3" colSpan={2}>TOTALS</td>
                   <td className="py-2 px-3 text-right font-mono">{formatMoney(tbPreview.totalDebits)}</td>
                   <td className="py-2 px-3 text-right font-mono">{formatMoney(tbPreview.totalCredits)}</td>
@@ -586,23 +642,61 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
               </tfoot>
             </table>
           </div>
-          <p className="text-xs text-text-tertiary mt-2">Showing {displayRows.length} of {tbPreview.rows.length} accounts</p>
+          <p className="text-xs mt-2" style={{ color: 'var(--text-tertiary)' }}>Showing {displayRows.length} of {tbPreview.rows.length} accounts</p>
         </div>
 
         <div className="flex gap-3 items-start">
-          <button type="button" onClick={() => setStep('mapping')} className="px-4 py-2 rounded-input border border-border text-sm font-medium hover:bg-hover">
+          <button
+            type="button"
+            onClick={() => setStep('mapping')}
+            className="px-4 py-2 text-sm font-medium"
+            style={{
+              border: '1px solid var(--border-default)',
+              backgroundColor: 'var(--bg-surface)',
+              color: 'var(--text-primary)',
+              borderRadius: 'var(--radius-md)',
+            }}
+          >
             Back
           </button>
           {canProceed ? (
-            <button type="button" onClick={() => setStep('confirm')} className="px-4 py-2 rounded-input bg-accent text-accent-contrast text-sm font-medium hover:opacity-90">
+            <button
+              type="button"
+              onClick={() => setStep('confirm')}
+              className="px-4 py-2 text-sm font-medium"
+              style={{
+                backgroundColor: 'var(--interactive-primary)',
+                color: 'white',
+                borderRadius: 'var(--radius-md)',
+              }}
+            >
               Continue to Confirm →
             </button>
           ) : (
             <div className="flex flex-col gap-2">
-              <button type="button" disabled className="px-4 py-2 rounded-input bg-elevated text-text-tertiary text-sm font-medium cursor-not-allowed">
+              <button
+                type="button"
+                disabled
+                className="px-4 py-2 text-sm font-medium cursor-not-allowed"
+                style={{
+                  backgroundColor: 'var(--bg-surface-sunken)',
+                  color: 'var(--text-tertiary)',
+                  borderRadius: 'var(--radius-md)',
+                }}
+              >
                 Cannot proceed — trial balance must be balanced
               </button>
-              <button type="button" onClick={onBack} className="px-4 py-2 rounded-input border border-border text-sm font-medium hover:bg-hover text-accent">
+              <button
+                type="button"
+                onClick={onBack}
+                className="px-4 py-2 text-sm font-medium"
+                style={{
+                  border: '1px solid var(--border-default)',
+                  backgroundColor: 'var(--bg-surface)',
+                  color: 'var(--interactive-primary)',
+                  borderRadius: 'var(--radius-md)',
+                }}
+              >
                 Upload New File
               </button>
             </div>
@@ -615,16 +709,29 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
   if (step === 'confirm' && tbPreview) {
     return (
       <div className="max-w-2xl space-y-6">
-        <h2 className="text-lg font-display text-primary">{replaceMode ? 'Ready to replace GL data' : 'Ready to import'}</h2>
+        <h2 className="text-lg font-display" style={{ color: 'var(--text-primary)' }}>{replaceMode ? 'Ready to replace GL data' : 'Ready to import'}</h2>
         {replaceMode && !advanceError && (
-          <div className="bg-status-amber/10 border border-status-amber rounded-card p-4 flex items-start gap-2 text-sm text-status-amber">
+          <div
+            className="rounded-card p-4 flex items-start gap-2 text-sm"
+            style={{
+              backgroundColor: 'var(--status-warning-bg)',
+              border: '1px solid var(--status-warning)',
+              color: 'var(--status-warning)',
+            }}
+          >
             <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
             <span>This will reset your trial balance, reconciliations, and statements. Account mappings and templates will be preserved.</span>
           </div>
         )}
         {advanceError && (
-          <div className="bg-status-red/10 border border-status-red rounded-card p-4 space-y-3">
-            <div className="flex items-start gap-2 text-sm text-status-red">
+          <div
+            className="rounded-card p-4 space-y-3"
+            style={{
+              backgroundColor: 'var(--status-error-bg)',
+              border: '1px solid var(--status-error)',
+            }}
+          >
+            <div className="flex items-start gap-2 text-sm" style={{ color: 'var(--status-error)' }}>
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
               <span>{advanceError}</span>
             </div>
@@ -632,7 +739,13 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
               <button
                 type="button"
                 onClick={downloadErrorReport}
-                className="px-3 py-1.5 rounded-input bg-surface border border-border text-sm font-medium hover:bg-hover inline-flex items-center gap-2 text-primary"
+                className="px-3 py-1.5 text-sm font-medium inline-flex items-center gap-2"
+                style={{
+                  backgroundColor: 'var(--bg-surface)',
+                  border: '1px solid var(--border-default)',
+                  color: 'var(--text-primary)',
+                  borderRadius: 'var(--radius-md)',
+                }}
               >
                 <Download className="w-4 h-4" />
                 Download Error Report ({ingestResult.imbalancedCount ?? ingestResult.imbalancedEntries.length} imbalanced entries)
@@ -640,9 +753,9 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
             )}
           </div>
         )}
-        <div className="bg-surface border border-border rounded-card p-6 space-y-4">
-          <p className="text-sm text-text-secondary">This will:</p>
-          <ul className="list-disc list-inside text-sm text-primary space-y-1">
+        <div className="rounded-card p-6 space-y-4" style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)' }}>
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>This will:</p>
+          <ul className="list-disc list-inside text-sm space-y-1" style={{ color: 'var(--text-primary)' }}>
             <li>{skipAdvance ? 'Replace existing GL data with' : 'Import'} {parseResult?.rowCount ?? 0} GL entries{importMode === 'period_only' ? ` (filtered to ${periodLabel})` : ''}</li>
             <li>{skipAdvance ? 'Re-derive' : 'Create'} a trial balance with {tbPreview.accountCount} accounts</li>
             {!skipAdvance && <li>Advance the session to IN_PROGRESS</li>}
@@ -654,10 +767,29 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
           </ul>
         </div>
         <div className="flex gap-3">
-          <button type="button" onClick={() => setStep('preview')} className="px-4 py-2 rounded-input border border-border text-sm font-medium hover:bg-hover">
+          <button
+            type="button"
+            onClick={() => setStep('preview')}
+            className="px-4 py-2 text-sm font-medium"
+            style={{
+              border: '1px solid var(--border-default)',
+              backgroundColor: 'var(--bg-surface)',
+              color: 'var(--text-primary)',
+              borderRadius: 'var(--radius-md)',
+            }}
+          >
             Back to Preview
           </button>
-          <button type="button" onClick={ingest} className="px-4 py-2 rounded-input bg-accent text-accent-contrast text-sm font-medium hover:opacity-90">
+          <button
+            type="button"
+            onClick={ingest}
+            className="px-4 py-2 text-sm font-medium"
+            style={{
+              backgroundColor: 'var(--interactive-primary)',
+              color: 'white',
+              borderRadius: 'var(--radius-md)',
+            }}
+          >
             {replaceMode ? 'Replace GL Data' : skipAdvance ? 'Replace GL & Re-derive TB' : 'Import & Begin Close'}
           </button>
         </div>
@@ -684,27 +816,47 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
     if (parseError) {
       return (
         <div className="max-w-2xl space-y-6">
-          <h2 className="text-lg font-display text-status-red flex items-center gap-2">
+          <h2 className="text-lg font-display flex items-center gap-2" style={{ color: 'var(--status-error)' }}>
             <X className="w-5 h-5" /> Parse Failed
           </h2>
-          <div className="bg-surface border border-border rounded-card p-5 space-y-4">
-            <p className="text-sm text-primary">{parseError}</p>
-            <div className="border-t border-border pt-4">
-              <p className="text-sm font-medium text-primary mb-2">Expected CSV format:</p>
-              <p className="text-xs text-text-secondary mb-2">Your file should include columns for these fields (exact names are flexible):</p>
-              <div className="bg-surface-alt rounded-input p-3 font-mono text-xs text-text-secondary overflow-x-auto">
+          <div className="rounded-card p-5 space-y-4" style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)' }}>
+            <p className="text-sm" style={{ color: 'var(--text-primary)' }}>{parseError}</p>
+            <div className="pt-4" style={{ borderTop: '1px solid var(--border-default)' }}>
+              <p className="text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>Expected CSV format:</p>
+              <p className="text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>Your file should include columns for these fields (exact names are flexible):</p>
+              <div className="rounded-input p-3 font-mono text-xs overflow-x-auto" style={{ backgroundColor: 'var(--bg-surface-sunken)', color: 'var(--text-secondary)' }}>
                 date, account_code, account_name, debit, credit
               </div>
-              <p className="text-xs text-text-tertiary mt-2">
+              <p className="text-xs mt-2" style={{ color: 'var(--text-tertiary)' }}>
                 Also accepted: description, reference/entry_id. Column headers are auto-detected — common variants like &quot;GL Account&quot;, &quot;Dr&quot;, &quot;Cr&quot; work too.
               </p>
             </div>
           </div>
           <div className="flex gap-3">
-            <button type="button" onClick={onBack} className="px-4 py-2 rounded-input border border-border text-sm font-medium hover:bg-hover">
+            <button
+              type="button"
+              onClick={onBack}
+              className="px-4 py-2 text-sm font-medium"
+              style={{
+                border: '1px solid var(--border-default)',
+                backgroundColor: 'var(--bg-surface)',
+                color: 'var(--text-primary)',
+                borderRadius: 'var(--radius-md)',
+              }}
+            >
               Upload New File
             </button>
-            <button type="button" onClick={downloadErrorReport} className="px-4 py-2 rounded-input bg-surface-alt border border-border text-sm font-medium hover:bg-hover inline-flex items-center gap-2">
+            <button
+              type="button"
+              onClick={downloadErrorReport}
+              className="px-4 py-2 text-sm font-medium inline-flex items-center gap-2"
+              style={{
+                backgroundColor: 'var(--bg-surface-sunken)',
+                border: '1px solid var(--border-default)',
+                color: 'var(--text-primary)',
+                borderRadius: 'var(--radius-md)',
+              }}
+            >
               <Download className="w-4 h-4" />
               Download Error Report
             </button>
@@ -715,26 +867,46 @@ export function GLUploadFlow({ sessionId, periodLabel, file, onBack, skipAdvance
     if (validationError) {
     return (
       <div className="max-w-2xl space-y-6">
-        <h2 className="text-lg font-display text-status-red flex items-center gap-2">
+        <h2 className="text-lg font-display flex items-center gap-2" style={{ color: 'var(--status-error)' }}>
           <X className="w-5 h-5" /> Validation Failed
         </h2>
-        <div className="bg-surface border border-border rounded-card p-5 space-y-3">
+        <div className="rounded-card p-5 space-y-3" style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)' }}>
           {validationError.errors.map((e, i) => (
             <div key={i} className="flex items-start gap-2 text-sm">
-              <X className="w-4 h-4 text-status-red shrink-0 mt-0.5" />
+              <X className="w-4 h-4 shrink-0 mt-0.5" style={{ color: 'var(--status-error)' }} />
               <div>
-                <p className="text-primary font-medium">{e.message}</p>
-                {e.detail && <p className="text-text-secondary mt-1">{e.detail}</p>}
+                <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{e.message}</p>
+                {e.detail && <p className="mt-1" style={{ color: 'var(--text-secondary)' }}>{e.detail}</p>}
               </div>
             </div>
           ))}
-          <p className="text-sm text-text-secondary mt-4">Please fix these issues in your source file and re-upload.</p>
+          <p className="text-sm mt-4" style={{ color: 'var(--text-secondary)' }}>Please fix these issues in your source file and re-upload.</p>
         </div>
         <div className="flex gap-3">
-          <button type="button" onClick={onBack} className="px-4 py-2 rounded-input border border-border text-sm font-medium hover:bg-hover">
+          <button
+            type="button"
+            onClick={onBack}
+            className="px-4 py-2 text-sm font-medium"
+            style={{
+              border: '1px solid var(--border-default)',
+              backgroundColor: 'var(--bg-surface)',
+              color: 'var(--text-primary)',
+              borderRadius: 'var(--radius-md)',
+            }}
+          >
             Upload New File
           </button>
-          <button type="button" onClick={downloadErrorReport} className="px-4 py-2 rounded-input bg-surface-alt border border-border text-sm font-medium hover:bg-hover inline-flex items-center gap-2">
+          <button
+            type="button"
+            onClick={downloadErrorReport}
+            className="px-4 py-2 text-sm font-medium inline-flex items-center gap-2"
+            style={{
+              backgroundColor: 'var(--bg-surface-sunken)',
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-primary)',
+              borderRadius: 'var(--radius-md)',
+            }}
+          >
             <Download className="w-4 h-4" />
             Download Error Report
           </button>

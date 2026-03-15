@@ -3,6 +3,7 @@
  */
 
 import type { Pool } from 'pg';
+import Decimal from 'decimal.js';
 import type { VarianceRecord } from '../../types/variance_analysis.js';
 
 interface VarianceRow {
@@ -23,17 +24,25 @@ interface VarianceRow {
   explanation_source: string | null;
   approved_at: string | null;
   approved_by: string | null;
+  variance_type: string | null;
+  full_year_impact: string | null;
   created_at: string;
 }
 
+const SELECT_COLS = `id, tenant_id, close_session_id, period_label, fs_line_id, statement, label,
+    current_amount, prior_amount, change_amount, change_percentage, material_threshold_pct,
+    explanation, ai_draft_explanation, explanation_source, approved_at, approved_by,
+    variance_type, full_year_impact, created_at`;
+
 function rowToVariance(row: VarianceRow): VarianceRecord {
-  const changeAmt = Number(row.change_amount);
-  const changePct = row.change_percentage != null ? Number(row.change_percentage) : null;
-  const thresholdPct = Number(row.material_threshold_pct);
-  const priorAmt = Number(row.prior_amount);
-  const isMaterial = priorAmt === 0
-    ? Math.abs(changeAmt) > 0.01
-    : changePct != null ? Math.abs(changePct) >= thresholdPct : false;
+  const changeAmt = row.change_amount;
+  const changePct = row.change_percentage ?? null;
+  const thresholdPct = row.material_threshold_pct;
+  const priorAmt = row.prior_amount;
+  const priorDec = new Decimal(priorAmt);
+  const isMaterial = priorDec.isZero()
+    ? new Decimal(changeAmt).abs().greaterThan('0.01')
+    : changePct != null ? new Decimal(changePct).abs().greaterThanOrEqualTo(thresholdPct) : false;
   return {
     id: row.id,
     tenantId: row.tenant_id,
@@ -42,7 +51,7 @@ function rowToVariance(row: VarianceRow): VarianceRecord {
     fsLineId: row.fs_line_id,
     statement: row.statement,
     label: row.label ?? undefined,
-    currentAmount: Number(row.current_amount),
+    currentAmount: row.current_amount,
     priorAmount: priorAmt,
     changeAmount: changeAmt,
     changePercentage: changePct,
@@ -53,6 +62,8 @@ function rowToVariance(row: VarianceRow): VarianceRecord {
     explanationSource: (row.explanation_source as VarianceRecord['explanationSource']) ?? undefined,
     approvedAt: row.approved_at ?? undefined,
     approvedBy: row.approved_by ?? undefined,
+    varianceType: row.variance_type ?? undefined,
+    fullYearImpact: row.full_year_impact ?? undefined,
     createdAt: row.created_at,
   };
 }
@@ -93,9 +104,7 @@ export async function upsertVariance(
     ]
   );
   const r = await pool.query<VarianceRow>(
-    `SELECT id, tenant_id, close_session_id, period_label, fs_line_id, statement, label,
-            current_amount, prior_amount, change_amount, change_percentage, material_threshold_pct,
-            explanation, ai_draft_explanation, explanation_source, approved_at, approved_by, created_at
+    `SELECT ${SELECT_COLS}
      FROM tenant_variance_analysis WHERE tenant_id = $1 AND close_session_id = $2 AND fs_line_id = $3 AND statement = $4`,
     [input.tenantId, input.closeSessionId, input.fsLineId, input.statement]
   );
@@ -109,9 +118,7 @@ export async function listVariancesForSession(
   closeSessionId: string
 ): Promise<VarianceRecord[]> {
   const r = await pool.query<VarianceRow>(
-    `SELECT id, tenant_id, close_session_id, period_label, fs_line_id, statement, label,
-            current_amount, prior_amount, change_amount, change_percentage, material_threshold_pct,
-            explanation, ai_draft_explanation, explanation_source, approved_at, approved_by, created_at
+    `SELECT ${SELECT_COLS}
      FROM tenant_variance_analysis WHERE tenant_id = $1 AND close_session_id = $2 ORDER BY statement, fs_line_id`,
     [tenantId, closeSessionId]
   );
@@ -130,9 +137,7 @@ export async function updateExplanation(
     [explanation, explanationSource ?? null, id, tenantId]
   );
   const r = await pool.query<VarianceRow>(
-    `SELECT id, tenant_id, close_session_id, period_label, fs_line_id, statement, label,
-            current_amount, prior_amount, change_amount, change_percentage, material_threshold_pct,
-            explanation, ai_draft_explanation, explanation_source, approved_at, approved_by, created_at
+    `SELECT ${SELECT_COLS}
      FROM tenant_variance_analysis WHERE id = $1 AND tenant_id = $2`,
     [id, tenantId]
   );
@@ -145,9 +150,7 @@ export async function getVarianceById(
   id: string
 ): Promise<VarianceRecord | null> {
   const r = await pool.query<VarianceRow>(
-    `SELECT id, tenant_id, close_session_id, period_label, fs_line_id, statement, label,
-            current_amount, prior_amount, change_amount, change_percentage, material_threshold_pct,
-            explanation, ai_draft_explanation, explanation_source, approved_at, approved_by, created_at
+    `SELECT ${SELECT_COLS}
      FROM tenant_variance_analysis WHERE id = $1 AND tenant_id = $2`,
     [id, tenantId]
   );
@@ -178,9 +181,27 @@ export async function approveVariance(
     [now, approvedBy, id, tenantId]
   );
   const r = await pool.query<VarianceRow>(
-    `SELECT id, tenant_id, close_session_id, period_label, fs_line_id, statement, label,
-            current_amount, prior_amount, change_amount, change_percentage, material_threshold_pct,
-            explanation, ai_draft_explanation, explanation_source, approved_at, approved_by, created_at
+    `SELECT ${SELECT_COLS}
+     FROM tenant_variance_analysis WHERE id = $1 AND tenant_id = $2`,
+    [id, tenantId]
+  );
+  return r.rows.length > 0 ? rowToVariance(r.rows[0]) : null;
+}
+
+/** Classify a variance with type and full-year impact. */
+export async function classifyVariance(
+  pool: Pool,
+  tenantId: string,
+  id: string,
+  varianceType: string,
+  fullYearImpact: number | null
+): Promise<VarianceRecord | null> {
+  await pool.query(
+    `UPDATE tenant_variance_analysis SET variance_type = $1, full_year_impact = $2 WHERE id = $3 AND tenant_id = $4`,
+    [varianceType, fullYearImpact, id, tenantId]
+  );
+  const r = await pool.query<VarianceRow>(
+    `SELECT ${SELECT_COLS}
      FROM tenant_variance_analysis WHERE id = $1 AND tenant_id = $2`,
     [id, tenantId]
   );

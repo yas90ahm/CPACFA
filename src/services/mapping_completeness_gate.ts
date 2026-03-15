@@ -114,6 +114,21 @@ export async function checkMappingCompleteness(
     asOfDate: session.periodEnd ?? undefined,
   });
 
+  // Fetch excluded accounts from gl_account_analysis (Quality Gate)
+  const excludedSet = new Set<string>();
+  try {
+    const { rows: excludedRows } = await pool.query(
+      `SELECT account_code FROM core.gl_account_analysis
+       WHERE tenant_id = $1 AND close_session_id = $2 AND action_taken = 'excluded'`,
+      [tenantId, periodId],
+    );
+    for (const r of excludedRows) {
+      excludedSet.add(r.account_code as string);
+    }
+  } catch {
+    // Table may not exist yet; silently continue
+  }
+
   const unmapped: UnmappedAccount[] = [];
   for (const e of entries) {
     const accountName = (e as { accountName?: string }).accountName ?? (e as { account_name?: string }).account_name ?? '';
@@ -124,6 +139,9 @@ export async function checkMappingCompleteness(
 
     const code = accountCode || accountName;
     if (!code) continue;
+
+    // Skip accounts excluded via GL Quality Gate
+    if (excludedSet.has(code)) continue;
 
     const matched = rules.some((r) => ruleMatches(r, accountName, code || undefined));
     if (!matched) {
@@ -136,17 +154,27 @@ export async function checkMappingCompleteness(
     }
   }
 
+  // Count mapped, excluding accounts excluded via Quality Gate
   const mapped = entries.filter((e) => {
     const accountName = (e as { accountName?: string }).accountName ?? (e as { account_name?: string }).account_name ?? '';
     const accountCode = (e as { accountCode?: string }).accountCode ?? (e as { account_code?: string }).account_code ?? '';
     const code = accountCode || accountName;
     if (!code) return false;
+    if (excludedSet.has(code)) return false;
     return rules.some((r) => ruleMatches(r, accountName, code || undefined));
+  }).length;
+
+  // Total excludes accounts excluded via Quality Gate
+  const totalAfterExclusions = entries.filter((e) => {
+    const accountCode = (e as { accountCode?: string }).accountCode ?? (e as { account_code?: string }).account_code ?? '';
+    const accountName = (e as { accountName?: string }).accountName ?? (e as { account_name?: string }).account_name ?? '';
+    const code = accountCode || accountName;
+    return code && !excludedSet.has(code);
   }).length;
 
   return {
     passes: unmapped.length === 0,
-    total_accounts: entries.length,
+    total_accounts: totalAfterExclusions,
     mapped_accounts: mapped,
     unmapped_accounts: unmapped,
   };

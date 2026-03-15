@@ -23,6 +23,7 @@ import { runPrePostChecksAndStore } from './shadow_auditor_service.js';
 import { runJustifier, hashJustifierInputs } from '../ai/ai_orchestrator.js';
 import { JUSTIFIER_PROMPT_VERSION } from '../ai/prompts/justifier.prompt.js';
 import { executeCascade, CascadeTriggerType } from './cascade_engine.js';
+import { financialEvents, buildEventPacket } from '../events/financial_event_emitter.js';
 
 /**
  * Segregation of duties bypass — DEVELOPMENT ONLY.
@@ -117,13 +118,22 @@ export async function proposeJE(pool: Pool, tenantId: string, id: string): Promi
   }
   const lines = await repo.listJournalEntryLines(pool, id);
   const balanced = validateBalanced(
-    lines.map((l) => ({ accountRef: l.accountRef, debit: l.debit, credit: l.credit }))
+    lines.map((l) => ({ accountRef: l.accountRef, debit: Number(l.debit), credit: Number(l.credit) }))
   );
   if (!balanced.valid) {
     throw new JournalEntryError(`JE does not balance: ${balanced.errors.join('; ')}`, 'VALIDATION');
   }
-  const updated = await repo.updateJournalEntryStatus(pool, id, tenantId, 'proposed');
-  return updated!;
+  const updated = await repo.updateJournalEntryStatus(pool, id, tenantId, 'proposed', {
+    expectedStatus: 'draft',
+  });
+  if (!updated) {
+    const current = await repo.getJournalEntryById(pool, id, tenantId);
+    throw new JournalEntryError(
+      `Journal entry ${id} is in status '${current?.status ?? 'unknown'}', cannot propose`,
+      'INVALID_STATUS'
+    );
+  }
+  return updated;
 }
 
 /** Approve a proposed JE (proposed → approved). Enforces segregation of duties. */
@@ -146,8 +156,23 @@ export async function approveJE(
   }
   const updated = await repo.updateJournalEntryStatus(pool, id, tenantId, 'approved', {
     approvedBy,
+    expectedStatus: 'proposed',
   });
-  return updated!;
+  if (!updated) {
+    // Concurrent status change — re-fetch to provide descriptive error
+    const current = await repo.getJournalEntryById(pool, id, tenantId);
+    if (current?.status === 'approved') {
+      throw new JournalEntryError(
+        `Journal entry ${id} was already approved by ${current.approvedBy ?? 'unknown'}`,
+        'INVALID_STATUS'
+      );
+    }
+    throw new JournalEntryError(
+      `Journal entry ${id} is in status '${current?.status ?? 'unknown'}', cannot approve`,
+      'INVALID_STATUS'
+    );
+  }
+  return updated;
 }
 
 /** Reject a proposed JE (proposed → rejected). Reason is required (min 10 chars). */
@@ -172,7 +197,15 @@ export async function rejectJE(
     rejectionReason: reasonTrimmed,
     rejectedBy,
     rejectedAt: now,
+    expectedStatus: 'proposed',
   });
+  if (!updated) {
+    const current = await repo.getJournalEntryById(pool, id, tenantId);
+    throw new JournalEntryError(
+      `Journal entry ${id} is in status '${current?.status ?? 'unknown'}', cannot reject`,
+      'INVALID_STATUS'
+    );
+  }
   const periodLabel = je.closeSessionId
     ? (await getCloseSessionById(pool, tenantId, je.closeSessionId))?.periodEnd?.slice(0, 7)
     : undefined;
@@ -188,7 +221,7 @@ export async function rejectJE(
       rejectedAt: now,
     },
   });
-  return updated!;
+  return updated;
 }
 
 export interface PostJEResult {
@@ -197,8 +230,8 @@ export interface PostJEResult {
 }
 
 /** Post an approved JE (approved → posted). Shadow Auditor runs first; blocks on severity=block. */
-function computeJETotalAmount(lines: { debit: number; credit: number }[]): number {
-  return sumRound2(lines.map((l) => l.debit ?? 0));
+function computeJETotalAmount(lines: { debit: string | number; credit: string | number }[]): number {
+  return sumRound2(lines.map((l) => Number(l.debit ?? 0)));
 }
 
 export async function postJE(pool: Pool, tenantId: string, id: string, aiPool?: Pool): Promise<PostJEResult> {
@@ -265,10 +298,45 @@ export async function postJE(pool: Pool, tenantId: string, id: string, aiPool?: 
     const messages = shadowResult.flags.map((f) => f.message).join('; ');
     throw new JournalEntryError(`Shadow Auditor blocked post: ${messages}`, 'SHADOW_AUDIT_BLOCK');
   }
+  // Emit async event for shadow audit warnings (non-blocking findings)
+  if (shadowResult.severity === 'warn' && shadowResult.flags.length > 0) {
+    financialEvents.emit('JE_POLICY_VIOLATION', buildEventPacket('JE_POLICY_VIOLATION', {
+      errorCode: 'SHADOW_AUDIT_WARNING',
+      conflictingData: { findings: shadowResult.flags },
+      metadata: {
+        tenantId,
+        closeSessionId: je.closeSessionId ?? undefined,
+        periodLabel,
+        relatedTransactions: [id],
+        accountCodes: lines.map((l) => l.accountRef),
+      },
+      data: {
+        journalEntryId: id,
+        severity: shadowResult.severity,
+        findings: shadowResult.flags.map((f) => ({
+          code: f.code ?? 'UNKNOWN',
+          message: f.message,
+          rule_ids: f.rule_ids ?? [],
+          refs: f.refs ?? [id],
+        })),
+        confidence: 0,
+        memo: je.memo,
+        lines: lines.map((l) => ({ accountRef: l.accountRef, debit: Number(l.debit), credit: Number(l.credit), description: l.description })),
+      },
+    }));
+  }
   const now = new Date().toISOString();
   const updated = await repo.updateJournalEntryStatus(pool, id, tenantId, 'posted', {
     postedAt: now,
+    expectedStatus: 'approved',
   });
+  if (!updated) {
+    const current = await repo.getJournalEntryById(pool, id, tenantId);
+    throw new JournalEntryError(
+      `Journal entry ${id} is in status '${current?.status ?? 'unknown'}', cannot post`,
+      'INVALID_STATUS'
+    );
+  }
   await recordMaterialEvent(pool, {
     tenantId,
     periodLabel,
@@ -333,7 +401,7 @@ export async function postJE(pool: Pool, tenantId: string, id: string, aiPool?: 
       });
     }
   }
-  return { journalEntry: updated!, aiWarnings };
+  return { journalEntry: updated, aiWarnings };
 }
 
 /** Mark a posted JE as exported (posted → exported). */
@@ -343,8 +411,17 @@ export async function exportJE(pool: Pool, tenantId: string, id: string): Promis
   if (je.status !== 'posted') {
     throw new JournalEntryError(`Only posted JEs can be exported; current status: ${je.status}`, 'INVALID_STATUS');
   }
-  const updated = await repo.updateJournalEntryStatus(pool, id, tenantId, 'exported');
-  return updated!;
+  const updated = await repo.updateJournalEntryStatus(pool, id, tenantId, 'exported', {
+    expectedStatus: 'posted',
+  });
+  if (!updated) {
+    const current = await repo.getJournalEntryById(pool, id, tenantId);
+    throw new JournalEntryError(
+      `Journal entry ${id} is in status '${current?.status ?? 'unknown'}', cannot export`,
+      'INVALID_STATUS'
+    );
+  }
+  return updated;
 }
 
 /** Validate that debits equal credits (exact to the penny via Decimal.js). */
@@ -495,8 +572,8 @@ export async function getPostableJEAdjustments(
   const result: { debits: { account: string; amount: number }[]; credits: { account: string; amount: number }[] }[] = [];
   for (const je of postable) {
     const lines = linesMap.get(je.id) ?? [];
-    const debits = lines.filter((l) => (l.debit ?? 0) > 0).map((l) => ({ account: l.accountRef, amount: l.debit }));
-    const credits = lines.filter((l) => (l.credit ?? 0) > 0).map((l) => ({ account: l.accountRef, amount: l.credit }));
+    const debits = lines.filter((l) => Number(l.debit ?? 0) > 0).map((l) => ({ account: l.accountRef, amount: Number(l.debit) }));
+    const credits = lines.filter((l) => Number(l.credit ?? 0) > 0).map((l) => ({ account: l.accountRef, amount: Number(l.credit) }));
     result.push({ debits, credits });
   }
   return result;
@@ -573,8 +650,8 @@ export async function reversePostedJE(
     createdBy: userId,
     lines: originalLines.map((l) => ({
       accountRef: l.accountRef,
-      debit: l.credit, // flip: original credit becomes reversal debit
-      credit: l.debit, // flip: original debit becomes reversal credit
+      debit: Number(l.credit), // flip: original credit becomes reversal debit
+      credit: Number(l.debit), // flip: original debit becomes reversal credit
       description: `Reversal: ${l.description ?? l.accountRef}`,
       amountProvenance: { kind: 'human_entered' as const, enteredBy: userId },
     })),

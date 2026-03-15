@@ -254,18 +254,33 @@ export async function setStatementsStaleSince(
   );
 }
 
-/** Clear statements_stale_since when statements are regenerated. */
+/**
+ * Clear statements_stale_since when statements are regenerated.
+ * Conditional: only clears if no new stale event occurred after generationStartedAt.
+ * Returns true if the flag was cleared, false if statements became stale during generation.
+ */
 export async function clearStatementsStaleSince(
   pool: Queryable,
   tenantId: string,
-  closeSessionId: string
-): Promise<void> {
+  closeSessionId: string,
+  generationStartedAt?: string
+): Promise<boolean> {
   const now = new Date().toISOString();
+  if (generationStartedAt) {
+    const r = await pool.query(
+      `UPDATE close_sessions SET statements_stale_since = NULL, updated_at = $1
+       WHERE tenant_id = $2 AND id = $3
+         AND (statements_stale_since IS NULL OR statements_stale_since <= $4)`,
+      [now, tenantId, closeSessionId, generationStartedAt]
+    );
+    return (r.rowCount ?? 0) > 0;
+  }
   await pool.query(
     `UPDATE close_sessions SET statements_stale_since = NULL, updated_at = $1
      WHERE tenant_id = $2 AND id = $3`,
     [now, tenantId, closeSessionId]
   );
+  return true;
 }
 
 /** Reopen: set status to in_progress, record reopened_at/by/reason. Certification fields preserved for audit. */

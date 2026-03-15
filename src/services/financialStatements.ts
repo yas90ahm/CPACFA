@@ -32,14 +32,42 @@ import {
 /** Re-export for backward compatibility. Primary gatekeeper: totalDebits !== totalCredits → MUST throw this (422). */
 export { MathematicalIntegrityError };
 
-/** Credit-positive fs line ids (positive = credit); others are debit-positive. */
+/** Credit-positive fs line ids (positive = credit); others are debit-positive.
+ *
+ * SIGN CONVENTION:
+ * - Debit-normal accounts (assets, expenses): net = debit - credit → positive when debit > credit
+ * - Credit-normal accounts (liabilities, equity, revenue): net = debit - credit → negative when credit > debit
+ *   → We negate (multiply by -1) so they display as POSITIVE on statements
+ *
+ * CONTRA ACCOUNTS:
+ * - Contra-assets (allowance, accum dep, amort): credit-normal but display on the ASSET section.
+ *   They are NOT in this set, so their net stays negative, correctly REDUCING total assets.
+ * - Contra-equity (treasury stock, dividends): debit-normal but display in EQUITY section.
+ *   They ARE in this set, so their positive net gets negated to negative, correctly REDUCING equity.
+ * - Contra-revenue (sales returns): debit-normal but display in REVENUE section.
+ *   They ARE in this set, so their positive net gets negated to negative, correctly REDUCING revenue.
+ */
 const CREDIT_POSITIVE_FS_LINES = new Set([
-  'fs_liability', 'fs_equity', 'fs_revenue',
-  'fs_liability_current', 'fs_liability_ap', 'fs_liability_accrued', 'fs_liability_current_debt', 'fs_liability_other_current',
-  'fs_liability_noncurrent', 'fs_liability_lt_debt', 'fs_liability_deferred_tax', 'fs_liability_other_noncurrent',
-  'fs_equity_common', 'fs_equity_retained', 'fs_equity_other',
-  'fs_other_income', 'fs_interest_income', 'fs_other_other',
+  // --- Liabilities (credit-normal → display positive) ---
+  'fs_liability', 'fs_liability_current', 'fs_liability_ap', 'fs_liability_accrued',
+  'fs_liability_current_debt', 'fs_liability_other_current',
+  'fs_liability_noncurrent', 'fs_liability_lt_debt', 'fs_liability_deferred_tax',
+  'fs_liability_other_noncurrent',
+  'fs_liability_deferred_rev_current', 'fs_liability_deferred_rev_noncurrent',
+  // --- Equity (credit-normal → display positive) ---
+  'fs_equity', 'fs_equity_common', 'fs_equity_retained', 'fs_equity_other', 'fs_equity_apic',
+  'fs_equity_aoci',
+  // --- Contra-equity (debit-normal → negate to display negative, reducing equity) ---
+  'fs_equity_treasury', 'fs_equity_dividends',
+  // --- Revenue (credit-normal → display positive) ---
+  'fs_revenue', 'fs_revenue_product', 'fs_revenue_service', 'fs_revenue_other',
+  // --- Contra-revenue (debit-normal → negate to display negative, reducing revenue) ---
+  'fs_revenue_contra',
+  // --- Other income (credit-normal → display positive) ---
+  'fs_other_income', 'fs_interest_income', 'fs_other_other', 'fs_other_gain_loss',
+  // --- OCI (credit-normal → display positive) ---
   'fs_oci', 'fs_oci_unrealized_gains', 'fs_oci_fx_translation', 'fs_oci_hedge',
+  // --- Discontinued operations (credit-normal → display positive) ---
   'fs_discontinued_ops', 'fs_discontinued_disposal',
 ]);
 
@@ -91,23 +119,29 @@ const DEFAULT_MATERIALITY = 0.01;
 
 /** FS line IDs that route to BS current assets. */
 const BS_CURRENT_ASSET_FS_LINES = new Set([
-  'fs_asset_current', 'fs_asset_cash', 'fs_asset_ar', 'fs_asset_inventory', 'fs_asset_prepaid', 'fs_asset_other_current',
+  'fs_asset_current', 'fs_asset_cash', 'fs_asset_ar', 'fs_asset_ar_allowance',
+  'fs_asset_inventory', 'fs_asset_prepaid', 'fs_asset_other_current',
 ]);
 /** FS line IDs that route to BS non-current assets. */
 const BS_NONCURRENT_ASSET_FS_LINES = new Set([
-  'fs_asset_noncurrent', 'fs_asset_ppe', 'fs_asset_intangible', 'fs_asset_goodwill', 'fs_asset_other_noncurrent',
+  'fs_asset_noncurrent', 'fs_asset_ppe', 'fs_asset_ppe_accum_dep',
+  'fs_asset_intangible', 'fs_asset_intangible_amort', 'fs_asset_goodwill', 'fs_asset_other_noncurrent',
+  'fs_asset_dta',
 ]);
 /** FS line IDs that route to BS current liabilities. */
 const BS_CURRENT_LIAB_FS_LINES = new Set([
   'fs_liability_current', 'fs_liability_ap', 'fs_liability_accrued', 'fs_liability_current_debt', 'fs_liability_other_current',
+  'fs_liability_deferred_rev_current',
 ]);
 /** FS line IDs that route to BS non-current liabilities. */
 const BS_NONCURRENT_LIAB_FS_LINES = new Set([
   'fs_liability_noncurrent', 'fs_liability_lt_debt', 'fs_liability_deferred_tax', 'fs_liability_other_noncurrent',
+  'fs_liability_deferred_rev_noncurrent',
 ]);
 /** FS line IDs for equity sub-lines */
 const BS_EQUITY_FS_LINES = new Set([
-  'fs_equity', 'fs_equity_common', 'fs_equity_retained', 'fs_equity_other',
+  'fs_equity', 'fs_equity_common', 'fs_equity_retained', 'fs_equity_treasury', 'fs_equity_other',
+  'fs_equity_apic', 'fs_equity_dividends', 'fs_equity_aoci',
 ]);
 
 /** Bucket entries by fsLineId (data-driven) with accountType fallback. Supports OCI and Discontinued Ops. */
@@ -251,13 +285,13 @@ export function buildBalanceSheet(
 }
 
 /** FS line IDs for COGS */
-const COGS_FS_LINES = new Set(['fs_cogs']);
+const COGS_FS_LINES = new Set(['fs_cogs', 'fs_cogs_materials', 'fs_cogs_labor', 'fs_cogs_overhead']);
 /** FS line IDs for Operating Expenses */
 const OPEX_FS_LINES = new Set(['fs_opex', 'fs_opex_sga', 'fs_opex_rd', 'fs_opex_da', 'fs_opex_other']);
 /** FS line IDs for Other Income / (Expense) */
-const OTHER_INCOME_FS_LINES = new Set(['fs_other_income', 'fs_interest_income', 'fs_interest_expense', 'fs_other_other']);
+const OTHER_INCOME_FS_LINES = new Set(['fs_other_income', 'fs_interest_income', 'fs_interest_expense', 'fs_other_other', 'fs_other_gain_loss']);
 /** FS line IDs for Tax */
-const TAX_FS_LINES = new Set(['fs_tax_expense']);
+const TAX_FS_LINES = new Set(['fs_tax_expense', 'fs_tax_current', 'fs_tax_deferred']);
 
 /** Bucket PL by taxonomy with PE-standard categories. Supports discontinued operations (ASC 205-20). */
 function bucketPlByFsLine(entries: TrialBalanceEntry[]): {
@@ -280,7 +314,7 @@ function bucketPlByFsLine(entries: TrialBalanceEntry[]): {
   const exp = (t?: string) => t != null && String(t).toUpperCase() === 'EXPENSE';
   for (const e of entries) {
     if (e.fsLineId && DISCONTINUED_FS_LINES.has(e.fsLineId)) discontinued.push(e);
-    else if (e.fsLineId === 'fs_revenue') revenue.push(e);
+    else if (e.fsLineId === 'fs_revenue' || e.fsLineId === 'fs_revenue_contra' || e.fsLineId === 'fs_revenue_product' || e.fsLineId === 'fs_revenue_service' || e.fsLineId === 'fs_revenue_other') revenue.push(e);
     else if (e.fsLineId && COGS_FS_LINES.has(e.fsLineId)) cogs.push(e);
     else if (e.fsLineId && OPEX_FS_LINES.has(e.fsLineId)) operatingExpenses.push(e);
     else if (e.fsLineId && OTHER_INCOME_FS_LINES.has(e.fsLineId)) otherIncomeExpense.push(e);

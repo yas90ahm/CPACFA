@@ -62,11 +62,11 @@ export async function checkReportabilityThresholds(
   let totalAssets = 0;
 
   for (const f of financials) {
-    totalRevenue += f.revenue ?? 0;
-    const pl = f.profitLoss ?? 0;
+    totalRevenue += Number(f.revenue ?? 0);
+    const pl = Number(f.profitLoss ?? 0);
     if (pl >= 0) totalProfit += pl;
     else totalLoss += Math.abs(pl);
-    totalAssets += f.assets ?? 0;
+    totalAssets += Number(f.assets ?? 0);
   }
 
   const profitLossBenchmark = Math.max(totalProfit, totalLoss);
@@ -75,9 +75,9 @@ export async function checkReportabilityThresholds(
 
   for (const seg of segments) {
     const fin = finMap.get(seg.id);
-    const segRevenue = fin?.revenue ?? 0;
-    const segPL = fin?.profitLoss ?? 0;
-    const segAssets = fin?.assets ?? 0;
+    const segRevenue = Number(fin?.revenue ?? 0);
+    const segPL = Number(fin?.profitLoss ?? 0);
+    const segAssets = Number(fin?.assets ?? 0);
 
     const revenuePercent = totalRevenue > 0 ? round2((segRevenue / totalRevenue) * 100) : 0;
     const profitLossPercent = profitLossBenchmark > 0 ? round2((Math.abs(segPL) / profitLossBenchmark) * 100) : 0;
@@ -89,7 +89,7 @@ export async function checkReportabilityThresholds(
     if (assetsPercent >= 10) thresholdsMet.push('assets');
 
     const isReportable = thresholdsMet.length > 0;
-    if (isReportable) reportableRevenue += segRevenue;
+    if (isReportable) reportableRevenue += Number(segRevenue);
 
     results.push({
       segmentId: seg.id,

@@ -13,6 +13,12 @@ export interface FsTaxonomyLine {
   statement: StatementType;
   parentId?: string;
   normalBalance: NormalBalance;
+  isSubtotal?: boolean;
+  isContra?: boolean;
+  isHidden?: boolean;
+  displayOrder?: number;
+  xbrlElement?: string;
+  xbrlLabel?: string;
   createdAt?: string;
 }
 
@@ -28,6 +34,8 @@ export interface CoaMappingRule {
   mappedFsLineId: string;
   confidenceDefault: number;
   cashFlowClass?: CashFlowClass | null;
+  /** PE reporting hierarchy line this account maps to (GAP I1). */
+  peLineId?: string;
   createdAt: string;
 }
 

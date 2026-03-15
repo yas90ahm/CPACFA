@@ -10,13 +10,13 @@ import { getUserByEmail, getUserByEmailOnly } from '../db/repositories/user_repo
 import { verifyPassword, signToken } from '../auth/index.js';
 import { hashPassword } from '../auth/index.js';
 import { send500 } from '../lib/errorHandler.js';
-import { validateBody } from '../middleware/validateRequest.js';
+import { validateBody } from '../middleware/validationMiddleware.js';
 import { loginSchema, registerSchema, allowedRolesSchema } from '../schemas/authSchemas.js';
 
 const router = Router();
 
-/** Allowed roles for registration (CloseRole + accountant + portfolio roles). */
-const ALLOWED_ROLES = ['accountant', 'preparer', 'reviewer', 'approver', 'admin', 'operating_partner'] as const;
+/** Allowed roles for self-registration. Privileged roles (admin, approver, operating_partner) must be assigned by an admin. */
+const ALLOWED_ROLES = ['accountant', 'preparer', 'reviewer'] as const;
 
 /** Register: 50 requests per 15 minutes per IP (generous for automated tests). */
 const registerLimiter = rateLimit({
@@ -27,10 +27,10 @@ const registerLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-/** Login: 100 requests per 15 minutes per IP (generous for automated tests). */
+/** Login: 10 requests per 15 minutes per IP. */
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 10,
   message: { error: 'Too many login attempts', retryAfter: '15 minutes' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -42,6 +42,11 @@ router.post('/login', loginLimiter, validateBody(loginSchema), async (req: Reque
       return res.status(503).json({ error: 'Auth requires DATABASE_URL (Postgres)' });
     }
     const { tenantId, email, password } = req.body;
+    // In production/staging, tenantId is mandatory to prevent cross-tenant email lookup
+    const mode = (await import('../lib/runtime_mode.js')).getMode();
+    if (!tenantId && (mode === 'prod' || mode === 'staging')) {
+      return res.status(400).json({ error: 'tenantId is required' });
+    }
     const user = tenantId
       ? await getUserByEmail(tenantId, email)
       : await getUserByEmailOnly(email);

@@ -60,6 +60,7 @@ import {
   generateCumulativeStatements,
   getCumulativePeriods,
 } from '../../services/cumulative_statement_service.js';
+import { getEntitySettings } from '../../services/entity_settings_service.js';
 import { getComparativeStatementLines } from '../../services/comparative_statements_service.js';
 
 const router = Router();
@@ -229,8 +230,10 @@ router.get('/sessions/:id', async (req: Request, res: Response) => {
     }
     const pkgs = await listStatementPackages(pool, tenantId, id, 1);
     const latestPackage = pkgs[0];
+    const entitySettings = await getEntitySettings(pool, tenantId, session.entityId);
     const payload: Record<string, unknown> = { ...session };
     payload.periodLabel = derivePeriodLabel(session.periodEnd ?? '');
+    payload.entityName = entitySettings.entityName || session.entityId;
     payload.statementsGeneratedAt = latestPackage?.generatedAt ?? null;
     payload.statementsStale = !!session.statementsStaleSince;
     res.json(payload);

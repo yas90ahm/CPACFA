@@ -1,0 +1,9 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/sabit-staging-v1/sabit-backend'
+      - '.'
+images:
+  - 'gcr.io/sabit-staging-v1/sabit-backend'
