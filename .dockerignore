@@ -2,48 +2,10 @@ node_modules
 .git
 .env
 .env.*
-!.env.example
-.gitignore
-
-# Build output (rebuilt in container)
-dist
-build
-
-# Non-production directories
-_quarantine
-tests
-coverage
-.nyc_output
-examples
-experimental
-frontend
-connectors
-mcp_server
-uat
-analysis
-docs
-data
-
-# IDE / OS
-.vscode
-.idea
-.DS_Store
-Thumbs.db
-
-# Documentation (not needed in image)
 *.md
-!README.md
-
-# Python artifacts
-__pycache__
-*.pyc
-*.pyo
-.pytest_cache
-.venv
-venv
-
-# Misc
+frontend/
+GAAP Taxonomy/
 *.log
-*.swp
-.claude
+coverage/
+.next/
 tmp_login.json

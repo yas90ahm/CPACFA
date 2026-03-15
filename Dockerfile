@@ -30,9 +30,10 @@ COPY --from=builder /app/package.json ./
 # Compiled application
 COPY --from=builder /app/dist ./dist
 
-# Runtime data: migrations, financial rules config
+# Runtime data: migrations, financial rules config, XBRL taxonomy
 COPY migrations/ ./migrations/
 COPY shared/ ./shared/
+COPY data/ ./data/
 
 # Docker entrypoint (runs migrations then starts app)
 COPY scripts/docker-entrypoint.sh ./docker-entrypoint.sh
@@ -40,7 +41,7 @@ RUN sed -i 's/\r$//' docker-entrypoint.sh && chmod +x docker-entrypoint.sh
 
 # Writable directories for evidence storage and local storage
 RUN mkdir -p /app/data/evidence /app/storage && \
-    chown -R appuser:appgroup /app/data /app/storage
+    chown -R appuser:appgroup /app/data/evidence /app/storage
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT:-3000}/health || exit 1
