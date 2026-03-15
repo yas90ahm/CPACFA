@@ -6,20 +6,44 @@
 -- Enable trigram extension for text similarity search
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
-CREATE TABLE IF NOT EXISTS xbrl_taxonomy_elements (
-  id TEXT PRIMARY KEY,
-  element_name TEXT NOT NULL,
-  label TEXT NOT NULL,
-  documentation TEXT,
-  balance_type TEXT CHECK (balance_type IN ('debit', 'credit', 'na')),
-  period_type TEXT CHECK (period_type IN ('instant', 'duration', 'na')),
-  abstract BOOLEAN DEFAULT false,
-  statement TEXT,
-  deprecated BOOLEAN DEFAULT false,
-  taxonomy_version TEXT DEFAULT '2025',
-  embedding vector(384),
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
+-- pgvector-dependent table — skip gracefully if extension not available
+DO $$
+BEGIN
+  -- Test if vector type is available
+  PERFORM 1 FROM pg_type WHERE typname = 'vector';
+  IF NOT FOUND THEN
+    RAISE NOTICE 'pgvector not available — creating xbrl_taxonomy_elements without embedding column';
+    CREATE TABLE IF NOT EXISTS xbrl_taxonomy_elements (
+      id TEXT PRIMARY KEY,
+      element_name TEXT NOT NULL,
+      label TEXT NOT NULL,
+      documentation TEXT,
+      balance_type TEXT CHECK (balance_type IN ('debit', 'credit', 'na')),
+      period_type TEXT CHECK (period_type IN ('instant', 'duration', 'na')),
+      abstract BOOLEAN DEFAULT false,
+      statement TEXT,
+      deprecated BOOLEAN DEFAULT false,
+      taxonomy_version TEXT DEFAULT '2025',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  ELSE
+    CREATE TABLE IF NOT EXISTS xbrl_taxonomy_elements (
+      id TEXT PRIMARY KEY,
+      element_name TEXT NOT NULL,
+      label TEXT NOT NULL,
+      documentation TEXT,
+      balance_type TEXT CHECK (balance_type IN ('debit', 'credit', 'na')),
+      period_type TEXT CHECK (period_type IN ('instant', 'duration', 'na')),
+      abstract BOOLEAN DEFAULT false,
+      statement TEXT,
+      deprecated BOOLEAN DEFAULT false,
+      taxonomy_version TEXT DEFAULT '2025',
+      embedding vector(384),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  END IF;
+END
+$$;
 
 CREATE INDEX IF NOT EXISTS idx_xbrl_label_trgm ON xbrl_taxonomy_elements USING gin (label gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_xbrl_element_trgm ON xbrl_taxonomy_elements USING gin (element_name gin_trgm_ops);

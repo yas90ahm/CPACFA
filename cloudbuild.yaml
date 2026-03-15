@@ -61,8 +61,8 @@ steps:
       - '3'
       - '--port'
       - '3000'
-      - '--set-env-vars'
-      - 'NODE_ENV=staging'
+      - '--update-env-vars'
+      - 'NODE_ENV=staging,APP_MODE=demo,TRUST_PROXY=1,CORS_ORIGINS=https://sabit-frontend-577604067574.us-central1.run.app'
     id: 'deploy-backend'
     waitFor: ['push-backend']
 
