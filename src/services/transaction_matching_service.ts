@@ -255,6 +255,95 @@ export function findManyToOneMatches(
 }
 
 /**
+ * Find 1:N matches: one bank transaction that splits into multiple GL entries.
+ * Common for consolidated payments or split receipts.
+ */
+export function findOneToManyMatches(
+  bankTxns: BankTransaction[],
+  glTxns: GLTransaction[],
+  config: MatchingConfig = DEFAULT_CONFIG
+): MatchGroup[] {
+  if (!config.enableMultiMatch) return [];
+
+  const groups: MatchGroup[] = [];
+  const unmatchedBank = bankTxns.filter((t) => t.matchStatus === 'unmatched');
+  const unmatchedGL = glTxns.filter((t) => t.matchStatus === 'unmatched');
+
+  for (const bank of unmatchedBank) {
+    const bankAmount = Math.abs(Number(bank.amount));
+    if (bankAmount === 0) continue;
+
+    const candidates = unmatchedGL.filter((g) =>
+      daysBetween(bank.transactionDate, g.entryDate) <= config.dateWindowDays
+    );
+
+    // Try 2-combination GL entries that sum to the bank amount
+    for (let i = 0; i < candidates.length; i++) {
+      for (let j = i + 1; j < candidates.length; j++) {
+        const sum = Math.abs(Number(candidates[i].netAmount)) + Math.abs(Number(candidates[j].netAmount));
+        const diff = Math.abs(sum - bankAmount);
+        if (diff <= config.amountTolerance) {
+          const avgDateDist = (
+            daysBetween(bank.transactionDate, candidates[i].entryDate) +
+            daysBetween(bank.transactionDate, candidates[j].entryDate)
+          ) / 2;
+          const confidence = computeConfidence(diff, avgDateDist, 0.5, config) * 0.9;
+
+          if (confidence >= config.minConfidence) {
+            groups.push({
+              id: randomUUID(),
+              bankTransactionIds: [bank.id],
+              glTransactionIds: [candidates[i].id, candidates[j].id],
+              matchType: 'one_to_many',
+              confidence,
+              matchMethod: 'exact_amount',
+              totalBankAmount: bankAmount,
+              totalGLAmount: sum,
+              amountDifference: diff,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  groups.sort((a, b) => b.confidence - a.confidence);
+  return groups;
+}
+
+/**
+ * Extract GL transactions from the general ledger for matching purposes.
+ * Populates tenant_gl_transactions from GL entries for a given period/account.
+ */
+export async function extractGLTransactions(
+  pool: Pool,
+  tenantId: string,
+  periodId: string,
+  accountCode?: string
+): Promise<number> {
+  // Get GL entries for the period and insert as denormalized transactions
+  let accountFilter = '';
+  const params: unknown[] = [tenantId, periodId];
+  if (accountCode) {
+    params.push(accountCode);
+    accountFilter = ` AND gl.account_code = $${params.length}`;
+  }
+
+  const r = await pool.query(
+    `INSERT INTO tenant_gl_transactions (tenant_id, period_id, account_code, entry_date, description, reference, debit, credit, gl_entry_id, gl_line_number)
+     SELECT $1, $2, gl.account_code, gl.entry_date, COALESCE(gl.description, ''), gl.reference,
+            COALESCE(gl.debit, 0), COALESCE(gl.credit, 0), gl.entry_id, gl.line_number
+     FROM tenant_general_ledger gl
+     WHERE gl.tenant_id = $1 AND gl.period_label = (SELECT LEFT(period_end, 7) FROM close_sessions WHERE id = $2 AND tenant_id = $1)
+     ${accountFilter}
+     ON CONFLICT DO NOTHING`,
+    params
+  );
+
+  return r.rowCount ?? 0;
+}
+
+/**
  * Run all matching strategies and return deduplicated proposed match groups.
  * Greedy algorithm: highest confidence matches first, no double-matching.
  */
@@ -265,6 +354,7 @@ export function runMatchingEngine(
 ): MatchGroup[] {
   const oneToOne = findOneToOneMatches(bankTxns, glTxns, config);
   const manyToOne = findManyToOneMatches(bankTxns, glTxns, config);
+  const oneToMany = findOneToManyMatches(bankTxns, glTxns, config);
 
   const usedBankIds = new Set<string>();
   const usedGLIds = new Set<string>();
@@ -289,6 +379,17 @@ export function runMatchingEngine(
       totalGLAmount: Math.abs(candidate.glAmount),
       amountDifference: candidate.amountDifference,
     });
+  }
+
+  // Process 1:N matches
+  for (const group of oneToMany) {
+    const bankConflict = group.bankTransactionIds.some((id) => usedBankIds.has(id));
+    const glConflict = group.glTransactionIds.some((id) => usedGLIds.has(id));
+    if (bankConflict || glConflict) continue;
+
+    for (const id of group.bankTransactionIds) usedBankIds.add(id);
+    for (const id of group.glTransactionIds) usedGLIds.add(id);
+    finalGroups.push(group);
   }
 
   // Process N:1 matches

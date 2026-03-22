@@ -10,6 +10,7 @@
 import { financialEvents, type FinancialEventMap, type FinancialEventType } from './financial_event_emitter.js';
 import { enqueueJob } from '../services/job_service.js';
 import { log } from '../lib/logger.js';
+import type { GateCheckRequestedData } from './financial_event_emitter.js';
 
 /**
  * Enqueue a resolution agent job for a financial event.
@@ -65,6 +66,33 @@ function handleGLHealthAnomaly(packet: FinancialEventMap['GL_HEALTH_ANOMALY']): 
   void enqueueResolutionJob('GL_HEALTH_ANOMALY', packet);
 }
 
+/** Enqueue gate check job when GATE_CHECK_REQUESTED fires. */
+async function handleGateCheckRequested(packet: FinancialEventMap['GATE_CHECK_REQUESTED']): Promise<void> {
+  const data = (packet as unknown as { data: GateCheckRequestedData }).data;
+  const closeSessionId = data?.closeSessionId ?? packet.metadata?.closeSessionId;
+  const tenantId = packet.metadata?.tenantId;
+  if (!closeSessionId || !tenantId) return;
+  try {
+    const idempotencyKey = `gate-check-${closeSessionId}-${packet.emittedAt}`;
+    await enqueueJob({
+      type: 'gate_check' as unknown as import('../types/job.js').JobType,
+      payload: {
+        tenantId,
+        closeSessionId,
+        triggeredBy: data?.triggeredBy ?? 'event',
+        trigger: data?.trigger ?? 'unknown',
+      },
+      idempotencyKey,
+      maxAttempts: 1,
+    });
+    log('info', `Queued gate_check job for session ${closeSessionId}`, { tenantId, trigger: data?.trigger });
+  } catch (err) {
+    log('error', `Failed to enqueue gate_check job`, {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 let registered = false;
 
 /**
@@ -80,6 +108,7 @@ export function registerEventHandlers(): void {
   financialEvents.on('JE_POLICY_VIOLATION', handleJEPolicyViolation);
   financialEvents.on('SUSPICIOUS_PLUG', handleSuspiciousPlug);
   financialEvents.on('GL_HEALTH_ANOMALY', handleGLHealthAnomaly);
+  financialEvents.on('GATE_CHECK_REQUESTED', handleGateCheckRequested);
 
   log('info', 'Financial event handlers registered');
 }
@@ -93,5 +122,6 @@ export function unregisterEventHandlers(): void {
   financialEvents.off('JE_POLICY_VIOLATION', handleJEPolicyViolation);
   financialEvents.off('SUSPICIOUS_PLUG', handleSuspiciousPlug);
   financialEvents.off('GL_HEALTH_ANOMALY', handleGLHealthAnomaly);
+  financialEvents.off('GATE_CHECK_REQUESTED', handleGateCheckRequested);
   registered = false;
 }

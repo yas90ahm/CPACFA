@@ -409,6 +409,13 @@ export async function postJE(pool: Pool, tenantId: string, id: string, aiPool?: 
         details: { aje_id: id },
       });
     }
+    // Emit gate check event for potential auto-advance
+    financialEvents.emit('GATE_CHECK_REQUESTED', buildEventPacket('GATE_CHECK_REQUESTED', {
+      errorCode: 'GATE_CHECK',
+      conflictingData: {},
+      metadata: { tenantId, closeSessionId: je.closeSessionId },
+      data: { closeSessionId: je.closeSessionId, trigger: 'je_posted', triggeredBy: je.approvedBy ?? 'system' },
+    }));
   }
   return { journalEntry: updated, aiWarnings, shadowWarnings: shadowWarnings.length > 0 ? shadowWarnings : undefined };
 }

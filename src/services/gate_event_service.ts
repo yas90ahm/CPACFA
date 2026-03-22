@@ -18,6 +18,7 @@ import { getSession, advanceSession } from './close_session_service.js';
 import { recordMaterialEvent } from './audit_service.js';
 import { financialEvents } from '../events/financial_event_emitter.js';
 import { log } from '../lib/logger.js';
+import { notifyAutoAdvance } from './close_notification_service.js';
 
 export interface GateCheckResult {
   sessionId: string;
@@ -87,6 +88,29 @@ export async function checkGatesAndAutoAdvance(
     // Gate snapshot table may not exist yet; non-fatal
   }
 
+  // Auto-complete checklist items that correspond to passing gates
+  try {
+    const { getChecklistItems, completeChecklistItem } = await import('./close_checklist_readiness_service.js');
+    const checklistItems = await getChecklistItems(pool, tenantId, sessionId);
+    const gateToChecklistMap: Record<string, string> = {
+      'cash_rec_complete': 'CASH_REC',
+      'no_blocking_issues': 'NO_CRITICAL_ISSUES',
+      'material_jes_approved': 'MATERIAL_JES_APPROVED',
+      'tb_balanced': 'INTEGRITY_CHECKS',
+    };
+    for (const gate of gatesResult.gates) {
+      if (!gate.passing) continue;
+      const checklistCode = gateToChecklistMap[gate.id];
+      if (!checklistCode) continue;
+      const item = checklistItems.find((i) => i.code === checklistCode && i.status !== 'completed' && i.status !== 'skipped');
+      if (item) {
+        await completeChecklistItem(pool, tenantId, item.id, 'system:auto-complete', `Auto-completed: ${gate.name} gate passed`);
+      }
+    }
+  } catch {
+    // Non-fatal: checklist auto-completion failed
+  }
+
   let autoAdvanced = false;
   let newStatus: string | null = null;
 
@@ -134,6 +158,13 @@ export async function checkGatesAndAutoAdvance(
             triggeredBy,
             gatesPassing: gatesResult.gatesPassing,
           });
+
+          // Notify team of auto-advance
+          try {
+            await notifyAutoAdvance(pool, tenantId, sessionId, newStatus, triggeredBy);
+          } catch {
+            // Non-fatal: notification delivery failure
+          }
         }
       } catch (err) {
         log('warn', 'Auto-advance failed', {

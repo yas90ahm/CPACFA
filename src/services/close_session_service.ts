@@ -36,6 +36,7 @@ import { runCrossStatementValidationForCertification } from './cross_statement_v
 import { buildCertificationArtifact, gatherAiMetadata } from './certification_artifact_service.js';
 import * as certArtifactRepo from '../db/repositories/certification_artifact_repository.js';
 import { verifyChain } from '../db/repositories/audit_ledger_repository.js';
+import { getReadinessGates } from './session_readiness_gates_service.js';
 import { sumRound2 } from '../utils/decimal.js';
 import type { LedgerSnapshotPayload } from '../types/ledger_snapshot.js';
 import { getLedgerSnapshotById } from '../db/repositories/ledger_snapshot_repository.js';
@@ -426,6 +427,23 @@ export async function certifyCloseSession(
       } catch (_) {
         /* non-fatal: AI metadata gathering failed */
       }
+      // Capture gate snapshot at certification moment
+      let gateSnapshot;
+      try {
+        const gatesResult = await getReadinessGates(pool, input.tenantId, session);
+        gateSnapshot = {
+          gatesPassing: gatesResult.gatesPassing,
+          gatesTotal: gatesResult.gatesTotal,
+          canAdvance: gatesResult.canAdvance,
+          gateDetails: gatesResult.gates.map((g) => ({
+            id: g.id, name: g.name, passing: g.passing, detail: g.detail, category: g.category,
+          })),
+          checkedAt: certifiedAt,
+        };
+      } catch {
+        // Non-fatal: gate snapshot capture failed
+      }
+
       const { artifact, artifactHash, signatureB64, publicKeyB64, alg } = buildCertificationArtifact({
         tenantId: input.tenantId,
         closeSessionId: input.closeSessionId,
@@ -444,6 +462,7 @@ export async function certifyCloseSession(
           message: c.message,
         })),
         aiMetadata,
+        gateSnapshot,
       });
       const inserted = await certArtifactRepo.insertCertificationArtifact(client, {
         tenantId: input.tenantId,
