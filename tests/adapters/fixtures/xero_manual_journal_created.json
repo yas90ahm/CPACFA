@@ -1,0 +1,28 @@
+{
+  "ManualJournals": [
+    {
+      "ManualJournalID": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "Date": "/Date(1711843200000+0000)/",
+      "Status": "POSTED",
+      "Narration": "Monthly depreciation",
+      "JournalLines": [
+        {
+          "AccountCode": "6000",
+          "AccountName": "Depreciation Expense",
+          "Description": "Monthly depreciation",
+          "LineAmount": 5000.00,
+          "TaxType": "",
+          "TrackingCategories": []
+        },
+        {
+          "AccountCode": "1500",
+          "AccountName": "Accumulated Depreciation",
+          "Description": "Monthly depreciation",
+          "LineAmount": -5000.00,
+          "TaxType": "",
+          "TrackingCategories": []
+        }
+      ]
+    }
+  ]
+}

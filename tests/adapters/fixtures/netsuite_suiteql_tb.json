@@ -1,0 +1,15 @@
+{
+  "items": [
+    { "account_code": "1000", "account_name": "Cash and Cash Equivalents", "debit": 320000.00, "credit": 0 },
+    { "account_code": "1200", "account_name": "Accounts Receivable", "debit": 145000.00, "credit": 0 },
+    { "account_code": "2000", "account_name": "Accounts Payable", "debit": 0, "credit": 98000.00 },
+    { "account_code": "3000", "account_name": "Retained Earnings", "debit": 0, "credit": 250000.00 },
+    { "account_code": "4000", "account_name": "Revenue", "debit": 0, "credit": 500000.00 },
+    { "account_code": "5000", "account_name": "Cost of Goods Sold", "debit": 275000.00, "credit": 0 },
+    { "account_code": "6000", "account_name": "Operating Expenses", "debit": 108000.00, "credit": 0 }
+  ],
+  "count": 7,
+  "hasMore": false,
+  "offset": 0,
+  "totalResults": 7
+}

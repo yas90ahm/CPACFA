@@ -1,0 +1,48 @@
+{
+  "items": [
+    {
+      "transaction_id": "10001",
+      "trandate": "2024-03-05",
+      "description": "Vendor payment - Office Supplies",
+      "account_code": "6100",
+      "account_name": "Office Expenses",
+      "debit": 2500.00,
+      "credit": null,
+      "reference": "JE-2024-001"
+    },
+    {
+      "transaction_id": "10001",
+      "trandate": "2024-03-05",
+      "description": "Vendor payment - Office Supplies",
+      "account_code": "1000",
+      "account_name": "Cash and Cash Equivalents",
+      "debit": null,
+      "credit": 2500.00,
+      "reference": "JE-2024-001"
+    },
+    {
+      "transaction_id": "10025",
+      "trandate": "2024-03-20",
+      "description": "Customer invoice - Project Alpha",
+      "account_code": "1200",
+      "account_name": "Accounts Receivable",
+      "debit": 75000.00,
+      "credit": null,
+      "reference": "INV-2024-042"
+    },
+    {
+      "transaction_id": "10025",
+      "trandate": "2024-03-20",
+      "description": "Customer invoice - Project Alpha",
+      "account_code": "4000",
+      "account_name": "Revenue",
+      "debit": null,
+      "credit": 75000.00,
+      "reference": "INV-2024-042"
+    }
+  ],
+  "count": 4,
+  "hasMore": false,
+  "offset": 0,
+  "totalResults": 4
+}

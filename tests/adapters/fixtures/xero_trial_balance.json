@@ -1,0 +1,77 @@
+{
+  "Reports": [
+    {
+      "ReportID": "TrialBalance",
+      "ReportName": "Trial Balance",
+      "ReportDate": "31 March 2024",
+      "Rows": [
+        {
+          "RowType": "Header",
+          "Cells": [
+            { "Value": "Account" },
+            { "Value": "Debit" },
+            { "Value": "Credit" }
+          ]
+        },
+        {
+          "RowType": "Section",
+          "Title": "Revenue",
+          "Rows": [
+            {
+              "RowType": "Row",
+              "Cells": [
+                { "Value": "Sales Revenue", "Attributes": [{ "Value": "4000", "Id": "AccountID" }] },
+                { "Value": "" },
+                { "Value": "150,000.00" }
+              ]
+            },
+            {
+              "RowType": "Row",
+              "Cells": [
+                { "Value": "Service Revenue", "Attributes": [{ "Value": "4100", "Id": "AccountID" }] },
+                { "Value": "" },
+                { "Value": "$75,000.00" }
+              ]
+            }
+          ]
+        },
+        {
+          "RowType": "Section",
+          "Title": "Assets",
+          "Rows": [
+            {
+              "RowType": "Row",
+              "Cells": [
+                { "Value": "Cash at Bank", "Attributes": [{ "Value": "1000", "Id": "AccountID" }] },
+                { "Value": "200,000.00" },
+                { "Value": "" }
+              ]
+            },
+            {
+              "RowType": "Row",
+              "Cells": [
+                { "Value": "Accounts Receivable", "Attributes": [{ "Value": "1200", "Id": "AccountID" }] },
+                { "Value": "85,000.00" },
+                { "Value": "" }
+              ]
+            }
+          ]
+        },
+        {
+          "RowType": "Section",
+          "Title": "Liabilities",
+          "Rows": [
+            {
+              "RowType": "Row",
+              "Cells": [
+                { "Value": "Accounts Payable", "Attributes": [{ "Value": "2000", "Id": "AccountID" }] },
+                { "Value": "" },
+                { "Value": "60,000.00" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
