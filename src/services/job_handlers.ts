@@ -12,6 +12,7 @@ import { runResolutionAgent } from '../ai/resolution_agent.js';
 import type { FinancialEventPacket } from '../events/financial_event_emitter.js';
 import { log } from '../lib/logger.js';
 import { runInBoundaryScope } from '../lib/ai_boundary.js';
+import { handleGateCheckJob } from './gate_event_service.js';
 
 // QUARANTINED — Automated ingestion pipeline not in MVP architecture
 // /** Run ingestion pipeline for a tenant (fetch email/drive, run ingestion agent, dedup). */
@@ -81,4 +82,5 @@ export const JOB_HANDLERS: Record<
   agentic_cleanup: handleAgenticCleanup,
   statement_generation: handleStatementGeneration,
   resolution_agent: handleResolutionAgent,
+  gate_check: handleGateCheckJob,
 };

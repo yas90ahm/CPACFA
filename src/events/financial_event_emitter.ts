@@ -13,7 +13,8 @@ export type FinancialEventType =
   | 'RECON_OVER_TOLERANCE'
   | 'JE_POLICY_VIOLATION'
   | 'SUSPICIOUS_PLUG'
-  | 'GL_HEALTH_ANOMALY';
+  | 'GL_HEALTH_ANOMALY'
+  | 'GATE_CHECK_REQUESTED';
 
 // --- Event Packet ---
 
@@ -80,6 +81,12 @@ export interface GLHealthAnomalyData {
   criticalFindings: Array<{ checkName: string; severity: string; findingCount: number; details?: string }>;
 }
 
+export interface GateCheckRequestedData {
+  closeSessionId: string;
+  trigger: string;
+  triggeredBy: string;
+}
+
 // --- Typed event map ---
 
 export interface FinancialEventMap {
@@ -88,6 +95,7 @@ export interface FinancialEventMap {
   JE_POLICY_VIOLATION: FinancialEventPacket<'JE_POLICY_VIOLATION'> & { data: JEPolicyViolationData };
   SUSPICIOUS_PLUG: FinancialEventPacket<'SUSPICIOUS_PLUG'> & { data: SuspiciousPlugData };
   GL_HEALTH_ANOMALY: FinancialEventPacket<'GL_HEALTH_ANOMALY'> & { data: GLHealthAnomalyData };
+  GATE_CHECK_REQUESTED: FinancialEventPacket<'GATE_CHECK_REQUESTED'> & { data: GateCheckRequestedData };
 }
 
 // --- Typed emitter ---

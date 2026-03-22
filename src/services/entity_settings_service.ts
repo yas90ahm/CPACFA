@@ -20,6 +20,10 @@ export interface EntitySettings {
   templateAutoApplyEnabled: boolean;
   /** Functional (reporting) currency — defaults to USD */
   functionalCurrency: string;
+  /** When abs(unexplained_variance) < this threshold, auto-waive as immaterial (0 = disabled) */
+  reconImmaterialWaiverThreshold: string;
+  /** When all gates pass, auto-advance session to next state */
+  autoAdvanceEnabled: boolean;
 }
 
 interface EntitySettingsRow {
@@ -36,6 +40,8 @@ interface EntitySettingsRow {
   auto_apply_after_n_periods: number | null;
   template_auto_apply_enabled: boolean | null;
   functional_currency: string | null;
+  recon_immaterial_waiver_threshold: string | null;
+  auto_advance_enabled: boolean | null;
 }
 
 function rowToSettings(row: EntitySettingsRow | null, entityId: string): EntitySettings {
@@ -54,6 +60,8 @@ function rowToSettings(row: EntitySettingsRow | null, entityId: string): EntityS
       autoApplyAfterNPeriods: 3,
       templateAutoApplyEnabled: false,
       functionalCurrency: 'USD',
+      reconImmaterialWaiverThreshold: '0.00',
+      autoAdvanceEnabled: false,
     };
   }
   return {
@@ -70,6 +78,8 @@ function rowToSettings(row: EntitySettingsRow | null, entityId: string): EntityS
     autoApplyAfterNPeriods: row.auto_apply_after_n_periods ?? 3,
     templateAutoApplyEnabled: row.template_auto_apply_enabled ?? false,
     functionalCurrency: row.functional_currency ?? 'USD',
+    reconImmaterialWaiverThreshold: String(row.recon_immaterial_waiver_threshold ?? '0.00'),
+    autoAdvanceEnabled: row.auto_advance_enabled ?? false,
   };
 }
 
@@ -82,7 +92,8 @@ export async function getEntitySettings(
     `SELECT entity_id, entity_name, fiscal_year_end_month, fiscal_year_end_day, base_currency, auto_lock_days,
        variance_materiality_dollar, variance_materiality_percent,
        mapping_confidence_threshold, mapping_auto_accept_enabled,
-       auto_apply_after_n_periods, template_auto_apply_enabled, functional_currency
+       auto_apply_after_n_periods, template_auto_apply_enabled, functional_currency,
+       recon_immaterial_waiver_threshold, auto_advance_enabled
      FROM tenant_entity_settings WHERE tenant_id = $1 AND entity_id = $2`,
     [tenantId, entityId]
   );
@@ -102,6 +113,8 @@ export interface UpsertEntitySettingsInput {
   autoApplyAfterNPeriods?: number;
   templateAutoApplyEnabled?: boolean;
   functionalCurrency?: string;
+  reconImmaterialWaiverThreshold?: string | number;
+  autoAdvanceEnabled?: boolean;
 }
 
 export async function upsertEntitySettings(
@@ -122,14 +135,17 @@ export async function upsertEntitySettings(
   const autoApplyAfterNPeriods = input.autoApplyAfterNPeriods ?? 3;
   const templateAutoApplyEnabled = input.templateAutoApplyEnabled ?? false;
   const functionalCurrency = input.functionalCurrency ?? 'USD';
+  const reconImmaterialWaiverThreshold = input.reconImmaterialWaiverThreshold != null ? String(input.reconImmaterialWaiverThreshold) : '0.00';
+  const autoAdvanceEnabled = input.autoAdvanceEnabled ?? false;
 
   await pool.query(
     `INSERT INTO tenant_entity_settings (
        tenant_id, entity_id, entity_name, fiscal_year_end_month, fiscal_year_end_day, base_currency, auto_lock_days,
        variance_materiality_dollar, variance_materiality_percent,
        mapping_confidence_threshold, mapping_auto_accept_enabled,
-       auto_apply_after_n_periods, template_auto_apply_enabled, functional_currency, updated_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9::numeric, $10, $11, $12, $13, $14, NOW())
+       auto_apply_after_n_periods, template_auto_apply_enabled, functional_currency,
+       recon_immaterial_waiver_threshold, auto_advance_enabled, updated_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9::numeric, $10, $11, $12, $13, $14, $15::numeric, $16, NOW())
      ON CONFLICT (tenant_id, entity_id) DO UPDATE SET
        entity_name = EXCLUDED.entity_name, fiscal_year_end_month = EXCLUDED.fiscal_year_end_month,
        fiscal_year_end_day = EXCLUDED.fiscal_year_end_day,
@@ -141,13 +157,15 @@ export async function upsertEntitySettings(
        auto_apply_after_n_periods = EXCLUDED.auto_apply_after_n_periods,
        template_auto_apply_enabled = EXCLUDED.template_auto_apply_enabled,
        functional_currency = EXCLUDED.functional_currency,
+       recon_immaterial_waiver_threshold = EXCLUDED.recon_immaterial_waiver_threshold,
+       auto_advance_enabled = EXCLUDED.auto_advance_enabled,
        updated_at = NOW()`,
     [
       tenantId, entityId, entityName, fiscalYearEndMonth, fiscalYearEndDay, baseCurrency, autoLockDays,
       varianceMaterialityDollar, varianceMaterialityPercent,
       mappingConfidenceThreshold, mappingAutoAcceptEnabled,
       autoApplyAfterNPeriods, templateAutoApplyEnabled,
-      functionalCurrency,
+      functionalCurrency, reconImmaterialWaiverThreshold, autoAdvanceEnabled,
     ]
   );
 
@@ -155,7 +173,8 @@ export async function upsertEntitySettings(
     `SELECT entity_id, entity_name, fiscal_year_end_month, fiscal_year_end_day, base_currency, auto_lock_days,
        variance_materiality_dollar, variance_materiality_percent,
        mapping_confidence_threshold, mapping_auto_accept_enabled,
-       auto_apply_after_n_periods, template_auto_apply_enabled, functional_currency
+       auto_apply_after_n_periods, template_auto_apply_enabled, functional_currency,
+       recon_immaterial_waiver_threshold, auto_advance_enabled
      FROM tenant_entity_settings WHERE tenant_id = $1 AND entity_id = $2`,
     [tenantId, entityId]
   );

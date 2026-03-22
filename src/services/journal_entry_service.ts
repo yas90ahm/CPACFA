@@ -298,6 +298,15 @@ export async function postJE(pool: Pool, tenantId: string, id: string, aiPool?: 
     const messages = shadowResult.flags.map((f) => f.message).join('; ');
     throw new JournalEntryError(`Shadow Auditor blocked post: ${messages}`, 'SHADOW_AUDIT_BLOCK');
   }
+  // Collect materiality warnings synchronously for response
+  const shadowWarnings = shadowResult.severity === 'warn' && shadowResult.flags.length > 0
+    ? shadowResult.flags.filter((f) => f.code === 'MATERIALITY_THRESHOLD').map((f) => ({
+        code: f.code,
+        message: f.message,
+        severity: 'warn' as const,
+      }))
+    : [];
+
   // Emit async event for shadow audit warnings (non-blocking findings)
   if (shadowResult.severity === 'warn' && shadowResult.flags.length > 0) {
     financialEvents.emit('JE_POLICY_VIOLATION', buildEventPacket('JE_POLICY_VIOLATION', {
@@ -401,7 +410,7 @@ export async function postJE(pool: Pool, tenantId: string, id: string, aiPool?: 
       });
     }
   }
-  return { journalEntry: updated, aiWarnings };
+  return { journalEntry: updated, aiWarnings, shadowWarnings: shadowWarnings.length > 0 ? shadowWarnings : undefined };
 }
 
 /** Mark a posted JE as exported (posted → exported). */
