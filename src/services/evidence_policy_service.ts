@@ -125,7 +125,7 @@ export async function checkEvidencePolicyForCertification(
       const reconAssertions = reconEvidence.flatMap((e) =>
         e.link?.assertionType ? [e.link.assertionType] : []
       );
-      const hasReconMatch = reconRequiredTypes.some((r) => reconAssertions.includes(r));
+      const hasReconMatch = reconRequiredTypes.some((r) => reconAssertions.includes(r as typeof reconAssertions[number]));
       if (!hasReconMatch) {
         const msg = `Reconciliation ${recon.accountCode} (balance: ${recon.glBalance}) requires evidence with assertion type(s): ${reconRequiredTypes.join(', ')}`;
         if (effectiveMode === 'hard_block') {

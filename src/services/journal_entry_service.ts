@@ -227,6 +227,7 @@ export async function rejectJE(
 export interface PostJEResult {
   journalEntry: JournalEntry;
   aiWarnings?: Array<{ ai_status: string; reason: string; pillar: string }>;
+  shadowWarnings?: Array<{ code: string; message: string; severity: 'warn' }>;
 }
 
 /** Post an approved JE (approved → posted). Shadow Auditor runs first; blocks on severity=block. */

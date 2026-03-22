@@ -251,7 +251,7 @@ export async function getValidAccessToken(
   );
 
   if (r.rows.length === 0 || !r.rows[0].access_token_encrypted) return null;
-  const row = r.rows[0];
+  const row = r.rows[0] as typeof r.rows[0] & { access_token_encrypted: string };
 
   // Check if token is expired
   const expiresAt = row.expires_at ? new Date(row.expires_at).getTime() : Infinity;
@@ -262,7 +262,7 @@ export async function getValidAccessToken(
     // Token is still valid
     return {
       accessToken: decrypt(row.access_token_encrypted),
-      realmId: row.realm_id,
+      realmId: row.realm_id ?? '',
     };
   }
 
