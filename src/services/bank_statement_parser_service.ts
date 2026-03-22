@@ -1,7 +1,7 @@
 /**
- * Bank Statement Parser — CSV/OFX format detection and extraction.
+ * Bank Statement Parser — CSV/OFX/BAI2 format detection and extraction.
  * Parses uploaded bank statements into normalized transaction records.
- * Supports CSV (auto-detect columns), OFX/QFX (XML-based).
+ * Supports CSV (auto-detect columns), OFX/QFX (XML-based), BAI2 (commercial bank format).
  */
 
 import { randomUUID } from 'crypto';
@@ -23,7 +23,7 @@ export interface ParsedBankTransaction {
 export interface ParseResult {
   success: boolean;
   transactions: ParsedBankTransaction[];
-  format: 'csv' | 'ofx' | 'qfx' | 'unknown';
+  format: 'csv' | 'ofx' | 'qfx' | 'bai2' | 'unknown';
   accountIdentifier: string | null;
   statementDate: string | null;
   errors: string[];
@@ -316,14 +316,207 @@ export function parseOFX(content: string): ParseResult {
   };
 }
 
+// --- BAI2 Parsing ---
+
+const BAI2_CREDIT_CODES = new Set(['115', '165', '195']);
+const BAI2_DEBIT_CODES = new Set(['395', '415', '475', '495']);
+
+function parseBAI2Date(dateStr: string): string | null {
+  if (!dateStr || dateStr.length !== 6) return null;
+  const yy = dateStr.slice(0, 2);
+  const mm = dateStr.slice(2, 4);
+  const dd = dateStr.slice(4, 6);
+  const year = parseInt(yy, 10) >= 50 ? `19${yy}` : `20${yy}`;
+  return `${year}-${mm}-${dd}`;
+}
+
+function classifyBAI2TransactionType(
+  typeCode: string,
+  description: string,
+  isCredit: boolean,
+): ParsedBankTransaction['transactionType'] {
+  if (typeCode === '495') return 'fee';
+  if (typeCode === '395') return 'check';
+  if (typeCode === '165' || typeCode === '415') {
+    if (description.toLowerCase().includes('transfer') || description.toLowerCase().includes('xfer')) return 'transfer';
+  }
+  return isCredit ? 'deposit' : 'withdrawal';
+}
+
+/**
+ * Pre-process BAI2 content: handle continuation records (type 88) by appending
+ * their content to the preceding record, then split into clean records.
+ */
+function preprocessBAI2(content: string): string[] {
+  const rawLines = content.split(/\r?\n/);
+  const merged: string[] = [];
+
+  for (const rawLine of rawLines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    if (line.startsWith('88,')) {
+      // Continuation record — append to previous line (strip '88,' prefix and trailing '/')
+      if (merged.length > 0) {
+        const prev = merged[merged.length - 1].replace(/\/\s*$/, '');
+        const continuation = line.slice(3).replace(/\/\s*$/, '');
+        merged[merged.length - 1] = prev + continuation;
+      }
+    } else {
+      merged.push(line.replace(/\/\s*$/, ''));
+    }
+  }
+
+  return merged;
+}
+
+export function parseBAI2(content: string): ParseResult {
+  const records = preprocessBAI2(content);
+  const transactions: ParsedBankTransaction[] = [];
+  const errors: string[] = [];
+  let statementDate: string | null = null;
+  const accountIdentifiers: string[] = [];
+
+  // Track current context
+  let currentAccountId: string | null = null;
+  let currentDate: string | null = null;
+
+  // Validation accumulators
+  const accountTotals: Map<string, { expected: string; actual: typeof from.prototype }> = new Map();
+  let fileControlTotal: string | null = null;
+
+  for (const record of records) {
+    const fields = record.split(',');
+    const recordType = fields[0];
+
+    if (recordType === '02') {
+      // Group header — extract date for statement
+      const asOfDate = fields[4] ?? '';
+      statementDate = parseBAI2Date(asOfDate);
+    } else if (recordType === '03') {
+      // Account identifier
+      currentAccountId = fields[1] ?? null;
+      if (currentAccountId) accountIdentifiers.push(currentAccountId);
+      // AS_OF_DATE may also be in group header; account-level amount is opening balance
+      // Date comes from the group header (type 02)
+      const groupDate = statementDate;
+      currentDate = groupDate;
+      // Initialize account total tracking
+      if (currentAccountId) {
+        accountTotals.set(currentAccountId, { expected: '0', actual: from(0) });
+      }
+    } else if (recordType === '16') {
+      // Transaction detail
+      const typeCode = fields[1] ?? '';
+      const rawAmount = fields[2] ?? '0';
+      const fundsType = fields[3] ?? '';
+
+      // Determine field positions based on funds type
+      // Funds type S has distribution data, V has date+amount after
+      let bankRefIdx = 4;
+      if (fundsType === 'S') {
+        // S,count,amount1,days1,amount2,days2,...
+        const distCount = parseInt(fields[4] ?? '0', 10);
+        bankRefIdx = 5 + distCount * 2;
+      } else if (fundsType === 'V') {
+        // V,date,time
+        bankRefIdx = 6;
+      } else if (fundsType === 'Z' || fundsType === '0' || fundsType === '1' || fundsType === '2') {
+        bankRefIdx = 4;
+      }
+
+      const bankReference = fields[bankRefIdx] ?? '';
+      const customerReference = fields[bankRefIdx + 1] ?? '';
+      const textParts = fields.slice(bankRefIdx + 2);
+      const description = textParts.join(',').trim();
+
+      // Amount: BAI2 amounts are in implied decimal (cents), divide by 100
+      const amountCents = from(rawAmount);
+      const amountDollars = amountCents.dividedBy(100).toDecimalPlaces(2);
+
+      const isCredit = BAI2_CREDIT_CODES.has(typeCode);
+      const isDebit = BAI2_DEBIT_CODES.has(typeCode);
+      // Sign: credits positive, debits negative
+      const signedAmount = isDebit ? amountDollars.negated() : amountDollars;
+
+      const transactionType = classifyBAI2TransactionType(typeCode, description, isCredit);
+
+      // Build externalId from bank reference or generate one
+      const externalId = bankReference.trim() || `bai2-${currentAccountId ?? 'unknown'}-${transactions.length}`;
+
+      transactions.push({
+        externalId,
+        transactionDate: currentDate ?? '',
+        postDate: currentDate,
+        description: description || '',
+        reference: bankReference.trim() || null,
+        checkNumber: typeCode === '395' ? (customerReference.trim() || null) : null,
+        amount: signedAmount.toFixed(2),
+        transactionType,
+        counterparty: null,
+        runningBalance: null,
+      });
+
+      // Accumulate for validation (absolute amounts for control totals)
+      if (currentAccountId && accountTotals.has(currentAccountId)) {
+        const entry = accountTotals.get(currentAccountId)!;
+        entry.actual = entry.actual.plus(amountDollars);
+      }
+    } else if (recordType === '49') {
+      // Account trailer — control total
+      const controlTotal = fields[1] ?? '0';
+      if (currentAccountId && accountTotals.has(currentAccountId)) {
+        accountTotals.get(currentAccountId)!.expected = controlTotal;
+      }
+    } else if (recordType === '99') {
+      // File trailer — file control total
+      fileControlTotal = fields[1] ?? '0';
+    }
+  }
+
+  // --- Validation ---
+  // Account trailer totals
+  for (const [accountId, totals] of accountTotals) {
+    const expectedDollars = from(totals.expected).dividedBy(100).toDecimalPlaces(2);
+    if (!totals.actual.equals(expectedDollars)) {
+      const discrepancy = totals.actual.minus(expectedDollars).toFixed(2);
+      errors.push(`BAI2 validation warning: Account ${accountId} control total mismatch. Expected ${expectedDollars.toFixed(2)}, got ${totals.actual.toFixed(2)}, discrepancy ${discrepancy}`);
+    }
+  }
+
+  // File control total
+  if (fileControlTotal !== null) {
+    const expectedFileTotal = from(fileControlTotal).dividedBy(100).toDecimalPlaces(2);
+    let actualFileTotal = from(0);
+    for (const totals of accountTotals.values()) {
+      actualFileTotal = actualFileTotal.plus(totals.actual);
+    }
+    if (!actualFileTotal.equals(expectedFileTotal)) {
+      const discrepancy = actualFileTotal.minus(expectedFileTotal).toFixed(2);
+      errors.push(`BAI2 validation warning: File control total mismatch. Expected ${expectedFileTotal.toFixed(2)}, got ${actualFileTotal.toFixed(2)}, discrepancy ${discrepancy}`);
+    }
+  }
+
+  return {
+    success: transactions.length > 0,
+    transactions,
+    format: 'bai2',
+    accountIdentifier: accountIdentifiers.length === 1 ? accountIdentifiers[0] : accountIdentifiers.join(';'),
+    statementDate,
+    errors,
+  };
+}
+
 // --- Format Detection & Dispatch ---
 
-export function detectFormat(content: string): 'csv' | 'ofx' | 'qfx' | 'unknown' {
+export function detectFormat(content: string): 'csv' | 'ofx' | 'qfx' | 'bai2' | 'unknown' {
   const trimmed = content.trim();
+  // BAI2 files always begin with 01, on the first line
+  const firstLine = trimmed.split(/\r?\n/)[0] ?? '';
+  if (firstLine.startsWith('01,')) return 'bai2';
   if (trimmed.includes('<OFX>') || trimmed.includes('<OFX>') || trimmed.startsWith('OFXHEADER')) return 'ofx';
   if (trimmed.includes('INTU.BID')) return 'qfx';
   // Check for CSV: first line should have comma-separated headers
-  const firstLine = trimmed.split(/\r?\n/)[0] ?? '';
   if (firstLine.includes(',') && !firstLine.includes('<')) return 'csv';
   return 'unknown';
 }
@@ -336,6 +529,8 @@ export function parseBankStatement(content: string, sourceFileName?: string): Pa
     case 'ofx':
     case 'qfx':
       return parseOFX(content);
+    case 'bai2':
+      return parseBAI2(content);
     default:
       return {
         success: false,
@@ -343,7 +538,7 @@ export function parseBankStatement(content: string, sourceFileName?: string): Pa
         format: 'unknown',
         accountIdentifier: null,
         statementDate: null,
-        errors: ['Unsupported file format. Supported: CSV, OFX, QFX'],
+        errors: ['Unsupported file format. Supported: CSV, OFX, QFX, BAI2'],
       };
   }
 }

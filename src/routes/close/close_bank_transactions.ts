@@ -69,7 +69,7 @@ export function createBankTransactionRoutes(getPool: (tenantId: string) => Promi
         runningBalance: txn.runningBalance,
         transactionType: txn.transactionType,
         counterparty: txn.counterparty,
-        source: parseResult.format === 'csv' ? 'csv_upload' : 'ofx_upload',
+        source: parseResult.format === 'csv' ? 'csv_upload' : parseResult.format === 'bai2' ? 'bai2_upload' : 'ofx_upload',
         sourceFileName: fileName ?? null,
         externalId: txn.externalId,
         createdBy: userId,
