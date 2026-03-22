@@ -320,11 +320,12 @@ router.get(
         is_material: boolean;
         explanation: string | null;
         explained_by: string | null;
+        explanation_source: string | null;
       }>(
         `SELECT account_code, account_name,
                 current_amount::text, prior_amount::text,
                 variance_amount::text, variance_percent::text,
-                is_material, explanation, explained_by
+                is_material, explanation, explained_by, explanation_source
          FROM tenant_variance_analysis
          WHERE tenant_id = $1 AND close_session_id = $2
          ORDER BY ABS(variance_amount) DESC`,
@@ -341,6 +342,7 @@ router.get(
         isMaterial: r.is_material,
         explanation: r.explanation,
         explainedBy: r.explained_by,
+        explanationSource: r.explanation_source,
       }));
 
       const buffer = exportVariances(rows, { entityName, periodLabel });

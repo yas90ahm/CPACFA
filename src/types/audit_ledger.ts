@@ -36,7 +36,11 @@ export type AuditLedgerEventType =
   | 'mapping_auto_accepted'
   | 'mapping_prior_period_reused'
   | 'template_auto_applied'
-  | 'ai_resolution_proposal';
+  | 'ai_resolution_proposal'
+  | 'recon_supporting_balance_set'
+  | 'subsequent_event_created'
+  | 'subsequent_event_disposition_set'
+  | 'subsequent_events_confirmed_none';
 
 /** Payload for appending one ledger entry (append-only). */
 export interface AuditLedgerEntryInput {

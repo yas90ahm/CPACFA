@@ -27,6 +27,7 @@ import * as reconRepo from '../db/repositories/period_reconciliation_repository.
 import * as reqRepo from '../db/repositories/recon_requirements_repository.js';
 import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
 import { getTrialBalanceForCertification } from './adjusted_trial_balance_service.js';
+import { recordMaterialEvent } from './audit_service.js';
 import { createDraftJE } from './journal_entry_service.js';
 import { financialEvents, buildEventPacket } from '../events/financial_event_emitter.js';
 import { getEntitySettings } from './entity_settings_service.js';
@@ -264,7 +265,7 @@ export async function refreshGLBalances(
   return { updated, reverted };
 }
 
-/** Set supporting balance (preparer). */
+/** Set supporting balance (preparer). Logs provenance to audit ledger. */
 export async function setSupportingBalance(
   pool: Pool,
   tenantId: string,
@@ -284,6 +285,20 @@ export async function setSupportingBalance(
     source
   );
   if (!updated) throw new PeriodReconciliationError('Reconciliation not found', 'NOT_FOUND');
+  await recordMaterialEvent(pool, {
+    tenantId,
+    periodLabel: recon.periodId?.slice(0, 7),
+    eventType: 'recon_supporting_balance_set',
+    deterministicFlagSnapshot: {
+      reconId,
+      accountCode: recon.accountCode,
+      source,
+      amount: amountStr,
+      previousAmount: recon.supportingBalance?.toString() ?? null,
+      previousSource: recon.supportingSource ?? null,
+    },
+    createdBy: userId,
+  });
   return updated;
 }
 

@@ -24,6 +24,8 @@ export interface EntitySettings {
   reconImmaterialWaiverThreshold: string;
   /** When all gates pass, auto-advance session to next state */
   autoAdvanceEnabled: boolean;
+  /** Allow same user to advance and certify (SoD opt-out for small teams) */
+  allowSameUserCertify: boolean;
 }
 
 interface EntitySettingsRow {
@@ -42,6 +44,7 @@ interface EntitySettingsRow {
   functional_currency: string | null;
   recon_immaterial_waiver_threshold: string | null;
   auto_advance_enabled: boolean | null;
+  allow_same_user_certify: boolean | null;
 }
 
 function rowToSettings(row: EntitySettingsRow | null, entityId: string): EntitySettings {
@@ -62,6 +65,7 @@ function rowToSettings(row: EntitySettingsRow | null, entityId: string): EntityS
       functionalCurrency: 'USD',
       reconImmaterialWaiverThreshold: '0.00',
       autoAdvanceEnabled: false,
+      allowSameUserCertify: false,
     };
   }
   return {
@@ -80,6 +84,7 @@ function rowToSettings(row: EntitySettingsRow | null, entityId: string): EntityS
     functionalCurrency: row.functional_currency ?? 'USD',
     reconImmaterialWaiverThreshold: String(row.recon_immaterial_waiver_threshold ?? '0.00'),
     autoAdvanceEnabled: row.auto_advance_enabled ?? false,
+    allowSameUserCertify: row.allow_same_user_certify ?? false,
   };
 }
 
@@ -93,7 +98,7 @@ export async function getEntitySettings(
        variance_materiality_dollar, variance_materiality_percent,
        mapping_confidence_threshold, mapping_auto_accept_enabled,
        auto_apply_after_n_periods, template_auto_apply_enabled, functional_currency,
-       recon_immaterial_waiver_threshold, auto_advance_enabled
+       recon_immaterial_waiver_threshold, auto_advance_enabled, allow_same_user_certify
      FROM tenant_entity_settings WHERE tenant_id = $1 AND entity_id = $2`,
     [tenantId, entityId]
   );
@@ -115,6 +120,7 @@ export interface UpsertEntitySettingsInput {
   functionalCurrency?: string;
   reconImmaterialWaiverThreshold?: string | number;
   autoAdvanceEnabled?: boolean;
+  allowSameUserCertify?: boolean;
 }
 
 export async function upsertEntitySettings(
@@ -137,6 +143,7 @@ export async function upsertEntitySettings(
   const functionalCurrency = input.functionalCurrency ?? 'USD';
   const reconImmaterialWaiverThreshold = input.reconImmaterialWaiverThreshold != null ? String(input.reconImmaterialWaiverThreshold) : '0.00';
   const autoAdvanceEnabled = input.autoAdvanceEnabled ?? false;
+  const allowSameUserCertify = input.allowSameUserCertify ?? false;
 
   await pool.query(
     `INSERT INTO tenant_entity_settings (
@@ -144,8 +151,8 @@ export async function upsertEntitySettings(
        variance_materiality_dollar, variance_materiality_percent,
        mapping_confidence_threshold, mapping_auto_accept_enabled,
        auto_apply_after_n_periods, template_auto_apply_enabled, functional_currency,
-       recon_immaterial_waiver_threshold, auto_advance_enabled, updated_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9::numeric, $10, $11, $12, $13, $14, $15::numeric, $16, NOW())
+       recon_immaterial_waiver_threshold, auto_advance_enabled, allow_same_user_certify, updated_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9::numeric, $10, $11, $12, $13, $14, $15::numeric, $16, $17, NOW())
      ON CONFLICT (tenant_id, entity_id) DO UPDATE SET
        entity_name = EXCLUDED.entity_name, fiscal_year_end_month = EXCLUDED.fiscal_year_end_month,
        fiscal_year_end_day = EXCLUDED.fiscal_year_end_day,
@@ -159,13 +166,14 @@ export async function upsertEntitySettings(
        functional_currency = EXCLUDED.functional_currency,
        recon_immaterial_waiver_threshold = EXCLUDED.recon_immaterial_waiver_threshold,
        auto_advance_enabled = EXCLUDED.auto_advance_enabled,
+       allow_same_user_certify = EXCLUDED.allow_same_user_certify,
        updated_at = NOW()`,
     [
       tenantId, entityId, entityName, fiscalYearEndMonth, fiscalYearEndDay, baseCurrency, autoLockDays,
       varianceMaterialityDollar, varianceMaterialityPercent,
       mappingConfidenceThreshold, mappingAutoAcceptEnabled,
       autoApplyAfterNPeriods, templateAutoApplyEnabled,
-      functionalCurrency, reconImmaterialWaiverThreshold, autoAdvanceEnabled,
+      functionalCurrency, reconImmaterialWaiverThreshold, autoAdvanceEnabled, allowSameUserCertify,
     ]
   );
 
@@ -174,7 +182,7 @@ export async function upsertEntitySettings(
        variance_materiality_dollar, variance_materiality_percent,
        mapping_confidence_threshold, mapping_auto_accept_enabled,
        auto_apply_after_n_periods, template_auto_apply_enabled, functional_currency,
-       recon_immaterial_waiver_threshold, auto_advance_enabled
+       recon_immaterial_waiver_threshold, auto_advance_enabled, allow_same_user_certify
      FROM tenant_entity_settings WHERE tenant_id = $1 AND entity_id = $2`,
     [tenantId, entityId]
   );
