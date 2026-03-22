@@ -197,67 +197,69 @@ export async function refreshGLBalances(
   }
 
   const recons = await reconRepo.listPeriodReconciliationsByPeriod(pool, tenantId, periodId);
-  let updated = 0;
+  if (recons.length === 0) return { updated: 0, reverted: [] };
+
+  // Build batch of GL balance updates
+  const updates = recons.map((recon) => ({
+    reconId: recon.reconId,
+    glBalance: getGLBalanceForAccount(tb, recon.accountCode) ?? null,
+  }));
+
+  // Single batch UPDATE + single SELECT (instead of 2N queries)
+  const updatedRecons = await reconRepo.batchUpdateReconGLBalances(pool, tenantId, periodId, updates);
+  const updated = updatedRecons.length;
   const reverted: string[] = [];
 
-  for (const recon of recons) {
-    const glBalance = getGLBalanceForAccount(tb, recon.accountCode);
-    const updatedRecon = await reconRepo.updateReconGLBalance(
-      pool,
-      tenantId,
-      recon.reconId,
-      glBalance ?? null
-    );
-    if (updatedRecon) {
-      updated++;
-      // Check if unexplained variance (after reconciling items) exceeds tolerance.
-      // isWithinTolerance checks raw variance (gl-supp) which ignores items;
-      // unexplainedVariance = (gl-supp) + items, so use that for revert decision.
-      const absUnexplained = updatedRecon.unexplainedVariance != null
-        ? Math.abs(Number(updatedRecon.unexplainedVariance))
-        : null;
-      const tolerance = Number(updatedRecon.toleranceAmount) || 0;
-      const overTolerance = absUnexplained != null && absUnexplained > tolerance;
-      if (
-        (recon.status === 'completed' || recon.status === 'approved') &&
-        overTolerance &&
-        updatedRecon.supportingBalance != null
-      ) {
-        await reconRepo.updateReconStatus(pool, tenantId, recon.reconId, 'in_progress');
-        reverted.push(recon.reconId);
-        const { createIssue } = await import('./issue_service.js');
-        await createIssue(pool, {
+  // Build lookup of original statuses for revert detection
+  const originalStatusByReconId = new Map(recons.map((r) => [r.reconId, r.status]));
+
+  // Check each updated recon for tolerance violations (only for previously completed/approved)
+  for (const updatedRecon of updatedRecons) {
+    const originalStatus = originalStatusByReconId.get(updatedRecon.reconId);
+    if (originalStatus !== 'completed' && originalStatus !== 'approved') continue;
+    if (updatedRecon.supportingBalance == null) continue;
+
+    const absUnexplained = updatedRecon.unexplainedVariance != null
+      ? Math.abs(Number(updatedRecon.unexplainedVariance))
+      : null;
+    const tolerance = Number(updatedRecon.toleranceAmount) || 0;
+    const overTolerance = absUnexplained != null && absUnexplained > tolerance;
+
+    if (overTolerance) {
+      await reconRepo.updateReconStatus(pool, tenantId, updatedRecon.reconId, 'in_progress');
+      reverted.push(updatedRecon.reconId);
+      const { createIssue } = await import('./issue_service.js');
+      await createIssue(pool, {
+        tenantId,
+        periodId,
+        entityId: updatedRecon.entityId,
+        issueType: 'recon_over_tolerance',
+        severity: 'blocking',
+        category: 'reconciliation',
+        title: `Reconciliation over tolerance: ${updatedRecon.accountCode}`,
+        description: `GL balance changed; unexplained variance now exceeds tolerance. Reconcile again.`,
+        affectedAccounts: [updatedRecon.accountCode],
+        sourceCheck: 'recon_completeness_gate',
+        sourceDetails: { recon_id: updatedRecon.reconId },
+      });
+      // Emit event for async resolution
+      financialEvents.emit('RECON_OVER_TOLERANCE', buildEventPacket('RECON_OVER_TOLERANCE', {
+        errorCode: 'RECON_OVER_TOLERANCE',
+        conflictingData: { unexplainedVariance: absUnexplained, tolerance, previousStatus: originalStatus },
+        metadata: {
           tenantId,
-          periodId,
-          entityId: recon.entityId,
-          issueType: 'recon_over_tolerance',
-          severity: 'blocking',
-          category: 'reconciliation',
-          title: `Reconciliation over tolerance: ${recon.accountCode}`,
-          description: `GL balance changed; unexplained variance now exceeds tolerance. Reconcile again.`,
-          affectedAccounts: [recon.accountCode],
-          sourceCheck: 'recon_completeness_gate',
-          sourceDetails: { recon_id: recon.reconId },
-        });
-        // Emit event for async resolution
-        financialEvents.emit('RECON_OVER_TOLERANCE', buildEventPacket('RECON_OVER_TOLERANCE', {
-          errorCode: 'RECON_OVER_TOLERANCE',
-          conflictingData: { unexplainedVariance: absUnexplained, tolerance, previousStatus: recon.status },
-          metadata: {
-            tenantId,
-            closeSessionId: periodId,
-            accountCodes: [recon.accountCode],
-          },
-          data: {
-            reconId: recon.reconId,
-            accountCode: recon.accountCode,
-            unexplainedVariance: absUnexplained!,
-            toleranceAmount: tolerance,
-            previousStatus: recon.status,
-            entityId: recon.entityId,
-          },
-        }));
-      }
+          closeSessionId: periodId,
+          accountCodes: [updatedRecon.accountCode],
+        },
+        data: {
+          reconId: updatedRecon.reconId,
+          accountCode: updatedRecon.accountCode,
+          unexplainedVariance: absUnexplained!,
+          toleranceAmount: tolerance,
+          previousStatus: originalStatus,
+          entityId: updatedRecon.entityId,
+        },
+      }));
     }
   }
   return { updated, reverted };

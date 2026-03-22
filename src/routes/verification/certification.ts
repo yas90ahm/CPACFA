@@ -86,10 +86,28 @@ router.post('/verify', async (req: Request, res: Response) => {
   const artifactHash = computeArtifactHash(body.artifact);
   const signatureValid = verifyArtifactHash(artifactHash, body.signatureB64, body.publicKeyB64);
 
+  // Surface hash version and integrity warnings for auditors
+  const snapshotHashVersion = body.artifact.snapshot?.hashVersion ?? null;
+  const hashVersionWarnings: string[] = [];
+  if (snapshotHashVersion === 'v1') {
+    hashVersionWarnings.push(
+      'This artifact was signed under hash version v1 which uses JavaScript floating-point representation. ' +
+      'Float drift may affect hash determinism. Consider re-certification under v4 for maximum integrity.'
+    );
+  }
+  if (snapshotHashVersion === 'v2') {
+    hashVersionWarnings.push(
+      'Hash version v2 uses canonical money strings but does not include the evidence manifest. ' +
+      'Upgrade to v3+ for evidence coverage.'
+    );
+  }
+
   const result: Record<string, unknown> = {
     contractVersion: 'v1',
     artifactHash,
     signatureValid,
+    hashVersion: snapshotHashVersion,
+    hashVersionWarnings: hashVersionWarnings.length > 0 ? hashVersionWarnings : undefined,
   };
 
   const authReq = req as AuthRequest;

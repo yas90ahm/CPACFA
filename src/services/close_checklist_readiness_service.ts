@@ -194,40 +194,60 @@ export async function computeReadiness(
   }
 
   if (!lightweight) {
-    // N+1 evidence loops — only run for full readiness checks, not cascade
-    // Recon evidence completeness (safety net): completed recons must have attachments
+    // Batched evidence checks — single query per object type instead of N+1
     const { listPeriodReconciliationsByPeriod } = await import('../db/repositories/period_reconciliation_repository.js');
-    const { listEvidenceForObject } = await import('../db/repositories/evidence_repository.js');
+    const { getObjectIdsWithEvidence } = await import('../db/repositories/evidence_repository.js');
+    const { listJournalEntryLinesBatch } = await import('../db/repositories/journal_entry_repository.js');
+
+    // Recon evidence completeness: batch check all completed recons at once
     const reconsForPeriod = await listPeriodReconciliationsByPeriod(pool, tenantId, closeSessionId);
     const completedRecons = reconsForPeriod.filter((r) => r.status === 'completed' || r.status === 'approved');
-    for (const recon of completedRecons) {
-      const attachments = await listEvidenceForObject(pool, tenantId, 'reconciliation', recon.reconId);
-      if (attachments.length === 0) {
-        hardBlockers.push(
-          `Reconciliation for ${recon.accountCode} is completed but missing supporting documentation. Upload the source document before close.`
-        );
+    if (completedRecons.length > 0) {
+      const reconIdsWithEvidence = await getObjectIdsWithEvidence(
+        pool, tenantId, 'reconciliation', completedRecons.map((r) => r.reconId)
+      );
+      for (const recon of completedRecons) {
+        if (!reconIdsWithEvidence.has(recon.reconId)) {
+          hardBlockers.push(
+            `Reconciliation for ${recon.accountCode} is completed but missing supporting documentation. Upload the source document before close.`
+          );
+        }
       }
     }
 
-    // JE evidence completeness (soft warning): posted JEs above threshold without evidence
+    // JE evidence completeness: batch check posted JEs above threshold
     const { getEvidencePolicy } = await import('../db/repositories/evidence_policy_repository.js');
-    const { listJournalEntryLines } = await import('../db/repositories/journal_entry_repository.js');
     const jePolicy = await getEvidencePolicy(pool, tenantId);
     const jeThreshold = jePolicy?.materialityThreshold != null && jePolicy.materialityThreshold !== ''
       ? Number(jePolicy.materialityThreshold)
       : 0;
     if (jeThreshold > 0) {
       const postedJes = jes.filter((j) => j.status === 'posted' || j.status === 'exported');
-      for (const je of postedJes) {
-        const jeLines = await listJournalEntryLines(pool, je.id);
+      if (postedJes.length > 0) {
+        // Batch fetch all JE lines in one query
+        const allLinesByJe = await listJournalEntryLinesBatch(pool, postedJes.map((j) => j.id));
         const { sumRound2 } = await import('../utils/decimal.js');
-        const totalAmount = sumRound2(jeLines.map((l) => Number(l.debit ?? 0)));
-        if (totalAmount >= jeThreshold) {
-          const jeAttachments = await listEvidenceForObject(pool, tenantId, 'journal_entry', je.id);
-          if (jeAttachments.length === 0) {
-            softWarnings.push(
-              `Posted journal entry ${je.memo ?? je.id} ($${totalAmount.toFixed(2)}) above threshold lacks supporting documentation.`
-            );
+        // Find JEs above threshold
+        const materialJeIds: string[] = [];
+        const materialJeLabels = new Map<string, { memo: string; total: number }>();
+        for (const je of postedJes) {
+          const jeLines = allLinesByJe.get(je.id) ?? [];
+          const totalAmount = sumRound2(jeLines.map((l) => Number(l.debit ?? 0)));
+          if (totalAmount >= jeThreshold) {
+            materialJeIds.push(je.id);
+            materialJeLabels.set(je.id, { memo: je.memo ?? je.id, total: totalAmount });
+          }
+        }
+        // Batch check evidence for all material JEs in one query
+        if (materialJeIds.length > 0) {
+          const jeIdsWithEvidence = await getObjectIdsWithEvidence(pool, tenantId, 'journal_entry', materialJeIds);
+          for (const jeId of materialJeIds) {
+            if (!jeIdsWithEvidence.has(jeId)) {
+              const info = materialJeLabels.get(jeId)!;
+              softWarnings.push(
+                `Posted journal entry ${info.memo} ($${info.total.toFixed(2)}) above threshold lacks supporting documentation.`
+              );
+            }
           }
         }
       }

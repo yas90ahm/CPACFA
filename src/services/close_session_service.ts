@@ -852,6 +852,7 @@ export async function advanceSession(
       }
       currentSession = await updateStatus(client, input.tenantId, input.closeSessionId, next, input.certifiedBy ?? 'advance-api');
       if (next === 'in_progress') {
+        // Initialize reconciliations for all required accounts
         try {
           const { initializeReconciliations } = await import('./period_reconciliation_service.js');
           await initializeReconciliations(
@@ -862,11 +863,56 @@ export async function advanceSession(
           );
         } catch (initErr) {
           console.warn('[advance] initializeReconciliations failed (non-fatal):', (initErr as Error).message);
-          // Non-fatal: session still advances to in_progress even if recon init fails
+        }
+
+        // Auto-propose and auto-apply recurring AJE templates
+        try {
+          const { proposeTemplatesForPeriod } = await import('./aje_template_service.js');
+          const periodLabel = (currentSession.periodEnd ?? '').slice(0, 7);
+          await proposeTemplatesForPeriod(client as unknown as Pool, {
+            tenantId: input.tenantId,
+            entityId: currentSession.entityId,
+            closeSessionId: input.closeSessionId,
+            periodLabel,
+          });
+        } catch (templateErr) {
+          console.warn('[advance] proposeTemplatesForPeriod failed (non-fatal):', (templateErr as Error).message);
+        }
+
+        // Auto-populate reconciliation supporting balances from prior period
+        try {
+          const { runReconIntelligence, applyPreFills } = await import('./recon_intelligence_service.js');
+          const intelligence = await runReconIntelligence(
+            client as unknown as Pool,
+            input.tenantId,
+            input.closeSessionId,
+            currentSession.entityId
+          );
+          if (intelligence.preFilled > 0) {
+            await applyPreFills(client as unknown as Pool, input.tenantId, intelligence.preFills);
+            console.log(`[advance] Pre-filled ${intelligence.preFilled} recon balances (prior: ${intelligence.fromPriorPeriod}, pdf: ${intelligence.fromPdfExtraction})`);
+          }
+        } catch (reconErr) {
+          console.warn('[advance] recon intelligence failed (non-fatal):', (reconErr as Error).message);
         }
       }
       return currentSession;
     });
+
+    // Emit real-time event for session advancement
+    if (current.status !== session.status) {
+      try {
+        const { emitSessionEvent } = await import('../realtime/index.js');
+        emitSessionEvent({
+          type: 'session_advanced',
+          sessionId: input.closeSessionId,
+          tenantId: input.tenantId,
+          triggeredBy: input.certifiedBy ?? 'advance-api',
+          data: { statusBefore: session.status, statusAfter: current.status },
+          timestamp: new Date().toISOString(),
+        });
+      } catch { /* non-fatal */ }
+    }
 
     return {
       success: true,

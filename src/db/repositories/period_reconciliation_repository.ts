@@ -134,7 +134,8 @@ export async function insertPeriodReconciliation(
     `INSERT INTO tenant_period_reconciliations (
       recon_id, tenant_id, period_id, entity_id, requirement_id, account_code,
       gl_balance, tolerance_amount, created_at, updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)`,
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
+    ON CONFLICT (period_id, account_code) DO NOTHING`,
     [
       reconId,
       input.tenantId,
@@ -242,6 +243,41 @@ export async function updateReconGLBalance(
   );
   if ((r.rowCount ?? 0) === 0) return null;
   return getPeriodReconciliationById(pool, tenantId, reconId);
+}
+
+/**
+ * Batch-update GL balances for multiple recons in a single query.
+ * Returns all updated recons with refreshed computed columns.
+ */
+export async function batchUpdateReconGLBalances(
+  pool: Pool,
+  tenantId: string,
+  periodId: string,
+  updates: Array<{ reconId: string; glBalance: string | null }>
+): Promise<PeriodReconciliation[]> {
+  if (updates.length === 0) return [];
+  const now = new Date().toISOString();
+
+  // Build a single UPDATE ... FROM VALUES batch
+  const values: unknown[] = [now, tenantId];
+  const valueClauses: string[] = [];
+  let idx = 3;
+  for (const u of updates) {
+    valueClauses.push(`($${idx}::uuid, $${idx + 1}::numeric)`);
+    values.push(u.reconId, u.glBalance);
+    idx += 2;
+  }
+
+  await pool.query(
+    `UPDATE tenant_period_reconciliations AS r
+     SET gl_balance = v.gl_balance, updated_at = $1
+     FROM (VALUES ${valueClauses.join(', ')}) AS v(recon_id, gl_balance)
+     WHERE r.tenant_id = $2 AND r.recon_id = v.recon_id`,
+    values
+  );
+
+  // Fetch all updated recons in one query
+  return listPeriodReconciliationsByPeriod(pool, tenantId, periodId);
 }
 
 export async function updateReconReconcilingItemsTotal(

@@ -7,10 +7,12 @@ import { MathematicalIntegrityError } from '../../services/financialStatements.j
 import { SessionPersistenceError } from '../../errors.js';
 import { send500 } from '../../lib/errorHandler.js';
 
-/** Auditor Portal token: in production must be set and not the default; in dev default allowed. */
+/** Auditor Portal token: in production/staging/demo must be set and not the default; in dev default allowed. */
 export function getAuditorToken(): string | null {
   const raw = process.env.AUDITOR_PORTAL_TOKEN;
-  if (process.env.NODE_ENV === 'production') {
+  const mode = process.env.MODE ?? process.env.APP_MODE ?? '';
+  const isSecure = process.env.NODE_ENV === 'production' || ['prod', 'staging', 'demo'].includes(mode);
+  if (isSecure) {
     if (!raw || raw.trim() === '' || raw === 'auditor-readonly-2025') return null;
     return raw;
   }

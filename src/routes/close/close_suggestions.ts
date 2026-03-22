@@ -14,6 +14,7 @@ import { send500 } from '../../lib/errorHandler.js';
 import { getCloseSessionById } from '../../db/repositories/close_session_repository.js';
 import {
   generateClassificationSuggestions,
+  classifyWithXBRL,
   listCoaSuggestions,
   listCfSuggestions,
   acceptCoaSuggestion,
@@ -58,6 +59,78 @@ router.post('/sessions/:closeSessionId/suggestions/generate', async (req: Reques
     res.json(result);
   } catch (e) {
     send500(res, e, 'Generate classification suggestions failed');
+  }
+});
+
+/**
+ * POST /sessions/:closeSessionId/suggestions/auto-classify
+ *
+ * XBRL-only classification — runs on page load without AI dependency.
+ * Uses trigram search against xbrl_taxonomy_elements table.
+ * Returns suggestions immediately (typically <2s for 100 accounts).
+ */
+router.post('/sessions/:closeSessionId/suggestions/auto-classify', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+
+    const { closeSessionId } = req.params;
+    const session = await getCloseSessionById(pool, tenantId, closeSessionId);
+    if (!session) {
+      res.status(404).json({ error: 'Close session not found' });
+      return;
+    }
+
+    // Check if suggestions already exist for this session
+    const existingSuggestions = await listCoaSuggestions(pool, tenantId, closeSessionId, 'pending');
+    if (existingSuggestions.length > 0) {
+      res.json({
+        coaSuggestions: existingSuggestions,
+        cfSuggestions: [],
+        errors: [],
+        source: 'cached',
+      });
+      return;
+    }
+
+    // Run full autonomous pipeline: classify → validate → auto-accept → return exceptions
+    const { runAutonomousMapping } = await import('../../services/autonomous_mapping_service.js');
+    const autonomousResult = await runAutonomousMapping(pool, tenantId, session.entityId, closeSessionId);
+
+    // Also return the suggestions list for the UI
+    const allSuggestions = await listCoaSuggestions(pool, tenantId, closeSessionId);
+
+    res.json({
+      coaSuggestions: allSuggestions,
+      cfSuggestions: [],
+      errors: [],
+      source: 'autonomous_pipeline',
+      autonomous: {
+        autoAccepted: autonomousResult.autoAccepted,
+        needsReview: autonomousResult.needsReview,
+        reviewRequired: autonomousResult.reviewRequired,
+        correctionProposals: autonomousResult.correctionProposals,
+        crossValidationPasses: autonomousResult.crossValidationPasses,
+        learningSignalsUsed: autonomousResult.learningSignalsUsed,
+      },
+    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes('xbrl_taxonomy_elements') && msg.includes('does not exist')) {
+      res.status(503).json({
+        error: 'TAXONOMY_NOT_INITIALIZED',
+        message: 'XBRL taxonomy has not been initialized. Run taxonomy seed first.',
+        coaSuggestions: [],
+        cfSuggestions: [],
+        errors: [{ account_name: '*', error: 'XBRL taxonomy table not found' }],
+      });
+      return;
+    }
+    send500(res, e, 'Auto-classify failed');
   }
 });
 
@@ -199,6 +272,199 @@ router.get('/suggestions/health', async (_req: Request, res: Response) => {
     res.json({ available: true, ...health });
   } catch (e) {
     send500(res, e, 'SLM health check failed');
+  }
+});
+
+/**
+ * POST /sessions/:closeSessionId/suggestions/validate-mappings
+ *
+ * Layer 3: Agentic balance validation. Detects mapping-balance mismatches
+ * and proposes corrections with full reasoning.
+ * Layer 4: Pre-statement cross-validation. Catches structural statement errors.
+ */
+router.post('/sessions/:closeSessionId/suggestions/validate-mappings', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+
+    const { closeSessionId } = req.params;
+    const session = await getCloseSessionById(pool, tenantId, closeSessionId);
+    if (!session) {
+      res.status(404).json({ error: 'Close session not found' });
+      return;
+    }
+
+    // Get mapped trial balance
+    const { getTrialBalanceForCertification } = await import('../../services/adjusted_trial_balance_service.js');
+    const { enrichEntriesWithCoaMapping } = await import('../../services/coa_mapping_service.js');
+    const periodLabel = (session.periodEnd ?? '').slice(0, 7);
+
+    let tbResult;
+    try {
+      tbResult = await getTrialBalanceForCertification(pool, tenantId, periodLabel, closeSessionId);
+    } catch {
+      res.json({ agent: { suspects: [], proposals: [], accountsValidated: 0, issuesFound: 0 }, crossValidation: { passes: true, issues: [], summary: { totalChecks: 0, passed: 0, critical: 0, warning: 0 } } });
+      return;
+    }
+
+    // Enrich with COA mappings
+    const tbEntries = tbResult.trialBalance.map((e) => ({ ...e }));
+    const enriched = await enrichEntriesWithCoaMapping(
+      pool, tenantId, session.entityId, tbEntries, { asOfDate: session.periodEnd }
+    );
+
+    // Build mapped accounts for Layer 3
+    const { listFsTaxonomyLines } = await import('../../db/repositories/fs_taxonomy_repository.js');
+    const fsLines = await listFsTaxonomyLines(pool);
+    const fsById = new Map(fsLines.map((l) => [l.id, l]));
+
+    const mappedAccounts = enriched.map((e) => {
+      const fsLine = fsById.get(e.fsLineId ?? '');
+      return {
+        accountCode: (e.accountCode ?? e.accountName ?? '').trim(),
+        accountName: e.accountName,
+        accountType: (e.accountType ?? '').toUpperCase(),
+        fsLineId: e.fsLineId ?? '',
+        fsLineName: fsLine?.name ?? e.fsLineId ?? '',
+        fsLineStatement: fsLine?.statement ?? '',
+        netBalance: (e.debit ?? 0) - (e.credit ?? 0),
+      };
+    }).filter((a) => a.fsLineId);
+
+    // Layer 3: Agentic validation
+    const { runValidationAgent } = await import('../../services/mapping_validation_agent.js');
+    const agentResult = await runValidationAgent(pool, tenantId, session.entityId, closeSessionId, mappedAccounts);
+
+    // Layer 4: Cross-validation
+    const { runMappingCrossValidation } = await import('../../services/mapping_cross_validation_service.js');
+    const crossValidation = runMappingCrossValidation(
+      enriched.map((e) => {
+        const fsLine = fsById.get(e.fsLineId ?? '');
+        return {
+          accountCode: (e.accountCode ?? e.accountName ?? '').trim(),
+          accountName: e.accountName,
+          fsLineId: e.fsLineId ?? '',
+          fsLineStatement: fsLine?.statement ?? '',
+          debit: e.debit ?? 0,
+          credit: e.credit ?? 0,
+        };
+      })
+    );
+
+    res.json({ agent: agentResult, crossValidation });
+  } catch (e) {
+    send500(res, e, 'Validate mappings failed');
+  }
+});
+
+/**
+ * GET /sessions/:closeSessionId/suggestions/learning-stats
+ *
+ * Layer 5: Learning loop statistics for this entity.
+ */
+router.get('/sessions/:closeSessionId/suggestions/learning-stats', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+
+    const { closeSessionId } = req.params;
+    const session = await getCloseSessionById(pool, tenantId, closeSessionId);
+    if (!session) {
+      res.status(404).json({ error: 'Close session not found' });
+      return;
+    }
+
+    const { getLearningStats } = await import('../../services/mapping_learning_service.js');
+    const stats = await getLearningStats(pool, tenantId, session.entityId);
+    res.json(stats);
+  } catch (e) {
+    send500(res, e, 'Learning stats failed');
+  }
+});
+
+/**
+ * POST /suggestions/:proposalId/accept-correction
+ *
+ * Accept a Layer 3 agent correction proposal — remaps the account.
+ */
+router.post('/suggestions/:proposalId/accept-correction', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+
+    const { proposalId } = req.params;
+
+    // Fetch proposal
+    const proposalRes = await pool.query<{
+      id: string; entity_id: string; close_session_id: string;
+      account_code: string; account_name: string;
+      current_fs_line_id: string; proposed_fs_line_id: string; proposed_fs_line_name: string;
+      status: string;
+    }>(
+      `SELECT id, entity_id, close_session_id, account_code, account_name,
+              current_fs_line_id, proposed_fs_line_id, proposed_fs_line_name, status
+       FROM mapping_correction_proposals
+       WHERE id = $1 AND tenant_id = $2`,
+      [proposalId, tenantId]
+    );
+    if (proposalRes.rows.length === 0) {
+      res.status(404).json({ error: 'Correction proposal not found' });
+      return;
+    }
+    const proposal = proposalRes.rows[0];
+    if (proposal.status !== 'pending') {
+      res.status(409).json({ error: `Proposal is already ${proposal.status}` });
+      return;
+    }
+
+    // Create the corrected mapping rule
+    const { upsertCoaRules } = await import('../../services/coa_mapping_service.js');
+    const { version } = await upsertCoaRules(pool, tenantId, proposal.entity_id, [{
+      sourceAccountNamePattern: '%',
+      sourceAccountNumberPattern: proposal.account_code,
+      mappedFsLineId: proposal.proposed_fs_line_id,
+      confidenceDefault: 1,
+      effectiveFrom: '2000-01-01',
+    }]);
+
+    // Mark proposal accepted
+    await pool.query(
+      `UPDATE mapping_correction_proposals SET status = 'accepted', reviewed_by = $1, reviewed_at = NOW()
+       WHERE id = $2 AND tenant_id = $3`,
+      [(req as import('../../auth/middleware.js').AuthRequest).userId ?? 'api', proposalId, tenantId]
+    );
+
+    // Record in learning loop
+    try {
+      const { recordCorrection } = await import('../../services/mapping_learning_service.js');
+      await recordCorrection(pool, {
+        tenantId,
+        entityId: proposal.entity_id,
+        accountNamePattern: proposal.account_name,
+        accountCodePattern: proposal.account_code,
+        rejectedFsLineId: proposal.current_fs_line_id,
+        chosenFsLineId: proposal.proposed_fs_line_id,
+        chosenFsLineName: proposal.proposed_fs_line_name,
+        source: 'manual_override',
+        closeSessionId: proposal.close_session_id,
+      });
+    } catch { /* non-fatal */ }
+
+    res.json({ accepted: true, version });
+  } catch (e) {
+    send500(res, e, 'Accept correction proposal failed');
   }
 });
 

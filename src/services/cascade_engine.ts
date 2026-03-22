@@ -324,5 +324,43 @@ export async function executeCascade(
     );
   }
 
+  // Emit real-time event so connected clients see the cascade result instantly
+  try {
+    const { emitSessionEvent } = await import('../realtime/index.js');
+    emitSessionEvent({
+      type: 'cascade_complete',
+      sessionId: trigger.period_id,
+      tenantId,
+      triggeredBy: trigger.triggered_by,
+      data: {
+        triggerType: trigger.type,
+        affectedAccounts: trigger.affected_accounts,
+        reconRefreshed: result.recon_balances_refreshed,
+        reconStatusChanges: result.recon_status_changes.length,
+        statementsInvalidated: result.statements_invalidated,
+        issuesCreated: result.issues_created.length,
+        issuesVerified: result.issues_auto_verified.length,
+        durationMs: result.duration_ms,
+        validationPassing: result.validation_results.all_hard_passing,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  } catch {
+    /* non-fatal: realtime not initialized */
+  }
+
+  // Readiness notification: if all gates pass, notify controller (never auto-advance)
+  if (depth === 0 && result.validation_results.all_hard_passing) {
+    try {
+      const { checkAndNotifyReadiness } = await import('./auto_advance_service.js');
+      const readinessResult = await checkAndNotifyReadiness(pool, tenantId, trigger.period_id, result);
+      if (readinessResult.ready && readinessResult.notified) {
+        console.log(`[cascade] All gates passed for ${trigger.period_id} — controller notified (manual advance required)`);
+      }
+    } catch {
+      /* non-fatal: readiness check failed */
+    }
+  }
+
   return result;
 }

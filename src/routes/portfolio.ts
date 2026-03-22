@@ -280,4 +280,23 @@ router.get('/metrics', async (req: Request, res: Response) => {
   }
 });
 
+/** GET /api/portfolio/analytics/:entityId — Audit trail analytics for entity */
+router.get('/analytics/:entityId', async (req: Request, res: Response) => {
+  try {
+    const tenantId = (req as AuthRequest).tenantId;
+    if (!tenantId) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const { entityId } = req.params;
+    const closeSessionId = req.query.closeSessionId as string | undefined;
+    const pool = await getTenantPool(tenantId);
+    const { computeAuditAnalytics } = await import('../services/audit_analytics_service.js');
+    const analytics = await computeAuditAnalytics(pool, tenantId, entityId, closeSessionId);
+    res.json(analytics);
+  } catch (e) {
+    send500(res, e, 'Audit analytics failed');
+  }
+});
+
 export default router;

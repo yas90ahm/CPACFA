@@ -156,4 +156,62 @@ router.get('/entities', async (req: Request, res: Response) => {
   }
 });
 
+/** GET /api/settings/cross-tenant-learning — get cross-tenant learning opt-in status */
+router.get('/cross-tenant-learning', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const result = await pool.query<{ cross_tenant_learning_enabled: boolean }>(
+      `SELECT cross_tenant_learning_enabled FROM tenant_financial_config WHERE tenant_id = $1`,
+      [tenantId]
+    );
+    res.json({ enabled: result.rows[0]?.cross_tenant_learning_enabled ?? false });
+  } catch {
+    // Column may not exist yet
+    res.json({ enabled: false });
+  }
+});
+
+/** PUT /api/settings/cross-tenant-learning — toggle cross-tenant learning (admin only) */
+router.put('/cross-tenant-learning', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const role = (req as AuthRequest).role;
+    if (role !== 'admin') {
+      res.status(403).json({ error: 'Only admin can change cross-tenant learning settings' });
+      return;
+    }
+    const { enabled } = req.body as { enabled?: boolean };
+    if (typeof enabled !== 'boolean') {
+      res.status(400).json({ error: 'enabled (boolean) required' });
+      return;
+    }
+    await pool.query(
+      `UPDATE tenant_financial_config SET cross_tenant_learning_enabled = $1 WHERE tenant_id = $2`,
+      [enabled, tenantId]
+    );
+    // Audit trail
+    try {
+      await recordMaterialEvent(pool, {
+        tenantId,
+        eventType: 'mapping_rule_update',
+        deterministicFlagSnapshot: { crossTenantLearningEnabled: enabled, changedBy: (req as AuthRequest).userId },
+        createdBy: (req as AuthRequest).userId,
+      });
+    } catch { /* non-fatal */ }
+    res.json({ enabled });
+  } catch (e) {
+    send500(res, e, 'Update cross-tenant learning failed');
+  }
+});
+
 export default router;

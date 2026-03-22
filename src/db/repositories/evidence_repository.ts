@@ -296,6 +296,26 @@ export async function listEvidenceForObject(
   }));
 }
 
+/**
+ * Batch check: which object IDs (of a given type) have at least one evidence attachment?
+ * Returns a Set of object IDs that have evidence.
+ */
+export async function getObjectIdsWithEvidence(
+  pool: Pool,
+  tenantId: string,
+  objectType: import('../../types/evidence.js').EvidenceObjectType,
+  objectIds: string[]
+): Promise<Set<string>> {
+  if (objectIds.length === 0) return new Set();
+  const r = await pool.query<{ object_id: string }>(
+    `SELECT DISTINCT el.object_id
+     FROM evidence_links el
+     WHERE el.tenant_id = $1 AND el.object_type = $2 AND el.object_id = ANY($3)`,
+    [tenantId, objectType, objectIds]
+  );
+  return new Set(r.rows.map((row) => row.object_id));
+}
+
 export async function listEvidenceForJournalEntry(
   pool: Pool,
   tenantId: string,

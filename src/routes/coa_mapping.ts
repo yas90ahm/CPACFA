@@ -128,7 +128,16 @@ router.get('/suggestions', async (req: Request, res: Response) => {
     });
 
     res.json({ suggestions });
-  } catch (e) {
+  } catch (e: any) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes('ANTHROPIC') || msg.includes('API key') || msg.includes('api_key')) {
+      res.status(503).json({ error: 'AI_UNAVAILABLE', message: 'AI classification service is not configured. Accounts can be mapped manually.' });
+      return;
+    }
+    if ((msg.includes('xbrl_taxonomy_elements') || msg.includes('knowledge_embeddings')) && msg.includes('does not exist')) {
+      res.status(503).json({ error: 'TAXONOMY_NOT_INITIALIZED', message: 'XBRL taxonomy has not been initialized. Accounts can be mapped manually.' });
+      return;
+    }
     send500(res, e, 'Get mapping suggestions failed');
   }
 });

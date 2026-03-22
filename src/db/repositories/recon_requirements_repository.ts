@@ -94,7 +94,12 @@ export async function insertRequirement(
       tolerance_amount, tolerance_type, tolerance_percentage, expected_source, requires_reviewer_approval,
       created_at, updated_at, created_by
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13)
-    ON CONFLICT (tenant_id, entity_id, account_code) DO UPDATE SET updated_at = $12
+    ON CONFLICT (tenant_id, entity_id, account_code) DO UPDATE SET
+      account_name = EXCLUDED.account_name,
+      tolerance_amount = EXCLUDED.tolerance_amount,
+      tolerance_type = EXCLUDED.tolerance_type,
+      tolerance_percentage = EXCLUDED.tolerance_percentage,
+      updated_at = $12
     RETURNING ${COLS}`,
     [
       requirementId,

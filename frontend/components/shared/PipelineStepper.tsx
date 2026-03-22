@@ -79,21 +79,15 @@ export function PipelineStepper({
               </div>
             )}
             {step.status === 'active' && (
-              <>
-                <div
-                  className="w-full h-full rounded-full flex items-center justify-center"
-                  style={{ backgroundColor: 'var(--interactive-primary)' }}
-                >
-                  <div className="w-2 h-2 bg-white rounded-full" />
-                </div>
-                <div
-                  className="absolute inset-0 rounded-full animate-ping"
-                  style={{
-                    backgroundColor: 'var(--interactive-primary)',
-                    opacity: 0.3,
-                  }}
-                />
-              </>
+              <div
+                className="w-full h-full rounded-full flex items-center justify-center"
+                style={{
+                  backgroundColor: 'var(--interactive-primary)',
+                  boxShadow: '0 0 0 3px color-mix(in srgb, var(--interactive-primary) 25%, transparent)',
+                }}
+              >
+                <div className="w-2 h-2 bg-white rounded-full" />
+              </div>
             )}
             {step.status === 'pending' && (
               <div

@@ -431,7 +431,7 @@ router.post('/journal-entries/:id/reverse', async (req: Request, res: Response) 
     res.status(201).json({ reversalJE, originalJeId: id });
   } catch (e) {
     if (e instanceof JournalEntryError) {
-      res.status(e.code === 'NOT_FOUND' ? 404 : e.code === 'INVALID_STATUS' ? 403 : 400).json({ error: e.message, code: e.code });
+      res.status(e.code === 'NOT_FOUND' ? 404 : e.code === 'INVALID_STATUS' ? 409 : e.code === 'VALIDATION' ? 409 : 400).json({ error: e.message, code: e.code });
       return;
     }
     send500(res, e, 'Reverse journal entry failed');

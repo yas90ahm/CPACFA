@@ -1177,4 +1177,21 @@ router.post('/sessions/:id/lock', async (req: Request, res: Response) => {
   }
 });
 
+/** GET /sessions/:closeSessionId/predict-timeline — AI-powered close timeline prediction */
+router.get('/sessions/:closeSessionId/predict-timeline', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const { predictCloseTimeline } = await import('../../services/close_velocity_service.js');
+    const prediction = await predictCloseTimeline(pool, tenantId, req.params.closeSessionId);
+    res.json(prediction);
+  } catch (e) {
+    handleSessionError(res, e, 'Predict timeline failed');
+  }
+});
+
 export default router;

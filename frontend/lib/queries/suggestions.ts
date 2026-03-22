@@ -38,6 +38,25 @@ export function useCFSuggestions(sessionId: string | null) {
   });
 }
 
+export function useAutoClassify(sessionId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<GenerateSuggestionsResult & { source?: string }> => {
+      if (!sessionId) throw new Error('No sessionId');
+      return apiFetch<GenerateSuggestionsResult & { source?: string }>(
+        `/api/close/sessions/${sessionId}/suggestions/auto-classify`,
+        { method: 'POST', body: {} }
+      );
+    },
+    onSuccess: () => {
+      if (sessionId) {
+        qc.invalidateQueries({ queryKey: ['coa-suggestions', sessionId] });
+        qc.invalidateQueries({ queryKey: ['cf-suggestions', sessionId] });
+      }
+    },
+  });
+}
+
 export function useGenerateSuggestions(sessionId: string | null) {
   const qc = useQueryClient();
   return useMutation({

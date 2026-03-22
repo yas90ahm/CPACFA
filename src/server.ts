@@ -277,7 +277,14 @@ async function start(): Promise<void> {
   const { registerEventHandlers } = await import('./events/event_handlers.js');
   registerEventHandlers();
 
-  app.listen(PORT, () => {
+  // Attach Socket.IO for real-time collaboration
+  const { createServer } = await import('http');
+  const httpServer = createServer(app);
+  const { initRealtime } = await import('./realtime/index.js');
+  const socketCorsOrigins = corsOrigins.length > 0 ? corsOrigins : [];
+  initRealtime(httpServer, socketCorsOrigins);
+
+  httpServer.listen(PORT, () => {
     console.log(`FinOS Agent API listening on http://localhost:${PORT}`);
     if (getMode() === 'demo') {
       console.log(`Demo ready at http://localhost:${PORT}`);

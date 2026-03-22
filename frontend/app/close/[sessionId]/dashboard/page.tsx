@@ -413,43 +413,37 @@ export default function CloseDashboardPage() {
   const gatesPassing = gatesWithMapping.filter((g) => g.passing).length;
   const gatesTotal = gatesWithMapping.length;
 
-  // Pipeline step statuses
-  const pipelineStatus: Record<string, 'complete' | 'active' | 'pending' | 'error'> = {};
-  pipelineStatus.upload = 'complete';
-  pipelineStatus.map = mappingGatePassing ? 'complete' : totalAccounts > 0 ? 'active' : 'pending';
-  pipelineStatus.recon =
-    reconTotal > 0 && reconComplete === reconTotal
-      ? 'complete'
-      : reconTotal > 0
-        ? 'active'
-        : 'pending';
-  pipelineStatus.adjust =
-    ajeTemplateTotal > 0 && ajeTemplatePending === 0
-      ? 'complete'
-      : ajeTemplateTotal > 0
-        ? 'active'
-        : 'pending';
-  pipelineStatus.generate =
-    statementsGenerated && !statementsStale ? 'complete' : statementsGenerated ? 'active' : 'pending';
-  pipelineStatus.variance =
-    varianceMaterialTotal > 0 && varianceUnexplained.length === 0
-      ? 'complete'
-      : varianceMaterialTotal > 0
-        ? 'active'
-        : 'pending';
+  // Pipeline step statuses — SEQUENTIAL logic.
+  // A step can only be complete if ALL prior steps are complete.
+  // The first incomplete step is active. Everything after it is pending (locked).
   const reviewState = session?.state ?? 'IN_PROGRESS';
-  pipelineStatus.review =
-    reviewState === 'UNDER_REVIEW' ||
-    reviewState === 'CERTIFIED' ||
-    reviewState === 'LOCKED'
-      ? 'complete'
-      : 'pending';
-  pipelineStatus.certify =
-    reviewState === 'CERTIFIED' || reviewState === 'LOCKED'
-      ? 'complete'
-      : reviewState === 'UNDER_REVIEW'
-        ? 'active'
-        : 'pending';
+
+  // Per-step gate: does this individual step's own gate pass?
+  const stepGatePasses: Record<string, boolean> = {
+    upload: true, // If we're on the dashboard, GL was uploaded
+    map: mappingGatePassing,
+    recon: reconTotal > 0 && reconComplete === reconTotal,
+    adjust: ajeTemplateTotal > 0 ? ajeTemplatePending === 0 : true, // No templates = nothing to do
+    generate: statementsGenerated && !statementsStale,
+    variance: varianceMaterialTotal > 0 ? varianceUnexplained.length === 0 : true, // No material variances = nothing to explain
+    review: reviewState === 'UNDER_REVIEW' || reviewState === 'CERTIFIED' || reviewState === 'LOCKED',
+    certify: reviewState === 'CERTIFIED' || reviewState === 'LOCKED',
+  };
+
+  // Walk steps sequentially: everything before the first failure is complete,
+  // the first failure is active, everything after is pending (locked).
+  const pipelineStatus: Record<string, 'complete' | 'active' | 'pending' | 'error'> = {};
+  let foundFirstIncomplete = false;
+  for (const s of PIPELINE_STEPS) {
+    if (foundFirstIncomplete) {
+      pipelineStatus[s.id] = 'pending';
+    } else if (stepGatePasses[s.id]) {
+      pipelineStatus[s.id] = 'complete';
+    } else {
+      pipelineStatus[s.id] = 'active';
+      foundFirstIncomplete = true;
+    }
+  }
 
   const stepperSteps: PipelineStep[] = PIPELINE_STEPS.map((s) => ({
     id: s.id,

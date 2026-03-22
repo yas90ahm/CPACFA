@@ -619,4 +619,110 @@ router.get('/sessions/:periodId/recon-completeness', async (req: Request, res: R
   }
 });
 
+/**
+ * POST /sessions/:periodId/reconciliations/auto-populate
+ *
+ * Run reconciliation intelligence: pre-fill supporting balances from
+ * prior period, PDF extraction, or bank API. Auto-resolve cleared items.
+ */
+router.post('/sessions/:periodId/reconciliations/auto-populate', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+
+    const { periodId } = req.params;
+    const { getCloseSessionById } = await import('../../db/repositories/close_session_repository.js');
+    const session = await getCloseSessionById(pool, tenantId, periodId);
+    if (!session) {
+      res.status(404).json({ error: 'Close session not found' });
+      return;
+    }
+
+    const apply = req.body?.apply === true;
+
+    const { runReconIntelligence, applyPreFills } = await import('../../services/recon_intelligence_service.js');
+    const result = await runReconIntelligence(pool, tenantId, periodId, session.entityId);
+
+    if (apply && result.preFilled > 0) {
+      const applyResult = await applyPreFills(pool, tenantId, result.preFills);
+      res.json({ ...result, applied: applyResult.applied, skipped: applyResult.skipped });
+      return;
+    }
+
+    res.json(result);
+  } catch (e) {
+    send500(res, e, 'Auto-populate reconciliations failed');
+  }
+});
+
+/**
+ * POST /sessions/:periodId/reconciliations/:reconId/extract-balance
+ *
+ * Extract ending balance from uploaded evidence PDF for a specific recon.
+ * Returns the extraction result without applying it (controller confirms).
+ */
+router.post('/sessions/:periodId/reconciliations/:reconId/extract-balance', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+
+    const { reconId } = req.params;
+
+    // Get evidence for this recon
+    const { listEvidenceForObject } = await import('../../db/repositories/evidence_repository.js');
+    const evidence = await listEvidenceForObject(pool, tenantId, 'reconciliation', reconId);
+    const pdfEvidence = evidence.filter((e) =>
+      e.mimeType === 'application/pdf' || e.originalFilename?.endsWith('.pdf')
+    );
+
+    if (pdfEvidence.length === 0) {
+      res.json({ extracted: false, reason: 'No PDF evidence found for this reconciliation' });
+      return;
+    }
+
+    const { getEvidenceStorageAdapterAsync } = await import('../../services/evidence_storage_service.js');
+    const adapter = await getEvidenceStorageAdapterAsync();
+
+    for (const ev of pdfEvidence) {
+      try {
+        const result = await adapter.retrieve(tenantId, ev.id);
+        if (!result) continue;
+
+        const { extractFromPDF } = await import('../../services/bank_statement_extraction_service.js');
+        const extraction = await extractFromPDF(result.buffer);
+
+        if (extraction.balance) {
+          res.json({
+            extracted: true,
+            balance: extraction.balance,
+            confidence: extraction.confidence,
+            institution: extraction.institution,
+            statementDate: extraction.statementDate,
+            accountLast4: extraction.accountLast4,
+            excerpt: extraction.excerpt,
+            candidates: extraction.candidates,
+            evidenceId: ev.id,
+            fileName: ev.originalFilename,
+          });
+          return;
+        }
+      } catch {
+        // Try next PDF
+      }
+    }
+
+    res.json({ extracted: false, reason: 'No ending balance found in uploaded PDFs' });
+  } catch (e) {
+    send500(res, e, 'Extract balance failed');
+  }
+});
+
 export default router;

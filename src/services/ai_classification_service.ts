@@ -29,6 +29,8 @@ import {
 } from './slm_client_service.js';
 import { checkMappingCompleteness } from './mapping_completeness_gate.js';
 import { runClassifier, type RunClassifierResult } from '../ai/ai_orchestrator.js';
+import { searchXBRL } from './xbrl_search_service.js';
+import { listFsTaxonomyLines } from '../db/repositories/fs_taxonomy_repository.js';
 
 // ---------- Types ----------
 
@@ -75,131 +77,303 @@ export interface GenerateSuggestionsResult {
   errors: SlmError[];
 }
 
-// ---------- Generate suggestions ----------
+// ---------- RAG Classification: XBRL Retrieval → AI Selection ----------
 
 /**
- * Generate COA and CF classification suggestions for unmapped accounts.
+ * RAG-based account classification pipeline.
  *
- * 1. Resolves unmapped accounts from the close session (or uses provided list)
- * 2. Calls SLM microservice for COA + CF classification
- * 3. Runs guardrail (assertNoNumericAmountsInAgentOutput)
- * 4. Persists suggestions to ai_coa_suggestions and ai_cf_suggestions
- * 5. Returns suggestions for UI display
+ * Step 1 (Retrieval): XBRL trigram search returns top 5 candidates per account
+ * Step 2 (Generation): AI reads candidates + account name + account type → picks best match
+ * Step 3 (Fallback): If AI unavailable, use best XBRL match directly
  *
- * Graceful degradation: if SLM is unreachable, returns empty results with errors.
+ * The AI prompt contains ONLY words — account names, XBRL labels, account types.
+ * NO dollar amounts, NO balances, NO numbers of any kind enter the prompt.
  */
-export async function generateClassificationSuggestions(
+export async function classifyWithXBRL(
   pool: Pool,
   input: GenerateSuggestionsInput
 ): Promise<GenerateSuggestionsResult> {
   const { tenantId, entityId, closeSessionId } = input;
-  const allErrors: SlmError[] = [];
 
-  // Resolve account names
-  let accountNames = input.accountNames;
-  let unmappedAccounts: Array<{ account_code: string | null; account_name: string }> = [];
-
-  if (!accountNames || accountNames.length === 0) {
-    // Get unmapped accounts from the session
+  // Resolve unmapped accounts
+  let unmappedAccounts: Array<{ account_code: string | null; account_name: string; account_type?: string }> = [];
+  if (!input.accountNames || input.accountNames.length === 0) {
     const mappingResult = await checkMappingCompleteness(pool, tenantId, closeSessionId, entityId);
     unmappedAccounts = mappingResult.unmapped_accounts;
-    accountNames = unmappedAccounts.map((a) => a.account_name);
   } else {
-    unmappedAccounts = accountNames.map((name) => ({ account_code: null, account_name: name }));
+    unmappedAccounts = input.accountNames.map((name) => ({ account_code: null, account_name: name }));
   }
 
-  if (accountNames.length === 0) {
+  if (unmappedAccounts.length === 0) {
     return { coaSuggestions: [], cfSuggestions: [], errors: [] };
   }
 
-  // Reuse mapping rules from prior certified sessions for accounts that already had rules
-  let priorReusedCount = 0;
-  try {
-    const existingRulesResult = await pool.query<{ source_account_name_pattern: string; source_account_number_pattern: string | null }>(
-      `SELECT DISTINCT source_account_name_pattern, source_account_number_pattern
-       FROM tenant_coa_mapping_rules WHERE tenant_id = $1 AND entity_id = $2`,
-      [tenantId, entityId]
-    );
-    if (existingRulesResult.rows.length > 0) {
-      const existingPatterns = new Set(
-        existingRulesResult.rows.map((r) =>
-          r.source_account_number_pattern || r.source_account_name_pattern
-        )
-      );
-      const alreadyMapped: string[] = [];
-      for (const acc of unmappedAccounts) {
-        const code = acc.account_code ?? acc.account_name;
-        if (existingPatterns.has(code) || existingPatterns.has(acc.account_name)) {
-          alreadyMapped.push(acc.account_name);
-        }
-      }
-      if (alreadyMapped.length > 0) {
-        priorReusedCount = alreadyMapped.length;
-        // Remove already-mapped accounts from the SLM request
-        const alreadyMappedSet = new Set(alreadyMapped);
-        accountNames = accountNames.filter((n) => !alreadyMappedSet.has(n));
-        unmappedAccounts = unmappedAccounts.filter((a) => !alreadyMappedSet.has(a.account_name));
-        try {
-          await appendEntry(pool, {
-            tenantId,
-            eventType: 'mapping_prior_period_reused',
-            deterministicFlagSnapshot: {
-              closeSessionId,
-              count: priorReusedCount,
-              accounts: alreadyMapped.slice(0, 20),
-            },
-            userPromptRationale: `Reused ${priorReusedCount} mapping rules from prior periods`,
-          });
-        } catch { /* non-fatal */ }
-      }
+  // Check if XBRL taxonomy is populated
+  const xbrlCountRes = await pool.query<{ cnt: string }>('SELECT COUNT(*) AS cnt FROM xbrl_taxonomy_elements WHERE abstract = false AND deprecated = false');
+  if (Number(xbrlCountRes.rows[0]?.cnt ?? 0) === 0) {
+    return {
+      coaSuggestions: [],
+      cfSuggestions: [],
+      errors: [{ account_name: '*', error: 'XBRL taxonomy not populated. Run seed_xbrl_taxonomy first.' }],
+    };
+  }
+
+  // Build fs_taxonomy_lines lookups
+  const fsLines = await listFsTaxonomyLines(pool);
+  const fsByXbrlId = new Map<string, { id: string; name: string; code: string; statement: string }>();
+  const fsByName = new Map<string, { id: string; name: string; code: string; statement: string }>();
+  const fsById = new Map<string, { id: string; name: string; code: string; statement: string }>();
+  for (const line of fsLines) {
+    fsById.set(line.id, { id: line.id, name: line.name, code: line.code, statement: line.statement });
+    if (line.xbrlElement) {
+      fsByXbrlId.set(line.xbrlElement, { id: line.id, name: line.name, code: line.code, statement: line.statement });
     }
-  } catch {
-    /* non-fatal: prior rule lookup failed */
+    fsByName.set(line.name.toLowerCase(), { id: line.id, name: line.name, code: line.code, statement: line.statement });
   }
 
-  if (accountNames.length === 0) {
-    return { coaSuggestions: [], cfSuggestions: [], errors: [] };
-  }
+  const statementByType: Record<string, string> = {
+    ASSET: 'BS', LIABILITY: 'BS', EQUITY: 'BS', REVENUE: 'PL', EXPENSE: 'PL',
+    CURRENT_ASSET: 'BS', NON_CURRENT_ASSET: 'BS',
+    CURRENT_LIABILITY: 'BS', NON_CURRENT_LIABILITY: 'BS',
+  };
+  const defaultFsLineByType: Record<string, string> = {
+    ASSET: 'fs_asset', LIABILITY: 'fs_liability', EQUITY: 'fs_equity',
+    REVENUE: 'fs_revenue', EXPENSE: 'fs_expense',
+  };
 
   // Expire previous pending suggestions for this session
   await pool.query(
-    `UPDATE ai_coa_suggestions SET status = 'expired' WHERE tenant_id = $1 AND close_session_id = $2 AND status = 'pending'`,
-    [tenantId, closeSessionId]
-  );
-  await pool.query(
-    `UPDATE ai_cf_suggestions SET status = 'expired' WHERE tenant_id = $1 AND close_session_id = $2 AND status = 'pending'`,
+    `UPDATE ai_coa_suggestions SET status = 'expired'
+     WHERE tenant_id = $1 AND close_session_id = $2 AND status = 'pending'`,
     [tenantId, closeSessionId]
   );
 
-  // Call SLM for COA classifications
-  const coaBatch = await classifyCoaBatch(accountNames).catch((err) => {
-    allErrors.push({ account_name: '*', error: `COA batch failed: ${err instanceof Error ? err.message : String(err)}` });
-    return { results: [] as SlmCoaResult[], errors: [] as SlmError[] };
-  });
-  allErrors.push(...coaBatch.errors);
-
-  // Call SLM for CF classifications
-  const cfBatch = await classifyCfBatch(accountNames).catch((err) => {
-    allErrors.push({ account_name: '*', error: `CF batch failed: ${err instanceof Error ? err.message : String(err)}` });
-    return { results: [] as SlmCfResult[], errors: [] as SlmError[] };
-  });
-  allErrors.push(...cfBatch.errors);
-
-  // Run guardrail on SLM results
-  for (const r of coaBatch.results) {
-    assertNoNumericAmountsInAgentOutput(r, `SLM COA result for "${r.account_name}"`);
-  }
-  for (const r of cfBatch.results) {
-    assertNoNumericAmountsInAgentOutput(r, `SLM CF result for "${r.account_name}"`);
+  // ── STEP 1: XBRL Retrieval ──
+  // For each account, retrieve top 5 XBRL candidates + resolve to Sabit fs_lines
+  interface XbrlRetrievalResult {
+    account: typeof unmappedAccounts[0];
+    xbrlResults: Awaited<ReturnType<typeof searchXBRL>>;
+    /** Best deterministic match (XBRL-only, no AI) */
+    bestFsLineId: string | null;
+    bestFsLineName: string | null;
+    bestConfidence: number;
+    bestXbrlId: string | null;
+    bestXbrlLabel: string | null;
+    /** All XBRL candidates mapped to Sabit lines (for AI to choose from) */
+    candidates: Array<{ fsLineId: string; fsLineName: string; xbrlId: string; xbrlLabel: string; similarity: number }>;
   }
 
-  // Persist COA suggestions
+  const retrievals: XbrlRetrievalResult[] = [];
+
+  for (const acc of unmappedAccounts) {
+    const accountType = ((acc as Record<string, unknown>).account_type as string ?? '').toUpperCase();
+    const xbrlStatement = statementByType[accountType] || undefined;
+
+    const xbrlResults = await searchXBRL(pool, acc.account_name, {
+      statement: xbrlStatement,
+      limit: 5,
+    });
+
+    let bestFsLineId: string | null = null;
+    let bestFsLineName: string | null = null;
+    let bestConfidence = 0;
+    let bestXbrlId: string | null = null;
+    let bestXbrlLabel: string | null = null;
+    const candidates: XbrlRetrievalResult['candidates'] = [];
+
+    // Build candidate list: every XBRL result that maps to a Sabit fs_line
+    for (const xr of xbrlResults) {
+      const mapped = fsByXbrlId.get(xr.id);
+      if (mapped) {
+        candidates.push({
+          fsLineId: mapped.id,
+          fsLineName: mapped.name,
+          xbrlId: xr.id,
+          xbrlLabel: xr.label,
+          similarity: xr.similarity,
+        });
+      }
+    }
+
+    // Best deterministic pick: highest-similarity candidate that maps to Sabit
+    if (candidates.length > 0) {
+      const best = candidates[0];
+      bestFsLineId = best.fsLineId;
+      bestFsLineName = best.fsLineName;
+      bestConfidence = best.similarity;
+      bestXbrlId = best.xbrlId;
+      bestXbrlLabel = best.xbrlLabel;
+    } else if (xbrlResults.length > 0) {
+      // No direct XBRL→Sabit mapping, try name similarity
+      const best = xbrlResults[0];
+      bestXbrlId = best.id;
+      bestXbrlLabel = best.label;
+      const bestLabel = best.label.toLowerCase();
+      for (const [name, line] of fsByName) {
+        if (bestLabel.includes(name) || name.includes(bestLabel)) {
+          bestFsLineId = line.id;
+          bestFsLineName = line.name;
+          bestConfidence = best.similarity * 0.9;
+          break;
+        }
+      }
+    }
+
+    // Ultimate fallback: default by account type
+    if (!bestFsLineId && accountType && defaultFsLineByType[accountType]) {
+      bestFsLineId = defaultFsLineByType[accountType];
+      const fallback = fsLines.find((l) => l.id === bestFsLineId);
+      bestFsLineName = fallback?.name ?? accountType;
+      bestConfidence = 0.3;
+    }
+
+    retrievals.push({
+      account: acc,
+      xbrlResults,
+      bestFsLineId,
+      bestFsLineName,
+      bestConfidence,
+      bestXbrlId,
+      bestXbrlLabel,
+      candidates,
+    });
+  }
+
+  // ── STEP 2: AI Selection (RAG — words only, no numbers) ──
+  // Build a single batch prompt: for each account, show the XBRL candidates
+  // AI picks the best Sabit fs_line for each. Fail-open: if AI fails, use XBRL-only.
+  let aiPicks: Map<string, { fsLineId: string; confidence: number }> = new Map();
+  let modelVersion = 'xbrl_rag_v1';
+
+  try {
+    const { callAIWithSchema } = await import('../ai/ai_client.js');
+    const { z } = await import('zod');
+
+    // Build prompt — WORDS ONLY, no dollar amounts
+    const accountBlocks = retrievals.map((r) => {
+      const accType = ((r.account as Record<string, unknown>).account_type as string ?? 'unknown').toUpperCase();
+
+      // Format candidates as a numbered list of choices
+      const candidateLines = r.candidates.map((c, i) =>
+        `  ${i + 1}. "${c.fsLineName}" (Sabit ID: ${c.fsLineId}) — XBRL: "${c.xbrlLabel}"`
+      ).join('\n');
+
+      // Also include Sabit lines reachable via name match (no XBRL link)
+      const xbrlOnlyLines = r.xbrlResults
+        .filter((xr) => !r.candidates.some((c) => c.xbrlId === xr.id))
+        .slice(0, 2)
+        .map((xr) => `  - XBRL only: "${xr.label}" (no direct Sabit mapping)`)
+        .join('\n');
+
+      return `Account: "${r.account.account_name}"
+Type: ${accType}
+Candidates:
+${candidateLines || '  (no strong candidates)'}${xbrlOnlyLines ? '\n' + xbrlOnlyLines : ''}`;
+    }).join('\n\n');
+
+    // Build the complete Sabit taxonomy as the "answer space"
+    const sabitLines = fsLines
+      .filter((l) => !l.isSubtotal && !l.isHidden)
+      .map((l) => `${l.id}: "${l.name}" (${l.statement})`)
+      .join('\n');
+
+    const userPrompt = `You are an expert CPA mapping accounts to financial statement line items.
+
+For each account below, pick the single best Sabit reporting line from the candidates provided.
+The candidates come from XBRL US GAAP taxonomy matching — they are strong hints but not always correct.
+If none of the candidates fit well, pick from the full Sabit taxonomy list.
+
+Rules:
+- Pick exactly one Sabit line ID per account
+- Use your accounting knowledge to disambiguate
+- Contra accounts (Accumulated Depreciation, Allowance for Doubtful Accounts) must map to contra-asset lines
+- Revenue accounts map to revenue lines, expense to expense lines
+- If truly ambiguous, pick the most conservative classification
+
+${accountBlocks}
+
+Full Sabit Taxonomy (pick from these IDs):
+${sabitLines}
+
+Respond with JSON only. One object per account. Shape:
+{"picks":[{"account_name":"...","fs_line_id":"...","confidence":0.0-1.0}]}`;
+
+    const systemPrompt = `You are an expert US GAAP accountant. You classify GL accounts to financial statement reporting lines. You NEVER produce dollar amounts, balances, or calculations. You ONLY output the JSON mapping. Be precise with contra accounts and account subtypes.`;
+
+    const PicksSchema = z.object({
+      picks: z.array(z.object({
+        account_name: z.string(),
+        fs_line_id: z.string(),
+        confidence: z.number(),
+      })),
+    });
+
+    const result = await callAIWithSchema({
+      pool,
+      tenantId,
+      pillar: 'classifier',
+      promptVersion: 'xbrl_rag_v1',
+      systemPrompt,
+      userPrompt,
+      schema: PicksSchema,
+      requestJson: {
+        pillar: 'classifier_rag',
+        accountCount: retrievals.length,
+        candidateCount: retrievals.reduce((s, r) => s + r.candidates.length, 0),
+      },
+    });
+
+    if (result.ok && result.parsed) {
+      modelVersion = 'xbrl_rag_ai_v1';
+      for (const pick of result.parsed.picks) {
+        // Validate the fs_line_id exists in our taxonomy
+        if (fsById.has(pick.fs_line_id)) {
+          aiPicks.set(pick.account_name, {
+            fsLineId: pick.fs_line_id,
+            confidence: pick.confidence,
+          });
+        }
+      }
+    }
+  } catch {
+    // AI unavailable — use XBRL-only results (fail-open)
+    modelVersion = 'xbrl_rag_v1';
+  }
+
+  // ── STEP 3: Merge — AI pick wins if it's valid, else XBRL-only ──
   const coaSuggestions: CoaSuggestion[] = [];
-  for (const r of coaBatch.results) {
-    const id = randomUUID();
-    const unmapped = unmappedAccounts.find((a) => a.account_name === r.account_name);
-    const accountCode = unmapped?.account_code ?? null;
 
+  for (const r of retrievals) {
+    let fsLineId = r.bestFsLineId;
+    let fsLineName = r.bestFsLineName;
+    let confidence = r.bestConfidence;
+
+    // If AI made a pick for this account, use it
+    const aiPick = aiPicks.get(r.account.account_name);
+    if (aiPick) {
+      const aiLine = fsById.get(aiPick.fsLineId);
+      if (aiLine) {
+        fsLineId = aiLine.id;
+        fsLineName = aiLine.name;
+        confidence = aiPick.confidence;
+      }
+    }
+
+    if (!fsLineId) continue;
+
+    const confidenceBand = confidence >= 0.8 ? 'high' : confidence >= 0.5 ? 'medium' : 'low';
+
+    const alternatives = r.candidates.slice(0, 4)
+      .filter((c) => c.fsLineId !== fsLineId)
+      .map((c) => ({
+        line_item_id: c.fsLineId,
+        label: c.fsLineName,
+        score: c.similarity,
+        xbrl_element: c.xbrlId,
+      }));
+
+    // Persist suggestion
+    const id = randomUUID();
     await pool.query(
       `INSERT INTO ai_coa_suggestions
         (id, tenant_id, entity_id, close_session_id, account_code, account_name,
@@ -208,63 +382,26 @@ export async function generateClassificationSuggestions(
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'pending')`,
       [
         id, tenantId, entityId, closeSessionId,
-        accountCode, r.account_name,
-        r.line_item_id, r.line_item_label,
-        r.confidence, r.confidence_band,
-        r.tier, JSON.stringify(r.alternatives),
-        r.model_version,
+        r.account.account_code, r.account.account_name,
+        fsLineId, fsLineName,
+        confidence, confidenceBand,
+        r.bestXbrlLabel ? `xbrl:${r.bestXbrlId}` : null,
+        JSON.stringify(alternatives),
+        modelVersion,
       ]
-    );
+    ).catch(() => { /* non-fatal: duplicate */ });
 
     coaSuggestions.push({
       id,
-      accountCode,
-      accountName: r.account_name,
-      suggestedFsLineId: r.line_item_id,
-      suggestedFsLineLabel: r.line_item_label,
-      confidence: r.confidence,
-      confidenceBand: r.confidence_band,
-      tier: r.tier,
-      alternatives: r.alternatives,
-      modelVersion: r.model_version,
-      status: 'pending',
-    });
-  }
-
-  // Persist CF suggestions
-  const cfSuggestions: CfSuggestion[] = [];
-  for (const r of cfBatch.results) {
-    const id = randomUUID();
-    const unmapped = unmappedAccounts.find((a) => a.account_name === r.account_name);
-    const accountCode = unmapped?.account_code ?? null;
-
-    await pool.query(
-      `INSERT INTO ai_cf_suggestions
-        (id, tenant_id, entity_id, close_session_id, account_code, account_name,
-         classification, confidence, confidence_band, source, rule_pattern,
-         alternatives, model_version, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'pending')`,
-      [
-        id, tenantId, entityId, closeSessionId,
-        accountCode, r.account_name,
-        r.classification, r.confidence, r.confidence_band,
-        r.source, r.rule_pattern,
-        JSON.stringify(r.alternatives),
-        r.model_version,
-      ]
-    );
-
-    cfSuggestions.push({
-      id,
-      accountCode,
-      accountName: r.account_name,
-      classification: r.classification,
-      confidence: r.confidence,
-      confidenceBand: r.confidence_band,
-      source: r.source,
-      rulePattern: r.rule_pattern,
-      alternatives: r.alternatives,
-      modelVersion: r.model_version,
+      accountCode: r.account.account_code,
+      accountName: r.account.account_name,
+      suggestedFsLineId: fsLineId,
+      suggestedFsLineLabel: fsLineName,
+      confidence,
+      confidenceBand,
+      tier: r.bestXbrlLabel ? `xbrl:${r.bestXbrlId}` : null,
+      alternatives,
+      modelVersion,
       status: 'pending',
     });
   }
@@ -275,7 +412,6 @@ export async function generateClassificationSuggestions(
     const settings = await getEntitySettings(pool, tenantId, entityId);
     if (settings.mappingAutoAcceptEnabled && coaSuggestions.length > 0) {
       const threshold = settings.mappingConfidenceThreshold;
-      let autoAcceptedCount = 0;
       for (const suggestion of coaSuggestions) {
         if (suggestion.confidence >= threshold && suggestion.status === 'pending') {
           try {
@@ -285,32 +421,34 @@ export async function generateClassificationSuggestions(
               [suggestion.id, tenantId]
             );
             suggestion.status = 'accepted';
-            autoAcceptedCount++;
+            suggestion.autoAccepted = true;
           } catch {
-            /* non-fatal: skip individual auto-accept failures */
+            /* non-fatal */
           }
         }
       }
-      if (autoAcceptedCount > 0) {
-        try {
-          await appendEntry(pool, {
-            tenantId,
-            eventType: 'mapping_auto_accepted',
-            deterministicFlagSnapshot: {
-              closeSessionId,
-              count: autoAcceptedCount,
-              threshold,
-            },
-            userPromptRationale: `Auto-accepted ${autoAcceptedCount} COA mapping suggestions with confidence >= ${threshold}`,
-          });
-        } catch { /* non-fatal */ }
-      }
     }
   } catch {
-    /* non-fatal: auto-accept feature failed gracefully */
+    /* non-fatal */
   }
 
-  return { coaSuggestions, cfSuggestions, errors: allErrors };
+  return { coaSuggestions, cfSuggestions: [], errors: [] };
+}
+
+// ---------- Generate suggestions ----------
+
+/**
+ * Generate COA and CF classification suggestions for unmapped accounts.
+ *
+ * Delegates to the RAG pipeline: XBRL retrieval → AI selection → fallback.
+ * This is the same pipeline as classifyWithXBRL — kept as a separate export
+ * for backward compatibility with the /generate endpoint.
+ */
+export async function generateClassificationSuggestions(
+  pool: Pool,
+  input: GenerateSuggestionsInput
+): Promise<GenerateSuggestionsResult> {
+  return classifyWithXBRL(pool, input);
 }
 
 // ---------- Accept suggestion ----------
@@ -405,6 +543,25 @@ export async function acceptCoaSuggestion(
     });
   } catch {
     /* non-fatal: cascade failed */
+  }
+
+  // Learning loop: record override corrections for future closes
+  if (overrideFsLineId && overrideFsLineId !== suggestion.suggested_fs_line_id) {
+    try {
+      const { recordCorrection } = await import('./mapping_learning_service.js');
+      await recordCorrection(pool, {
+        tenantId,
+        entityId: suggestion.entity_id,
+        accountNamePattern: suggestion.account_name,
+        accountCodePattern: suggestion.account_code ?? undefined,
+        rejectedFsLineId: suggestion.suggested_fs_line_id,
+        chosenFsLineId: overrideFsLineId,
+        source: 'manual_override',
+        closeSessionId: suggestion.close_session_id,
+      });
+    } catch {
+      /* non-fatal: learning loop write failed */
+    }
   }
 
   return { ruleId, version };

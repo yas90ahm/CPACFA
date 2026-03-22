@@ -29,6 +29,7 @@ import { group17_edge_cases } from './groups/group17_edge_cases';
 import { group18_multi_period } from './groups/group18_multi_period';
 import { group19_modules } from './groups/group19_modules';
 import { group20_board_package } from './groups/group20_board_package';
+import { group21_autonomous_mapping } from './groups/group21_autonomous_mapping';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -154,6 +155,7 @@ async function main() {
     group18_multi_period(),
     group19_modules(),
     group20_board_package(),
+    group21_autonomous_mapping,
   ];
 
   const allResults: TestResult[] = [];

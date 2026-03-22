@@ -9,6 +9,7 @@ import {
   useAcceptSuggestion,
   useRejectSuggestion,
   useGenerateSuggestions,
+  useAutoClassify,
 } from '@/lib/queries/suggestions';
 import { MoneyCell } from '@/components/shared/MoneyCell';
 import { StatusBadge } from '@/components/shared/StatusBadge';
@@ -46,8 +47,8 @@ interface MergedRow {
 /* ------------------------------------------------------------------ */
 
 function getConfidenceColor(confidence: number): string {
-  if (confidence >= 90) return 'var(--ai-primary)';
-  if (confidence >= 70) return 'var(--status-warning)';
+  if (confidence >= 90) return 'var(--status-success)';
+  if (confidence >= 60) return 'var(--status-warning)';
   return 'var(--status-error)';
 }
 
@@ -67,7 +68,7 @@ function groupByCategory(items: TaxonomyItem[]): Record<string, TaxonomyItem[]> 
 function SkeletonRow() {
   return (
     <tr>
-      {[40, 80, 200, 80, 200, 100, 120].map((w, i) => (
+      {[40, 80, 200, 80, 200, 120, 70, 120].map((w, i) => (
         <td key={i} className="px-3 py-3">
           <div
             className="h-4 rounded animate-pulse"
@@ -107,6 +108,27 @@ export default function AccountMappingPage() {
   const acceptMutation = useAcceptSuggestion();
   const rejectMutation = useRejectSuggestion();
   const generateMutation = useGenerateSuggestions(sessionId);
+  const autoClassifyMutation = useAutoClassify(sessionId);
+
+  /* ── Auto-classify on page load when unmapped accounts exist ── */
+  const [autoClassifyTriggered, setAutoClassifyTriggered] = useState(false);
+  useEffect(() => {
+    if (
+      !tbLoading &&
+      !suggestionsLoading &&
+      rows.length > 0 &&
+      coaSuggestions.length === 0 &&
+      !autoClassifyTriggered &&
+      !autoClassifyMutation.isPending
+    ) {
+      // Check if there are unmapped accounts
+      const unmapped = rows.filter((r) => !r.mappingReportingLineId);
+      if (unmapped.length > 0) {
+        setAutoClassifyTriggered(true);
+        autoClassifyMutation.mutate();
+      }
+    }
+  }, [tbLoading, suggestionsLoading, rows, coaSuggestions, autoClassifyTriggered, autoClassifyMutation]);
 
   /* ── Taxonomy ── */
   const [taxonomy, setTaxonomy] = useState<TaxonomyItem[]>([]);
@@ -501,30 +523,46 @@ export default function AccountMappingPage() {
         </div>
       )}
 
-      {!isLoading && rows.length > 0 && !hasSuggestions && (
+      {/* Auto-classifying banner */}
+      {autoClassifyMutation.isPending && (
+        <div
+          className="flex items-center gap-3 px-4 py-3 rounded-md"
+          style={{
+            marginTop: '16px',
+            backgroundColor: 'var(--ai-bg)',
+            border: '1px solid var(--ai-primary)',
+          }}
+        >
+          <Sparkles className="w-4 h-4 animate-pulse" style={{ color: 'var(--ai-primary)' }} />
+          <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
+            Classifying {rows.filter((r) => !r.mappingReportingLineId).length} accounts against XBRL taxonomy...
+          </span>
+        </div>
+      )}
+
+      {/* Fallback: manual re-classify button if auto-classify failed */}
+      {!isLoading && rows.length > 0 && !hasSuggestions && !autoClassifyMutation.isPending && autoClassifyMutation.isError && (
         <div className="flex justify-center" style={{ marginTop: '24px' }}>
-          <button
-            type="button"
-            disabled={generateMutation.isPending}
-            onClick={() => generateMutation.mutate(undefined)}
-            className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white rounded-md transition-colors"
-            style={{
-              backgroundColor: 'var(--interactive-primary)',
-              opacity: generateMutation.isPending ? 0.7 : 1,
-            }}
-          >
-            {generateMutation.isPending ? (
-              <>
-                <Sparkles className="w-4 h-4 animate-pulse" />
-                Generating...
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-4 h-4" />
-                Generate AI Suggestions
-              </>
-            )}
-          </button>
+          <div className="text-center">
+            <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
+              Auto-classification failed. Click to retry.
+            </p>
+            <button
+              type="button"
+              disabled={autoClassifyMutation.isPending}
+              onClick={() => {
+                setAutoClassifyTriggered(false);
+                autoClassifyMutation.mutate();
+              }}
+              className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white rounded-md transition-colors"
+              style={{
+                backgroundColor: 'var(--interactive-primary)',
+              }}
+            >
+              <Sparkles className="w-4 h-4" />
+              Retry Classification
+            </button>
+          </div>
         </div>
       )}
 
@@ -565,7 +603,8 @@ export default function AccountMappingPage() {
                   { label: 'Account Name', width: undefined },
                   { label: 'GL Type', width: '80px' },
                   { label: 'Suggested Mapping', width: '200px' },
-                  { label: 'Confidence', width: '100px' },
+                  { label: 'Confidence', width: '120px' },
+                  { label: 'Source', width: '70px' },
                   { label: 'Actions', width: '120px' },
                 ].map((col) => (
                   <th
@@ -724,6 +763,7 @@ function MappingRow({
       break;
     case 'accepted':
       rowStyle.backgroundColor = 'var(--bg-surface)';
+      rowStyle.borderLeft = '3px solid var(--status-success)';
       break;
     case 'rejected':
       rowStyle.backgroundColor = 'var(--status-error-bg)';
@@ -801,14 +841,9 @@ function MappingRow({
       {/* Suggested Mapping */}
       <td style={{ padding: '10px 12px', width: '200px' }}>
         {displayStatus === 'pending' && suggestion && (
-          <AISuggestionCard
-            suggestion={suggestion.suggestedFsLineLabel ?? suggestion.suggestedFsLineId}
-            confidence={confidenceValue ?? undefined}
-            reasoning={(suggestion as unknown as { xbrl_label?: string }).xbrl_label ? `XBRL: ${(suggestion as unknown as { xbrl_label?: string }).xbrl_label}` : undefined}
-            onAccept={() => onAccept(suggestion)}
-            onReject={() => onReject(suggestion)}
-            className="text-sm"
-          />
+          <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+            {suggestion.suggestedFsLineLabel ?? suggestion.suggestedFsLineId}
+          </span>
         )}
         {displayStatus === 'accepted' && (
           <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
@@ -886,12 +921,12 @@ function MappingRow({
       </td>
 
       {/* Confidence */}
-      <td style={{ padding: '10px 12px', width: '100px' }}>
-        {displayStatus !== 'pending' && confidenceValue !== null && suggestion && (
+      <td style={{ padding: '10px 12px', width: '120px' }}>
+        {confidenceValue !== null && suggestion && (
           <div className="flex items-center gap-2">
             <span
               className="text-xs font-semibold tabular-nums"
-              style={{ color: getConfidenceColor(confidenceValue) }}
+              style={{ color: getConfidenceColor(confidenceValue), minWidth: '32px' }}
             >
               {confidenceValue}%
             </span>
@@ -915,14 +950,66 @@ function MappingRow({
         )}
       </td>
 
+      {/* Source */}
+      <td style={{ padding: '10px 12px', width: '70px' }}>
+        {suggestion && (
+          <span
+            className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium uppercase"
+            style={{
+              backgroundColor: suggestion.modelVersion?.startsWith('xbrl')
+                ? 'var(--bg-surface-sunken)'
+                : 'var(--ai-bg)',
+              color: suggestion.modelVersion?.startsWith('xbrl')
+                ? 'var(--text-secondary)'
+                : 'var(--ai-primary)',
+            }}
+          >
+            {suggestion.modelVersion?.startsWith('xbrl') ? 'XBRL' : 'AI'}
+          </span>
+        )}
+      </td>
+
       {/* Actions */}
       <td style={{ padding: '10px 12px', width: '120px' }}>
+        {displayStatus === 'pending' && suggestion && (
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => onAccept(suggestion)}
+              className="inline-flex items-center gap-1 text-xs font-medium rounded-md transition-colors"
+              style={{
+                height: '26px',
+                padding: '0 8px',
+                backgroundColor: 'var(--status-success)',
+                color: 'white',
+              }}
+            >
+              <Check className="w-3 h-3" />
+              Accept
+            </button>
+            <button
+              type="button"
+              onClick={() => onReject(suggestion)}
+              className="inline-flex items-center gap-1 text-xs font-medium rounded-md transition-colors"
+              style={{
+                height: '26px',
+                padding: '0 8px',
+                border: '1px solid var(--border-default)',
+                backgroundColor: 'var(--bg-surface)',
+                color: 'var(--text-secondary)',
+              }}
+            >
+              Change
+            </button>
+          </div>
+        )}
         {displayStatus === 'accepted' && (
           <span
-            className="text-xs font-medium cursor-pointer"
-            style={{ color: 'var(--text-link)' }}
+            className="inline-flex items-center gap-1 text-xs font-medium"
+            style={{ color: 'var(--status-success)' }}
           >
-            Edit
+            <Check className="w-3.5 h-3.5" />
+            Mapped
           </span>
         )}
         {displayStatus === 'rejected' && suggestion && rejectedOverride && (
