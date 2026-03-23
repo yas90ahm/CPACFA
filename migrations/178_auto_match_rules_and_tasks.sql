@@ -29,7 +29,7 @@ CREATE INDEX IF NOT EXISTS idx_auto_match_rules_tenant ON tenant_auto_match_rule
 CREATE TABLE IF NOT EXISTS tenant_clearing_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id TEXT NOT NULL,
-  period_id UUID NOT NULL REFERENCES close_sessions(id),
+  period_id TEXT NOT NULL REFERENCES close_sessions(id),
   recon_id UUID,
   account_code TEXT NOT NULL,
 
@@ -58,7 +58,7 @@ CREATE INDEX IF NOT EXISTS idx_clearing_items_status ON tenant_clearing_items(te
 CREATE TABLE IF NOT EXISTS tenant_close_tasks (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id TEXT NOT NULL,
-  close_session_id UUID NOT NULL REFERENCES close_sessions(id),
+  close_session_id TEXT NOT NULL REFERENCES close_sessions(id),
   entity_id TEXT,
 
   task_type TEXT NOT NULL CHECK (task_type IN (

@@ -3,7 +3,7 @@
 CREATE TABLE IF NOT EXISTS tenant_gate_snapshots (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id TEXT NOT NULL,
-  close_session_id UUID NOT NULL REFERENCES close_sessions(id),
+  close_session_id TEXT NOT NULL REFERENCES close_sessions(id),
   gates_passing INTEGER NOT NULL DEFAULT 0,
   gates_total INTEGER NOT NULL DEFAULT 0,
   can_advance BOOLEAN NOT NULL DEFAULT FALSE,

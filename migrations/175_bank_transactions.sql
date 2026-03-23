@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS tenant_bank_transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id TEXT NOT NULL,
-  period_id UUID NOT NULL REFERENCES close_sessions(id),
+  period_id TEXT NOT NULL REFERENCES close_sessions(id),
   account_code TEXT NOT NULL,
 
   -- Transaction data
@@ -49,7 +49,7 @@ CREATE INDEX IF NOT EXISTS idx_bank_txn_date ON tenant_bank_transactions(tenant_
 CREATE TABLE IF NOT EXISTS tenant_gl_transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id TEXT NOT NULL,
-  period_id UUID NOT NULL REFERENCES close_sessions(id),
+  period_id TEXT NOT NULL REFERENCES close_sessions(id),
   account_code TEXT NOT NULL,
 
   -- Transaction data
@@ -80,7 +80,7 @@ CREATE INDEX IF NOT EXISTS idx_gl_txn_match_status ON tenant_gl_transactions(ten
 CREATE TABLE IF NOT EXISTS tenant_transaction_match_groups (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id TEXT NOT NULL,
-  period_id UUID NOT NULL REFERENCES close_sessions(id),
+  period_id TEXT NOT NULL REFERENCES close_sessions(id),
   recon_id UUID,
 
   match_type TEXT NOT NULL DEFAULT 'one_to_one'
