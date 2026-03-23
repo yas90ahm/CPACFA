@@ -42,9 +42,7 @@ CREATE TABLE IF NOT EXISTS tenant_clearing_items (
   status TEXT NOT NULL DEFAULT 'outstanding' CHECK (status IN ('outstanding', 'cleared', 'voided', 'stale')),
   cleared_date DATE,
   cleared_by TEXT,
-  days_outstanding INTEGER GENERATED ALWAYS AS (
-    CASE WHEN status = 'outstanding' THEN CURRENT_DATE - original_date ELSE NULL END
-  ) STORED,
+  days_outstanding INTEGER, -- computed at query time: CURRENT_DATE - original_date
 
   bank_transaction_id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
