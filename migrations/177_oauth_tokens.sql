@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS tenant_oauth_tokens (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id TEXT NOT NULL,
-  connection_id UUID NOT NULL REFERENCES accounting_connections(id) ON DELETE CASCADE,
+  connection_id TEXT NOT NULL REFERENCES accounting_connections(id) ON DELETE CASCADE,
   provider TEXT NOT NULL CHECK (provider IN ('quickbooks', 'xero', 'netsuite')),
 
   -- Token data (access_token stored encrypted or as reference, never plaintext in prod)
@@ -36,7 +36,7 @@ CREATE INDEX IF NOT EXISTS idx_oauth_tokens_connection
 CREATE TABLE IF NOT EXISTS tenant_sync_schedules (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id TEXT NOT NULL,
-  connection_id UUID NOT NULL REFERENCES accounting_connections(id) ON DELETE CASCADE,
+  connection_id TEXT NOT NULL REFERENCES accounting_connections(id) ON DELETE CASCADE,
 
   frequency TEXT NOT NULL DEFAULT 'daily' CHECK (frequency IN ('hourly', 'daily', 'weekly', 'manual')),
   next_run_at TIMESTAMPTZ,
