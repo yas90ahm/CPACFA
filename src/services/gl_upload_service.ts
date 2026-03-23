@@ -6,7 +6,7 @@
 import { parse } from 'csv-parse/sync';
 import { createHash } from 'crypto';
 import type { Pool } from 'pg';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import type {
   GeneralLedgerLine,
   JournalEntry,
@@ -75,7 +75,7 @@ function findHeaderRowIndex(rows: unknown[][]): number {
  * For Excel: reads sheets directly into arrays, finds header row, rebuilds CSV.
  * For CSV: detects header row among first 20 rows and strips junk prefix.
  */
-function ensureCsvBuffer(fileBuffer: Buffer): Buffer {
+async function ensureCsvBuffer(fileBuffer: Buffer): Promise<Buffer> {
   const isExcel = (fileBuffer[0] === 0x50 && fileBuffer[1] === 0x4B)
     || (fileBuffer[0] === 0xD0 && fileBuffer[1] === 0xCF);
 
@@ -87,13 +87,33 @@ function ensureCsvBuffer(fileBuffer: Buffer): Buffer {
   return csvWithHeaderDetection(fileBuffer);
 }
 
+/** Convert an ExcelJS worksheet to an array-of-arrays */
+function worksheetToAoa(worksheet: ExcelJS.Worksheet): unknown[][] {
+  const result: unknown[][] = [];
+  worksheet.eachRow({ includeEmpty: true }, (row, _rowNumber) => {
+    const values: unknown[] = [];
+    const rawValues = row.values as unknown[];
+    for (let i = 1; i < rawValues.length; i++) {
+      const cell = rawValues[i];
+      if (cell != null && typeof cell === 'object' && 'richText' in (cell as Record<string, unknown>)) {
+        const rt = (cell as { richText: Array<{ text: string }> }).richText;
+        values.push(rt.map(t => t.text).join(''));
+      } else {
+        values.push(cell ?? '');
+      }
+    }
+    result.push(values);
+  });
+  return result;
+}
+
 /**
  * Convert Excel buffer to CSV, detecting the real header row.
  */
-function excelToCsvBuffer(fileBuffer: Buffer): Buffer {
-  let workbook: XLSX.WorkBook;
+async function excelToCsvBuffer(fileBuffer: Buffer): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
   try {
-    workbook = XLSX.read(fileBuffer, { type: 'buffer', cellDates: true, cellText: false });
+    await workbook.xlsx.load(fileBuffer as unknown as ArrayBuffer);
   } catch (e) {
     const msg = e instanceof Error ? e.message : '';
     if (msg.includes('password')) {
@@ -102,16 +122,20 @@ function excelToCsvBuffer(fileBuffer: Buffer): Buffer {
     throw new Error(`Failed to read Excel file: ${msg}`);
   }
 
-  if (!workbook.SheetNames.length) {
+  if (!workbook.worksheets.length) {
     throw new Error('The uploaded Excel file contains no data');
   }
 
-  if (workbook.SheetNames.length > 1) {
-    console.warn(`GL upload: Multiple sheets detected (${workbook.SheetNames.join(', ')}), using first sheet "${workbook.SheetNames[0]}"`);
+  if (workbook.worksheets.length > 1) {
+    const sheetNames = workbook.worksheets.map(ws => ws.name);
+    console.warn(`GL upload: Multiple sheets detected (${sheetNames.join(', ')}), using first sheet "${sheetNames[0]}"`);
   }
 
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  let rawRows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', rawNumbers: true });
+  const sheet = workbook.getWorksheet(1);
+  if (!sheet) {
+    throw new Error('The uploaded Excel file contains no data');
+  }
+  let rawRows = worksheetToAoa(sheet);
 
   if (!rawRows.length) {
     throw new Error('The uploaded Excel file contains no data');
@@ -355,10 +379,10 @@ function parseGlAmount(value: unknown): number {
 /**
  * Parse GL CSV for preview (no persist). Returns headers, suggested mapping, errors, TB preview.
  */
-export function parseGLPreview(
+export async function parseGLPreview(
   fileBuffer: Buffer,
   columnMapping?: GLColumnMapping | null
-): {
+): Promise<{
   success: boolean;
   headers: string[];
   appliedMapping: GLColumnMapping;
@@ -382,8 +406,8 @@ export function parseGLPreview(
       entryCount: number;
     }>;
   } | null;
-} {
-  const csvBuffer = ensureCsvBuffer(fileBuffer);
+}> {
+  const csvBuffer = await ensureCsvBuffer(fileBuffer);
   const records = parse(csvBuffer.toString('utf8'), {
     columns: true,
     skip_empty_lines: true,
@@ -1071,7 +1095,7 @@ export async function uploadGLForPeriod(
 
   try {
     const parseStart = Date.now();
-    const csvBuffer = ensureCsvBuffer(fileBuffer);
+    const csvBuffer = await ensureCsvBuffer(fileBuffer);
     const parsed = columnMapping
       ? parseGLCsvWithMapping(csvBuffer, columnMapping)
       : parseGLCsv(csvBuffer);

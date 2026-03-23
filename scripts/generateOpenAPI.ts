@@ -300,10 +300,10 @@ export function generateOpenAPISpec() {
   const openAPISpec = generator.generateDocument({
     openapi: '3.0.0',
     info: {
-      title: 'FinOS API - True AI Finance Operating System',
+      title: 'Sabit API - Financial Close Automation Engine',
       version: '1.0.0',
       description: `
-# FinOS API Documentation
+# Sabit API Documentation
 
 A comprehensive API for CPA and CFA operations including:
 
@@ -331,8 +331,8 @@ All major modules include agentic AI capabilities for intelligent suggestions, a
 All endpoints (except /auth/*) require Bearer token authentication.
       `,
       contact: {
-        name: 'FinOS Support',
-        email: 'support@finos.com',
+        name: 'Sabit Support',
+        email: 'support@sabit.com',
       },
       license: {
         name: 'Proprietary',
@@ -344,7 +344,7 @@ All endpoints (except /auth/*) require Bearer token authentication.
         description: 'Local development server',
       },
       {
-        url: 'https://api.finos.com',
+        url: 'https://api.sabit.com',
         description: 'Production server',
       },
     ],

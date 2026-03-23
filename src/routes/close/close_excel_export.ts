@@ -98,7 +98,7 @@ router.get(
         credit: Number(r.credit),
       }));
 
-      const buffer = exportTrialBalance(rows, { entityName, periodLabel });
+      const buffer = await exportTrialBalance(rows, { entityName, periodLabel });
       sendXlsx(res, buffer, `trial-balance-${periodLabel}.xlsx`);
     } catch (e) {
       send500(res, e, 'Export trial balance xlsx failed');
@@ -186,7 +186,7 @@ router.get(
         equityChanges: byStatement.equity_changes,
       };
 
-      const buffer = exportStatements(data);
+      const buffer = await exportStatements(data);
       sendXlsx(res, buffer, `financial-statements-${periodLabel}.xlsx`);
     } catch (e) {
       send500(res, e, 'Export statements xlsx failed');
@@ -269,7 +269,7 @@ router.get(
         reviewedBy: r.reviewed_by,
       }));
 
-      const buffer = exportReconciliations(rows, { entityName, periodLabel });
+      const buffer = await exportReconciliations(rows, { entityName, periodLabel });
       sendXlsx(res, buffer, `reconciliations-${periodLabel}.xlsx`);
     } catch (e) {
       send500(res, e, 'Export reconciliations xlsx failed');
@@ -345,7 +345,7 @@ router.get(
         explanationSource: r.explanation_source,
       }));
 
-      const buffer = exportVariances(rows, { entityName, periodLabel });
+      const buffer = await exportVariances(rows, { entityName, periodLabel });
       sendXlsx(res, buffer, `variance-analysis-${periodLabel}.xlsx`);
     } catch (e) {
       send500(res, e, 'Export variances xlsx failed');

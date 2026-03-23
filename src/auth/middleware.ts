@@ -5,7 +5,7 @@
 import type { Pool } from 'pg';
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken } from './index.js';
-import { isDbConfigured, getTenantPoolWithMigrations, getTenantAiPoolWithMigrations, isAiBoundaryDbRolesEnabled } from '../db/index.js';
+import { isDbConfigured, getTenantPoolWithMigrations, getTenantAiPoolWithMigrations, isAiBoundaryDbRolesEnabled, createTenantScopedPool } from '../db/index.js';
 import { requireTenantContext as configRequireTenantContext } from '../lib/runtime_mode.js';
 
 export interface AuthRequest extends Request {
@@ -17,9 +17,14 @@ export interface AuthRequest extends Request {
   tenantAiPool?: Pool;
 }
 
-export function requireAuth(req: AuthRequest, res: Response, next: NextFunction): void {
+function extractBearerToken(req: Request): string | undefined {
   const authHeader = req.headers.authorization;
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+  return authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+}
+
+export function requireAuth(req: AuthRequest, res: Response, next: NextFunction): void {
+  // Check HttpOnly cookie first, then fall back to Authorization header
+  const token = (req as any).cookies?.cpa_session || extractBearerToken(req);
   if (!token) {
     res.status(401).json({ error: 'Unauthorized', message: 'Missing or invalid Authorization header' });
     return;
@@ -44,8 +49,8 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
 
 /** Optional auth: if token present, attach user; otherwise continue (for dev without auth). */
 export function optionalAuth(req: AuthRequest, _res: Response, next: NextFunction): void {
-  const authHeader = req.headers.authorization;
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+  // Check HttpOnly cookie first, then fall back to Authorization header
+  const token = (req as any).cookies?.cpa_session || extractBearerToken(req);
   if (token) {
     const payload = verifyToken(token);
     if (payload) {
@@ -76,8 +81,10 @@ export function attachTenantPool(req: AuthRequest, res: Response, next: NextFunc
     : loadCore;
   Promise.all([loadCore, loadAi])
     .then(([pool, aiPool]) => {
-      req.tenantPool = pool;
-      req.tenantAiPool = aiPool;
+      // Wrap pools with tenant-scoped proxies that SET app.current_tenant_id
+      // on every connection checkout, enabling Row-Level Security (RLS) policies.
+      req.tenantPool = createTenantScopedPool(pool, req.tenantId!);
+      req.tenantAiPool = createTenantScopedPool(aiPool, req.tenantId!);
       next();
     })
     .catch(next);

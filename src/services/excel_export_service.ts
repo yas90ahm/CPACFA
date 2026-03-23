@@ -2,11 +2,11 @@
  * Excel Export Service (GAP I7)
  *
  * Generates .xlsx buffers for trial balance, financial statements,
- * reconciliations, and variance analysis using the xlsx library.
+ * reconciliations, and variance analysis using the exceljs library.
  * All monetary values use Decimal.js for precision.
  */
 
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { round2 } from '../utils/decimal.js';
 
 export interface TrialBalanceExportRow {
@@ -63,16 +63,32 @@ export interface VarianceExportRow {
   explanationSource: string | null;
 }
 
+/** Helper: add rows from an array-of-arrays to a worksheet */
+function addAoaToWorksheet(ws: ExcelJS.Worksheet, rows: (string | number | boolean | null | undefined)[][]): void {
+  for (const row of rows) {
+    ws.addRow(row);
+  }
+}
+
+/** Helper: set column widths on a worksheet */
+function setColumnWidths(ws: ExcelJS.Worksheet, widths: number[]): void {
+  for (let i = 0; i < widths.length; i++) {
+    const col = ws.getColumn(i + 1);
+    col.width = widths[i];
+  }
+}
+
 /**
  * Export trial balance data to an xlsx buffer.
  * Single sheet with account code, name, debit, credit, net balance columns,
  * plus a totals row at the bottom.
  */
-export function exportTrialBalance(
+export async function exportTrialBalance(
   rows: TrialBalanceExportRow[],
   meta?: { entityName?: string; periodLabel?: string }
-): Buffer {
-  const wb = XLSX.utils.book_new();
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Trial Balance');
 
   const headerRows: (string | number)[][] = [];
   if (meta?.entityName) headerRows.push(['Entity', meta.entityName]);
@@ -111,20 +127,12 @@ export function exportTrialBalance(
   ]);
 
   const allRows = [...headerRows, ...dataRows];
-  const ws = XLSX.utils.aoa_to_sheet(allRows);
+  addAoaToWorksheet(ws, allRows);
 
   // Set column widths
-  ws['!cols'] = [
-    { wch: 16 }, // Account Code
-    { wch: 40 }, // Account Name
-    { wch: 20 }, // Account Type
-    { wch: 18 }, // Debit
-    { wch: 18 }, // Credit
-    { wch: 18 }, // Net Balance
-  ];
+  setColumnWidths(ws, [16, 40, 20, 18, 18, 18]);
 
-  XLSX.utils.book_append_sheet(wb, ws, 'Trial Balance');
-  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const buf = await wb.xlsx.writeBuffer();
   return Buffer.from(buf);
 }
 
@@ -133,13 +141,15 @@ export function exportTrialBalance(
  * Sheets: Income Statement, Balance Sheet, Cash Flow, Equity Changes.
  * GAAP formatting: subtotal rows bolded via indentation markers.
  */
-export function exportStatements(data: StatementsExportData): Buffer {
-  const wb = XLSX.utils.book_new();
+export async function exportStatements(data: StatementsExportData): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
 
   function buildStatementSheet(
+    sheetName: string,
     title: string,
     lines: StatementLineExport[]
-  ): XLSX.WorkSheet {
+  ): void {
+    const ws = wb.addWorksheet(sheetName);
     const rows: (string | number)[][] = [
       [data.entityName],
       [title],
@@ -154,33 +164,16 @@ export function exportStatements(data: StatementsExportData): Buffer {
       rows.push([`${indent}${prefix}${line.label}`, round2(line.amount)]);
     }
 
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols'] = [{ wch: 50 }, { wch: 20 }];
-    return ws;
+    addAoaToWorksheet(ws, rows);
+    setColumnWidths(ws, [50, 20]);
   }
 
-  XLSX.utils.book_append_sheet(
-    wb,
-    buildStatementSheet('Income Statement', data.incomeStatement),
-    'Income Statement'
-  );
-  XLSX.utils.book_append_sheet(
-    wb,
-    buildStatementSheet('Balance Sheet', data.balanceSheet),
-    'Balance Sheet'
-  );
-  XLSX.utils.book_append_sheet(
-    wb,
-    buildStatementSheet('Cash Flow Statement', data.cashFlow),
-    'Cash Flow'
-  );
-  XLSX.utils.book_append_sheet(
-    wb,
-    buildStatementSheet('Statement of Changes in Equity', data.equityChanges),
-    'Equity Changes'
-  );
+  buildStatementSheet('Income Statement', 'Income Statement', data.incomeStatement);
+  buildStatementSheet('Balance Sheet', 'Balance Sheet', data.balanceSheet);
+  buildStatementSheet('Cash Flow', 'Cash Flow Statement', data.cashFlow);
+  buildStatementSheet('Equity Changes', 'Statement of Changes in Equity', data.equityChanges);
 
-  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const buf = await wb.xlsx.writeBuffer();
   return Buffer.from(buf);
 }
 
@@ -188,11 +181,12 @@ export function exportStatements(data: StatementsExportData): Buffer {
  * Export reconciliation summary to an xlsx buffer.
  * Single sheet with account-level reconciliation data.
  */
-export function exportReconciliations(
+export async function exportReconciliations(
   rows: ReconciliationExportRow[],
   meta?: { entityName?: string; periodLabel?: string }
-): Buffer {
-  const wb = XLSX.utils.book_new();
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Reconciliations');
 
   const headerRows: (string | number)[][] = [];
   if (meta?.entityName) headerRows.push(['Entity', meta.entityName]);
@@ -234,24 +228,10 @@ export function exportReconciliations(
   }
 
   const allRows = [...headerRows, ...dataRows];
-  const ws = XLSX.utils.aoa_to_sheet(allRows);
-  ws['!cols'] = [
-    { wch: 16 },
-    { wch: 35 },
-    { wch: 16 },
-    { wch: 18 },
-    { wch: 14 },
-    { wch: 18 },
-    { wch: 20 },
-    { wch: 12 },
-    { wch: 16 },
-    { wch: 14 },
-    { wch: 20 },
-    { wch: 20 },
-  ];
+  addAoaToWorksheet(ws, allRows);
+  setColumnWidths(ws, [16, 35, 16, 18, 14, 18, 20, 12, 16, 14, 20, 20]);
 
-  XLSX.utils.book_append_sheet(wb, ws, 'Reconciliations');
-  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const buf = await wb.xlsx.writeBuffer();
   return Buffer.from(buf);
 }
 
@@ -259,11 +239,12 @@ export function exportReconciliations(
  * Export variance analysis to an xlsx buffer.
  * Single sheet with variance amounts, percentages, and explanations.
  */
-export function exportVariances(
+export async function exportVariances(
   rows: VarianceExportRow[],
   meta?: { entityName?: string; periodLabel?: string }
-): Buffer {
-  const wb = XLSX.utils.book_new();
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Variance Analysis');
 
   const headerRows: (string | number)[][] = [];
   if (meta?.entityName) headerRows.push(['Entity', meta.entityName]);
@@ -301,21 +282,9 @@ export function exportVariances(
   }
 
   const allRows = [...headerRows, ...dataRows];
-  const ws = XLSX.utils.aoa_to_sheet(allRows);
-  ws['!cols'] = [
-    { wch: 16 },
-    { wch: 35 },
-    { wch: 16 },
-    { wch: 16 },
-    { wch: 16 },
-    { wch: 12 },
-    { wch: 10 },
-    { wch: 50 },
-    { wch: 20 },
-    { wch: 20 },
-  ];
+  addAoaToWorksheet(ws, allRows);
+  setColumnWidths(ws, [16, 35, 16, 16, 16, 12, 10, 50, 20, 20]);
 
-  XLSX.utils.book_append_sheet(wb, ws, 'Variance Analysis');
-  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const buf = await wb.xlsx.writeBuffer();
   return Buffer.from(buf);
 }

@@ -5,7 +5,7 @@
  */
 
 import { parse } from 'csv-parse/sync';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import type { RawTrialBalanceRow } from './trialBalanceParser.js';
 import {
   standardizeColumns,
@@ -87,22 +87,42 @@ function findTBHeaderRowIndex(rows: unknown[][]): number {
   return bestScore >= 3 ? bestIdx : 0;
 }
 
+/** Convert an ExcelJS worksheet to an array-of-arrays (like sheet_to_json with header:1) */
+function worksheetToAoa(worksheet: ExcelJS.Worksheet): unknown[][] {
+  const result: unknown[][] = [];
+  worksheet.eachRow({ includeEmpty: true }, (row, _rowNumber) => {
+    const values: unknown[] = [];
+    // ExcelJS row.values is 1-indexed (index 0 is undefined)
+    const rawValues = row.values as unknown[];
+    for (let i = 1; i < rawValues.length; i++) {
+      const cell = rawValues[i];
+      // Handle ExcelJS rich text objects
+      if (cell != null && typeof cell === 'object' && 'richText' in (cell as Record<string, unknown>)) {
+        const rt = (cell as { richText: Array<{ text: string }> }).richText;
+        values.push(rt.map(t => t.text).join(''));
+      } else {
+        values.push(cell ?? '');
+      }
+    }
+    result.push(values);
+  });
+  return result;
+}
+
 /**
  * Parse XLSX buffer — first sheet, auto-detect header row.
  * Handles junk rows above headers and single-column CSV-pasted-into-Excel.
  * Standardizes column names via parser_utils for messy bank/export formats.
  * Sets needsAgenticMapping when no canonical debit/credit or amount column was found.
  */
-export function parseXlsxToTrialBalance(buffer: Buffer): IngestTrialBalanceResult {
-  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false });
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) return { rows: [], headers: [], needsAgenticMapping: false };
+export async function parseXlsxToTrialBalance(buffer: Buffer): Promise<IngestTrialBalanceResult> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
 
-  const sheet = workbook.Sheets[sheetName];
-  let data = XLSX.utils.sheet_to_json(sheet, {
-    header: 1,
-    defval: '',
-  }) as unknown[][];
+  const worksheet = workbook.getWorksheet(1);
+  if (!worksheet) return { rows: [], headers: [], needsAgenticMapping: false };
+
+  let data = worksheetToAoa(worksheet);
 
   if (data.length < 2) return { rows: [], headers: [], needsAgenticMapping: false };
 
@@ -158,7 +178,7 @@ export function parseXlsxToTrialBalance(buffer: Buffer): IngestTrialBalanceResul
  * Returns { rows, needsAgenticMapping }. When needsAgenticMapping is true, trigger agentic column guess
  * and require user confirmation before saving.
  */
-export function ingestTrialBalanceFile(buffer: Buffer, mimeType: string): IngestTrialBalanceResult {
+export async function ingestTrialBalanceFile(buffer: Buffer, mimeType: string): Promise<IngestTrialBalanceResult> {
   const mime = mimeType.toLowerCase().split(';')[0].trim();
   if (mime === 'text/csv') return parseCsvToTrialBalance(buffer);
   if (

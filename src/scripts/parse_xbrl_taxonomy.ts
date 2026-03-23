@@ -10,7 +10,7 @@
  *   13: deprecatedLabel, 14: deprecatedDate
  */
 
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -86,17 +86,33 @@ function classifyStatement(
   return 'other';
 }
 
-function main(): void {
+async function main(): Promise<void> {
   console.log(`Reading taxonomy file: ${FILE_PATH}`);
-  const workbook = XLSX.readFile(FILE_PATH);
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(FILE_PATH);
 
-  const sheet = workbook.Sheets['Concepts'];
+  const sheet = workbook.getWorksheet('Concepts');
   if (!sheet) {
     console.error('No "Concepts" sheet found in workbook.');
     process.exit(1);
   }
 
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1 });
+  // Convert worksheet to array-of-arrays
+  const rows: unknown[][] = [];
+  sheet.eachRow({ includeEmpty: true }, (row, _rowNumber) => {
+    const values: unknown[] = [];
+    const rawValues = row.values as unknown[];
+    for (let i = 1; i < rawValues.length; i++) {
+      const cell = rawValues[i];
+      if (cell != null && typeof cell === 'object' && 'richText' in (cell as Record<string, unknown>)) {
+        const rt = (cell as { richText: Array<{ text: string }> }).richText;
+        values.push(rt.map(t => t.text).join(''));
+      } else {
+        values.push(cell ?? '');
+      }
+    }
+    rows.push(values);
+  });
   console.log(`Total rows in Concepts sheet: ${rows.length}`);
 
   // Row 0 is header
@@ -181,4 +197,7 @@ function main(): void {
   console.log(`\nWrote ${elements.length} elements to ${OUTPUT_PATH}`);
 }
 
-main();
+main().catch(err => {
+  console.error(err);
+  process.exit(1);
+});

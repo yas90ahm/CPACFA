@@ -1,7 +1,20 @@
 /**
- * FinOS Agent — Backend API
+ * Sabit — Backend API
  * Trial Balance ingestion → Balance Sheet + P&L with Plan-Execute-Verify and codification traceability.
  * Phase 1: DB (Postgres when DATABASE_URL set), auth (JWT), optionalAuth middleware sets req.tenantId.
+ *
+ * Deployment modes:
+ *   1. Single process (default): API + job worker together.
+ *      $ npm start
+ *
+ *   2. Split process (horizontal scaling): API-only + dedicated worker(s).
+ *      $ JOB_WORKER_ENABLED=false npm start   # API process (no worker)
+ *      $ npm run worker                        # Standalone worker process
+ *
+ *   In split mode, set JOB_WORKER_ENABLED=false on the API process so it does
+ *   not compete with the dedicated worker(s) for jobs. You can run multiple
+ *   worker replicas — the job table uses SELECT ... FOR UPDATE SKIP LOCKED
+ *   so each job is claimed by exactly one worker.
  */
 
 import 'dotenv/config';
@@ -18,6 +31,7 @@ assertSigningKeysInStrictMode();
 
 import express from 'express';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { optionalAuth, requireAuth, attachTenantPool, requireTenantContext, type AuthRequest } from './auth/middleware.js';
@@ -77,10 +91,11 @@ const corsOrigins = process.env.CORS_ORIGINS
   : (process.env.CORS_ORIGIN ? [process.env.CORS_ORIGIN] : []);
 // When no CORS env is set, allow local dev (frontend on 3000 or 3002 calling API on 3001)
 const corsOptions = corsOrigins.length
-  ? { origin: corsOrigins }
-  : { origin: ['http://localhost:3000', 'http://localhost:3002', 'http://127.0.0.1:3000', 'http://127.0.0.1:3002'] };
+  ? { origin: corsOrigins, credentials: true }
+  : { origin: ['http://localhost:3000', 'http://localhost:3002', 'http://127.0.0.1:3000', 'http://127.0.0.1:3002'], credentials: true };
 app.use(cors(corsOptions));
 
+app.use(cookieParser());
 app.use(express.json({ limit: '1mb' }));
 app.use(requestIdMiddleware);
 
@@ -90,7 +105,7 @@ app.use((_req, _res, next) => { runInBoundaryScope(next); });
 
 // Health check (public)
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'finos-agent-api' });
+  res.json({ status: 'ok', service: 'sabit-api' });
 });
 
 // Readiness: checks control DB without leaking internals
@@ -282,10 +297,10 @@ async function start(): Promise<void> {
   const httpServer = createServer(app);
   const { initRealtime } = await import('./realtime/index.js');
   const socketCorsOrigins = corsOrigins.length > 0 ? corsOrigins : [];
-  initRealtime(httpServer, socketCorsOrigins);
+  await initRealtime(httpServer, socketCorsOrigins);
 
   httpServer.listen(PORT, () => {
-    console.log(`FinOS Agent API listening on http://localhost:${PORT}`);
+    console.log(`Sabit API listening on http://localhost:${PORT}`);
     if (getMode() === 'demo') {
       console.log(`Demo ready at http://localhost:${PORT}`);
       console.log('  Demo user seeded — check your .env or seed_demo output for credentials.');

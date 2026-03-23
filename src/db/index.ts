@@ -322,6 +322,7 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 171, file: '171_pe_manufacturer_taxonomy_lines.sql' },
   { version: 172, file: '172_pgvector_gaap.sql' },
   { version: 173, file: '173_taxonomy_is_hidden.sql' },
+  { version: 184, file: '184_row_level_security.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 
@@ -382,6 +383,70 @@ export async function getTenantAiPool(tenantId: string): Promise<pg.Pool> {
 export async function getTenantAiPoolWithMigrations(tenantId: string): Promise<pg.Pool> {
   await getTenantPoolWithMigrations(tenantId);
   return getTenantAiPool(tenantId);
+}
+
+/**
+ * Validate a tenant ID to prevent injection when used in SET commands.
+ * Tenant IDs must be UUID-like or simple alphanumeric strings.
+ */
+function isValidTenantId(tenantId: string): boolean {
+  return /^[a-zA-Z0-9_-]+$/.test(tenantId) && tenantId.length <= 128;
+}
+
+/**
+ * Create a tenant-scoped pool proxy that sets app.current_tenant_id on every
+ * connection checkout. This is required for Row-Level Security (RLS) policies
+ * that reference current_setting('app.current_tenant_id').
+ *
+ * The proxy intercepts:
+ * - connect(): acquires a client, sets the session variable, returns the client
+ * - query(): acquires a client, sets the session variable, runs the query, releases
+ *
+ * The underlying pool is shared and may serve multiple tenants (shared-DB mode),
+ * so the tenant context MUST be set on each checkout, not on pool creation.
+ */
+export function createTenantScopedPool(pool: pg.Pool, tenantId: string): pg.Pool {
+  if (!isValidTenantId(tenantId)) {
+    throw new Error(`Invalid tenant ID format: ${tenantId}`);
+  }
+
+  const setTenantContext = `SET app.current_tenant_id = '${tenantId}'`;
+
+  // Wrap connect() to set tenant context on each checkout
+  const originalConnect = pool.connect.bind(pool);
+  const scopedConnect = async (): Promise<pg.PoolClient> => {
+    const client = await originalConnect();
+    try {
+      await client.query(setTenantContext);
+    } catch (err) {
+      client.release();
+      throw err;
+    }
+    return client;
+  };
+
+  // Wrap query() to set tenant context before each direct query
+  const originalQuery = pool.query.bind(pool);
+  const scopedQuery = async (...args: unknown[]): Promise<pg.QueryResult> => {
+    const client = await originalConnect();
+    try {
+      await client.query(setTenantContext);
+      // pg.Pool.query accepts (text, values?) or (QueryConfig)
+      const result = await (client.query as (...a: unknown[]) => Promise<pg.QueryResult>)(...args);
+      return result;
+    } finally {
+      client.release();
+    }
+  };
+
+  // Create a proxy that intercepts connect and query, passes everything else through
+  return new Proxy(pool, {
+    get(target, prop, receiver) {
+      if (prop === 'connect') return scopedConnect;
+      if (prop === 'query') return scopedQuery;
+      return Reflect.get(target, prop, receiver);
+    },
+  });
 }
 
 export async function closePool(): Promise<void> {

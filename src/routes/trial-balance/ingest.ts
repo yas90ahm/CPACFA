@@ -156,7 +156,7 @@ router.post('/ingest', upload.single('file'), injectTenantFromBody, requireValid
     }
 
     const body = req.body as IngestBody;
-    const ingestResult = ingestTrialBalanceFile(file.buffer, file.mimetype);
+    const ingestResult = await ingestTrialBalanceFile(file.buffer, file.mimetype);
     let rawRows = ingestResult.rows;
     if (rawRows.length === 0) {
       res.status(400).json({

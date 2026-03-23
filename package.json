@@ -1,7 +1,7 @@
 {
-  "name": "finos-agent",
+  "name": "sabit",
   "version": "0.1.0",
-  "description": "Enterprise-grade agentic financial platform — Trial Balance to Balance Sheet & P&L",
+  "description": "Sabit — Enterprise-grade financial close automation engine",
   "private": true,
   "scripts": {
     "build": "tsc",
@@ -27,21 +27,22 @@
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f app",
-    "verify": "bash scripts/verify-production-ready.sh"
+    "verify": "bash scripts/verify-production-ready.sh",
+    "worker": "tsx src/worker.ts"
   },
   "engines": {
     "node": ">=18"
   },
-  "_vulnerabilityNotes": {
-    "xlsx": "GHSA-4r6h-8v6p-xvw6 (prototype pollution, high) and GHSA-5pgg-2g8v-p4x9 (ReDoS, high). No upstream fix available. Flagged for replacement with exceljs. Used in: fileIngestion, gl_upload_service, excel_export_service, parse_xbrl_taxonomy."
-  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
+    "@types/cookie-parser": "^1.4.10",
     "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "csv-parse": "^5.5.2",
     "decimal.js": "^10.6.0",
     "dotenv": "^17.2.3",
+    "exceljs": "^4.4.0",
     "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
     "helmet": "^7.1.0",
@@ -50,14 +51,15 @@
     "pdf-lib": "^1.17.1",
     "pg": "^8.11.3",
     "socket.io": "^4.8.3",
-    "xlsx": "^0.18.5",
     "zod": "^3.23.8"
   },
   "optionalDependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
     "@mistralai/mistralai": "^1.2.0",
+    "@socket.io/redis-adapter": "^8.3.0",
     "openai": "^4.52.0",
-    "pdf-parse": "^1.1.1"
+    "pdf-parse": "^1.1.1",
+    "redis": "^4.7.0"
   },
   "devDependencies": {
     "@jest/globals": "^30.3.0",

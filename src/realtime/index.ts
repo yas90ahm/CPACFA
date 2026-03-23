@@ -16,6 +16,7 @@ import { Server as IOServer } from 'socket.io';
 import type { Server as HTTPServer } from 'http';
 import { verifyToken } from '../auth/index.js';
 
+// Optional Redis adapter for horizontal scaling (multi-process / multi-node).
 let io: IOServer | null = null;
 
 export type RealtimeEventType =
@@ -48,8 +49,12 @@ export interface RealtimeEvent {
 /**
  * Initialize Socket.IO on the HTTP server.
  * Call once during server startup.
+ *
+ * When REDIS_URL is set and the redis + @socket.io/redis-adapter packages are
+ * installed, the adapter is configured automatically so that events propagate
+ * across multiple server instances.
  */
-export function initRealtime(httpServer: HTTPServer, corsOrigins: string[]): IOServer {
+export async function initRealtime(httpServer: HTTPServer, corsOrigins: string[]): Promise<IOServer> {
   io = new IOServer(httpServer, {
     cors: {
       origin: corsOrigins.length > 0
@@ -60,6 +65,21 @@ export function initRealtime(httpServer: HTTPServer, corsOrigins: string[]): IOS
     path: '/ws',
     transports: ['websocket', 'polling'],
   });
+
+  // Attach Redis adapter for horizontal scaling when REDIS_URL is configured
+  if (process.env.REDIS_URL) {
+    try {
+      const { createAdapter } = await import('@socket.io/redis-adapter');
+      const { createClient } = await import('redis');
+      const pubClient = createClient({ url: process.env.REDIS_URL });
+      const subClient = pubClient.duplicate();
+      await Promise.all([pubClient.connect(), subClient.connect()]);
+      io.adapter(createAdapter(pubClient, subClient));
+      console.log('[realtime] Redis adapter connected — multi-instance broadcast enabled');
+    } catch (err) {
+      console.error('[realtime] Failed to connect Redis adapter, falling back to in-memory:', err);
+    }
+  }
 
   io.on('connection', (socket) => {
     const token = socket.handshake.auth?.token as string | undefined;

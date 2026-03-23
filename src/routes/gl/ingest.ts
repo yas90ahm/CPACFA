@@ -79,7 +79,7 @@ router.post(
           return;
         }
       }
-      const result = parseGLPreview(file.buffer, columnMapping);
+      const result = await parseGLPreview(file.buffer, columnMapping);
       res.json(result);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Parse failed';

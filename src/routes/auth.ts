@@ -63,6 +63,15 @@ router.post('/login', loginLimiter, validateBody(loginSchema), async (req: Reque
       email: user.email,
       role: user.role,
     });
+    // Set HttpOnly cookie as primary auth mechanism for web frontend
+    res.cookie('cpa_session', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 4 * 60 * 60 * 1000, // 4 hours (match JWT expiry)
+      path: '/',
+    });
+    // Still return token in body for backward compatibility (mobile clients, API consumers)
     res.json({ token, userId: user.id, tenantId: user.tenant_id, role: user.role, email: user.email, name: user.name ?? null });
   } catch (e) {
     send500(res, e, 'Login failed');
@@ -98,10 +107,29 @@ router.post('/register', registerLimiter, validateBody(registerSchema), async (r
       email: user.email,
       role: user.role,
     });
+    // Set HttpOnly cookie as primary auth mechanism for web frontend
+    res.cookie('cpa_session', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 4 * 60 * 60 * 1000, // 4 hours (match JWT expiry)
+      path: '/',
+    });
     res.status(201).json({ token, userId: user.id, tenantId: user.tenant_id, role: user.role, email: user.email, name: user.name ?? null });
   } catch (e) {
     send500(res, e, 'Registration failed');
   }
+});
+
+/** Logout: clear the HttpOnly session cookie. */
+router.post('/logout', (_req: Request, res: Response) => {
+  res.clearCookie('cpa_session', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+  });
+  res.json({ ok: true });
 });
 
 export default router;

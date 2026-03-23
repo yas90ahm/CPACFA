@@ -10,12 +10,10 @@ export function setAuthTokenGetter(getter: () => string | null): void {
 }
 
 function getAuthToken(): string | null {
+  // Primary auth is via HttpOnly cookie (sent automatically with credentials: 'include').
+  // This getter is a fallback for API consumers that explicitly provide a Bearer token.
   const fromGetter = authTokenGetter?.() ?? null;
   if (fromGetter) return fromGetter;
-  // Fallback: read localStorage directly during hydration race window
-  if (typeof window !== 'undefined') {
-    try { return localStorage.getItem('cpa_auth_token'); } catch { return null; }
-  }
   return null;
 }
 
@@ -73,6 +71,7 @@ export async function apiFetch<T>(path: string, options: ApiOptions = {}): Promi
   const res = await fetch(url.toString(), {
     method,
     headers,
+    credentials: 'include', // Send HttpOnly cookie for auth
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 
@@ -110,6 +109,7 @@ export async function apiUpload<T>(path: string, formData: FormData): Promise<T>
   const res = await fetch(url, {
     method: 'POST',
     headers,
+    credentials: 'include', // Send HttpOnly cookie for auth
     body: formData,
   });
 
