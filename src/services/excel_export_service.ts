@@ -60,6 +60,7 @@ export interface VarianceExportRow {
   isMaterial: boolean;
   explanation: string | null;
   explainedBy: string | null;
+  explanationSource: string | null;
 }
 
 /**
@@ -280,6 +281,7 @@ export function exportVariances(
       'Material',
       'Explanation',
       'Explained By',
+      'Explanation Source',
     ],
   ];
 
@@ -294,6 +296,7 @@ export function exportVariances(
       row.isMaterial ? 'Yes' : 'No',
       row.explanation,
       row.explainedBy,
+      row.explanationSource ?? '',
     ]);
   }
 
@@ -308,6 +311,7 @@ export function exportVariances(
     { wch: 12 },
     { wch: 10 },
     { wch: 50 },
+    { wch: 20 },
     { wch: 20 },
   ];
 

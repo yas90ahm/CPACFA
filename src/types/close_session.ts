@@ -12,6 +12,7 @@ export type CloseSessionStatus =
   | 'in_progress'
   | 'under_review'
   | 'certified'
+  | 'subsequent_events_review'
   | 'locked';
 
 export interface CloseSession {
@@ -36,6 +37,12 @@ export interface CloseSession {
   reopenReason?: string;
   /** Set when TB changes (cascade); cleared when statements regenerated. */
   statementsStaleSince?: string;
+  /** Who advanced this session to UNDER_REVIEW (for SoD enforcement). */
+  advancedToReviewBy?: string | null;
+  advancedToReviewAt?: string | null;
+  /** Who confirmed "no subsequent events" (ASC 855). */
+  subsequentEventsConfirmedBy?: string | null;
+  subsequentEventsConfirmedAt?: string | null;
   createdAt: string;  // ISO
   updatedAt: string;  // ISO
 }

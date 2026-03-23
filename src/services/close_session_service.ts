@@ -1,12 +1,13 @@
 /**
  * Close Session Service — State Machine
  *
- * States: OPEN → IN_PROGRESS → UNDER_REVIEW → CERTIFIED → LOCKED
+ * States: OPEN → IN_PROGRESS → UNDER_REVIEW → CERTIFIED → SUBSEQUENT_EVENTS_REVIEW → LOCKED
  *
  * OPEN: Period exists, close not started
  * IN_PROGRESS: Active close work (recons, AJEs, statement generation)
  * UNDER_REVIEW: All work complete, senior reviewer examining package
  * CERTIFIED: Human has attested to correctness, snapshot created
+ * SUBSEQUENT_EVENTS_REVIEW: ASC 855 review of post-balance-sheet-date events
  * LOCKED: Permanent immutability, terminal state
  *
  * Key transitions:
@@ -14,7 +15,8 @@
  * - UNDER_REVIEW → CERTIFIED: gated by re-validation + authority (canCertify)
  * - UNDER_REVIEW → IN_PROGRESS: rejection (preserves all work)
  * - CERTIFIED → IN_PROGRESS: reopen (requires CFO auth + reason)
- * - CERTIFIED → LOCKED: permanent (no undo)
+ * - CERTIFIED → SUBSEQUENT_EVENTS_REVIEW: advance to review subsequent events
+ * - SUBSEQUENT_EVENTS_REVIEW → LOCKED: permanent (no undo), requires all events dispositioned
  */
 
 import { randomUUID } from 'crypto';
@@ -36,17 +38,20 @@ import { runCrossStatementValidationForCertification } from './cross_statement_v
 import { buildCertificationArtifact, gatherAiMetadata } from './certification_artifact_service.js';
 import * as certArtifactRepo from '../db/repositories/certification_artifact_repository.js';
 import { verifyChain } from '../db/repositories/audit_ledger_repository.js';
+import { getReadinessGates } from './session_readiness_gates_service.js';
 import { sumRound2 } from '../utils/decimal.js';
 import type { LedgerSnapshotPayload } from '../types/ledger_snapshot.js';
 import { getLedgerSnapshotById } from '../db/repositories/ledger_snapshot_repository.js';
 import { assertNoAiMutationContext } from '../lib/ai_boundary.js';
 import { createIssue } from './issue_service.js';
+import { getEntitySettings } from './entity_settings_service.js';
 
 const ALLOWED_TRANSITIONS: Record<CloseSessionStatus, CloseSessionStatus[]> = {
   open: ['in_progress'],
   in_progress: ['under_review'],
   under_review: ['in_progress'], // certified only via certifyCloseSession (updateCertification)
-  certified: ['in_progress', 'locked'],
+  certified: ['in_progress', 'subsequent_events_review'],
+  subsequent_events_review: ['in_progress', 'locked'],
   locked: [],
 };
 
@@ -215,7 +220,7 @@ export async function updateStatus(
       'INVALID_TRANSITION'
     );
   }
-  const updated = await repo.updateCloseSessionStatus(client, tenantId, id, newStatus);
+  const updated = await repo.updateCloseSessionStatus(client, tenantId, id, newStatus, createdBy);
   if (!updated) {
     throw new CloseSessionError('Close session not found', 'NOT_FOUND');
   }
@@ -284,6 +289,17 @@ export async function certifyCloseSession(
 
     const session = await repo.getCloseSessionById(client, input.tenantId, input.closeSessionId);
     if (!session) throw new CloseSessionError('Close session not found', 'NOT_FOUND');
+
+    // SoD check: certifier must differ from person who advanced to under_review (unless tenant setting allows)
+    if (session.advancedToReviewBy && input.certifiedBy && session.advancedToReviewBy === input.certifiedBy) {
+      const entitySettings = await getEntitySettings(pool, input.tenantId, session.entityId);
+      if (!entitySettings.allowSameUserCertify) {
+        throw new CloseSessionError(
+          'Segregation of duties: certifier cannot be the same user who advanced to under_review',
+          'INSUFFICIENT_ROLE'
+        );
+      }
+    }
 
     if (session.statementsStaleSince) {
       throw new CloseSessionError(
@@ -426,6 +442,23 @@ export async function certifyCloseSession(
       } catch (_) {
         /* non-fatal: AI metadata gathering failed */
       }
+      // Capture gate snapshot at certification moment
+      let gateSnapshot;
+      try {
+        const gatesResult = await getReadinessGates(pool, input.tenantId, session);
+        gateSnapshot = {
+          gatesPassing: gatesResult.gatesPassing,
+          gatesTotal: gatesResult.gatesTotal,
+          canAdvance: gatesResult.canAdvance,
+          gateDetails: gatesResult.gates.map((g) => ({
+            id: g.id, name: g.name, passing: g.passing, detail: g.detail, category: g.category,
+          })),
+          checkedAt: certifiedAt,
+        };
+      } catch {
+        // Non-fatal: gate snapshot capture failed
+      }
+
       const { artifact, artifactHash, signatureB64, publicKeyB64, alg } = buildCertificationArtifact({
         tenantId: input.tenantId,
         closeSessionId: input.closeSessionId,
@@ -444,6 +477,7 @@ export async function certifyCloseSession(
           message: c.message,
         })),
         aiMetadata,
+        gateSnapshot,
       });
       const inserted = await certArtifactRepo.insertCertificationArtifact(client, {
         tenantId: input.tenantId,
@@ -639,7 +673,7 @@ export async function canCertify(
 
 /** Gate: can transition CERTIFIED → LOCKED. */
 export function canLock(session: CloseSession): boolean {
-  return session.status === 'certified';
+  return session.status === 'subsequent_events_review';
 }
 
 /** Gate: can reopen (CERTIFIED → IN_PROGRESS). Requires reason and reopen authority. */
@@ -725,13 +759,91 @@ export async function reopenCloseSession(
   });
 }
 
-/** Lock: CERTIFIED → LOCKED. Terminal state; no further transitions. */
-export async function lockCloseSession(pool: Pool, sessionId: string, tenantId: string, lockedBy?: string): Promise<CloseSession> {
+/** Advance: CERTIFIED → SUBSEQUENT_EVENTS_REVIEW. Requires approver role. */
+export async function advanceToSubsequentEventsReview(
+  pool: Pool,
+  sessionId: string,
+  tenantId: string,
+  userId: string,
+  actorRole: CloseRole
+): Promise<CloseSession> {
   assertNoAiMutationContext();
+  if (!canPerform(actorRole, 'period_lock')) {
+    throw new CloseSessionError('Insufficient role: advancing to subsequent_events_review requires approver', 'INSUFFICIENT_ROLE');
+  }
+  const session = await repo.getCloseSessionById(pool, tenantId, sessionId);
+  if (!session) throw new CloseSessionError('Close session not found', 'NOT_FOUND');
+  if (session.status !== 'certified') {
+    throw new CloseSessionError(`Can only advance to subsequent_events_review from certified; current status is ${session.status}`, 'INVALID_TRANSITION');
+  }
+  return withTransaction(pool, async (client) => {
+    const updated = await repo.updateCloseSessionStatus(client, tenantId, sessionId, 'subsequent_events_review', userId);
+    if (!updated) throw new CloseSessionError('Close session not found', 'NOT_FOUND');
+    await recordMaterialEvent(client, {
+      tenantId,
+      periodLabel: updated.periodEnd?.slice(0, 7),
+      eventType: 'close_session_transition',
+      deterministicFlagSnapshot: {
+        closeSessionId: sessionId,
+        from: 'certified',
+        to: 'subsequent_events_review',
+        advancedBy: userId,
+      },
+      createdBy: userId,
+    });
+    return updated;
+  });
+}
+
+/** Confirm "no subsequent events found" for a session in SUBSEQUENT_EVENTS_REVIEW. */
+export async function confirmNoSubsequentEvents(
+  pool: Pool,
+  sessionId: string,
+  tenantId: string,
+  userId: string,
+  actorRole: CloseRole
+): Promise<CloseSession> {
+  assertNoAiMutationContext();
+  if (!canPerform(actorRole, 'period_lock')) {
+    throw new CloseSessionError('Insufficient role: confirming no subsequent events requires approver', 'INSUFFICIENT_ROLE');
+  }
+  const session = await repo.getCloseSessionById(pool, tenantId, sessionId);
+  if (!session) throw new CloseSessionError('Close session not found', 'NOT_FOUND');
+  if (session.status !== 'subsequent_events_review') {
+    throw new CloseSessionError(`Confirm no subsequent events only allowed in subsequent_events_review; current status is ${session.status}`, 'INVALID_TRANSITION');
+  }
+  const now = new Date().toISOString();
+  await pool.query(
+    'UPDATE close_sessions SET subsequent_events_confirmed_by = $1, subsequent_events_confirmed_at = $2, updated_at = $2 WHERE id = $3 AND tenant_id = $4',
+    [userId, now, sessionId, tenantId]
+  );
+  await recordMaterialEvent(pool, {
+    tenantId,
+    periodLabel: session.periodEnd?.slice(0, 7),
+    eventType: 'subsequent_events_confirmed_none',
+    deterministicFlagSnapshot: { closeSessionId: sessionId, confirmedBy: userId },
+    createdBy: userId,
+  });
+  const updated = await repo.getCloseSessionById(pool, tenantId, sessionId);
+  return updated!;
+}
+
+/** Lock: SUBSEQUENT_EVENTS_REVIEW → LOCKED. Terminal state; no further transitions. Requires approver role. */
+export async function lockCloseSession(pool: Pool, sessionId: string, tenantId: string, lockedBy?: string, actorRole?: CloseRole): Promise<CloseSession> {
+  assertNoAiMutationContext();
+  if (actorRole && !canPerform(actorRole, 'period_lock')) {
+    throw new CloseSessionError('Insufficient role: period_lock requires approver', 'INSUFFICIENT_ROLE');
+  }
   const session = await repo.getCloseSessionById(pool, tenantId, sessionId);
   if (!session) throw new CloseSessionError('Close session not found', 'NOT_FOUND');
   if (!canLock(session)) {
-    throw new CloseSessionError(`Lock only allowed from certified; current status is ${session.status}`, 'INVALID_TRANSITION');
+    throw new CloseSessionError(`Lock only allowed from subsequent_events_review; current status is ${session.status}`, 'INVALID_TRANSITION');
+  }
+  // Verify subsequent events review is complete before locking
+  const { isReviewComplete } = await import('./subsequent_event_service.js');
+  const reviewStatus = await isReviewComplete(pool, tenantId, sessionId, session.subsequentEventsConfirmedBy);
+  if (!reviewStatus.complete) {
+    throw new CloseSessionError(`Cannot lock: ${reviewStatus.reason}`, 'VALIDATION');
   }
   return withTransaction(pool, async (client) => {
     const updated = await repo.updateCloseSessionStatus(client, tenantId, sessionId, 'locked');
@@ -756,6 +868,7 @@ export async function lockCloseSession(pool: Pool, sessionId: string, tenantId: 
 
 /**
  * Auto-lock certified sessions that have been certified for longer than `daysAfterCert` days.
+ * Advances through subsequent_events_review (with auto-confirmation) then locks.
  * Intended to be called by a scheduled job (e.g. daily cron).
  * Returns the list of session IDs that were auto-locked.
  */
@@ -764,16 +877,31 @@ export async function autoLockCertifiedSessions(
   tenantId: string,
   daysAfterCert: number = 30
 ): Promise<string[]> {
+  // Handle sessions already in subsequent_events_review (auto-lock them)
+  const reviewSessions = await repo.listCloseSessions(pool, tenantId, undefined, 'subsequent_events_review');
+  const locked: string[] = [];
+  for (const session of reviewSessions) {
+    try {
+      // Auto-confirm no subsequent events then lock
+      await confirmNoSubsequentEvents(pool, session.id, tenantId, 'system:auto-lock', 'approver');
+      await lockCloseSession(pool, session.id, tenantId, 'system:auto-lock', 'approver');
+      locked.push(session.id);
+    } catch {
+      // Skip sessions that fail (e.g. concurrent modification)
+    }
+  }
+
+  // Handle certified sessions past the cutoff (advance to review then lock)
   const certifiedSessions = await repo.listCloseSessions(pool, tenantId, undefined, 'certified');
   const cutoff = Date.now() - daysAfterCert * 24 * 60 * 60 * 1000;
-  const locked: string[] = [];
-
   for (const session of certifiedSessions) {
     if (!session.certifiedAt) continue;
     const certTime = new Date(session.certifiedAt).getTime();
     if (certTime <= cutoff) {
       try {
-        await lockCloseSession(pool, session.id, tenantId, 'system:auto-lock');
+        await advanceToSubsequentEventsReview(pool, session.id, tenantId, 'system:auto-lock', 'approver');
+        await confirmNoSubsequentEvents(pool, session.id, tenantId, 'system:auto-lock', 'approver');
+        await lockCloseSession(pool, session.id, tenantId, 'system:auto-lock', 'approver');
         locked.push(session.id);
       } catch {
         // Skip sessions that fail to lock (e.g. concurrent modification)
@@ -825,7 +953,7 @@ export async function advanceSession(
     hashVersion: null,
   };
 
-  if (session.status === 'under_review' || session.status === 'certified' || session.status === 'locked') {
+  if (session.status === 'under_review' || session.status === 'certified' || session.status === 'subsequent_events_review' || session.status === 'locked') {
     return {
       success: true,
       session,

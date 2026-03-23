@@ -20,6 +20,7 @@ import * as repo from '../db/repositories/statement_package_repository.js';
 import { computeVariances } from './variance_analysis_service.js';
 import { getEntitySettings } from './entity_settings_service.js';
 import { from as decimalFrom, sumRound2, normalizeMoney } from '../utils/decimal.js';
+import { financialEvents, buildEventPacket } from '../events/financial_event_emitter.js';
 
 const ENGINE_VERSION = 'financialStatements.v1';
 const TOLERANCE = 0.01;
@@ -535,6 +536,15 @@ export async function generateStatements(
     });
     return created;
   });
+
+  // Emit gate check event after successful statement generation
+  financialEvents.emit('GATE_CHECK_REQUESTED', buildEventPacket('GATE_CHECK_REQUESTED', {
+    errorCode: 'GATE_CHECK',
+    conflictingData: {},
+    metadata: { tenantId, closeSessionId },
+    data: { closeSessionId, trigger: 'statement_generated', triggeredBy: opts?.generatedBy ?? 'system' },
+  }));
+
   return pkg;
 }
 

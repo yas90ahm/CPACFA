@@ -14,7 +14,6 @@ import {
 import { MoneyCell } from '@/components/shared/MoneyCell';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { EmptyState } from '@/components/shared/EmptyState';
-import { AISuggestionCard } from '@/components/shared/AISuggestionCard';
 import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { ContinueToNextStep } from '@/components/shared/ContinueToNextStep';
@@ -128,7 +127,8 @@ export default function AccountMappingPage() {
         autoClassifyMutation.mutate();
       }
     }
-  }, [tbLoading, suggestionsLoading, rows, coaSuggestions, autoClassifyTriggered, autoClassifyMutation]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tbLoading, suggestionsLoading, rows, coaSuggestions, autoClassifyTriggered]);
 
   /* ── Taxonomy ── */
   const [taxonomy, setTaxonomy] = useState<TaxonomyItem[]>([]);
@@ -332,7 +332,7 @@ export default function AccountMappingPage() {
   useEffect(() => {
     if (!autoAcceptEnabled) return;
     const highConfPending = coaSuggestions.filter(
-      (s) => s.status === 'pending' && s.confidence > 95
+      (s) => s.status === 'pending' && s.confidence > 0.95
     );
     for (const s of highConfPending) {
       acceptMutation.mutate({ suggestionId: s.id, type: 'coa' });

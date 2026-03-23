@@ -17,14 +17,9 @@ import type { Pool } from 'pg';
 import { randomUUID } from 'node:crypto';
 import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import { appendEntry } from '../db/repositories/audit_ledger_repository.js';
-import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
 import { insertCoaMappingRule, getNextRuleVersion } from '../db/repositories/coa_mapping_rules_repository.js';
 import { executeCascade, CascadeTriggerType } from './cascade_engine.js';
 import {
-  classifyCoaBatch,
-  classifyCfBatch,
-  type SlmCoaResult,
-  type SlmCfResult,
   type SlmError,
 } from './slm_client_service.js';
 import { checkMappingCompleteness } from './mapping_completeness_gate.js';

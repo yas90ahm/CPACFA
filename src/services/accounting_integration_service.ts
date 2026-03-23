@@ -86,14 +86,52 @@ class MockAccountingAdapter implements IAccountingAdapter {
   }
 }
 
-const adapters: Record<AccountingProvider, IAccountingAdapter> = {
+/** Default mock adapters — used when no real adapter is available */
+const mockAdapters: Record<AccountingProvider, IAccountingAdapter> = {
   quickbooks: new MockAccountingAdapter('quickbooks'),
   xero: new MockAccountingAdapter('xero'),
   netsuite: new MockAccountingAdapter('netsuite'),
 };
 
-function getAdapter(provider: AccountingProvider): IAccountingAdapter {
-  return adapters[provider];
+/** Real adapter instances — lazy-initialized per pool+tenant */
+const realAdapterCache = new Map<string, IAccountingAdapter>();
+
+/**
+ * Get adapter for provider. Uses real implementation when available
+ * (QuickBooks, Xero, NetSuite), falls back to mock otherwise.
+ */
+function getAdapter(provider: AccountingProvider, pool?: Pool, tenantId?: string): IAccountingAdapter {
+  if (pool && tenantId) {
+    const cacheKey = `${provider}-${tenantId}`;
+    const cached = realAdapterCache.get(cacheKey);
+    if (cached) return cached;
+
+    // Lazy-load real adapters to avoid circular imports
+    try {
+      if (provider === 'quickbooks') {
+        // Dynamic import would be ideal but we use sync factory here
+        const { QuickBooksAdapter } = require('../adapters/quickbooks_adapter.js');
+        const adapter = new QuickBooksAdapter(pool, tenantId);
+        realAdapterCache.set(cacheKey, adapter);
+        return adapter;
+      }
+      if (provider === 'xero') {
+        const { XeroAdapter } = require('../adapters/xero_adapter.js');
+        const adapter = new XeroAdapter(pool, tenantId);
+        realAdapterCache.set(cacheKey, adapter);
+        return adapter;
+      }
+      if (provider === 'netsuite') {
+        const { NetSuiteAdapter } = require('../adapters/netsuite_adapter.js');
+        const adapter = new NetSuiteAdapter(pool, tenantId);
+        realAdapterCache.set(cacheKey, adapter);
+        return adapter;
+      }
+    } catch {
+      // Real adapter not available — fall back to mock
+    }
+  }
+  return mockAdapters[provider];
 }
 
 export async function createConnection(
@@ -141,7 +179,7 @@ export async function syncTrialBalance(
     const date = asOfDate ?? new Date().toISOString().slice(0, 10);
     return { success: false, entries: [], asOfDate: date, provider: 'quickbooks', connectionId, errors: ['Connection not found'] };
   }
-  const result = await getAdapter(conn.provider).syncTrialBalance(conn, connectionId, asOfDate);
+  const result = await getAdapter(conn.provider, pool ?? undefined, tenantId ?? undefined).syncTrialBalance(conn, connectionId, asOfDate);
   if (isDbConfigured() && pool && tenantId && result.success) {
     await connectionRepo.updateConnection(pool, tenantId, connectionId, { lastSyncAt: new Date().toISOString(), lastSyncStatus: 'success' });
   } else if (!pool && result.success) {
@@ -154,11 +192,11 @@ export async function syncTrialBalance(
 export async function pushJournalEntry(input: PushJournalEntryInput, pool?: Pool, tenantId?: string): Promise<PushJournalEntryResult> {
   const conn = await getConnectionById(input.connectionId, pool, tenantId);
   if (!conn) return { success: false, errors: ['Connection not found'] };
-  return getAdapter(conn.provider).pushJournalEntry(conn, input);
+  return getAdapter(conn.provider, pool ?? undefined, tenantId ?? undefined).pushJournalEntry(conn, input);
 }
 
 export async function pullTransactions(input: PullTransactionsInput, pool?: Pool, tenantId?: string): Promise<PullTransactionsResult> {
   const conn = await getConnectionById(input.connectionId, pool, tenantId);
   if (!conn) return { success: false, transactions: [], errors: ['Connection not found'] };
-  return getAdapter(conn.provider).pullTransactions(conn, input);
+  return getAdapter(conn.provider, pool ?? undefined, tenantId ?? undefined).pullTransactions(conn, input);
 }

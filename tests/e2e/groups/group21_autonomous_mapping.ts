@@ -29,15 +29,17 @@ export const group21_autonomous_mapping: TestGroup = {
       id: '21.01',
       name: 'Auto-classify returns XBRL-based suggestions',
       fn: async () => {
-        const token = state.controllerToken!;
+        const token = state.preparerToken!;
         const entityId = `e2e-mapping-${Date.now()}`;
         await createEntity(token, entityId);
         const sess = await createSession(token, entityId, '2026-03-01', '2026-03-31', '2026-03');
-        await uploadGL(token, sess.id, FIXTURES.SIMPLE_GL);
+        await uploadGL(token, sess.id, FIXTURES.minimalGL);
 
         const res = await apiFetch<any>(
+          'POST',
           `/api/close/sessions/${sess.id}/suggestions/auto-classify`,
-          { method: 'POST', token, body: {} }
+          {},
+          token
         );
         expectStatus(res, 200);
         expectFieldExists(res.body, 'coaSuggestions');
@@ -51,12 +53,14 @@ export const group21_autonomous_mapping: TestGroup = {
       id: '21.02',
       name: 'Validate-mappings returns agent + cross-validation results',
       fn: async () => {
-        const token = state.controllerToken!;
+        const token = state.preparerToken!;
         const sessionId = state.sessionId!;
 
         const res = await apiFetch<any>(
+          'POST',
           `/api/close/sessions/${sessionId}/suggestions/validate-mappings`,
-          { method: 'POST', token, body: {} }
+          {},
+          token
         );
         expectStatus(res, 200);
         expectFieldExists(res.body, 'agent');
@@ -69,12 +73,14 @@ export const group21_autonomous_mapping: TestGroup = {
       id: '21.03',
       name: 'Learning stats endpoint returns metrics',
       fn: async () => {
-        const token = state.controllerToken!;
+        const token = state.preparerToken!;
         const sessionId = state.sessionId!;
 
         const res = await apiFetch<any>(
+          'GET',
           `/api/close/sessions/${sessionId}/suggestions/learning-stats`,
-          { method: 'GET', token }
+          undefined,
+          token
         );
         expectStatus(res, 200);
         expectFieldExists(res.body, 'totalCorrections');
@@ -86,11 +92,13 @@ export const group21_autonomous_mapping: TestGroup = {
       id: '21.04',
       name: 'Cross-tenant learning is off by default',
       fn: async () => {
-        const token = state.controllerToken!;
+        const token = state.preparerToken!;
 
         const res = await apiFetch<any>(
+          'GET',
           '/api/settings/cross-tenant-learning',
-          { method: 'GET', token }
+          undefined,
+          token
         );
         expectStatus(res, 200);
         expectTrue(
@@ -103,12 +111,14 @@ export const group21_autonomous_mapping: TestGroup = {
       id: '21.05',
       name: 'GL anomaly detection returns anomalies',
       fn: async () => {
-        const token = state.controllerToken!;
+        const token = state.preparerToken!;
         const sessionId = state.sessionId!;
 
         const res = await apiFetch<any>(
+          'GET',
           `/api/close/sessions/${sessionId}/gl-anomalies`,
-          { method: 'GET', token }
+          undefined,
+          token
         );
         expectStatus(res, 200);
         expectFieldExists(res.body, 'anomalies');
@@ -120,12 +130,14 @@ export const group21_autonomous_mapping: TestGroup = {
       id: '21.06',
       name: 'Predict-timeline returns forecast',
       fn: async () => {
-        const token = state.controllerToken!;
+        const token = state.preparerToken!;
         const sessionId = state.sessionId!;
 
         const res = await apiFetch<any>(
+          'GET',
           `/api/close/sessions/${sessionId}/predict-timeline`,
-          { method: 'GET', token }
+          undefined,
+          token
         );
         expectStatus(res, 200);
         expectFieldExists(res.body, 'targetDays');
@@ -138,12 +150,14 @@ export const group21_autonomous_mapping: TestGroup = {
       id: '21.07',
       name: 'Portfolio analytics returns audit metrics',
       fn: async () => {
-        const token = state.adminToken ?? state.controllerToken!;
+        const token = state.approverToken ?? state.preparerToken!;
         const entityId = state.entityId!;
 
         const res = await apiFetch<any>(
+          'GET',
           `/api/portfolio/analytics/${entityId}`,
-          { method: 'GET', token }
+          undefined,
+          token
         );
         expectStatus(res, 200);
         expectFieldExists(res.body, 'jeApproval');
@@ -155,28 +169,28 @@ export const group21_autonomous_mapping: TestGroup = {
       id: '21.08',
       name: 'Verification endpoint surfaces hash version',
       fn: async () => {
-        const token = state.controllerToken!;
-        const sessionId = state.certifiedSessionId ?? state.sessionId!;
+        const token = state.preparerToken!;
+        const sessionId = state._certifiedSessionId ?? state.sessionId!;
 
         // Get the artifact first
         const artRes = await apiFetch<any>(
+          'GET',
           `/api/verification/certification/artifacts/${sessionId}`,
-          { method: 'GET', token }
+          undefined,
+          token
         );
         if (artRes.status === 404) return; // No certified session in this run
 
         // Verify it
         const verifyRes = await apiFetch<any>(
+          'POST',
           '/api/verification/certification/verify',
           {
-            method: 'POST',
-            token,
-            body: {
-              artifact: artRes.body.artifact,
-              signatureB64: artRes.body.signatureB64,
-              publicKeyB64: artRes.body.publicKeyB64,
-            },
-          }
+            artifact: artRes.body.artifact,
+            signatureB64: artRes.body.signatureB64,
+            publicKeyB64: artRes.body.publicKeyB64,
+          },
+          token
         );
         expectStatus(verifyRes, 200);
         expectFieldExists(verifyRes.body, 'hashVersion');

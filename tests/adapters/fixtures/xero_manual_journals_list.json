@@ -1,0 +1,42 @@
+{
+  "ManualJournals": [
+    {
+      "ManualJournalID": "j1-abc-001",
+      "Date": "2024-03-15",
+      "Narration": "Payroll accrual",
+      "JournalLines": [
+        {
+          "AccountCode": "6100",
+          "AccountName": "Salaries Expense",
+          "Description": "March payroll",
+          "LineAmount": 45000.00
+        },
+        {
+          "AccountCode": "2100",
+          "AccountName": "Accrued Liabilities",
+          "Description": "March payroll",
+          "LineAmount": -45000.00
+        }
+      ]
+    },
+    {
+      "ManualJournalID": "j2-def-002",
+      "Date": "2024-03-31",
+      "Narration": "Rent prepayment",
+      "JournalLines": [
+        {
+          "AccountCode": "6200",
+          "AccountName": "Rent Expense",
+          "Description": "March rent",
+          "LineAmount": 10000.00
+        },
+        {
+          "AccountCode": "1300",
+          "AccountName": "Prepaid Rent",
+          "Description": "March rent",
+          "LineAmount": -10000.00
+        }
+      ]
+    }
+  ]
+}

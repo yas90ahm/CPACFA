@@ -260,7 +260,7 @@ router.post('/sessions/:id/advance', async (req: Request, res: Response) => {
     const result = await advanceSession(pool, {
       tenantId,
       closeSessionId: id,
-      certifiedBy: body.certifiedBy,
+      certifiedBy: body.certifiedBy ?? authReq.userId ?? 'advance-api',
       actorRole,
     });
     const payload = {
@@ -1170,7 +1170,8 @@ router.post('/sessions/:id/lock', async (req: Request, res: Response) => {
     }
     const authReq = req as AuthRequest;
     const lockedBy = authReq.userId ?? 'system';
-    const session = await lockCloseSession(pool, id, tenantId, lockedBy);
+    const actorRole = getCloseRoleFromReq(authReq);
+    const session = await lockCloseSession(pool, id, tenantId, lockedBy, actorRole);
     res.status(200).json(session);
   } catch (e) {
     handleSessionError(res, e, 'Lock close session failed');

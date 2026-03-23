@@ -27,8 +27,10 @@ import * as reconRepo from '../db/repositories/period_reconciliation_repository.
 import * as reqRepo from '../db/repositories/recon_requirements_repository.js';
 import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
 import { getTrialBalanceForCertification } from './adjusted_trial_balance_service.js';
+import { recordMaterialEvent } from './audit_service.js';
 import { createDraftJE } from './journal_entry_service.js';
 import { financialEvents, buildEventPacket } from '../events/financial_event_emitter.js';
+import { getEntitySettings } from './entity_settings_service.js';
 
 export class PeriodReconciliationError extends Error {
   constructor(
@@ -265,7 +267,7 @@ export async function refreshGLBalances(
   return { updated, reverted };
 }
 
-/** Set supporting balance (preparer). */
+/** Set supporting balance (preparer). Logs provenance to audit ledger. */
 export async function setSupportingBalance(
   pool: Pool,
   tenantId: string,
@@ -285,6 +287,20 @@ export async function setSupportingBalance(
     source
   );
   if (!updated) throw new PeriodReconciliationError('Reconciliation not found', 'NOT_FOUND');
+  await recordMaterialEvent(pool, {
+    tenantId,
+    periodLabel: recon.periodId?.slice(0, 7),
+    eventType: 'recon_supporting_balance_set',
+    deterministicFlagSnapshot: {
+      reconId,
+      accountCode: recon.accountCode,
+      source,
+      amount: amountStr,
+      previousAmount: recon.supportingBalance?.toString() ?? null,
+      previousSource: recon.supportingSource ?? null,
+    },
+    createdBy: userId,
+  });
   return updated;
 }
 
@@ -363,10 +379,22 @@ export async function completeReconciliation(
       'VALIDATION'
     );
   }
+  // Immaterial auto-waiver: if unexplained variance is below the entity's waiver threshold,
+  // allow completion without explanation (auto-waived as immaterial).
+  let immaterialWaiverThreshold = 0;
+  try {
+    const settings = await getEntitySettings(pool, tenantId, recon.entityId);
+    immaterialWaiverThreshold = Number(settings.reconImmaterialWaiverThreshold) || 0;
+  } catch {
+    // Settings table may not exist; use default (0 = no waiver)
+  }
+  const isImmaterial = immaterialWaiverThreshold > 0 && absUnexplained != null && absUnexplained <= immaterialWaiverThreshold;
+
   if (
     absUnexplained != null &&
     absUnexplained > 0 &&
     absUnexplained <= tolerance &&
+    !isImmaterial &&
     !(varianceExplanation ?? recon.varianceExplanation ?? '').trim()
   ) {
     throw new PeriodReconciliationError(
@@ -384,6 +412,11 @@ export async function completeReconciliation(
     );
   }
 
+  // Auto-set explanation for immaterial variances
+  const effectiveExplanation = isImmaterial && !(varianceExplanation ?? recon.varianceExplanation ?? '').trim()
+    ? `Auto-waived: immaterial variance ($${absUnexplained?.toFixed(2)}) below threshold ($${immaterialWaiverThreshold.toFixed(2)})`
+    : varianceExplanation ?? recon.varianceExplanation;
+
   // Wrap status update + cascade in a single transaction
   const updated = await withTransaction(pool, async (client) => {
     const result = await reconRepo.updateReconStatus(
@@ -392,7 +425,7 @@ export async function completeReconciliation(
       reconId,
       'completed',
       {
-        varianceExplanation: varianceExplanation ?? recon.varianceExplanation,
+        varianceExplanation: effectiveExplanation,
         preparedBy: userId,
         preparedAt: new Date().toISOString(),
       }
@@ -411,6 +444,14 @@ export async function completeReconciliation(
 
     return result;
   });
+
+  // Emit gate check event for potential auto-advance
+  financialEvents.emit('GATE_CHECK_REQUESTED', buildEventPacket('GATE_CHECK_REQUESTED', {
+    errorCode: 'GATE_CHECK',
+    conflictingData: {},
+    metadata: { tenantId, closeSessionId: recon.periodId },
+    data: { closeSessionId: recon.periodId, trigger: 'recon_completed', triggeredBy: userId },
+  }));
 
   return updated;
 }

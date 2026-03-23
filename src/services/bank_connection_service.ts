@@ -11,6 +11,7 @@
  */
 
 import type { Pool } from 'pg';
+import Decimal from 'decimal.js';
 
 // ── Interface ──
 
@@ -218,7 +219,7 @@ export const PlaidAdapter: BankConnectionAdapter = {
       if (!account) return null;
 
       return {
-        balance: account.balances.current.toFixed(2),
+        balance: new Decimal(account.balances.current ?? 0).toFixed(2),
         currency: account.balances.iso_currency_code ?? 'USD',
         institution: 'Plaid',
         accountName: account.official_name ?? account.name,
@@ -265,7 +266,7 @@ export const PlaidAdapter: BankConnectionAdapter = {
         name: a.name,
         last4: a.mask ?? '',
         type: a.type,
-        balance: (a.balances?.current ?? 0).toFixed(2),
+        balance: new Decimal(a.balances?.current ?? 0).toFixed(2),
       }));
     } catch {
       return [];

@@ -204,7 +204,7 @@ export async function getPeriodReconciliationByPeriodAndAccount(
   accountCode: string
 ): Promise<PeriodReconciliation | null> {
   const r = await pool.query<ReconRow>(
-    `SELECT ${RECON_COLS} FROM tenant_period_reconciliations WHERE tenant_id = $1 AND period_id = $2 AND account_code = $3`,
+    `SELECT r.*, req.account_name FROM tenant_period_reconciliations r LEFT JOIN tenant_recon_requirements req ON r.tenant_id = req.tenant_id AND r.requirement_id = req.requirement_id WHERE r.tenant_id = $1 AND r.period_id = $2 AND r.account_code = $3`,
     [tenantId, periodId, accountCode]
   );
   const row = r.rows[0];
@@ -263,7 +263,7 @@ export async function batchUpdateReconGLBalances(
   const valueClauses: string[] = [];
   let idx = 3;
   for (const u of updates) {
-    valueClauses.push(`($${idx}::uuid, $${idx + 1}::numeric)`);
+    valueClauses.push(`($${idx}::text, $${idx + 1}::numeric)`);
     values.push(u.reconId, u.glBalance);
     idx += 2;
   }

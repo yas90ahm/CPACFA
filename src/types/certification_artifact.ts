@@ -53,6 +53,15 @@ export interface CertificationArtifactAiMetadata {
   confidenceTiers: { high: number; medium: number; low: number };
 }
 
+/** Gate status at moment of certification — proves all gates passed. */
+export interface CertificationArtifactGateSnapshot {
+  gatesPassing: number;
+  gatesTotal: number;
+  canAdvance: boolean;
+  gateDetails: Array<{ id: string; name: string; passing: boolean; detail: string; category: string }>;
+  checkedAt: string;
+}
+
 export interface CertificationArtifactV1 {
   contractVersion: 'v1';
   artifactId: string;
@@ -68,5 +77,7 @@ export interface CertificationArtifactV1 {
   validationStateAtCertification?: ValidationStateCheck[];
   /** AI usage metadata captured at certification — advisory only. */
   aiMetadata?: CertificationArtifactAiMetadata;
+  /** Gate readiness snapshot at moment of certification. */
+  gateSnapshot?: CertificationArtifactGateSnapshot;
   mode: 'dev' | 'demo' | 'staging' | 'prod';
 }

@@ -14,6 +14,7 @@
 
 import { Server as IOServer } from 'socket.io';
 import type { Server as HTTPServer } from 'http';
+import jwt from 'jsonwebtoken';
 
 let io: IOServer | null = null;
 
@@ -72,7 +73,6 @@ export function initRealtime(httpServer: HTTPServer, corsOrigins: string[]): IOS
     // Validate JWT (lightweight — just decode, don't hit DB)
     let payload: { tenantId?: string; userId?: string } | null = null;
     try {
-      const jwt = require('jsonwebtoken');
       const secret = process.env.JWT_SECRET ?? 'dev-jwt-secret';
       payload = jwt.verify(token, secret) as { tenantId?: string; userId?: string };
     } catch {

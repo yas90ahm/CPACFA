@@ -12,11 +12,14 @@ export interface PipelineStep {
 
 const STEP_ROUTES: Record<string, string> = {
   ingest: 'dashboard',
+  upload: 'trial-balance',
   map: 'mapping',
   reconcile: 'reconciliation',
+  recon: 'reconciliation',
   adjust: 'adjustments',
   generate: 'statements',
   analyze: 'variance',
+  variance: 'variance',
   review: 'review',
   certify: 'review',
   // Also support id-based keys from portfolio entity pages

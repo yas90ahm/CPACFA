@@ -51,6 +51,7 @@ import closePeReportingRouter from './close_pe_reporting.js';
 import closeExcelExportRouter from './close_excel_export.js';
 import closeAuditDataRouter from './close_audit_data.js';
 import closeAccountAnalysisRouter from './close_account_analysis.js';
+import closeSubsequentEventsRouter from './close_subsequent_events.js';
 
 const router = Router();
 router.use(closeJeAccrualsRouter);
@@ -100,5 +101,6 @@ router.use(closePeReportingRouter);
 router.use(closeExcelExportRouter);
 router.use(closeAuditDataRouter);
 router.use(closeAccountAnalysisRouter);
+router.use(closeSubsequentEventsRouter);
 
 export default router;

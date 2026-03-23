@@ -11,8 +11,10 @@ import * as jeRepo from '../db/repositories/journal_entry_repository.js';
 import { sumRound2 } from '../utils/decimal.js';
 import {
   listAssertionTypesByJournalEntryForSession,
+  listEvidenceForObject,
 } from '../db/repositories/evidence_repository.js';
 import { normalizeMoney } from '../utils/decimal.js';
+import { listPeriodReconciliationsByPeriod } from '../db/repositories/period_reconciliation_repository.js';
 
 export interface MissingEvidenceDetail {
   journalEntryId: string;
@@ -106,6 +108,31 @@ export async function checkEvidencePolicyForCertification(
         hardBlockers.push({ code: 'EVIDENCE_REQUIRED', message: msg, jeId: je.id });
       } else {
         softWarnings.push({ message: msg, jeId: je.id });
+      }
+    }
+  }
+
+  // Check reconciliation evidence requirements
+  const recons = await listPeriodReconciliationsByPeriod(pool, tenantId, closeSessionId);
+  const reconRequiredTypes = requiredTypes['reconciliation'];
+  if (reconRequiredTypes && reconRequiredTypes.length > 0) {
+    for (const recon of recons) {
+      if (recon.status !== 'completed' && recon.status !== 'approved') continue;
+      const glBalance = recon.glBalance != null ? Math.abs(Number(recon.glBalance)) : 0;
+      if (glBalance < thresholdNum) continue;
+
+      const reconEvidence = await listEvidenceForObject(pool, tenantId, 'reconciliation', recon.reconId);
+      const reconAssertions = reconEvidence.flatMap((e) =>
+        e.link?.assertionType ? [e.link.assertionType] : []
+      );
+      const hasReconMatch = reconRequiredTypes.some((r) => reconAssertions.includes(r as typeof reconAssertions[number]));
+      if (!hasReconMatch) {
+        const msg = `Reconciliation ${recon.accountCode} (balance: ${recon.glBalance}) requires evidence with assertion type(s): ${reconRequiredTypes.join(', ')}`;
+        if (effectiveMode === 'hard_block') {
+          hardBlockers.push({ code: 'RECON_EVIDENCE_REQUIRED', message: msg });
+        } else {
+          softWarnings.push({ message: msg });
+        }
       }
     }
   }

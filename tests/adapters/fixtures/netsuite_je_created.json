@@ -1,0 +1,22 @@
+{
+  "id": "78543",
+  "trandate": "2024-03-31",
+  "memo": "Monthly depreciation entry",
+  "line": {
+    "items": [
+      {
+        "account": { "id": "6000", "refName": "Depreciation Expense" },
+        "debit": 12500.00,
+        "memo": "Fixed asset depreciation"
+      },
+      {
+        "account": { "id": "1500", "refName": "Accumulated Depreciation" },
+        "credit": 12500.00,
+        "memo": "Fixed asset depreciation"
+      }
+    ]
+  },
+  "links": [
+    { "rel": "self", "href": "/services/rest/record/v1/journalentry/78543" }
+  ]
+}

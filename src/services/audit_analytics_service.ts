@@ -109,10 +109,6 @@ async function computeJEApprovalMetrics(
   tenantId: string,
   closeSessionId?: string
 ): Promise<JEApprovalMetrics> {
-  const sessionFilter = closeSessionId
-    ? `AND close_session_id = '${closeSessionId}'`
-    : '';
-
   // Average hours from created to posted, grouped by source
   const avgRes = await pool.query<{ source: string; avg_hours: string; cnt: string }>(
     `SELECT source,
@@ -182,7 +178,7 @@ async function computeAISuggestionMetrics(
     params
   );
 
-  let coaAccepted = 0, coaRejected = 0, coaTotal = 0, autoAccepted = 0, editedCount = 0;
+  let coaAccepted = 0, coaRejected = 0, coaTotal = 0, autoAccepted = 0;
   let avgAcceptedConf = 0, avgRejectedConf = 0, acceptedConfCount = 0, rejectedConfCount = 0;
 
   for (const row of coaRes.rows) {
@@ -200,6 +196,15 @@ async function computeAISuggestionMetrics(
       rejectedConfCount += cnt;
     }
   }
+
+  // Count edited suggestions from audit ledger (accepted with override)
+  const editedRes = await pool.query<{ cnt: string }>(
+    `SELECT COUNT(*) AS cnt FROM audit_ledger
+     WHERE tenant_id = $1 AND event_type = 'ai_mapping_suggestion_edited'
+       ${closeSessionId ? 'AND payload->>\'closeSessionId\' = $2' : ''}`,
+    closeSessionId ? [tenantId, closeSessionId] : [tenantId]
+  );
+  const editedCount = Number(editedRes.rows[0]?.cnt ?? 0);
 
   // CF suggestion stats
   const cfRes = await pool.query<{ status: string; cnt: string }>(

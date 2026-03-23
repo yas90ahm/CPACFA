@@ -45,6 +45,10 @@ export interface RecordMaterialEventInput {
     | 'bridge_command'
     | 'evidence_link'
     | 'legacy_certified_source_used'
+    | 'recon_supporting_balance_set'
+    | 'subsequent_event_created'
+    | 'subsequent_event_disposition_set'
+    | 'subsequent_events_confirmed_none'
   >;
   deterministicFlagSnapshot: Record<string, unknown>;
   agentDissentSnapshot?: Record<string, unknown>;

@@ -1,0 +1,8 @@
+{
+  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.test-access-token-payload",
+  "refresh_token": "test-refresh-token-abc123def456",
+  "token_type": "bearer",
+  "expires_in": 3600,
+  "x_refresh_token_expires_in": 8726400,
+  "scope": "accounting.transactions accounting.reports.read"
+}

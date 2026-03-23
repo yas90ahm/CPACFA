@@ -30,6 +30,10 @@ interface CloseSessionRow {
   reopened_by: string | null;
   reopen_reason: string | null;
   statements_stale_since: string | Date | null;
+  advanced_to_review_by: string | null;
+  advanced_to_review_at: string | Date | null;
+  subsequent_events_confirmed_by: string | null;
+  subsequent_events_confirmed_at: string | Date | null;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -49,7 +53,7 @@ function toISOTimestampString(v: string | Date | null | undefined): string {
 }
 
 const SESSION_COLUMNS =
-  'id, tenant_id, entity_id, period_start, period_end, basis, standard, status, certified_by, certified_at, certification_memo, certified_snapshot_id, certification_artifact_id, reopened_at, reopened_by, reopen_reason, statements_stale_since, created_at, updated_at';
+  'id, tenant_id, entity_id, period_start, period_end, basis, standard, status, certified_by, certified_at, certification_memo, certified_snapshot_id, certification_artifact_id, reopened_at, reopened_by, reopen_reason, statements_stale_since, advanced_to_review_by, advanced_to_review_at, subsequent_events_confirmed_by, subsequent_events_confirmed_at, created_at, updated_at';
 
 function rowToSession(row: CloseSessionRow): CloseSession {
   return {
@@ -81,6 +85,16 @@ function rowToSession(row: CloseSessionRow): CloseSession {
             ? row.statements_stale_since
             : (row.statements_stale_since as Date).toISOString())
         : undefined,
+    advancedToReviewBy: row.advanced_to_review_by ?? null,
+    advancedToReviewAt:
+      row.advanced_to_review_at != null
+        ? (typeof row.advanced_to_review_at === 'string' ? row.advanced_to_review_at : (row.advanced_to_review_at as Date).toISOString())
+        : null,
+    subsequentEventsConfirmedBy: row.subsequent_events_confirmed_by ?? null,
+    subsequentEventsConfirmedAt:
+      row.subsequent_events_confirmed_at != null
+        ? (typeof row.subsequent_events_confirmed_at === 'string' ? row.subsequent_events_confirmed_at : (row.subsequent_events_confirmed_at as Date).toISOString())
+        : null,
     createdAt: toISOTimestampString(row.created_at),
     updatedAt: toISOTimestampString(row.updated_at),
   };
@@ -205,14 +219,26 @@ export async function updateCloseSessionStatus(
   client: Queryable,
   tenantId: string,
   id: string,
-  status: string
+  status: string,
+  actorUserId?: string
 ): Promise<CloseSession | null> {
   const now = new Date().toISOString();
-  const r = await client.query(
-    'UPDATE close_sessions SET status = $1, updated_at = $2 WHERE tenant_id = $3 AND id = $4',
-    [status, now, tenantId, id]
-  );
-  if (r.rowCount === 0) return null;
+  if (status === 'under_review' && actorUserId) {
+    await client.query(
+      'UPDATE close_sessions SET status = $1, advanced_to_review_by = $5, advanced_to_review_at = $2, updated_at = $2 WHERE tenant_id = $3 AND id = $4',
+      [status, now, tenantId, id, actorUserId]
+    );
+  } else if (status === 'in_progress') {
+    await client.query(
+      'UPDATE close_sessions SET status = $1, advanced_to_review_by = NULL, advanced_to_review_at = NULL, updated_at = $2 WHERE tenant_id = $3 AND id = $4',
+      [status, now, tenantId, id]
+    );
+  } else {
+    await client.query(
+      'UPDATE close_sessions SET status = $1, updated_at = $2 WHERE tenant_id = $3 AND id = $4',
+      [status, now, tenantId, id]
+    );
+  }
   return getCloseSessionById(client, tenantId, id);
 }
 

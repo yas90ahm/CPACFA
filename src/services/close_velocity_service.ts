@@ -55,12 +55,12 @@ export interface CloseTimelinePrediction {
 
 interface HistoricalClose {
   id: string;
-  entityId: string;
+  entity_id: string;
   status: string;
-  createdAt: string;
-  certifiedAt: string | null;
-  lockedAt: string | null;
-  periodEnd: string;
+  created_at: string;
+  certified_at: string | null;
+  locked_at: string | null;
+  period_end: string;
 }
 
 const PIPELINE_STEPS = [
@@ -113,10 +113,10 @@ export async function predictCloseTimeline(
   // Compute historical durations (days from created to certified/locked)
   const historicalDurations: number[] = [];
   for (const h of historicalCloses) {
-    const end = h.certifiedAt ?? h.lockedAt;
+    const end = h.certified_at ?? h.locked_at;
     if (end) {
       const days = Math.max(1, Math.ceil(
-        (new Date(end).getTime() - new Date(h.createdAt).getTime()) / 86400000
+        (new Date(end).getTime() - new Date(h.created_at).getTime()) / 86400000
       ));
       historicalDurations.push(days);
     }

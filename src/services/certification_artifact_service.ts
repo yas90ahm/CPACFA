@@ -14,6 +14,7 @@ import type {
   CertificationArtifactAuditChain,
   CertificationArtifactEvidenceManifest,
   CertificationArtifactAiMetadata,
+  CertificationArtifactGateSnapshot,
 } from '../types/certification_artifact.js';
 import type { Pool, PoolClient } from 'pg';
 import type { LedgerSnapshotPayload } from '../types/ledger_snapshot.js';
@@ -41,6 +42,8 @@ export interface BuildArtifactInput {
   validationStateAtCertification?: Array<{ check_name: string; check_type: 'hard' | 'soft'; passes: boolean; message: string | null }>;
   /** AI usage metadata gathered at certification time. */
   aiMetadata?: CertificationArtifactAiMetadata;
+  /** Gate readiness snapshot at moment of certification. */
+  gateSnapshot?: CertificationArtifactGateSnapshot;
 }
 
 export function buildCertificationArtifact(input: BuildArtifactInput): {
@@ -94,6 +97,7 @@ export function buildCertificationArtifact(input: BuildArtifactInput): {
       validationStateAtCertification: input.validationStateAtCertification,
     }),
     ...(input.aiMetadata && { aiMetadata: input.aiMetadata }),
+    ...(input.gateSnapshot && { gateSnapshot: input.gateSnapshot }),
     mode,
   };
 
