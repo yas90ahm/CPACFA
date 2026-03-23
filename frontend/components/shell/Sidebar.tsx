@@ -57,30 +57,32 @@ interface NavGroup {
 
 const navGroups: NavGroup[] = [
   {
-    label: 'Close Pipeline',
+    label: 'Close Workflow',
     defaultOpen: true,
     items: [
       { href: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { href: 'trial-balance', label: 'Trial Balance', icon: Table },
-      { href: 'gl-quality', label: 'GL Quality', icon: Sparkles },
       { href: 'mapping', label: 'Mapping', icon: ArrowRightLeft },
       { href: 'reconciliation', label: 'Reconciliation', icon: ShieldCheck, badgeProp: 'recon' },
-      { href: 'bank-reconciliation', label: 'Bank Recon', icon: Calculator },
       { href: 'adjustments', label: 'Adjustments', icon: PenLine, badgeProp: 'adjustments' },
+      { href: 'statements', label: 'Statements', icon: FileText, stale: false },
+      { href: 'variance', label: 'Variance', icon: TrendingUp },
+      { href: 'review', label: 'Review & Certify', icon: Award },
     ],
   },
   {
-    label: 'Statements & Analysis',
-    defaultOpen: true,
+    label: 'Workpapers',
+    defaultOpen: false,
     items: [
-      { href: 'statements', label: 'Statements', icon: FileText, stale: false },
-      { href: 'variance', label: 'Variance', icon: TrendingUp, badge: 2 },
+      { href: 'trial-balance', label: 'Trial Balance', icon: Table },
+      { href: 'bank-reconciliation', label: 'Bank Recon', icon: Calculator },
       { href: 'gl-health', label: 'GL Health', icon: HeartPulse },
+      { href: 'gl-quality', label: 'GL Quality', icon: Sparkles },
+      { href: 'checklist', label: 'Checklist', icon: ListChecks },
       { href: 'discrepancies', label: 'Discrepancies', icon: Search },
     ],
   },
   {
-    label: 'Specialized Modules',
+    label: 'Modules',
     defaultOpen: false,
     items: [
       { href: 'fixed-assets', label: 'Fixed Assets', icon: Building2 },
@@ -94,14 +96,13 @@ const navGroups: NavGroup[] = [
   },
   {
     label: 'Governance',
-    defaultOpen: true,
+    defaultOpen: false,
     items: [
-      { href: 'ai-review', label: 'AI Review', icon: Brain },
       { href: 'controls', label: 'Controls', icon: Shield },
-      { href: 'checklist', label: 'Checklist', icon: ListChecks },
+      { href: 'ai-review', label: 'AI Review', icon: Brain },
       { href: 'board-package', label: 'Board Package', icon: BookOpen },
-      { href: 'review', label: 'Review & Certify', icon: Award },
       { href: 'audit-trail', label: 'Audit Trail', icon: History },
+      { href: 'audit-binder', label: 'Audit Binder', icon: BookOpen },
       { href: 'analytics', label: 'Analytics', icon: BarChart3 },
     ],
   },
