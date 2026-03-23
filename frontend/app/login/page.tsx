@@ -6,13 +6,7 @@ import Link from 'next/link';
 import { useAuth } from '@/lib/auth';
 import { getDefaultLandingPage } from '@/lib/permissions';
 import { cn } from '@/lib/utils';
-import { Eye, EyeOff, AlertCircle, Shield, Lock, CheckCircle, Loader2, ChevronDown } from 'lucide-react';
-
-const badges = [
-  { icon: Shield, label: 'SOC 2 Type II' },
-  { icon: Lock, label: '256-bit Encryption' },
-  { icon: CheckCircle, label: 'AICPA Compliant' },
-] as const;
+import { Eye, EyeOff, AlertCircle, Loader2, ChevronDown } from 'lucide-react';
 
 export default function LoginPage() {
   const { login, token, user, isLoading: authLoading } = useAuth();
@@ -72,18 +66,6 @@ export default function LoginPage() {
         >
           Deterministic financial statements. Every dollar provably correct.
         </p>
-
-        <div className="flex items-center gap-3 mt-16">
-          {badges.map(({ icon: Icon, label }) => (
-            <span
-              key={label}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-white/10 text-white/60"
-            >
-              <Icon className="w-3.5 h-3.5" />
-              <span className="text-[11px] font-medium uppercase tracking-wide">{label}</span>
-            </span>
-          ))}
-        </div>
       </div>
 
       {/* Right Panel -- Form */}

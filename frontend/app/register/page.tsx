@@ -4,17 +4,12 @@ import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { AlertCircle, Shield, Lock, CheckCircle, Loader2, Eye, EyeOff } from 'lucide-react';
+import { AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react';
 
 const API_BASE = typeof window !== 'undefined'
   ? (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001')
   : (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001');
 
-const badges = [
-  { icon: Shield, label: 'SOC 2 Type II' },
-  { icon: Lock, label: '256-bit Encryption' },
-  { icon: CheckCircle, label: 'AICPA Compliant' },
-] as const;
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -82,18 +77,6 @@ export default function RegisterPage() {
         >
           Deterministic financial statements. Every dollar provably correct.
         </p>
-
-        <div className="flex items-center gap-3 mt-16">
-          {badges.map(({ icon: Icon, label }) => (
-            <span
-              key={label}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-white/10 text-white/60"
-            >
-              <Icon className="w-3.5 h-3.5" />
-              <span className="text-[11px] font-medium uppercase tracking-wide">{label}</span>
-            </span>
-          ))}
-        </div>
       </div>
 
       {/* Right Panel -- Form */}
