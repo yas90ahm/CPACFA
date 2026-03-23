@@ -1,12 +1,14 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCloseSession, useCloseReadiness, useCloseIssues } from '@/lib/queries/close-session';
 import { useReconciliations } from '@/lib/queries/reconciliations';
 import { useAjeTemplates } from '@/lib/queries/adjustments';
 import { useVariances } from '@/lib/queries/variance';
 import { useStatements, useValidation } from '@/lib/queries/statements';
 import { useAuditTrail } from '@/lib/queries/audit-trail';
+import { useSessionSocket } from '@/lib/socket';
 import type { PipelineStep } from '@/components/shared/PipelineStepper';
 import { PIPELINE_STEPS } from './PipelineCard';
 import type { FinancialLine } from './FinancialHighlightsCard';
@@ -25,6 +27,56 @@ export function useDashboardData(
   const { data: stmtData } = useStatements(sessionId);
   const { data: validation } = useValidation(sessionId);
   const { data: auditTrail } = useAuditTrail(sessionId, { limit: 8 });
+
+  /* ── Real-time: invalidate React Query caches on Socket.IO events ────── */
+  const queryClient = useQueryClient();
+  const { on, off } = useSessionSocket(sessionId);
+
+  useEffect(() => {
+    const handler = (...args: unknown[]) => {
+      const event = args[0] as { type?: string } | undefined;
+      const t = event?.type;
+
+      // Always refresh readiness and issues on any close event
+      queryClient.invalidateQueries({ queryKey: ['readiness', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['issues', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['audit-events', sessionId] });
+
+      if (t === 'cascade_complete' || t === 'je_posted') {
+        queryClient.invalidateQueries({ queryKey: ['trial-balance', sessionId] });
+        queryClient.invalidateQueries({ queryKey: ['statements', sessionId] });
+        queryClient.invalidateQueries({ queryKey: ['validation', sessionId] });
+        queryClient.invalidateQueries({ queryKey: ['journal-entries', sessionId] });
+        queryClient.invalidateQueries({ queryKey: ['templates', sessionId] });
+      }
+
+      if (t === 'session_advanced') {
+        queryClient.invalidateQueries({ queryKey: ['close-session', sessionId] });
+      }
+
+      if (t === 'recon_completed' || t === 'recon_approved') {
+        queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+      }
+
+      if (t === 'statements_generated') {
+        queryClient.invalidateQueries({ queryKey: ['statements', sessionId] });
+        queryClient.invalidateQueries({ queryKey: ['validation', sessionId] });
+        queryClient.invalidateQueries({ queryKey: ['close-session', sessionId] });
+        queryClient.invalidateQueries({ queryKey: ['variances', sessionId] });
+      }
+
+      if (t === 'variance_explained') {
+        queryClient.invalidateQueries({ queryKey: ['variances', sessionId] });
+      }
+
+      if (t === 'readiness_changed') {
+        queryClient.invalidateQueries({ queryKey: ['close-session', sessionId] });
+      }
+    };
+
+    on('close_event', handler);
+    return () => { off('close_event', handler); };
+  }, [on, off, sessionId, queryClient]);
 
   const { mappedCount, unmappedCount, rows: tbRows } = tbContext;
   const totalAccounts = tbRows.length;

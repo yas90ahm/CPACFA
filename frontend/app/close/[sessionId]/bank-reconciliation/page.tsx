@@ -10,14 +10,19 @@ import {
   useRunMatching,
   useConfirmMatch,
   useRejectMatch,
+  useAutoMatchRules,
+  useCreateAutoMatchRule,
+  useDeleteAutoMatchRule,
+  useClearingItems,
 } from '@/lib/queries/bank-transactions';
-import type { BankTransaction, MatchGroup, ParsePreview } from '@/lib/queries/bank-transactions';
+import type { BankTransaction, MatchGroup, ParsePreview, AutoMatchRule, CreateAutoMatchRuleInput, ClearingItem } from '@/lib/queries/bank-transactions';
 import { MoneyCell } from '@/components/shared/MoneyCell';
 import { FileUploadZone } from '@/components/shared/FileUploadZone';
 import { fmtMoney } from '@/lib/money';
 import {
   Upload, Play, Check, X, Filter, ArrowRightLeft,
   Loader2, CheckCircle2, XCircle, AlertCircle, Clock,
+  ChevronDown, Trash2, Plus, AlertTriangle,
 } from 'lucide-react';
 
 /* ── Status helpers ────────────────────────────────────────────────────────── */
@@ -246,6 +251,12 @@ export default function BankReconciliationPage() {
   const confirmMut = useConfirmMatch(sessionId);
   const rejectMut = useRejectMatch(sessionId);
 
+  /* ── Auto-match rules & clearing items ─────────────────────────────────── */
+  const { data: autoMatchRules } = useAutoMatchRules(sessionId);
+  const createRuleMut = useCreateAutoMatchRule(sessionId);
+  const deleteRuleMut = useDeleteAutoMatchRule(sessionId);
+  const { data: clearingItems } = useClearingItems(sessionId);
+
   /* ── Local state ─────────────────────────────────────────────────────────── */
   const [filter, setFilter] = useState<FilterStatus>('all');
   const [matchFilter, setMatchFilter] = useState<'all' | 'proposed' | 'confirmed' | 'rejected'>('all');
@@ -253,6 +264,8 @@ export default function BankReconciliationPage() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
   const [actingGroupId, setActingGroupId] = useState<string | null>(null);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const [clearingOpen, setClearingOpen] = useState(false);
 
   /* ── Derived data ────────────────────────────────────────────────────────── */
   const isLoading = txnLoading || summaryLoading;
@@ -536,6 +549,137 @@ export default function BankReconciliationPage() {
               )}
             </div>
           </div>
+        </section>
+      )}
+
+      {/* ── Auto-Match Rules (collapsible) ────────────────────────────────── */}
+      {!isLoading && (
+        <section>
+          <button
+            onClick={() => setRulesOpen((v) => !v)}
+            className="flex items-center gap-2 w-full text-left py-2"
+          >
+            <ChevronDown
+              className="w-4 h-4 transition-transform"
+              style={{ color: 'var(--text-secondary)', transform: rulesOpen ? 'rotate(0deg)' : 'rotate(-90deg)' }}
+            />
+            <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+              Auto-Match Rules
+            </h2>
+            <span className="text-[0.6875rem] px-1.5 py-0.5 rounded" style={{ color: 'var(--text-tertiary)', backgroundColor: 'var(--bg-surface-sunken)' }}>
+              {autoMatchRules?.length ?? 0}
+            </span>
+          </button>
+          {rulesOpen && (
+            <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-surface)' }}>
+              {(autoMatchRules ?? []).length === 0 ? (
+                <div className="py-6 text-center text-sm" style={{ color: 'var(--text-tertiary)' }}>
+                  No auto-match rules configured. Backend routes not yet wired.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[0.8125rem]">
+                    <thead>
+                      <tr style={{ backgroundColor: 'var(--bg-surface-sunken)', borderBottom: '1px solid var(--border-default)' }}>
+                        {['Name', 'Description Pattern', 'Amount Range', 'Counterparty', 'Type', 'Auto-Confirm', ''].map((h) => (
+                          <th key={h} className="px-3 py-2 text-left text-[0.6875rem] font-semibold uppercase tracking-[0.06em]" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(autoMatchRules ?? []).map((rule) => (
+                        <tr key={rule.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                          <td className="px-3 py-2 font-medium" style={{ color: 'var(--text-primary)' }}>{rule.ruleName}</td>
+                          <td className="px-3 py-2 font-mono text-[0.75rem]" style={{ color: 'var(--text-secondary)' }}>{rule.descriptionPattern ?? '--'}</td>
+                          <td className="px-3 py-2 tabular-nums" style={{ color: 'var(--text-secondary)' }}>
+                            {rule.amountMin || rule.amountMax ? `${rule.amountMin ?? '0'} - ${rule.amountMax ?? 'any'}` : '--'}
+                          </td>
+                          <td className="px-3 py-2" style={{ color: 'var(--text-secondary)' }}>{rule.counterpartyPattern ?? '--'}</td>
+                          <td className="px-3 py-2" style={{ color: 'var(--text-secondary)' }}>{rule.transactionType ?? '--'}</td>
+                          <td className="px-3 py-2">
+                            <span className="text-[0.6875rem] px-1.5 py-0.5 rounded font-medium"
+                              style={{ color: rule.autoConfirm ? 'var(--status-success)' : 'var(--text-tertiary)', backgroundColor: rule.autoConfirm ? 'var(--status-success-bg)' : 'var(--status-neutral-bg)' }}>
+                              {rule.autoConfirm ? 'Yes' : 'No'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">
+                            <button onClick={() => deleteRuleMut.mutate(rule.id)} className="p-1 rounded hover:bg-[var(--interactive-ghost-hover)]" title="Delete rule" aria-label={`Delete rule ${rule.ruleName}`}>
+                              <Trash2 className="w-3.5 h-3.5" style={{ color: 'var(--status-error)' }} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ── Clearing Items (collapsible) ──────────────────────────────────── */}
+      {!isLoading && (
+        <section>
+          <button
+            onClick={() => setClearingOpen((v) => !v)}
+            className="flex items-center gap-2 w-full text-left py-2"
+          >
+            <ChevronDown
+              className="w-4 h-4 transition-transform"
+              style={{ color: 'var(--text-secondary)', transform: clearingOpen ? 'rotate(0deg)' : 'rotate(-90deg)' }}
+            />
+            <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+              Clearing Items
+            </h2>
+            <span className="text-[0.6875rem] px-1.5 py-0.5 rounded" style={{ color: 'var(--text-tertiary)', backgroundColor: 'var(--bg-surface-sunken)' }}>
+              {clearingItems?.length ?? 0}
+            </span>
+          </button>
+          {clearingOpen && (
+            <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-surface)' }}>
+              {(clearingItems ?? []).length === 0 ? (
+                <div className="py-6 text-center text-sm" style={{ color: 'var(--text-tertiary)' }}>
+                  No clearing items. Backend routes not yet wired.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[0.8125rem]">
+                    <thead>
+                      <tr style={{ backgroundColor: 'var(--bg-surface-sunken)', borderBottom: '1px solid var(--border-default)' }}>
+                        {['Type', 'Description', 'Amount', 'Date', 'Days Out', 'Status'].map((h) => (
+                          <th key={h} className="px-3 py-2 text-left text-[0.6875rem] font-semibold uppercase tracking-[0.06em]" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(clearingItems ?? []).map((item) => {
+                        const isStale = (item.daysOutstanding ?? 0) > 90;
+                        const statusColor = item.status === 'cleared' ? 'var(--status-success)' : item.status === 'voided' ? 'var(--text-tertiary)' : isStale ? 'var(--status-error)' : 'var(--status-warning)';
+                        const statusBg = item.status === 'cleared' ? 'var(--status-success-bg)' : item.status === 'voided' ? 'var(--status-neutral-bg)' : isStale ? 'var(--status-error-bg)' : 'var(--status-warning-bg)';
+                        return (
+                          <tr key={item.id} style={{ borderBottom: '1px solid var(--border-subtle)', backgroundColor: isStale ? 'var(--status-error-bg)' : 'transparent' }}>
+                            <td className="px-3 py-2" style={{ color: 'var(--text-secondary)' }}>{item.itemType.replace(/_/g, ' ')}</td>
+                            <td className="px-3 py-2 max-w-[200px] truncate" style={{ color: 'var(--text-primary)' }} title={item.description}>{item.description}</td>
+                            <td className="px-3 py-2 tabular-nums text-right"><MoneyCell value={item.amount} /></td>
+                            <td className="px-3 py-2 tabular-nums" style={{ color: 'var(--text-secondary)' }}>{item.originalDate}</td>
+                            <td className="px-3 py-2 tabular-nums" style={{ color: isStale ? 'var(--status-error)' : 'var(--text-secondary)' }}>
+                              {item.daysOutstanding ?? '--'}{isStale && <AlertTriangle className="w-3 h-3 inline ml-1" />}
+                            </td>
+                            <td className="px-3 py-2">
+                              <span className="text-[0.6875rem] px-1.5 py-0.5 rounded font-medium uppercase" style={{ color: statusColor, backgroundColor: statusBg }}>
+                                {item.status}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </section>
       )}
 

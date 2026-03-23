@@ -211,3 +211,90 @@ export function useRejectMatch(sessionId: string) {
     },
   });
 }
+
+/* ── Auto-Match Rules (awaiting backend route wiring) ─────────────────────── */
+
+export interface AutoMatchRule {
+  id: string;
+  ruleName: string;
+  descriptionPattern: string | null;
+  amountMin: string | null;
+  amountMax: string | null;
+  counterpartyPattern: string | null;
+  transactionType: string | null;
+  targetGlAccount: string | null;
+  autoConfirm: boolean;
+  priority: number;
+}
+
+export type CreateAutoMatchRuleInput = Omit<AutoMatchRule, 'id' | 'priority'> & { priority?: number };
+
+export function useAutoMatchRules(sessionId: string | null) {
+  return useQuery({
+    queryKey: ['auto-match-rules', sessionId],
+    queryFn: async (): Promise<AutoMatchRule[]> => {
+      const res = await apiFetch<{ rules: AutoMatchRule[] }>(
+        `/api/close/sessions/${sessionId}/bank-transactions/auto-match-rules`
+      );
+      return res.rules ?? [];
+    },
+    enabled: !!sessionId,
+    staleTime: STALE_TIME,
+  });
+}
+
+export function useCreateAutoMatchRule(sessionId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateAutoMatchRuleInput) =>
+      apiFetch<AutoMatchRule>(
+        `/api/close/sessions/${sessionId}/bank-transactions/auto-match-rules`,
+        { method: 'POST', body: input }
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['auto-match-rules', sessionId] });
+    },
+  });
+}
+
+export function useDeleteAutoMatchRule(sessionId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ruleId: string) =>
+      apiFetch(`/api/close/sessions/${sessionId}/bank-transactions/auto-match-rules/${ruleId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['auto-match-rules', sessionId] });
+    },
+  });
+}
+
+/* ── Clearing Items (awaiting backend route wiring) ───────────────────────── */
+
+export type ClearingItemType = 'outstanding_check' | 'deposit_in_transit' | 'pending_transfer' | 'other';
+export type ClearingItemStatus = 'outstanding' | 'cleared' | 'voided' | 'stale';
+
+export interface ClearingItem {
+  id: string;
+  accountCode: string;
+  itemType: ClearingItemType;
+  description: string;
+  amount: string;
+  originalDate: string;
+  expectedClearingDate: string | null;
+  status: ClearingItemStatus;
+  daysOutstanding: number | null;
+}
+
+export function useClearingItems(sessionId: string | null) {
+  return useQuery({
+    queryKey: ['clearing-items', sessionId],
+    queryFn: async (): Promise<ClearingItem[]> => {
+      const res = await apiFetch<{ items: ClearingItem[] }>(
+        `/api/close/sessions/${sessionId}/clearing-items`
+      );
+      return res.items ?? [];
+    },
+    enabled: !!sessionId,
+    staleTime: STALE_TIME,
+  });
+}

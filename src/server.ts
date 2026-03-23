@@ -23,7 +23,8 @@ import { applyModeDefaults, getMode, requireAuth as requireAuthFromMode, enableD
 import { runStartupValidation, printStartupBanner } from './startup_validation.js';
 import { seedDemo } from './scripts/seed_demo.js';
 import { assertDeploymentConfigSafe, printDevModeEnforcementWarning } from './lib/deployment_config_guard.js';
-import { assertSigningKeysInStrictMode } from './lib/cert_signing.js';
+import { assertSigningKeysInStrictMode, isSigningConfigured, getPublicKeyB64, verifyArtifactHash } from './lib/cert_signing.js';
+import { computeArtifactHash } from './services/certification_artifact_service.js';
 
 // Apply MODE-based defaults before any route setup (fail fast if prod/demo misconfigured)
 const _modeConfig = applyModeDefaults();
@@ -123,6 +124,33 @@ app.get('/health/ready', async (_req, res) => {
 
 // Auth (no requireAuth / attachTenantPool); rate limits applied inside auth router
 app.use('/api/auth', authRouter);
+
+// Public verification endpoints (no auth required) — auditors and third-parties
+// can fetch the signing public key and verify certification artifacts without a JWT.
+// Only public-key and verify are exposed; artifacts/:id stays behind auth.
+(() => {
+  const pub = express.Router();
+  pub.get('/public-key', (_req, res) => {
+    if (!isSigningConfigured()) {
+      return res.status(501).json({ contractVersion: 'v1', code: 'SIGNING_NOT_CONFIGURED', message: 'Certification signing is not configured.' });
+    }
+    const pubB64 = getPublicKeyB64();
+    if (!pubB64) {
+      return res.status(501).json({ contractVersion: 'v1', code: 'SIGNING_NOT_CONFIGURED', message: 'Public key not available.' });
+    }
+    res.json({ contractVersion: 'v1', alg: 'ed25519', publicKeyB64: pubB64 });
+  });
+  pub.post('/verify', (req, res) => {
+    const { artifact, signatureB64, publicKeyB64 } = req.body ?? {};
+    if (!artifact || !signatureB64 || !publicKeyB64) {
+      return res.status(400).json({ contractVersion: 'v1', code: 'INVALID_INPUT', message: 'artifact, signatureB64, and publicKeyB64 required.' });
+    }
+    const artifactHash = computeArtifactHash(artifact);
+    const signatureValid = verifyArtifactHash(artifactHash, signatureB64, publicKeyB64);
+    res.json({ contractVersion: 'v1', artifactHash, signatureValid });
+  });
+  app.use('/api/verification/certification', pub);
+})();
 
 // General API rate limit (200 req/min per IP); /api/auth is mounted above so excluded
 const apiLimiter = rateLimit({

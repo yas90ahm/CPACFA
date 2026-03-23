@@ -222,5 +222,83 @@ export function createBankTransactionRoutes(getPool: (tenantId: string) => Promi
     }
   });
 
+  // ── Auto-Match Rules ──
+
+  router.get('/sessions/:sessionId/bank-transactions/auto-match-rules', async (req, res) => {
+    try {
+      const tenantId = (req as unknown as { tenantId: string }).tenantId;
+      const pool = await getPool(tenantId);
+      const { listAutoMatchRules } = await import('../../services/auto_match_rules_service.js');
+      const rules = await listAutoMatchRules(pool, tenantId);
+      return res.json(rules);
+    } catch (err) {
+      return res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to list rules' });
+    }
+  });
+
+  router.post('/sessions/:sessionId/bank-transactions/auto-match-rules', async (req, res) => {
+    try {
+      const tenantId = (req as unknown as { tenantId: string }).tenantId;
+      const pool = await getPool(tenantId);
+      const { createAutoMatchRule } = await import('../../services/auto_match_rules_service.js');
+      const rule = await createAutoMatchRule(pool, tenantId, req.body);
+      return res.status(201).json(rule);
+    } catch (err) {
+      return res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to create rule' });
+    }
+  });
+
+  router.delete('/sessions/:sessionId/bank-transactions/auto-match-rules/:ruleId', async (req, res) => {
+    try {
+      const tenantId = (req as unknown as { tenantId: string }).tenantId;
+      const pool = await getPool(tenantId);
+      await pool.query('DELETE FROM tenant_auto_match_rules WHERE id = $1 AND tenant_id = $2', [req.params.ruleId, tenantId]);
+      return res.json({ ok: true });
+    } catch (err) {
+      return res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to delete rule' });
+    }
+  });
+
+  // ── Clearing Items ──
+
+  router.get('/sessions/:sessionId/clearing-items', async (req, res) => {
+    try {
+      const tenantId = (req as unknown as { tenantId: string }).tenantId;
+      const { sessionId } = req.params;
+      const pool = await getPool(tenantId);
+      const { listClearingItems } = await import('../../services/clearing_account_service.js');
+      const items = await listClearingItems(pool, tenantId, sessionId);
+      return res.json(items);
+    } catch (err) {
+      return res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to list clearing items' });
+    }
+  });
+
+  router.post('/sessions/:sessionId/clearing-items/:id/clear', async (req, res) => {
+    try {
+      const tenantId = (req as unknown as { tenantId: string }).tenantId;
+      const pool = await getPool(tenantId);
+      const { clearItem } = await import('../../services/clearing_account_service.js');
+      const item = await clearItem(pool, tenantId, req.params.id);
+      if (!item) return res.status(404).json({ error: 'Item not found' });
+      return res.json(item);
+    } catch (err) {
+      return res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to clear item' });
+    }
+  });
+
+  router.post('/sessions/:sessionId/clearing-items/:id/void', async (req, res) => {
+    try {
+      const tenantId = (req as unknown as { tenantId: string }).tenantId;
+      const pool = await getPool(tenantId);
+      const { voidItem } = await import('../../services/clearing_account_service.js');
+      const item = await voidItem(pool, tenantId, req.params.id);
+      if (!item) return res.status(404).json({ error: 'Item not found' });
+      return res.json(item);
+    } catch (err) {
+      return res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to void item' });
+    }
+  });
+
   return router;
 }

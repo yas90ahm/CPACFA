@@ -35,6 +35,7 @@ import {
   PanelLeftOpen,
   Sparkles,
   CheckCircle2,
+  BarChart3,
 } from 'lucide-react';
 
 interface NavItem {
@@ -101,6 +102,7 @@ const navGroups: NavGroup[] = [
       { href: 'board-package', label: 'Board Package', icon: BookOpen },
       { href: 'review', label: 'Review & Certify', icon: Award },
       { href: 'audit-trail', label: 'Audit Trail', icon: History },
+      { href: 'analytics', label: 'Analytics', icon: BarChart3 },
     ],
   },
 ];
