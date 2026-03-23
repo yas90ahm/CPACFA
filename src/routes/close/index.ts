@@ -52,6 +52,13 @@ import closeExcelExportRouter from './close_excel_export.js';
 import closeAuditDataRouter from './close_audit_data.js';
 import closeAccountAnalysisRouter from './close_account_analysis.js';
 import closeSubsequentEventsRouter from './close_subsequent_events.js';
+import closeDebtAccrualRouter from './close_debt_accrual.js';
+import closePayrollAccrualRouter from './close_payroll_accrual.js';
+import closePrepaidRouter from './close_prepaid.js';
+import closeArAgingRouter from './close_ar_aging.js';
+import closeApAgingRouter from './close_ap_aging.js';
+import closeInventoryReserveRouter from './close_inventory_reserve.js';
+import closeLeasesRouter from './close_leases.js';
 import { createBankTransactionRoutes } from './close_bank_transactions.js';
 import { getTenantPool } from '../../db/index.js';
 
@@ -105,6 +112,13 @@ router.use(closeExcelExportRouter);
 router.use(closeAuditDataRouter);
 router.use(closeAccountAnalysisRouter);
 router.use(closeSubsequentEventsRouter);
+router.use(closeDebtAccrualRouter);
+router.use(closePayrollAccrualRouter);
+router.use(closePrepaidRouter);
+router.use(closeArAgingRouter);
+router.use(closeApAgingRouter);
+router.use(closeInventoryReserveRouter);
+router.use(closeLeasesRouter);
 router.use(bankTransactionRouter);
 
 export default router;

@@ -75,6 +75,8 @@ const navGroups: NavGroup[] = [
     items: [
       { href: 'trial-balance', label: 'Trial Balance', icon: Table },
       { href: 'bank-reconciliation', label: 'Bank Recon', icon: Calculator },
+      { href: 'ar-aging', label: 'AR Aging', icon: Table },
+      { href: 'ap-aging', label: 'AP Aging', icon: Table },
       { href: 'gl-health', label: 'GL Health', icon: HeartPulse },
       { href: 'gl-quality', label: 'GL Quality', icon: Sparkles },
       { href: 'checklist', label: 'Checklist', icon: ListChecks },
@@ -85,8 +87,13 @@ const navGroups: NavGroup[] = [
     label: 'Modules',
     defaultOpen: false,
     items: [
+      { href: 'prepaids', label: 'Prepaids', icon: FileText },
+      { href: 'debt-accrual', label: 'Debt Accrual', icon: Calculator },
+      { href: 'payroll-accrual', label: 'Payroll Accrual', icon: Calculator },
       { href: 'fixed-assets', label: 'Fixed Assets', icon: Building2 },
       { href: 'deferred-tax', label: 'Deferred Tax', icon: Calculator },
+      { href: 'leases', label: 'Leases (ASC 842)', icon: Building2 },
+      { href: 'inventory-reserve', label: 'Inventory Reserve', icon: AlertTriangle },
       { href: 'stock-compensation', label: 'Equity Comp', icon: Star },
       { href: 'impairment', label: 'Impairment', icon: AlertTriangle },
       { href: 'segments', label: 'Segments', icon: PieChart },
