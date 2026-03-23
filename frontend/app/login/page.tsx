@@ -51,12 +51,6 @@ export default function LoginPage() {
         <h1 className="text-[2.5rem] font-semibold tracking-[0.12em] uppercase leading-none text-white">
           SABIT
         </h1>
-        <p
-          className="text-base tracking-[0.08em] uppercase mt-3 leading-relaxed"
-          style={{ color: 'var(--text-inverse-secondary)' }}
-        >
-          Financial Close Engine
-        </p>
 
         <div className="w-20 h-px bg-white/40 mt-12" />
 
