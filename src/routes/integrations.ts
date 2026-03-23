@@ -8,6 +8,7 @@ import { setIntegration, getIntegration, listIntegrations } from '../services/in
 import { getTenantId } from '../lib/tenant_context.js';
 import { getTenantPool } from '../db/index.js';
 import { send500 } from '../lib/errorHandler.js';
+import { signState, verifyAndParseState } from '../services/oauth_service.js';
 import type { AccountingProvider } from '../types/accounting_integration.js';
 
 const router = Router();
@@ -32,7 +33,7 @@ router.get('/google/start', (req: Request, res: Response) => {
     res.status(400).json({ error: 'Google OAuth is not configured' });
     return;
   }
-  const state = Buffer.from(JSON.stringify({ tenantId })).toString('base64url');
+  const state = signState(JSON.stringify({ tenantId }));
   const url =
     'https://accounts.google.com/o/oauth2/v2/auth?' +
     new URLSearchParams({
@@ -59,8 +60,12 @@ router.get('/google/callback', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Google OAuth is not configured' });
       return;
     }
-    const decoded = JSON.parse(Buffer.from(state, 'base64url').toString('utf8')) as { tenantId?: string };
-    const tenantId = decoded.tenantId ?? 'default-tenant';
+    const decoded = verifyAndParseState(state) as { tenantId?: string } | null;
+    if (!decoded || !decoded.tenantId) {
+      res.status(403).json({ error: 'Invalid or tampered OAuth state' });
+      return;
+    }
+    const tenantId = decoded.tenantId;
 
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',

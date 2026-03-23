@@ -20,6 +20,18 @@ import { getValidAccessToken } from '../services/oauth_service.js';
 
 const NS_REST_BASE = process.env.NS_REST_BASE ?? 'https://rest.netsuite.com/rest/platform/v1';
 
+function validateDate(date: string, fieldName: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new Error(`Invalid ${fieldName}: must be YYYY-MM-DD format, got "${date}"`);
+  }
+}
+
+function validateAccountCode(code: string): void {
+  if (!/^[a-zA-Z0-9._-]+$/.test(code)) {
+    throw new Error(`Invalid account code: contains disallowed characters, got "${code}"`);
+  }
+}
+
 export class NetSuiteAdapter implements IAccountingAdapter {
   constructor(private pool: Pool, private tenantId: string) {}
 
@@ -83,6 +95,7 @@ export class NetSuiteAdapter implements IAccountingAdapter {
     try {
       const { accessToken, accountId } = await this.getToken(connectionId);
       const date = asOfDate ?? new Date().toISOString().slice(0, 10);
+      validateDate(date, 'asOfDate');
 
       // SuiteQL to get trial balance
       const query = `
@@ -153,8 +166,14 @@ export class NetSuiteAdapter implements IAccountingAdapter {
     try {
       const { accessToken, accountId } = await this.getToken(input.connectionId);
 
+      validateDate(input.startDate, 'startDate');
+      validateDate(input.endDate, 'endDate');
+
       let accountFilter = '';
       if (input.accountCodes?.length) {
+        for (const code of input.accountCodes) {
+          validateAccountCode(code);
+        }
         const codes = input.accountCodes.map((c) => `'${c}'`).join(',');
         accountFilter = `AND a.acctnumber IN (${codes})`;
       }

@@ -27,6 +27,33 @@ import { runClassifier, type RunClassifierResult } from '../ai/ai_orchestrator.j
 import { searchXBRL } from './xbrl_search_service.js';
 import { listFsTaxonomyLines } from '../db/repositories/fs_taxonomy_repository.js';
 
+// ---------- Prompt sanitization (H7 fix) ----------
+
+/** Injection patterns that should be stripped from user-supplied text before prompt inclusion. */
+const INJECTION_PREFIXES = /^(IGNORE|SYSTEM:|INSTRUCTIONS:|ASSISTANT:|HUMAN:|USER:|<\|im_start\|>|<\|im_end\|>|<\/?system>|<\/?user>|<\/?assistant>)/im;
+
+/**
+ * Sanitize user-supplied text before interpolating into AI prompts.
+ * Defends against prompt injection via GL account names or other user input.
+ */
+function sanitizeForPrompt(text: string): string {
+  let s = text;
+  // Strip control characters (keep newlines and tabs for readability)
+  s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+  // Escape backslashes and quotes
+  s = s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  // Remove lines that look like prompt injection
+  s = s
+    .split('\n')
+    .filter((line) => !INJECTION_PREFIXES.test(line.trim()))
+    .join('\n');
+  // Limit length to 200 characters
+  if (s.length > 200) {
+    s = s.slice(0, 200);
+  }
+  return s;
+}
+
 // ---------- Types ----------
 
 export interface GenerateSuggestionsInput {
@@ -260,7 +287,7 @@ export async function classifyWithXBRL(
         .map((xr) => `  - XBRL only: "${xr.label}" (no direct Sabit mapping)`)
         .join('\n');
 
-      return `Account: "${r.account.account_name}"
+      return `Account: "${sanitizeForPrompt(String(r.account.account_name))}"
 Type: ${accType}
 Candidates:
 ${candidateLines || '  (no strong candidates)'}${xbrlOnlyLines ? '\n' + xbrlOnlyLines : ''}`;
@@ -320,7 +347,7 @@ Respond with JSON only. One object per account. Shape:
 
     if (result.ok && result.parsed) {
       // Layer 3 guardrail: verify no dollar amounts leaked into AI output
-      assertNoNumericAmountsInAgentOutput(result.raw ?? JSON.stringify(result.parsed), 'ai_classification_xbrl_rag');
+      assertNoNumericAmountsInAgentOutput(JSON.stringify(result.parsed), 'ai_classification_xbrl_rag');
       modelVersion = 'xbrl_rag_ai_v1';
       for (const pick of result.parsed.picks) {
         // Validate the fs_line_id exists in our taxonomy

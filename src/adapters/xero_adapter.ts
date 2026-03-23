@@ -19,6 +19,12 @@ import { getValidAccessToken } from '../services/oauth_service.js';
 
 const XERO_API_BASE = 'https://api.xero.com/api.xro/2.0';
 
+function validateDate(date: string, fieldName: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new Error(`Invalid ${fieldName}: must be YYYY-MM-DD format, got "${date}"`);
+  }
+}
+
 export class XeroAdapter implements IAccountingAdapter {
   constructor(private pool: Pool, private tenantId: string) {}
 
@@ -63,6 +69,7 @@ export class XeroAdapter implements IAccountingAdapter {
     try {
       const { accessToken, xeroTenantId } = await this.getToken(connectionId);
       const date = asOfDate ?? new Date().toISOString().slice(0, 10);
+      validateDate(date, 'asOfDate');
 
       const response = await this.xeroFetch(accessToken, xeroTenantId, `/Reports/TrialBalance?date=${date}`);
       if (!response.ok) {
@@ -141,6 +148,9 @@ export class XeroAdapter implements IAccountingAdapter {
   async pullTransactions(conn: AccountingConnection, input: PullTransactionsInput): Promise<PullTransactionsResult> {
     try {
       const { accessToken, xeroTenantId } = await this.getToken(input.connectionId);
+
+      validateDate(input.startDate, 'startDate');
+      validateDate(input.endDate, 'endDate');
 
       const where = `Date >= DateTime(${input.startDate.replace(/-/g, ',')}) AND Date <= DateTime(${input.endDate.replace(/-/g, ',')})`;
       const response = await this.xeroFetch(accessToken, xeroTenantId, `/ManualJournals?where=${encodeURIComponent(where)}`);

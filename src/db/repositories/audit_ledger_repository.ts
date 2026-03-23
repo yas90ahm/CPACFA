@@ -89,6 +89,13 @@ export async function getLatestHash(client: Queryable, tenantId: string): Promis
   return r.rows[0]?.entry_hash ?? null;
 }
 
+/**
+ * L2 fix: Serialize getLatestHash + INSERT to prevent hash chain race conditions.
+ * When a Pool is passed (not already in a transaction), wraps in BEGIN/COMMIT with
+ * a pg_advisory_xact_lock to serialize concurrent appends per tenant.
+ * When a PoolClient is passed (already in a transaction), acquires the advisory lock
+ * within the existing transaction.
+ */
 export async function appendEntry(
   client: Queryable,
   input: Omit<AuditLedgerEntryInput, 'previousEntryHash' | 'entryHash'> & {
@@ -97,6 +104,43 @@ export async function appendEntry(
     afterState?: Record<string, unknown> | null;
   }
 ): Promise<AuditLedgerEntry> {
+  // Detect if caller passed a Pool (has connect method) vs PoolClient (already transactional)
+  const isPool = 'connect' in client && typeof (client as Pool).connect === 'function'
+    && !('release' in client); // PoolClient has release, Pool does not at instance level
+
+  if (isPool) {
+    // Wrap in a transaction to serialize the read-then-write
+    const txClient = await (client as Pool).connect();
+    try {
+      await txClient.query('BEGIN');
+      const result = await appendEntryInternal(txClient, input);
+      await txClient.query('COMMIT');
+      return result;
+    } catch (err) {
+      await txClient.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      txClient.release();
+    }
+  } else {
+    // Already in a transaction — just acquire advisory lock and proceed
+    return appendEntryInternal(client, input);
+  }
+}
+
+async function appendEntryInternal(
+  client: Queryable,
+  input: Omit<AuditLedgerEntryInput, 'previousEntryHash' | 'entryHash'> & {
+    createdBy?: string;
+    beforeState?: Record<string, unknown> | null;
+    afterState?: Record<string, unknown> | null;
+  }
+): Promise<AuditLedgerEntry> {
+  // Acquire advisory lock keyed on tenant to serialize concurrent appends
+  // Use a hash of the tenantId as the lock key (bigint)
+  const lockKey = hashTenantIdToLockKey(input.tenantId);
+  await client.query('SELECT pg_advisory_xact_lock($1)', [lockKey]);
+
   const id = nextId();
   const createdAt = new Date().toISOString();
   const previousEntryHash = await getLatestHash(client, input.tenantId);
@@ -152,6 +196,17 @@ export async function appendEntry(
     createdAt,
     createdBy: input.createdBy ?? null,
   };
+}
+
+/** Convert tenantId string to a deterministic bigint for pg_advisory_xact_lock. */
+function hashTenantIdToLockKey(tenantId: string): string {
+  // Use a simple hash to create a stable numeric lock key
+  // Namespace 0x41554449 = 'AUDI' to avoid collisions with other advisory locks
+  let hash = 0x41554449;
+  for (let i = 0; i < tenantId.length; i++) {
+    hash = ((hash << 5) - hash + tenantId.charCodeAt(i)) | 0;
+  }
+  return String(hash);
 }
 
 /** List ledger entries for tenant and period (session-scoped). */

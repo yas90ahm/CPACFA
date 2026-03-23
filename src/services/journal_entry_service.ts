@@ -25,13 +25,57 @@ import { JUSTIFIER_PROMPT_VERSION } from '../ai/prompts/justifier.prompt.js';
 import { executeCascade, CascadeTriggerType } from './cascade_engine.js';
 import { financialEvents, buildEventPacket } from '../events/financial_event_emitter.js';
 
+/** Maximum amount that fits NUMERIC(20,2): 99_999_999_999_999.99 */
+const MAX_AMOUNT = 99_999_999_999_999.99;
+
 /**
- * Segregation of duties bypass — DEVELOPMENT ONLY.
- * In production (NODE_ENV=production or MODE=prod), this always returns false
+ * Sanitize a JE line amount value before Decimal processing.
+ * Rejects NaN, Infinity, negative values, sub-penny precision, and values exceeding NUMERIC(20,2).
+ * Returns a validated non-negative number with at most 2 decimal places.
+ */
+export function sanitizeAmount(val: unknown): number {
+  const n = typeof val === 'string' ? Number(val) : (typeof val === 'number' ? val : NaN);
+  if (!Number.isFinite(n)) {
+    throw new JournalEntryError(
+      `Invalid amount: value must be a finite number, received ${String(val)}`,
+      'VALIDATION'
+    );
+  }
+  if (n < 0) {
+    throw new JournalEntryError(
+      `Invalid amount: value must be >= 0, received ${n}`,
+      'VALIDATION'
+    );
+  }
+  if (n > MAX_AMOUNT) {
+    throw new JournalEntryError(
+      `Invalid amount: value ${n} exceeds maximum allowed (${MAX_AMOUNT})`,
+      'VALIDATION'
+    );
+  }
+  // Check for sub-penny precision (more than 2 decimal places)
+  const parts = String(n).split('.');
+  if (parts[1] && parts[1].length > 2) {
+    throw new JournalEntryError(
+      `Invalid amount: value ${n} has more than 2 decimal places (sub-penny precision not allowed)`,
+      'VALIDATION'
+    );
+  }
+  return n;
+}
+
+/**
+ * Segregation of duties bypass — LOCAL DEVELOPMENT ONLY.
+ * In production, staging, or demo modes, this always returns false
  * regardless of the ALLOW_SAME_USER_APPROVE environment variable.
+ * M4 fix: Extend production guard to also block staging and demo modes.
  */
 function isSameUserApproveAllowed(): boolean {
-  if (process.env.NODE_ENV === 'production' || process.env.MODE === 'prod') {
+  const env = process.env.NODE_ENV ?? '';
+  const mode = process.env.MODE ?? '';
+  const blockedEnvs = ['production', 'staging', 'demo'];
+  const blockedModes = ['prod', 'staging', 'demo'];
+  if (blockedEnvs.includes(env) || blockedModes.includes(mode)) {
     return false;
   }
   return process.env.ALLOW_SAME_USER_APPROVE === '1' || process.env.ALLOW_SAME_USER_APPROVE === 'true';
@@ -55,6 +99,19 @@ export async function createDraftJE(pool: Pool, input: CreateDraftJEInput): Prom
   }
   if (memo.length < 5) {
     throw new JournalEntryError('Journal entry memo must be at least 5 characters', 'VALIDATION');
+  }
+  // Sanitize all line amounts before any Decimal processing
+  for (let i = 0; i < input.lines.length; i++) {
+    const line = input.lines[i];
+    try {
+      line.debit = line.debit != null ? sanitizeAmount(line.debit) : 0;
+      line.credit = line.credit != null ? sanitizeAmount(line.credit) : 0;
+    } catch (e) {
+      if (e instanceof JournalEntryError) {
+        throw new JournalEntryError(`Line ${i + 1}: ${e.message}`, 'VALIDATION');
+      }
+      throw e;
+    }
   }
   // Reject lines where both debit and credit are zero
   const zeroLines = input.lines.filter((l) => (l.debit ?? 0) === 0 && (l.credit ?? 0) === 0);

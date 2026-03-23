@@ -37,6 +37,7 @@ import type { JournalEntrySource } from '../../types/journal_entry.js';
 import { executeBridgeCommand } from '../../bridge/index.js';
 import type { AuthRequest } from '../../auth/middleware.js';
 import { guardSessionWritable } from '../../lib/session_write_guard.js';
+import { getCloseRoleFromReq } from '../../lib/closeRole.js';
 
 const router = Router();
 
@@ -267,8 +268,15 @@ router.post('/journal-entries/:id/approve', async (req: Request, res: Response) 
     const id = req.params.id ?? '';
     const jeForGuard = await getJournalEntry(pool, tenantId, id);
     if (jeForGuard && !await guardSessionWritable(res, pool, tenantId, jeForGuard.closeSessionId)) return;
-    const body = req.body as { approvedBy?: string };
-    const approvedBy = body?.approvedBy || (req as AuthRequest).userId || 'anonymous';
+    // SECURITY: Always derive approvedBy from the authenticated JWT user.
+    // Never accept approvedBy from the request body — prevents identity spoofing.
+    const approvedBy = (req as AuthRequest).userId || 'anonymous';
+    // SECURITY: Role check — only approvers can approve journal entries.
+    const approverRole = getCloseRoleFromReq(req as AuthRequest);
+    if (approverRole !== 'approver') {
+      res.status(403).json({ error: 'Only approvers can approve journal entries', code: 'INSUFFICIENT_ROLE' });
+      return;
+    }
     const result = await executeBridgeCommand(
       { pool, tenantId, actor: (req as AuthRequest).userId ?? 'anonymous' },
       { commandType: 'ApproveJE', journalEntryId: id, approvedBy }
@@ -335,6 +343,12 @@ router.post('/journal-entries/:id/post', async (req: Request, res: Response) => 
       return;
     }
     const id = req.params.id ?? '';
+    // SECURITY: Role check — only approvers can post journal entries.
+    const posterRole = getCloseRoleFromReq(req as AuthRequest);
+    if (posterRole !== 'approver') {
+      res.status(403).json({ error: 'Only approvers can post journal entries', code: 'INSUFFICIENT_ROLE' });
+      return;
+    }
     const jeForGuard = await getJournalEntry(pool, tenantId, id);
     if (jeForGuard && !await guardSessionWritable(res, pool, tenantId, jeForGuard.closeSessionId)) return;
     const result = await executeBridgeCommand(
@@ -604,6 +618,21 @@ router.post('/journal-entries/:id/evidence', async (req: Request, res: Response)
       res.status(400).json({ error: 'hashSha256 and sizeBytes required' });
       return;
     }
+    // H1 fix: Require a stored file or verifiable external reference
+    if (!body.externalUri) {
+      res.status(400).json({ error: 'Evidence must have a stored file or verifiable external reference' });
+      return;
+    }
+    // H1 fix: Validate hashSha256 is a 64-character hex string
+    if (!/^[a-f0-9]{64}$/i.test(body.hashSha256)) {
+      res.status(400).json({ error: 'hashSha256 must be a 64-character hex string' });
+      return;
+    }
+    // H1 fix: Validate sizeBytes is a positive integer
+    if (!Number.isInteger(body.sizeBytes) || body.sizeBytes <= 0) {
+      res.status(400).json({ error: 'sizeBytes must be a positive integer' });
+      return;
+    }
     const validAssertionTypes = ['invoice_support', 'bank_support', 'reconciliation', 'approval', 'contract_support', 'calc_support', 'other'];
     if (!body?.assertionType || !validAssertionTypes.includes(body.assertionType)) {
       res.status(400).json({ error: 'assertionType required; must be one of: ' + validAssertionTypes.join(', ') });
@@ -687,7 +716,21 @@ router.post(
           res.status(400).json({ error: 'file (multipart) or fileRef required' });
           return;
         }
-        fileRef = body.fileRef;
+        // M2 fix: Validate fileRef to prevent path injection
+        const ref = body.fileRef;
+        if (ref.includes('..')) {
+          res.status(400).json({ error: 'fileRef must not contain path traversal sequences' });
+          return;
+        }
+        if (!ref.startsWith(tenantId + '/')) {
+          res.status(403).json({ error: 'fileRef must belong to your tenant' });
+          return;
+        }
+        if (!/^[a-zA-Z0-9_-]+\/attachments\/[a-zA-Z0-9/_.-]+$/.test(ref)) {
+          res.status(400).json({ error: 'fileRef format is invalid. Expected: {tenantId}/attachments/{path}' });
+          return;
+        }
+        fileRef = ref;
       }
       const attachment = await addJEAttachment(pool, tenantId, id, fileRef);
       res.status(201).json(attachment);

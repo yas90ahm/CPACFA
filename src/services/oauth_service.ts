@@ -7,41 +7,112 @@
  */
 
 import { randomUUID } from 'crypto';
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
+import { createCipheriv, createDecipheriv, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 import type { Pool } from 'pg';
 import type { AccountingProvider } from '../types/accounting_integration.js';
 
+// --- Production startup guard ---
+
+const DEFAULT_KEY = 'default-dev-key-change-in-production-32';
+const ENCRYPTION_KEY = process.env.OAUTH_ENCRYPTION_KEY ?? DEFAULT_KEY;
+
+if (process.env.NODE_ENV === 'production') {
+  if (!process.env.OAUTH_ENCRYPTION_KEY || process.env.OAUTH_ENCRYPTION_KEY === DEFAULT_KEY) {
+    throw new Error(
+      'FATAL: OAUTH_ENCRYPTION_KEY must be set to a secure value in production. ' +
+      'Do not use the default development key.'
+    );
+  }
+}
+
 // --- Encryption ---
 
-const ENCRYPTION_KEY = process.env.OAUTH_ENCRYPTION_KEY ?? 'default-dev-key-change-in-production-32';
 const ALGORITHM = 'aes-256-gcm';
 
-function deriveKey(password: string): Buffer {
-  return scryptSync(password, 'sovereign-cpa-salt', 32);
+function deriveKey(password: string, salt: Buffer): Buffer {
+  return scryptSync(password, salt, 32);
 }
 
 export function encrypt(text: string): string {
-  const key = deriveKey(ENCRYPTION_KEY);
+  const salt = randomBytes(16);
+  const key = deriveKey(ENCRYPTION_KEY, salt);
   const iv = randomBytes(16);
   const cipher = createCipheriv(ALGORITHM, key, iv);
   let encrypted = cipher.update(text, 'utf8', 'hex');
   encrypted += cipher.final('hex');
   const authTag = cipher.getAuthTag().toString('hex');
-  return `${iv.toString('hex')}:${authTag}:${encrypted}`;
+  return `${salt.toString('hex')}:${iv.toString('hex')}:${authTag}:${encrypted}`;
 }
 
 export function decrypt(encryptedText: string): string {
-  const key = deriveKey(ENCRYPTION_KEY);
   const parts = encryptedText.split(':');
-  if (parts.length !== 3) throw new Error('Invalid encrypted text format');
-  const iv = Buffer.from(parts[0], 'hex');
-  const authTag = Buffer.from(parts[1], 'hex');
-  const encrypted = parts[2];
+  // Support both legacy 3-part format (iv:authTag:encrypted) and new 4-part format (salt:iv:authTag:encrypted)
+  let salt: Buffer;
+  let iv: Buffer;
+  let authTag: Buffer;
+  let encrypted: string;
+  if (parts.length === 4) {
+    salt = Buffer.from(parts[0], 'hex');
+    iv = Buffer.from(parts[1], 'hex');
+    authTag = Buffer.from(parts[2], 'hex');
+    encrypted = parts[3];
+  } else if (parts.length === 3) {
+    // Legacy format: derive key with hardcoded salt for backward compatibility
+    salt = Buffer.from('sovereign-cpa-salt', 'utf8');
+    iv = Buffer.from(parts[0], 'hex');
+    authTag = Buffer.from(parts[1], 'hex');
+    encrypted = parts[2];
+  } else {
+    throw new Error('Invalid encrypted text format');
+  }
+  const key = deriveKey(ENCRYPTION_KEY, salt);
   const decipher = createDecipheriv(ALGORITHM, key, iv);
   decipher.setAuthTag(authTag);
   let decrypted = decipher.update(encrypted, 'hex', 'utf8');
   decrypted += decipher.final('utf8');
   return decrypted;
+}
+
+// --- HMAC-signed OAuth State ---
+
+/**
+ * Sign a base64url-encoded state string with HMAC-SHA256.
+ * Returns `base64urlPayload.signature` format.
+ */
+export function signState(stateJson: string): string {
+  const payload = Buffer.from(stateJson).toString('base64url');
+  const signature = createHmac('sha256', ENCRYPTION_KEY)
+    .update(payload)
+    .digest('base64url');
+  return `${payload}.${signature}`;
+}
+
+/**
+ * Verify HMAC signature on state parameter and return parsed state, or null if invalid.
+ */
+export function verifyAndParseState(stateStr: string): OAuthState | null {
+  const dotIndex = stateStr.lastIndexOf('.');
+  if (dotIndex === -1) return null;
+
+  const payload = stateStr.substring(0, dotIndex);
+  const receivedSig = stateStr.substring(dotIndex + 1);
+
+  const expectedSig = createHmac('sha256', ENCRYPTION_KEY)
+    .update(payload)
+    .digest('base64url');
+
+  // Constant-time comparison to prevent timing attacks
+  const receivedBuf = Buffer.from(receivedSig, 'base64url');
+  const expectedBuf = Buffer.from(expectedSig, 'base64url');
+  if (receivedBuf.length !== expectedBuf.length || !timingSafeEqual(receivedBuf, expectedBuf)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as OAuthState;
+  } catch {
+    return null;
+  }
 }
 
 // --- Provider Configuration ---
@@ -96,13 +167,9 @@ export interface OAuthState {
   nonce: string;
 }
 
-/** Parse a base64url-encoded OAuth state string back into its structured form. */
+/** Parse and verify an HMAC-signed OAuth state string back into its structured form. */
 export function parseOAuthState(stateStr: string): OAuthState | null {
-  try {
-    return JSON.parse(Buffer.from(stateStr, 'base64url').toString('utf8')) as OAuthState;
-  } catch {
-    return null;
-  }
+  return verifyAndParseState(stateStr);
 }
 
 /**
@@ -121,7 +188,7 @@ export function getAuthorizationUrl(
     provider,
     nonce: randomUUID(),
   };
-  const stateStr = Buffer.from(JSON.stringify(state)).toString('base64url');
+  const stateStr = signState(JSON.stringify(state));
 
   const params = new URLSearchParams({
     client_id: config.clientId,

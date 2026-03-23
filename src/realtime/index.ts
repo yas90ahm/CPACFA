@@ -14,7 +14,7 @@
 
 import { Server as IOServer } from 'socket.io';
 import type { Server as HTTPServer } from 'http';
-import jwt from 'jsonwebtoken';
+import { verifyToken } from '../auth/index.js';
 
 let io: IOServer | null = null;
 
@@ -70,12 +70,9 @@ export function initRealtime(httpServer: HTTPServer, corsOrigins: string[]): IOS
       return;
     }
 
-    // Validate JWT (lightweight — just decode, don't hit DB)
-    let payload: { tenantId?: string; userId?: string } | null = null;
-    try {
-      const secret = process.env.JWT_SECRET ?? 'dev-jwt-secret';
-      payload = jwt.verify(token, secret) as { tenantId?: string; userId?: string };
-    } catch {
+    // H8 fix: Use the canonical verifyToken from auth module (correct secret + HS256 algorithm constraint)
+    const payload = verifyToken(token);
+    if (!payload) {
       socket.disconnect(true);
       return;
     }

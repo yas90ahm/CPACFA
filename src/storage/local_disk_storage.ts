@@ -9,12 +9,24 @@ import type { Storage } from './types.js';
 
 const BASE = process.env.STORAGE_LOCAL_BASE_PATH ?? join(process.cwd(), 'storage');
 
+/**
+ * L1 fix: Allowlist-based key validation instead of denylist stripping.
+ * Key must start with an alphanumeric character and contain only safe characters.
+ * Throws on violation instead of silently stripping.
+ */
 function sanitizeKey(key: string): string {
-  const normalized = normalize(key).replace(/^(\.\.(\/|\\))+/, '');
-  if (normalized.includes('..')) {
-    throw new Error('Storage key must not contain path traversal');
+  if (!key || typeof key !== 'string') {
+    throw new Error('Storage key must be a non-empty string');
   }
-  return normalized;
+  if (key.includes('..')) {
+    throw new Error('Storage key must not contain path traversal (..)');
+  }
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9/_.-]*$/.test(key)) {
+    throw new Error(
+      'Storage key must start with alphanumeric and contain only alphanumeric, /, _, ., - characters'
+    );
+  }
+  return key;
 }
 
 function keyToPath(key: string): string {

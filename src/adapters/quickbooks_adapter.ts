@@ -32,6 +32,12 @@ function getApiBase(): string {
   return process.env.QB_SANDBOX === 'true' ? QB_SANDBOX_API_BASE : QB_API_BASE;
 }
 
+function validateDate(date: string, fieldName: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new Error(`Invalid ${fieldName}: must be YYYY-MM-DD format, got "${date}"`);
+  }
+}
+
 interface QBTrialBalanceReport {
   Header: { Time: string; ReportName: string; DateMacro: string; StartPeriod: string; EndPeriod: string };
   Columns: { Column: Array<{ ColTitle: string; ColType: string }> };
@@ -96,6 +102,7 @@ export class QuickBooksAdapter implements IAccountingAdapter {
     try {
       const { accessToken, realmId } = await this.getToken(connectionId);
       const date = asOfDate ?? new Date().toISOString().slice(0, 10);
+      validateDate(date, 'asOfDate');
 
       const response = await this.qbFetch(
         realmId,
@@ -235,6 +242,9 @@ export class QuickBooksAdapter implements IAccountingAdapter {
   ): Promise<PullTransactionsResult> {
     try {
       const { accessToken, realmId } = await this.getToken(input.connectionId);
+
+      validateDate(input.startDate, 'startDate');
+      validateDate(input.endDate, 'endDate');
 
       // Query journal entries within date range
       let query = `SELECT * FROM JournalEntry WHERE TxnDate >= '${input.startDate}' AND TxnDate <= '${input.endDate}'`;

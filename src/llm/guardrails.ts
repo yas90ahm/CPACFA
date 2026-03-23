@@ -78,19 +78,65 @@ const ALLOWED_KEYS = new Set([
       if (AMOUNT_KEYS.has(key) && typeof v === 'number') {
         return true;
       }
+      // M8 fix: Also catch AMOUNT_KEYS with string values that look numeric (e.g. "debit": "1234.56")
+      if (AMOUNT_KEYS.has(key) && typeof v === 'string' && /^\d[\d,]*\.?\d*$/.test(v.trim())) {
+        return true;
+      }
       if (!ALLOWED_KEYS.has(key) && typeof v === 'object' && hasNumericAmount(v, `${path}.${k}`)) {
         return true;
       }
     }
   }
   return false;
-}/**
+}
+
+/** Check if a string value contains dollar-amount patterns that indicate AI is producing financial numbers. */
+function stringContainsDollarAmounts(s: string): boolean {
+  // Match $1,234.56 or $1234.56 style
+  if (/\$[\d,]+\.?\d*/.test(s)) return true;
+  // Match formatted numbers like 1,234.56 (at least one comma group)
+  if (/\b\d{1,3}(,\d{3})+\.\d{2}\b/.test(s)) return true;
+  return false;
+}
+
+/**
  * Scope guardrail: fail if agent output contains debit/credit/amount (or similar) numeric fields.
  * Call this on any LLM/agent response before using it to drive ledger or adjustments.
  * Allowed: confidence, type, labels, rationale. Forbidden: debit, credit, amount as numbers.
+ *
+ * M8 fix: When input is a raw string, parse as JSON first and also run regex checks for dollar amounts.
+ * Also checks AMOUNT_KEYS in string values (not just number values) to catch stringified amounts.
  */
 export function assertNoNumericAmountsInAgentOutput(output: unknown, context?: string): void {
-  if (hasNumericAmount(output, '')) {
+  let target = output;
+
+  // M8 fix: If input is a string, try to parse as JSON first; otherwise run regex checks
+  if (typeof output === 'string') {
+    try {
+      target = JSON.parse(output);
+    } catch {
+      // Not valid JSON — run regex check for dollar amounts in the raw string
+      if (stringContainsDollarAmounts(output)) {
+        const msg = context
+          ? `Scope violation: agent output string contains dollar amounts. ${context}`
+          : 'Scope violation: agent output string contains dollar amounts. AI must not produce financial numbers.';
+        throw new Error(msg);
+      }
+      // Also check for AMOUNT_KEYS patterns in the string (e.g. "debit": "1234.56")
+      for (const key of AMOUNT_KEYS) {
+        const pattern = new RegExp(`"${key}"\\s*:\\s*"?\\d`, 'i');
+        if (pattern.test(output)) {
+          const msg = context
+            ? `Scope violation: agent output string contains amount key '${key}' with numeric value. ${context}`
+            : `Scope violation: agent output string contains amount key '${key}' with numeric value. AI must not produce financial numbers.`;
+          throw new Error(msg);
+        }
+      }
+      return; // Plain string without dollar amounts — OK
+    }
+  }
+
+  if (hasNumericAmount(target, '')) {
     const msg = context
       ? `Scope violation: agent output contains numeric amounts (debit/credit/amount). ${context}`
       : 'Scope violation: agent output contains numeric amounts (debit/credit/amount). AI must not produce numbers; use HITL only.';

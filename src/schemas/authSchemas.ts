@@ -30,11 +30,11 @@ const passwordComplexity = z
   );
 
 export const registerSchema = z.object({
-  tenantId: z.string().min(1).optional(),
+  tenantId: z.string().min(1).optional(),  // accepted but rejected at route level (H2)
   tenantName: z.string().min(1, 'Tenant name required').optional(),
   name: z.string().optional(),
   email: z.string().email('Invalid email format'),
   password: passwordComplexity,
   role: allowedRolesSchema.optional(),
-  databaseUrl: z.string().url().optional(),
+  // H3 fix: databaseUrl removed — must never be user-supplied
 });

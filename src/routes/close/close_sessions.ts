@@ -255,12 +255,13 @@ router.post('/sessions/:id/advance', async (req: Request, res: Response) => {
       return;
     }
     const authReq = req as AuthRequest;
-    const body = (req.body as { certifiedBy?: string }) ?? {};
     const actorRole = getCloseRoleFromReq(authReq);
+    // SECURITY: Always derive certifiedBy from the authenticated JWT user.
+    // Never accept certifiedBy from the request body — prevents identity spoofing.
     const result = await advanceSession(pool, {
       tenantId,
       closeSessionId: id,
-      certifiedBy: body.certifiedBy ?? authReq.userId ?? 'advance-api',
+      certifiedBy: authReq.userId ?? 'advance-api',
       actorRole,
     });
     const payload = {
@@ -506,19 +507,22 @@ router.post('/sessions/:id/certify', async (req: Request, res: Response) => {
       return;
     }
     const authReq = req as AuthRequest;
-    const body = req.body as { periodLabel?: string; certifiedBy: string; memo?: string };
-    if (!body?.certifiedBy?.trim()) {
+    const body = req.body as { periodLabel?: string; memo?: string };
+    // SECURITY: Always derive certifiedBy from the authenticated JWT user.
+    // Never accept certifiedBy from the request body — prevents identity spoofing.
+    const certifiedBy = authReq.userId;
+    if (!certifiedBy?.trim()) {
       criticalLog(req, ROUTE_CERTIFY, 'error', { code: 'VALIDATION', closeSessionId: id, startMs });
-      res.status(400).json({ error: 'certifiedBy is required' });
+      res.status(400).json({ error: 'Authenticated user ID is required for certification' });
       return;
     }
     const actorRole = getCloseRoleFromReq(authReq);
     const session = await certifyCloseSession(pool, {
       tenantId,
       closeSessionId: id,
-      certifiedBy: body.certifiedBy.trim(),
-      periodLabel: body.periodLabel,
-      memo: body.memo,
+      certifiedBy: certifiedBy.trim(),
+      periodLabel: body?.periodLabel,
+      memo: body?.memo,
     }, actorRole);
     const payload: Record<string, unknown> = { ...session };
     if (session.certifiedSnapshotId) {
@@ -541,8 +545,8 @@ router.post('/sessions/:id/certify', async (req: Request, res: Response) => {
       tenantId,
       eventType: 'company_certified',
       title: `${entityName} certified`,
-      body: `${entityName} has certified ${periodLabel}. Certified by ${body.certifiedBy.trim()} at ${new Date().toISOString()}.`,
-      data: { closeSessionId: id, certifiedBy: body.certifiedBy.trim() },
+      body: `${entityName} has certified ${periodLabel}. Certified by ${certifiedBy.trim()} at ${new Date().toISOString()}.`,
+      data: { closeSessionId: id, certifiedBy: certifiedBy.trim() },
     }).catch(() => {});
   } catch (e) {
     criticalLog(req, ROUTE_CERTIFY, 'error', { closeSessionId: id, startMs });
@@ -1065,13 +1069,28 @@ router.get('/sessions/:id/trial-balance/:accountCode/entries', async (req: Reque
   }
 });
 
-/** PATCH /api/close/sessions/:id/status — update close session status (under_review requires readiness) */
+/**
+ * PATCH /api/close/sessions/:id/status — DEPRECATED.
+ * SECURITY: This endpoint should be removed in favor of the dedicated
+ * advance/certify/lock/reject/reopen endpoints which have proper gate checks.
+ * Until removal, restricted to approver role only.
+ */
 router.patch('/sessions/:id/status', async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
     if (!tenantId || !pool) {
       res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    // SECURITY: Role check — only approvers can use the raw status endpoint.
+    const authReq = req as AuthRequest;
+    const actorRole = getCloseRoleFromReq(authReq);
+    if (actorRole !== 'approver') {
+      res.status(403).json({
+        error: 'Only approvers can directly update session status. Use the dedicated advance/certify/lock/reject endpoints instead.',
+        code: 'INSUFFICIENT_ROLE',
+      });
       return;
     }
     const id = req.params.id ?? '';
@@ -1097,7 +1116,7 @@ router.patch('/sessions/:id/status', async (req: Request, res: Response) => {
         }
       }
     }
-    const userId = (req as AuthRequest).userId;
+    const userId = authReq.userId;
     const session = await withTransaction(pool, (client) =>
       updateStatus(client, tenantId, id, newStatus, userId ?? 'api')
     );

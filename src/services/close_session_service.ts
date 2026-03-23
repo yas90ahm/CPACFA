@@ -82,13 +82,11 @@ export async function createSession(
 ): Promise<CloseSession> {
   const basis = input.basis ?? 'accrual';
   const standard = input.standard ?? 'GAAP';
-  const status = input.status ?? 'open';
+  // SECURITY: Always start sessions in 'open' status. Never accept status from
+  // user input — this prevents privilege escalation via arbitrary status injection.
+  const status: CloseSessionStatus = 'open';
   if (basis !== 'cash' && basis !== 'accrual') {
     throw new CloseSessionError('basis must be cash or accrual', 'VALIDATION');
-  }
-  const validStatuses: CloseSessionStatus[] = ['open', 'in_progress', 'under_review', 'certified', 'locked'];
-  if (!validStatuses.includes(status)) {
-    throw new CloseSessionError('invalid status', 'VALIDATION');
   }
   const overlapping = await repo.hasOverlappingSession(
     pool,
@@ -530,26 +528,27 @@ export async function rejectSession(
   reason: string,
   rejectedBy: string
 ): Promise<CloseSession> {
-  const session = await repo.getCloseSessionById(pool, tenantId, sessionId);
-  if (!session) throw new CloseSessionError('Close session not found', 'NOT_FOUND');
-  if (session.status !== 'under_review') {
-    throw new CloseSessionError(
-      `Cannot reject session in '${session.status}' state. Can only reject from UNDER_REVIEW.`,
-      'NOT_UNDER_REVIEW'
-    );
-  }
-
   const reasonTrimmed = reason?.trim() ?? '';
   if (reasonTrimmed.length < 10) {
     throw new CloseSessionError('Rejection reason is required (minimum 10 characters)', 'VALIDATION');
   }
 
-  await withTransaction(pool, async (client) => {
+  // M3 fix: Move status check inside the transaction with FOR UPDATE to prevent TOCTOU race
+  const session = await withTransaction(pool, async (client) => {
+    const locked = await repo.getCloseSessionByIdForUpdate(client, tenantId, sessionId);
+    if (!locked) throw new CloseSessionError('Close session not found', 'NOT_FOUND');
+    if (locked.status !== 'under_review') {
+      throw new CloseSessionError(
+        `Cannot reject session in '${locked.status}' state. Can only reject from UNDER_REVIEW.`,
+        'NOT_UNDER_REVIEW'
+      );
+    }
+
     await updateStatus(client, tenantId, sessionId, 'in_progress', rejectedBy);
     const issue = await createIssue(client as unknown as Pool, {
       tenantId,
       periodId: sessionId,
-      entityId: session.entityId,
+      entityId: locked.entityId,
       issueType: 'review_rejection',
       severity: 'blocking',
       category: 'review',
@@ -558,11 +557,12 @@ export async function rejectSession(
       sourceCheck: 'review_rejection',
       sourceDetails: { rejectedBy, reason: reasonTrimmed },
     });
-    const preparerId = (session as { createdBy?: string }).createdBy ?? null;
+    const preparerId = (locked as { createdBy?: string }).createdBy ?? null;
     if (preparerId) {
       const { assignIssue } = await import('./issue_service.js');
       await assignIssue(client as unknown as Pool, tenantId, issue.issueId, preparerId, rejectedBy);
     }
+    return locked;
   });
 
   await recordMaterialEvent(pool, {

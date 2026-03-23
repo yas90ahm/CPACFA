@@ -75,23 +75,20 @@ router.post('/register', registerLimiter, validateBody(registerSchema), async (r
     if (!isDbConfigured()) {
       return res.status(503).json({ error: 'Register requires DATABASE_URL (Postgres)' });
     }
-    const { tenantId: existingTenantId, tenantName, name, email, password, role, databaseUrl } = req.body;
+    const { tenantName, name, email, password, role } = req.body;
     const roleValue = role ?? 'accountant';
-    let tenantId: string;
-    if (existingTenantId) {
-      tenantId = existingTenantId;
-      const tenantCheck = await queryControl<{ id: string }>('SELECT id FROM tenants WHERE id = $1', [tenantId]);
-      if (!tenantCheck?.rows?.length) {
-        return res.status(400).json({ error: 'Tenant not found', tenantId });
-      }
-    } else {
-      tenantId = `tenant-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-      const displayName = tenantName ?? name ?? 'My organization';
-      await queryControl(
-        'INSERT INTO tenants (id, name, database_url, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW())',
-        [tenantId, displayName, databaseUrl ?? null]
-      );
+    // H2 fix: Self-registration only creates NEW tenants. Joining existing tenants
+    // must go through the team/invite flow managed by an admin.
+    if (req.body.tenantId) {
+      return res.status(403).json({ error: 'Cannot join an existing tenant via self-registration. Ask a tenant admin for an invite.' });
     }
+    const tenantId = `tenant-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const displayName = tenantName ?? name ?? 'My organization';
+    // H3 fix: databaseUrl removed — never accept DB connection strings from user input
+    await queryControl(
+      'INSERT INTO tenants (id, name, database_url, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW())',
+      [tenantId, displayName, null]
+    );
     const { createUser } = await import('../db/repositories/user_repository.js');
     const passwordHash = await hashPassword(password);
     const user = await createUser(tenantId, email, passwordHash, roleValue, name ?? undefined);

@@ -343,7 +343,7 @@ function runCumulativeValidation(lines: StatementLine[]): ValidationResult[] {
 
   // Net income tie (IS → Equity)
   const isNetIncome = Number(lines.find((l) => l.fsLineId === 'pl_net_income')?.amount ?? 0);
-  const eqNetIncome = lines.filter((l) => l.statement === 'equity' && /net income/i.test((l.metadata as { label?: string })?.label ?? '')).reduce((s, l) => d(s).plus(d(l.amount)).toNumber(), 0);
+  const eqNetIncome = lines.filter((l) => l.statement === 'equity' && /net income/i.test((l.metadata as { label?: string })?.label ?? '')).reduce((s: number, l) => d(s).plus(d(Number(l.amount))).toNumber(), 0);
   const netIncomeTie = d(isNetIncome).equals(d(eqNetIncome || isNetIncome));
   results.push({
     check: 'net_income_tie',
