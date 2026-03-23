@@ -180,6 +180,31 @@ export function useReopenSession(sessionId: string | null) {
   });
 }
 
+export interface CloseTimelinePrediction {
+  predictedCompletionDate: string | null;
+  predictedRemainingDays: number | null;
+  targetDays: number;
+  currentDay: number;
+  atRisk: boolean;
+  riskReason: string | null;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+export function useCloseTimeline(sessionId: string | null) {
+  return useQuery({
+    queryKey: ['close-timeline', sessionId],
+    queryFn: async (): Promise<CloseTimelinePrediction> => {
+      if (!sessionId) throw new Error('No sessionId');
+      return apiFetch<CloseTimelinePrediction>(
+        `/api/close/sessions/${sessionId}/predict-timeline`,
+      );
+    },
+    enabled: !!sessionId,
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
 export function useCreateSession() {
   const qc = useQueryClient();
   return useMutation({

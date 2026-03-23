@@ -1,15 +1,31 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { Check, X, Clock, Loader2, Lock, Circle, Minus } from 'lucide-react';
+import { CheckCircle2, XCircle, AlertCircle, Loader2, MinusCircle, Lock } from 'lucide-react';
 
-export type StatusType = 'complete' | 'in-progress' | 'pending' | 'failed' | 'not-started' | 'certified' | 'locked';
+/* ------------------------------------------------------------------ */
+/*  Canonical status types and their semantic groups                    */
+/* ------------------------------------------------------------------ */
+
+/** All recognized status strings (hyphenated canonical form) */
+export type StatusType =
+  /* Green — success */
+  | 'complete' | 'passing' | 'approved' | 'current' | 'certified'
+  /* Blue — active / in-flight */
+  | 'active' | 'in-progress' | 'proposed' | 'generating'
+  /* Amber — needs attention */
+  | 'pending' | 'needs-attention' | 'at-risk' | 'under-review'
+  /* Red — blocked / failure */
+  | 'blocked' | 'failing' | 'overdue' | 'rejected' | 'error'
+  /* Grey — neutral */
+  | 'not-started' | 'locked' | 'inactive' | 'neutral';
+
 /** Legacy variant names for backward compat */
 type LegacyVariant = 'success' | 'warning' | 'error' | 'info' | 'neutral';
 
 export interface StatusBadgeProps {
   /** New spec-compliant status prop */
-  status?: StatusType;
+  status?: StatusType | string;
   /** @deprecated Legacy variant prop — use status instead */
   variant?: LegacyVariant;
   size?: 'sm' | 'md';
@@ -21,70 +37,246 @@ export interface StatusBadgeProps {
   className?: string;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Status config: icon, color, bg, border, label                      */
+/* ------------------------------------------------------------------ */
+
 interface StatusConfig {
   icon: React.ComponentType<{ className?: string }>;
   color: string;
   bg: string;
+  border: string;
   label: string;
+  spin?: boolean;
 }
 
 const STATUS_CONFIG: Record<StatusType, StatusConfig> = {
+  /* ── Green: success ── */
   'complete': {
-    icon: Check,
+    icon: CheckCircle2,
     color: 'var(--status-success)',
     bg: 'var(--status-success-bg)',
+    border: 'var(--status-success-border)',
     label: 'COMPLETE',
+  },
+  'passing': {
+    icon: CheckCircle2,
+    color: 'var(--status-success)',
+    bg: 'var(--status-success-bg)',
+    border: 'var(--status-success-border)',
+    label: 'PASSING',
+  },
+  'approved': {
+    icon: CheckCircle2,
+    color: 'var(--status-success)',
+    bg: 'var(--status-success-bg)',
+    border: 'var(--status-success-border)',
+    label: 'APPROVED',
+  },
+  'current': {
+    icon: CheckCircle2,
+    color: 'var(--status-success)',
+    bg: 'var(--status-success-bg)',
+    border: 'var(--status-success-border)',
+    label: 'CURRENT',
+  },
+  'certified': {
+    icon: CheckCircle2,
+    color: 'var(--status-success)',
+    bg: 'var(--status-success-bg)',
+    border: 'var(--status-success-border)',
+    label: 'CERTIFIED',
+  },
+
+  /* ── Blue: active / in-flight ── */
+  'active': {
+    icon: Loader2,
+    color: 'var(--status-info)',
+    bg: 'var(--status-info-bg)',
+    border: 'var(--status-info-border)',
+    label: 'ACTIVE',
+    spin: true,
   },
   'in-progress': {
     icon: Loader2,
-    color: 'var(--interactive-primary)',
+    color: 'var(--status-info)',
     bg: 'var(--status-info-bg)',
+    border: 'var(--status-info-border)',
     label: 'IN PROGRESS',
+    spin: true,
   },
+  'proposed': {
+    icon: Loader2,
+    color: 'var(--status-info)',
+    bg: 'var(--status-info-bg)',
+    border: 'var(--status-info-border)',
+    label: 'PROPOSED',
+    spin: true,
+  },
+  'generating': {
+    icon: Loader2,
+    color: 'var(--status-info)',
+    bg: 'var(--status-info-bg)',
+    border: 'var(--status-info-border)',
+    label: 'GENERATING',
+    spin: true,
+  },
+
+  /* ── Amber: warning / needs attention ── */
   'pending': {
-    icon: Clock,
+    icon: AlertCircle,
     color: 'var(--status-warning)',
     bg: 'var(--status-warning-bg)',
+    border: 'var(--status-warning-border)',
     label: 'PENDING',
   },
-  'failed': {
-    icon: X,
+  'needs-attention': {
+    icon: AlertCircle,
+    color: 'var(--status-warning)',
+    bg: 'var(--status-warning-bg)',
+    border: 'var(--status-warning-border)',
+    label: 'NEEDS ATTENTION',
+  },
+  'at-risk': {
+    icon: AlertCircle,
+    color: 'var(--status-warning)',
+    bg: 'var(--status-warning-bg)',
+    border: 'var(--status-warning-border)',
+    label: 'AT RISK',
+  },
+  'under-review': {
+    icon: AlertCircle,
+    color: 'var(--status-warning)',
+    bg: 'var(--status-warning-bg)',
+    border: 'var(--status-warning-border)',
+    label: 'UNDER REVIEW',
+  },
+
+  /* ── Red: error / blocked ── */
+  'blocked': {
+    icon: XCircle,
     color: 'var(--status-error)',
     bg: 'var(--status-error-bg)',
-    label: 'FAILED',
+    border: 'var(--status-error-border)',
+    label: 'BLOCKED',
   },
+  'failing': {
+    icon: XCircle,
+    color: 'var(--status-error)',
+    bg: 'var(--status-error-bg)',
+    border: 'var(--status-error-border)',
+    label: 'FAILING',
+  },
+  'overdue': {
+    icon: XCircle,
+    color: 'var(--status-error)',
+    bg: 'var(--status-error-bg)',
+    border: 'var(--status-error-border)',
+    label: 'OVERDUE',
+  },
+  'rejected': {
+    icon: XCircle,
+    color: 'var(--status-error)',
+    bg: 'var(--status-error-bg)',
+    border: 'var(--status-error-border)',
+    label: 'REJECTED',
+  },
+  'error': {
+    icon: XCircle,
+    color: 'var(--status-error)',
+    bg: 'var(--status-error-bg)',
+    border: 'var(--status-error-border)',
+    label: 'ERROR',
+  },
+
+  /* ── Grey: neutral ── */
   'not-started': {
-    icon: Minus,
-    color: 'var(--text-tertiary)',
+    icon: MinusCircle,
+    color: 'var(--status-neutral)',
     bg: 'var(--status-neutral-bg)',
+    border: 'var(--border-default)',
     label: 'NOT STARTED',
-  },
-  'certified': {
-    icon: Lock,
-    color: 'var(--cert-primary)',
-    bg: 'var(--bg-certified)',
-    label: 'CERTIFIED',
   },
   'locked': {
     icon: Lock,
-    color: 'var(--cert-primary)',
-    bg: 'var(--bg-certified)',
+    color: 'var(--status-neutral)',
+    bg: 'var(--status-neutral-bg)',
+    border: 'var(--border-default)',
     label: 'LOCKED',
+  },
+  'inactive': {
+    icon: MinusCircle,
+    color: 'var(--status-neutral)',
+    bg: 'var(--status-neutral-bg)',
+    border: 'var(--border-default)',
+    label: 'INACTIVE',
+  },
+  'neutral': {
+    icon: MinusCircle,
+    color: 'var(--status-neutral)',
+    bg: 'var(--status-neutral-bg)',
+    border: 'var(--border-default)',
+    label: 'NEUTRAL',
   },
 };
 
-/** Map legacy variants to StatusType */
+/* ------------------------------------------------------------------ */
+/*  Legacy variant → StatusType mapping                                */
+/* ------------------------------------------------------------------ */
+
 const LEGACY_MAP: Record<LegacyVariant, StatusType> = {
   success: 'complete',
   warning: 'pending',
-  error: 'failed',
+  error: 'error',
   info: 'in-progress',
   neutral: 'not-started',
 };
 
+/* ------------------------------------------------------------------ */
+/*  Normalizer: accepts hyphenated, underscored, or UPPER_CASE input   */
+/* ------------------------------------------------------------------ */
+
+/** Common aliases that map to canonical status names */
+const STATUS_ALIASES: Record<string, StatusType> = {
+  'failed': 'error',
+  'fail': 'error',
+  'success': 'complete',
+  'completed': 'complete',
+  'done': 'complete',
+  'open': 'active',
+  'running': 'in-progress',
+  'draft': 'not-started',
+  'waiting': 'pending',
+  'warn': 'pending',
+  'warning': 'pending',
+  'info': 'in-progress',
+  'danger': 'error',
+};
+
+function normalizeStatus(raw: string): StatusType {
+  // lowercase, replace underscores with hyphens, trim
+  const normalized = raw.toLowerCase().replace(/_/g, '-').trim();
+  if (normalized in STATUS_CONFIG) return normalized as StatusType;
+  if (normalized in STATUS_ALIASES) return STATUS_ALIASES[normalized];
+  // Fallback to not-started for unknown statuses
+  return 'not-started';
+}
+
+/* ------------------------------------------------------------------ */
+/*  Component                                                          */
+/* ------------------------------------------------------------------ */
+
 export function StatusBadge(p: StatusBadgeProps) {
   // Resolve status: prefer `status`, fall back to mapped `variant`
-  const resolvedStatus: StatusType = p.status ?? (p.variant ? LEGACY_MAP[p.variant] : 'not-started');
+  let resolvedStatus: StatusType;
+  if (p.status) {
+    resolvedStatus = normalizeStatus(p.status);
+  } else if (p.variant) {
+    resolvedStatus = LEGACY_MAP[p.variant] ?? 'not-started';
+  } else {
+    resolvedStatus = 'not-started';
+  }
+
   const config = STATUS_CONFIG[resolvedStatus];
   const size = p.size ?? 'md';
   const showIcon = p.showIcon ?? (p.dot !== false);
@@ -102,13 +294,14 @@ export function StatusBadge(p: StatusBadgeProps) {
       style={{
         color: config.color,
         backgroundColor: config.bg,
+        border: `1px solid ${config.border}`,
       }}
     >
       {showIcon && (
         <Icon
           className={cn(
             size === 'sm' ? 'w-3 h-3' : 'w-[18px] h-[18px]',
-            resolvedStatus === 'in-progress' && 'animate-spin'
+            config.spin && 'animate-spin'
           )}
         />
       )}

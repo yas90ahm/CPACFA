@@ -105,6 +105,16 @@ export const PIPELINE_STEPS = [
 
 /* ── PipelineCard ─────────────────────────────────────────────────────────── */
 
+export interface TimelinePrediction {
+  predictedCompletionDate: string | null;
+  predictedRemainingDays: number | null;
+  targetDays: number;
+  currentDay: number;
+  atRisk: boolean;
+  riskReason: string | null;
+  confidence: 'high' | 'medium' | 'low';
+}
+
 export interface PipelineCardProps {
   periodLabel: string;
   entityName: string;
@@ -116,7 +126,51 @@ export interface PipelineCardProps {
   canReplaceGL: boolean;
   isInProgress: boolean;
   onReplaceGL: () => void;
+  timeline?: TimelinePrediction | null;
 }
+
+/* -- Timeline bar helper --------------------------------------------------- */
+
+function formatDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  } catch {
+    return iso;
+  }
+}
+
+function TimelineBar({ dayElapsed, targetDays, timeline }: { dayElapsed: number; targetDays: number; timeline?: TimelinePrediction | null }) {
+  const overdue = dayElapsed > targetDays;
+  const atRisk = timeline?.atRisk ?? overdue;
+  const statusColor = overdue
+    ? 'var(--status-error)'
+    : atRisk
+      ? 'var(--status-warning)'
+      : 'var(--status-success)';
+  const statusLabel = overdue ? 'Overdue' : atRisk ? 'At Risk' : 'On Track';
+
+  const parts: string[] = [`Day ${dayElapsed} of ${targetDays}`];
+  if (timeline?.predictedCompletionDate) {
+    parts.push(`Est. completion: ${formatDate(timeline.predictedCompletionDate)}`);
+  }
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap text-xs" style={{ color: 'var(--text-secondary)' }}>
+      <span>{parts.join('  \u2022  ')}</span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: statusColor }} />
+        <span style={{ color: statusColor, fontWeight: 600 }}>{statusLabel}</span>
+      </span>
+      {atRisk && timeline?.riskReason && (
+        <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+          &mdash; {timeline.riskReason}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/* -- PipelineCard ---------------------------------------------------------- */
 
 export function PipelineCard({
   periodLabel,
@@ -129,69 +183,67 @@ export function PipelineCard({
   canReplaceGL: showReplaceGL,
   isInProgress,
   onReplaceGL,
+  timeline,
 }: PipelineCardProps) {
   return (
-    <section
-      className="grid grid-cols-12 gap-6 items-center"
-      style={{ minHeight: 72 }}
-    >
-      {/* Left: Period name + entity + status badge */}
-      <div className="col-span-12 lg:col-span-5 flex items-center gap-4">
-        <div>
-          <h1
-            className="font-semibold leading-tight text-2xl"
-            style={{ color: 'var(--text-primary)' }}
-          >
-            {periodLabel} Close
-          </h1>
-          <p
-            className="mt-0.5 text-sm"
-            style={{ color: 'var(--text-secondary)' }}
-          >
-            {entityName}
-          </p>
+    <section className="space-y-2">
+      <div
+        className="grid grid-cols-12 gap-6 items-center"
+        style={{ minHeight: 72 }}
+      >
+        {/* Left: Period name + entity + status badge */}
+        <div className="col-span-12 lg:col-span-5 flex items-center gap-4">
+          <div>
+            <h1
+              className="font-semibold leading-tight text-2xl"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              {periodLabel} Close
+            </h1>
+            <p
+              className="mt-0.5 text-sm"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              {entityName}
+            </p>
+          </div>
+          <StatusBadge {...sessionStateToBadge(sessionState)} />
         </div>
-        <StatusBadge {...sessionStateToBadge(sessionState)} />
+
+        {/* Right: Day progress ring + Pipeline stepper */}
+        <div className="col-span-12 lg:col-span-7 flex items-center gap-5 justify-end flex-wrap">
+          <ProgressRing value={dayElapsed} max={targetDays} size={48} strokeWidth={4} />
+          <PipelineStepper
+            steps={stepperSteps}
+            compact={false}
+            interactive
+            sessionId={sessionId}
+            onStepClick={(stepId) => {
+              const step = PIPELINE_STEPS.find((s) => s.id === stepId);
+              if (step) {
+                window.location.href = `/close/${sessionId}/${step.path}`;
+              }
+            }}
+          />
+          {showReplaceGL && isInProgress && (
+            <button
+              type="button"
+              className={cn(
+                'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium',
+                'rounded-[var(--radius-md)] border border-[var(--border-default)]',
+                'bg-[var(--bg-surface)] text-[var(--text-secondary)]',
+                'hover:bg-[var(--interactive-ghost-hover)] transition-colors',
+              )}
+              onClick={onReplaceGL}
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Replace GL
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Right: Day progress ring + Pipeline stepper */}
-      <div className="col-span-12 lg:col-span-7 flex items-center gap-5 justify-end flex-wrap">
-        <div className="flex items-center gap-2">
-          <ProgressRing value={dayElapsed} max={targetDays} size={48} strokeWidth={4} />
-          <span
-            className="text-sm whitespace-nowrap"
-            style={{ color: 'var(--text-secondary)' }}
-          >
-            Day {dayElapsed} of {targetDays}
-          </span>
-        </div>
-        <PipelineStepper
-          steps={stepperSteps}
-          compact={false}
-          interactive
-          sessionId={sessionId}
-          onStepClick={(stepId) => {
-            const step = PIPELINE_STEPS.find((s) => s.id === stepId);
-            if (step) {
-              window.location.href = `/close/${sessionId}/${step.path}`;
-            }
-          }}
-        />
-        {showReplaceGL && isInProgress && (
-          <button
-            type="button"
-            className={cn(
-              'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium',
-              'rounded-[var(--radius-md)] border border-[var(--border-default)]',
-              'bg-[var(--bg-surface)] text-[var(--text-secondary)]',
-              'hover:bg-[var(--interactive-ghost-hover)] transition-colors',
-            )}
-            onClick={onReplaceGL}
-          >
-            <RefreshCw className="w-3.5 h-3.5" /> Replace GL
-          </button>
-        )}
-      </div>
+      {/* Timeline bar */}
+      <TimelineBar dayElapsed={dayElapsed} targetDays={targetDays} timeline={timeline} />
     </section>
   );
 }

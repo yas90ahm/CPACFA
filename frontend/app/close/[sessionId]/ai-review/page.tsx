@@ -45,7 +45,7 @@ function formatRelativeTime(iso: string): string {
 const HITL_STATUS_MAP: Record<string, StatusType> = {
   pending: 'pending',
   approved: 'complete',
-  rejected: 'failed',
+  rejected: 'rejected',
 };
 
 function StagingItemCard({ item, onApprove, onReject, resolving }: {

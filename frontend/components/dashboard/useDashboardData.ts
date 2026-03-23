@@ -2,9 +2,10 @@
 
 import { useMemo, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useCloseSession, useCloseReadiness, useCloseIssues } from '@/lib/queries/close-session';
+import { useCloseSession, useCloseReadiness, useCloseIssues, useCloseTimeline } from '@/lib/queries/close-session';
+import type { CloseTimelinePrediction } from '@/lib/queries/close-session';
 import { useReconciliations } from '@/lib/queries/reconciliations';
-import { useAjeTemplates } from '@/lib/queries/adjustments';
+import { useAjeTemplates, useJournalEntries } from '@/lib/queries/adjustments';
 import { useVariances } from '@/lib/queries/variance';
 import { useStatements, useValidation } from '@/lib/queries/statements';
 import { useAuditTrail } from '@/lib/queries/audit-trail';
@@ -27,6 +28,8 @@ export function useDashboardData(
   const { data: stmtData } = useStatements(sessionId);
   const { data: validation } = useValidation(sessionId);
   const { data: auditTrail } = useAuditTrail(sessionId, { limit: 8 });
+  const { data: journalEntries = [] } = useJournalEntries(sessionId);
+  const { data: timeline } = useCloseTimeline(sessionId);
 
   /* ── Real-time: invalidate React Query caches on Socket.IO events ────── */
   const queryClient = useQueryClient();
@@ -92,6 +95,8 @@ export function useDashboardData(
     (v) => v.isMaterial && (v.explanationStatus === 'explained' || v.explanationStatus === 'approved'),
   ).length;
   const varianceUnexplained = variances.filter((v) => v.isMaterial && v.explanationStatus === 'pending');
+  const jesAwaitingApproval = journalEntries.filter((je) => je.status === 'proposed').length;
+  const reconsInProgress = reconciliations.filter((r) => r.status === 'in_progress').length;
   const mappingGatePassing = totalAccounts > 0 && unmappedCount === 0;
   const balanceVerified = validation?.allPassing ?? false;
 
@@ -185,9 +190,17 @@ export function useDashboardData(
     targetDays: 10,
     mappedCount,
     unmappedCount,
+    totalAccounts,
     reconComplete,
     reconTotal,
     statementsGenerated,
     statementsStale,
+    ajeTemplatePending,
+    ajeTemplateTotal,
+    varianceExplainedCount,
+    varianceMaterialTotal,
+    jesAwaitingApproval,
+    reconsInProgress,
+    timeline: timeline ?? null,
   };
 }

@@ -136,12 +136,26 @@ export default function CloseDashboardPage() {
         canReplaceGL={canReplaceGL(role)}
         isInProgress={state === 'IN_PROGRESS'}
         onReplaceGL={() => setShowReplaceConfirm(true)}
+        timeline={d.timeline}
       />
 
       {/* ROW 2: Attention + Stats */}
       <section className="grid grid-cols-12 gap-6">
         <div className="col-span-12 lg:col-span-8">
-          <AttentionItemsCard issues={d.issues} sessionId={sessionId} />
+          <AttentionItemsCard
+            gates={d.gatesWithMapping}
+            sessionId={sessionId}
+            reconComplete={d.reconComplete}
+            reconTotal={d.reconTotal}
+            ajeTemplatePending={d.ajeTemplatePending}
+            ajeTemplateTotal={d.ajeTemplateTotal}
+            varianceExplainedCount={d.varianceExplainedCount}
+            varianceMaterialTotal={d.varianceMaterialTotal}
+            mappedCount={d.mappedCount}
+            totalAccounts={d.totalAccounts}
+            jesAwaitingApproval={d.jesAwaitingApproval}
+            reconsInProgress={d.reconsInProgress}
+          />
         </div>
         <div className="col-span-12 lg:col-span-4">
           <QuickStatsPanel

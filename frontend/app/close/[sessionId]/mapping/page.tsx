@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { Search, Sparkles, Check, X, ChevronDown, GitBranch } from 'lucide-react';
+import { Search, Sparkles, Check, X, ChevronDown, GitBranch, Loader2 } from 'lucide-react';
 import { useTrialBalance } from '@/lib/queries/trial-balance';
 import {
   useCOASuggestions,
@@ -227,6 +227,24 @@ export default function AccountMappingPage() {
   const totalCount = mergedRows.length;
   const progressPct = totalCount > 0 ? Math.round((mappedCount / totalCount) * 100) : 0;
 
+  // Stats for the sticky progress header
+  const autoAcceptedCount = useMemo(
+    () => coaSuggestions.filter((s) => s.status === 'accepted' && (s as any).auto_accepted).length,
+    [coaSuggestions]
+  );
+  const highConfPending = useMemo(
+    () => coaSuggestions.filter((s) => s.status === 'pending' && s.confidence > 0.90),
+    [coaSuggestions]
+  );
+  const [bulkAccepting, setBulkAccepting] = useState(false);
+  const handleAcceptAllHighConf = useCallback(async () => {
+    setBulkAccepting(true);
+    for (const s of highConfPending) {
+      acceptMutation.mutate({ suggestionId: s.id, type: 'coa' });
+    }
+    setBulkAccepting(false);
+  }, [highConfPending, acceptMutation]);
+
   /* ── Filtering ── */
   const filteredRows = useMemo(() => {
     let list = mergedRows;
@@ -356,89 +374,70 @@ export default function AccountMappingPage() {
   return (
     <div style={{ padding: '24px' }}>
       {/* ================================================================ */}
-      {/* HEADER                                                           */}
+      {/* STICKY PROGRESS HEADER                                           */}
       {/* ================================================================ */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1
-            className="font-semibold"
-            style={{
-              fontSize: '24px',
-              color: 'var(--text-primary)',
-              margin: 0,
-            }}
-          >
+      <div
+        className="rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-4"
+        style={{ position: 'sticky', top: 0, zIndex: 10 }}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <h1 className="font-semibold text-lg" style={{ color: 'var(--text-primary)', margin: 0 }}>
             Account Mapping
           </h1>
-          <p
-            style={{
-              fontSize: '13px',
-              color: 'var(--text-secondary)',
-              marginTop: '8px',
-              margin: 0,
-              paddingTop: '8px',
-            }}
-          >
-            {mappedCount} of {totalCount} accounts mapped ({progressPct}%)
-          </p>
+          <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+            {mappedCount} of {totalCount} mapped
+          </span>
         </div>
 
-        {/* Auto-accept toggle */}
-        <label className="flex items-center gap-2 cursor-pointer select-none">
-          <span
-            style={{
-              fontSize: '13px',
-              color: 'var(--text-secondary)',
-            }}
-          >
-            Auto-accept High Confidence (&gt;95%)
+        {/* Progress bar */}
+        <div className="flex items-center gap-3 mb-3">
+          <div className="flex-1 h-2 rounded-full overflow-hidden bg-[var(--bg-surface-sunken)]">
+            <div
+              className="h-full rounded-full transition-all duration-300 bg-[var(--interactive-primary)]"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+          <span className="text-sm font-semibold tabular-nums" style={{ color: 'var(--text-primary)', minWidth: '36px' }}>
+            {progressPct}%
           </span>
+        </div>
+
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-4 text-xs" style={{ color: 'var(--text-secondary)' }}>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-2.5 h-2.5 rounded-full bg-[var(--status-success)]" />
+              {autoAcceptedCount > 0 ? autoAcceptedCount : mappedCount} accepted
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-2.5 h-2.5 rounded-full bg-[var(--status-warning)]" />
+              {needsReviewCount} need review
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: 'var(--text-tertiary)' }} />
+              {unmappedCount} not started
+            </span>
+          </div>
+
           <button
             type="button"
-            role="switch"
-            aria-checked={autoAcceptEnabled}
-            onClick={() => setAutoAcceptEnabled((v) => !v)}
-            className="relative inline-flex shrink-0 rounded-full transition-colors duration-200"
-            style={{
-              width: '44px',
-              height: '24px',
-              backgroundColor: autoAcceptEnabled
-                ? 'var(--status-success)'
-                : 'var(--border-default)',
-            }}
+            disabled={highConfPending.length === 0 || bulkAccepting}
+            onClick={handleAcceptAllHighConf}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ backgroundColor: 'var(--interactive-primary)' }}
           >
-            <span
-              className="inline-block rounded-full shadow transition-transform duration-200"
-              style={{
-                width: '20px',
-                height: '20px',
-                marginTop: '2px',
-                backgroundColor: 'white',
-                transform: autoAcceptEnabled ? 'translateX(22px)' : 'translateX(2px)',
-              }}
-            />
+            {bulkAccepting ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Accepting {highConfPending.length} suggestions...
+              </>
+            ) : (
+              <>
+                <Check className="w-3.5 h-3.5" />
+                Accept All High Confidence ({'>'}90%) &middot; {highConfPending.length}
+              </>
+            )}
           </button>
-        </label>
-      </div>
-
-      {/* Progress bar */}
-      <div
-        className="w-full overflow-hidden"
-        style={{
-          height: '6px',
-          borderRadius: '3px',
-          backgroundColor: 'var(--bg-surface-sunken)',
-          marginTop: '12px',
-        }}
-      >
-        <div
-          className="h-full transition-all duration-300"
-          style={{
-            width: `${progressPct}%`,
-            borderRadius: '3px',
-            backgroundColor: 'var(--interactive-primary)',
-          }}
-        />
+        </div>
       </div>
 
       {/* ================================================================ */}
@@ -523,21 +522,13 @@ export default function AccountMappingPage() {
         </div>
       )}
 
-      {/* Auto-classifying banner */}
+      {/* Auto-classifying loading state */}
       {autoClassifyMutation.isPending && (
-        <div
-          className="flex items-center gap-3 px-4 py-3 rounded-md"
-          style={{
-            marginTop: '16px',
-            backgroundColor: 'var(--ai-bg)',
-            border: '1px solid var(--ai-primary)',
-          }}
-        >
-          <Sparkles className="w-4 h-4 animate-pulse" style={{ color: 'var(--ai-primary)' }} />
-          <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
-            Classifying {rows.filter((r) => !r.mappingReportingLineId).length} accounts against XBRL taxonomy...
-          </span>
-        </div>
+        <EmptyState
+          loading
+          loadingMessage={`Classifying your ${rows.filter((r) => !r.mappingReportingLineId).length} accounts — this takes about 30 seconds`}
+          title=""
+        />
       )}
 
       {/* Fallback: manual re-classify button if auto-classify failed */}

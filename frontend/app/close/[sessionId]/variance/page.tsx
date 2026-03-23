@@ -466,8 +466,9 @@ export default function VariancePage() {
       {variances.length === 0 ? (
         <EmptyState
           icon={TrendingUp}
-          title="Generate financial statements to see variance analysis"
-          description="Variances are computed when financial statements are produced. Complete reconciliation and adjustments, then generate statements."
+          title="No variances to explain"
+          description="Variances will appear here once statements are generated and prior period data is available."
+          variant="prerequisite-missing"
         />
       ) : filtered.length === 0 ? (
         <EmptyState

@@ -140,7 +140,7 @@ function saveGroupState(state: Record<string, boolean>) {
 
 export function Sidebar({
   sessionId,
-  unmappedCount = 0,
+  mappingPendingCount = 0,
   reconIncompleteCount = 0,
   adjustmentsBadge = 0,
   statementsStale = false,
@@ -154,7 +154,7 @@ export function Sidebar({
   onToggleCollapse,
 }: {
   sessionId: string;
-  unmappedCount?: number;
+  mappingPendingCount?: number;
   reconIncompleteCount?: number;
   adjustmentsBadge?: number;
   statementsStale?: boolean;
@@ -243,8 +243,7 @@ export function Sidebar({
       >
         <item.icon className="w-4 h-4 shrink-0" />
         <span className="flex-1 truncate">{item.label}</span>
-        {item.href === 'trial-balance' && unmappedCount > 0 && renderBadge(unmappedCount)}
-        {item.href === 'mapping' && unmappedCount > 0 && renderBadge(unmappedCount)}
+        {item.href === 'mapping' && mappingPendingCount > 0 && renderBadge(mappingPendingCount)}
         {item.badgeProp === 'recon' && reconIncompleteCount > 0 && renderBadge(reconIncompleteCount)}
         {item.badgeProp === 'adjustments' && adjustmentsBadge > 0 && renderBadge(adjustmentsBadge)}
         {item.href === 'variance' && varianceUnexplainedCount > 0 && renderBadge(varianceUnexplainedCount)}

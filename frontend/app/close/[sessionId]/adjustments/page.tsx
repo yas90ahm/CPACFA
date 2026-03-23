@@ -17,7 +17,7 @@ import { EmptyState } from '@/components/shared/EmptyState';
 import { cn } from '@/lib/utils';
 import { ContinueToNextStep } from '@/components/shared/ContinueToNextStep';
 import { sumMoneyStrings } from '@/lib/money';
-import { FileEdit } from 'lucide-react';
+import { PenLine, CheckCircle2, XCircle } from 'lucide-react';
 import type { JournalEntry, JournalEntryStatus, AJETemplate } from '@/lib/types/journal-entry';
 
 const displayUser = (user: { userId: string; email?: string } | null) => user?.email ?? user?.userId ?? 'Unknown';
@@ -31,11 +31,172 @@ function useToast() {
   return { toast, show };
 }
 
+function ApprovalQueueGroup({
+  title,
+  entries,
+  onApprove,
+  onReject,
+  isApproving,
+}: {
+  title: string;
+  entries: JournalEntry[];
+  onApprove: (je: JournalEntry) => void;
+  onReject: (je: JournalEntry) => void;
+  isApproving: boolean;
+}) {
+  if (entries.length === 0) return null;
+  return (
+    <div className="space-y-1">
+      <h3
+        className="text-xs font-semibold uppercase tracking-wide px-1 pb-1"
+        style={{ color: 'var(--text-tertiary)' }}
+      >
+        {title} ({entries.length})
+      </h3>
+      <div
+        className="border divide-y"
+        style={{
+          borderColor: 'var(--border-default)',
+          borderRadius: 'var(--radius-md)',
+        }}
+      >
+        {entries.map((je) => {
+          const totalDebit = sumMoneyStrings(je.lines.map((l) => l.debit));
+          const truncatedMemo =
+            je.memo.length > 60 ? je.memo.slice(0, 57) + '...' : je.memo;
+          return (
+            <div
+              key={je.id}
+              className="flex items-center gap-3 px-4 py-2.5 text-sm"
+              style={{ borderColor: 'var(--border-subtle)' }}
+            >
+              <span
+                className="font-mono text-xs shrink-0"
+                style={{ color: 'var(--interactive-primary)' }}
+              >
+                JE-{String(je.jeNumber).padStart(3, '0')}
+              </span>
+              <span
+                className="flex-1 truncate"
+                style={{ color: 'var(--text-primary)' }}
+                title={je.memo}
+              >
+                {truncatedMemo}
+              </span>
+              <span
+                className="font-mono text-xs shrink-0"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <MoneyCell value={totalDebit} showDollar />
+              </span>
+              <span
+                className="text-xs shrink-0 max-w-[120px] truncate"
+                style={{ color: 'var(--text-secondary)' }}
+                title={je.createdBy}
+              >
+                {je.createdBy}
+              </span>
+              <span
+                className="text-xs shrink-0"
+                style={{ color: 'var(--text-tertiary)' }}
+              >
+                {je.proposedAt
+                  ? new Date(je.proposedAt).toLocaleDateString()
+                  : ''}
+              </span>
+              <div className="flex gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium border transition-colors"
+                  style={{
+                    borderColor: 'var(--status-success)',
+                    color: 'var(--status-success)',
+                    borderRadius: 'var(--radius-sm)',
+                  }}
+                  disabled={isApproving}
+                  onClick={() => onApprove(je)}
+                  title="Approve"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Approve
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium border transition-colors"
+                  style={{
+                    borderColor: 'var(--status-error)',
+                    color: 'var(--status-error)',
+                    borderRadius: 'var(--radius-sm)',
+                  }}
+                  onClick={() => onReject(je)}
+                  title="Reject"
+                >
+                  <XCircle className="w-3.5 h-3.5" />
+                  Reject
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ApprovalQueueTab({
+  groups,
+  onApprove,
+  onReject,
+  isApproving,
+}: {
+  groups: { recurring: JournalEntry[]; module: JournalEntry[]; manual: JournalEntry[] };
+  onApprove: (je: JournalEntry) => void;
+  onReject: (je: JournalEntry) => void;
+  isApproving: boolean;
+}) {
+  const total = groups.recurring.length + groups.module.length + groups.manual.length;
+  if (total === 0) {
+    return (
+      <EmptyState
+        icon={CheckCircle2}
+        title="No Entries Awaiting Your Approval"
+        description="All proposed journal entries have been reviewed, or there are no entries you can approve (you cannot approve entries you created)."
+      />
+    );
+  }
+  return (
+    <div className="space-y-4">
+      <ApprovalQueueGroup
+        title="Recurring Templates"
+        entries={groups.recurring}
+        onApprove={onApprove}
+        onReject={onReject}
+        isApproving={isApproving}
+      />
+      <ApprovalQueueGroup
+        title="Module Entries"
+        entries={groups.module}
+        onApprove={onApprove}
+        onReject={onReject}
+        isApproving={isApproving}
+      />
+      <ApprovalQueueGroup
+        title="Manual Entries"
+        entries={groups.manual}
+        onApprove={onApprove}
+        onReject={onReject}
+        isApproving={isApproving}
+      />
+    </div>
+  );
+}
+
 export default function AdjustmentsPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const sessionId = params.sessionId as string;
-  const tab = searchParams.get('tab') === 'templates' ? 'templates' : 'entries';
+  const rawTab = searchParams.get('tab');
+  const tab = rawTab === 'templates' ? 'templates' : rawTab === 'approval' ? 'approval' : 'entries';
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const { toast, show: showToast } = useToast();
@@ -194,8 +355,34 @@ export default function AdjustmentsPage() {
     },
     onError: (err) => showToast('error', err instanceof Error ? err.message : 'Failed to delete entry'),
   });
+  const currentUserEmail = user?.email ?? user?.userId ?? '';
+
+  const approvableEntries = useMemo(
+    () => allEntries.filter(
+      (je) => je.status === 'proposed' && je.createdBy !== currentUserEmail
+    ),
+    [allEntries, currentUserEmail]
+  );
+
+  const approvalGroups = useMemo(() => {
+    const moduleKeywords = /prepaid|depreciation|interest|payroll|lease|inventory|cecl/i;
+    const recurring: JournalEntry[] = [];
+    const module: JournalEntry[] = [];
+    const manual: JournalEntry[] = [];
+    for (const je of approvableEntries) {
+      if (je.source === 'template' || (je.templateId && je.templateId.length > 0)) {
+        recurring.push(je);
+      } else if (moduleKeywords.test(je.memo)) {
+        module.push(je);
+      } else {
+        manual.push(je);
+      }
+    }
+    return { recurring, module, manual };
+  }, [approvableEntries]);
+
   const setTab = useCallback(
-    (t: 'entries' | 'templates') => {
+    (t: 'entries' | 'templates' | 'approval') => {
       const url = new URL(window.location.href);
       url.searchParams.set('tab', t);
       window.history.replaceState({}, '', url.pathname + url.search);
@@ -398,11 +585,12 @@ export default function AdjustmentsPage() {
 
       {allEntries.length === 0 && templates.length === 0 && (
         <EmptyState
-          icon={FileEdit}
-          title="No Adjusting Entries"
-          description="Create a journal entry or apply a recurring template to get started with adjustments."
-          actionLabel="New Journal Entry"
+          icon={PenLine}
+          title="No adjusting entries yet"
+          description="Recurring entries from your templates will appear here when proposed. You can also create manual entries."
+          actionLabel="Create Entry"
           onAction={openCreate}
+          variant="first-time"
         />
       )}
 
@@ -462,6 +650,28 @@ export default function AdjustmentsPage() {
         >
           Templates
         </button>
+        <button
+          type="button"
+          onClick={() => setTab('approval')}
+          className="px-4 py-2 text-sm font-medium border-b-2 -mb-px flex items-center gap-2"
+          style={{
+            borderColor: tab === 'approval' ? 'var(--interactive-primary)' : 'transparent',
+            color: tab === 'approval' ? 'var(--interactive-primary)' : 'var(--text-secondary)',
+          }}
+        >
+          Approval Queue
+          {approvableEntries.length > 0 && (
+            <span
+              className="inline-flex items-center justify-center min-w-[18px] px-1.5 py-0.5 text-xs font-medium tabular-nums rounded-full"
+              style={{
+                backgroundColor: 'var(--status-warning-bg)',
+                color: 'var(--status-warning)',
+              }}
+            >
+              {approvableEntries.length}
+            </span>
+          )}
+        </button>
       </div>
 
       {tab === 'templates' && (
@@ -495,6 +705,18 @@ export default function AdjustmentsPage() {
           onStatusFilterChange={setStatusFilter}
           search={search}
           onSearchChange={setSearch}
+        />
+      )}
+
+      {tab === 'approval' && (
+        <ApprovalQueueTab
+          groups={approvalGroups}
+          onApprove={(je) => approveMutation.mutate(je.id)}
+          onReject={(je) => {
+            setRejectJeId(je.id);
+            setRejectReason('');
+          }}
+          isApproving={approveMutation.isPending}
         />
       )}
 

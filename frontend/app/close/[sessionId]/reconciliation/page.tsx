@@ -14,7 +14,7 @@ import { FilterBar } from '@/components/shared/FilterBar';
 import type { Reconciliation, ReconStatus } from '@/lib/types/reconciliation';
 import { moneyAbs, cmpMoney, sumMoneyStrings, fmtMoney } from '@/lib/money';
 import { cn } from '@/lib/utils';
-import { Paperclip, Check, AlertCircle, Layers, CheckCircle2, Loader2, ClipboardList, FileDown, Columns } from 'lucide-react';
+import { Paperclip, Check, AlertCircle, Layers, CheckCircle2, Loader2, ClipboardList, FileDown, Columns, X, ShieldCheck } from 'lucide-react';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { ContinueToNextStep } from '@/components/shared/ContinueToNextStep';
 import { canCompleteRecon, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
@@ -121,6 +121,7 @@ export default function ReconciliationPage() {
   const [search, setSearch] = useState('');
   const hasIncomplete = recons.some((r) => r.status === 'not_started' || r.status === 'in_progress');
   const [statusFilter, setStatusFilter] = useState<ReconStatus | 'all'>('all');
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [overToleranceOnly, setOverToleranceOnly] = useState(false);
   const [sortKey, setSortKey] = useState<keyof Reconciliation | string>('status');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -157,8 +158,14 @@ export default function ReconciliationPage() {
     });
   }, [recons]);
 
+  // Apply category filter to the list
+  const categoryFilteredRecons = useMemo(() => {
+    if (!selectedCategory) return recons;
+    return recons.filter((r) => classifyCategory(r.accountName) === selectedCategory);
+  }, [recons, selectedCategory]);
+
   const filtered = useMemo(() => {
-    let list = recons;
+    let list = categoryFilteredRecons;
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter((r) => (r.accountCode ?? '').toLowerCase().includes(q) || (r.accountName ?? '').toLowerCase().includes(q));
@@ -168,7 +175,7 @@ export default function ReconciliationPage() {
       list = list.filter((r) => r.supportingBalance != null && moneyAbs(r.unexplainedVariance) > moneyAbs(r.tolerance));
     }
     return list;
-  }, [recons, search, statusFilter, overToleranceOnly]);
+  }, [categoryFilteredRecons, search, statusFilter, overToleranceOnly]);
 
   const sorted = useMemo(() => {
     const copy = [...filtered];
@@ -202,6 +209,33 @@ export default function ReconciliationPage() {
   const approved = recons.filter((r) => r.status === 'approved').length;
   const overTolerance = recons.filter((r) => r.supportingBalance != null && moneyAbs(r.unexplainedVariance) > moneyAbs(r.tolerance)).length;
   const progressPct = total ? Math.round((completed / total) * 1000) / 10 : 0;
+
+  // ─── Category status board ────────────────────────────────────────────────
+  const classifyCategory = (name: string): string => {
+    const n = (name ?? '').toLowerCase();
+    if (n.includes('cash') || n.includes('bank')) return 'Cash';
+    if (n.includes('receivable') || n.includes(' ar')) return 'Receivables';
+    if (n.includes('payable') || n.includes(' ap')) return 'Payables';
+    if (n.includes('asset') || n.includes('equipment') || n.includes('property')) return 'Fixed Assets';
+    return 'Other';
+  };
+
+  const categorySummaries = useMemo(() => {
+    const cats: Record<string, { total: number; complete: number; inProgress: number; notStarted: number }> = {};
+    for (const cat of ['Cash', 'Receivables', 'Payables', 'Fixed Assets', 'Other']) {
+      cats[cat] = { total: 0, complete: 0, inProgress: 0, notStarted: 0 };
+    }
+    for (const r of recons) {
+      const cat = classifyCategory(r.accountName);
+      cats[cat].total++;
+      if (r.status === 'completed' || r.status === 'approved') cats[cat].complete++;
+      else if (r.status === 'in_progress') cats[cat].inProgress++;
+      else cats[cat].notStarted++;
+    }
+    return Object.entries(cats)
+      .filter(([, v]) => v.total > 0)
+      .map(([category, v]) => ({ category, ...v }));
+  }, [recons]);
 
   const totals = useMemo(() => {
     const gl = sumMoneyStrings(filtered.map((r) => r.glBalance));
@@ -675,9 +709,10 @@ export default function ReconciliationPage() {
           />
         ) : (
           <EmptyState
-            icon={ClipboardList}
-            title="Complete account mapping first, then reconciliations will be initialized"
-            description="Map your GL accounts to reporting line items so the system knows which balance sheet accounts need reconciliation."
+            icon={ShieldCheck}
+            title="No reconciliations yet"
+            description="Reconciliations will appear here once your accounts are mapped and GL balance data is available."
+            variant="prerequisite-missing"
             ctaLabel="Go to Mapping"
             ctaHref={`/close/${sessionId}/mapping`}
           />
@@ -764,6 +799,53 @@ export default function ReconciliationPage() {
           </span>
         </div>
       </div>
+
+      {/* ─── Category Status Board ─── */}
+      {categorySummaries.length > 0 && (
+        <div className="flex flex-wrap gap-3">
+          {categorySummaries.map((cat) => {
+            const pctComplete = cat.total > 0 ? (cat.complete / cat.total) * 100 : 0;
+            const pctInProgress = cat.total > 0 ? (cat.inProgress / cat.total) * 100 : 0;
+            const isActive = selectedCategory === cat.category;
+            return (
+              <button
+                key={cat.category}
+                type="button"
+                onClick={() => setSelectedCategory(isActive ? null : cat.category)}
+                className="flex-1 min-w-[140px] max-w-[220px] rounded-[var(--radius-lg)] border p-3 text-left transition-all duration-200"
+                style={{
+                  borderColor: isActive ? 'var(--interactive-primary)' : 'var(--border-default)',
+                  backgroundColor: isActive ? 'rgba(59,130,246,0.06)' : 'var(--bg-surface)',
+                }}
+              >
+                <div className="text-xs font-semibold text-[var(--text-primary)] mb-1">{cat.category}</div>
+                <div className="text-xs text-[var(--text-secondary)] mb-2">
+                  {cat.complete} of {cat.total} complete
+                </div>
+                <div className="h-1.5 w-full rounded-full overflow-hidden bg-[var(--bg-surface-sunken)] flex">
+                  <div className="h-full bg-[var(--status-success)] transition-all" style={{ width: `${pctComplete}%` }} />
+                  <div className="h-full bg-[var(--status-warning)] transition-all" style={{ width: `${pctInProgress}%` }} />
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Clear category filter pill */}
+      {selectedCategory && (
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-[var(--text-secondary)]">Filtered by:</span>
+          <button
+            type="button"
+            onClick={() => setSelectedCategory(null)}
+            className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full border transition-colors border-[var(--interactive-primary)] text-[var(--interactive-primary)] bg-[rgba(59,130,246,0.06)] hover:bg-[rgba(59,130,246,0.12)]"
+          >
+            {selectedCategory}
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
 
       {/* Batch mode info banner */}
       {batchMode && (

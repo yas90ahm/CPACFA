@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export type EmptyStateVariant = 'first-time' | 'no-results' | 'prerequisite-missing';
@@ -18,6 +19,10 @@ export interface EmptyStateProps {
   onCtaClick?: () => void;
   variant?: EmptyStateVariant;
   className?: string;
+  /** When true, show a loading spinner instead of the normal empty state */
+  loading?: boolean;
+  /** Message shown below the spinner when loading is true */
+  loadingMessage?: string;
 }
 
 export function EmptyState({
@@ -31,7 +36,37 @@ export function EmptyState({
   onCtaClick,
   variant = 'first-time',
   className,
+  loading = false,
+  loadingMessage,
 }: EmptyStateProps) {
+  /* ── Loading variant ── */
+  if (loading) {
+    return (
+      <div
+        className={cn('rounded-lg p-12 text-center flex flex-col items-center justify-center', className)}
+        style={{
+          border: '1px solid var(--border-default)',
+          backgroundColor: 'var(--bg-surface)',
+          borderRadius: 'var(--radius-lg)',
+        }}
+      >
+        <Loader2
+          className="w-10 h-10 animate-spin mb-4"
+          style={{ color: 'var(--status-info)' }}
+        />
+        {loadingMessage && (
+          <p
+            className="text-sm"
+            style={{ color: 'var(--text-secondary)', maxWidth: 400 }}
+          >
+            {loadingMessage}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  /* ── Normal empty state ── */
   // Resolve CTA: new props take precedence over legacy
   const resolvedLabel = actionLabel ?? ctaLabel;
   const resolvedAction = onAction ?? onCtaClick;

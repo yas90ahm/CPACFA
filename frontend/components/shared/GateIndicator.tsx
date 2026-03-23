@@ -1,7 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { Check, X, Circle } from 'lucide-react';
+import { CheckCircle2, XCircle, MinusCircle } from 'lucide-react';
 import Link from 'next/link';
 
 export interface GateIndicatorProps {
@@ -27,13 +27,13 @@ export function GateIndicator({
 }: GateIndicatorProps) {
   return (
     <div className={cn('flex items-start gap-3 py-2', className)}>
-      {/* Icon */}
+      {/* Icon — uses same semantic colors as StatusBadge */}
       {status === 'passed' && (
         <div
           className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center"
           style={{ backgroundColor: 'var(--status-success-bg)' }}
         >
-          <Check className="w-3.5 h-3.5" style={{ color: 'var(--status-success)' }} />
+          <CheckCircle2 className="w-3.5 h-3.5" style={{ color: 'var(--status-success)' }} />
         </div>
       )}
       {status === 'failed' && (
@@ -41,15 +41,16 @@ export function GateIndicator({
           className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center"
           style={{ backgroundColor: 'var(--status-error-bg)' }}
         >
-          <X className="w-3.5 h-3.5" style={{ color: 'var(--status-error)' }} />
+          <XCircle className="w-3.5 h-3.5" style={{ color: 'var(--status-error)' }} />
         </div>
       )}
       {status === 'not-evaluated' && (
-        <Circle
-          className="flex-shrink-0 w-5 h-5"
-          style={{ color: 'var(--text-tertiary)' }}
-          strokeDasharray="4 2"
-        />
+        <div
+          className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center"
+          style={{ backgroundColor: 'var(--status-neutral-bg)' }}
+        >
+          <MinusCircle className="w-3.5 h-3.5" style={{ color: 'var(--status-neutral)' }} />
+        </div>
       )}
 
       {/* Content */}

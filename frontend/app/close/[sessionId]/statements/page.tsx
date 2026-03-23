@@ -544,10 +544,11 @@ export default function StatementsPage() {
         {!hasStatements && tab !== 'validation' && tab !== 'ebitda' && (
           <EmptyState
             icon={FileText}
-            title="Complete reconciliation and adjustments, then generate financial statements"
-            description="All four statements (Income Statement, Balance Sheet, Cash Flow, Equity) will be produced from your adjusted trial balance."
-            ctaLabel={generating ? 'Preparing\u2026' : 'Prepare Statements'}
+            title="Statements not yet generated"
+            description="Generate your financial statements once all accounts are mapped and adjusting entries are posted."
+            ctaLabel={generating ? 'Generating...' : 'Generate Statements'}
             onCtaClick={handleRegenerate}
+            variant="first-time"
           />
         )}
         {tab === 'income-statement' && statements?.incomeStatement && (

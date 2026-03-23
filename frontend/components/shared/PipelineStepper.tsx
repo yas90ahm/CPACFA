@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { Check, X } from 'lucide-react';
+import { CheckCircle2, XCircle } from 'lucide-react';
 
 export interface PipelineStep {
   id: string;
@@ -38,6 +38,14 @@ export interface PipelineStepperProps {
   sessionId?: string;
   className?: string;
 }
+
+/**
+ * Color semantics aligned with StatusBadge:
+ * - complete  -> green  (--status-success)
+ * - active    -> blue   (--status-info)
+ * - pending   -> grey   (--status-neutral / --text-tertiary)
+ * - error     -> red    (--status-error)
+ */
 
 export function PipelineStepper({
   steps,
@@ -78,15 +86,15 @@ export function PipelineStepper({
                 className="w-full h-full rounded-full flex items-center justify-center"
                 style={{ backgroundColor: 'var(--status-success)' }}
               >
-                <Check className="text-white" style={{ width: circleSize * 0.6, height: circleSize * 0.6 }} />
+                <CheckCircle2 className="text-white" style={{ width: circleSize * 0.6, height: circleSize * 0.6 }} />
               </div>
             )}
             {step.status === 'active' && (
               <div
                 className="w-full h-full rounded-full flex items-center justify-center"
                 style={{
-                  backgroundColor: 'var(--interactive-primary)',
-                  boxShadow: '0 0 0 3px color-mix(in srgb, var(--interactive-primary) 25%, transparent)',
+                  backgroundColor: 'var(--status-info)',
+                  boxShadow: '0 0 0 3px color-mix(in srgb, var(--status-info) 25%, transparent)',
                 }}
               >
                 <div className="w-2 h-2 bg-white rounded-full" />
@@ -105,7 +113,7 @@ export function PipelineStepper({
                 className="w-full h-full rounded-full flex items-center justify-center"
                 style={{ backgroundColor: 'var(--status-error)' }}
               >
-                <X className="text-white" style={{ width: circleSize * 0.6, height: circleSize * 0.6 }} />
+                <XCircle className="text-white" style={{ width: circleSize * 0.6, height: circleSize * 0.6 }} />
               </div>
             )}
           </div>
@@ -121,7 +129,7 @@ export function PipelineStepper({
               color: step.status === 'complete'
                 ? 'var(--status-success)'
                 : step.status === 'active'
-                  ? 'var(--interactive-primary)'
+                  ? 'var(--status-info)'
                   : step.status === 'error'
                     ? 'var(--status-error)'
                     : 'var(--text-tertiary)',
