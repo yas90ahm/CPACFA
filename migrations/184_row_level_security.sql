@@ -50,6 +50,17 @@ BEGIN
       CONTINUE;
     END IF;
 
+    -- Skip tables that don't have a tenant_id column
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+       WHERE table_schema = tbl_record.schemaname
+         AND table_name   = tbl_record.tablename
+         AND column_name  = 'tenant_id'
+    ) THEN
+      RAISE NOTICE 'Table %.% has no tenant_id column — skipping RLS', tbl_record.schemaname, tbl_record.tablename;
+      CONTINUE;
+    END IF;
+
     -- Enable RLS (idempotent — no error if already enabled)
     EXECUTE format(
       'ALTER TABLE %I.%I ENABLE ROW LEVEL SECURITY',
