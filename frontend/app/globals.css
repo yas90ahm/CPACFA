@@ -96,6 +96,87 @@ button[type="submit"]:hover {
   }
 }
 
+/* Fade-in animation for page transitions */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Collapse/expand animation for sidebar groups */
+@keyframes collapseDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 500px;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out both;
+}
+
+.animate-collapse-down {
+  animation: collapseDown 0.2s ease-out both;
+  overflow: hidden;
+}
+
+/* Menu open animation */
+@keyframes menuOpen {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-menu-open {
+  animation: menuOpen 0.15s ease-out both;
+}
+
+/* Card hover lift effect */
+.card-hover {
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.card-hover:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+/* Premium focus ring for interactive elements */
+.focus-ring:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--interactive-primary);
+}
+
+/* Selection color */
+::selection {
+  background: color-mix(in srgb, var(--interactive-primary) 20%, transparent);
+}
+
+/* Print styles for financial statements */
+@media print {
+  body { background: white !important; color: black !important; font-size: 10pt; }
+  nav, .no-print, [role="navigation"], button, .toast-container { display: none !important; }
+  .print-break-before { page-break-before: always; }
+  .print-header { position: running(header); }
+  @page { margin: 0.75in 1in; @top-center { content: element(header); } }
+  table { page-break-inside: avoid; }
+  .border-total-single, .border-total-double { border-color: black !important; }
+  .tabular-nums { font-variant-numeric: tabular-nums lining-nums; }
+}
+
 /* Utility button classes */
 @layer utilities {
   .btn-primary {

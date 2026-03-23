@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { Settings, ArrowLeft, LogOut, ChevronDown, Sun, Moon } from 'lucide-react';
+import { Settings, ArrowLeft, LogOut, ChevronDown, Sun, Moon, Building2 } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth } from '@/lib/auth';
 import { canAccessSettings, getRoleLabel } from '@/lib/permissions';
@@ -64,7 +64,7 @@ export function TopBar(p: TopBarProps) {
   }, [menuOpen]);
 
   return (
-    <header className="fixed top-0 left-0 right-0 h-14 z-40 flex items-center justify-between px-5 bg-surface border-b border-border print:hidden">
+    <header className="fixed top-0 left-0 right-0 h-14 z-40 flex items-center justify-between px-5 bg-surface border-b border-border shadow-sm print:hidden">
       <div className="flex items-center gap-6">
         <span className="font-display text-lg tracking-[0.2em] uppercase text-primary">Sabit</span>
         {isPortfolio ? (
@@ -77,7 +77,8 @@ export function TopBar(p: TopBarProps) {
                 Back to Portfolio
               </Link>
             )}
-            <span className="flex items-center gap-2 px-3 py-1.5 rounded-input bg-hover border border-border-light text-primary text-sm">
+            <span className="flex items-center gap-2 px-3 py-1.5 rounded-input bg-[var(--bg-surface-sunken)] border border-border-light text-primary text-sm font-medium">
+              <Building2 className="w-3.5 h-3.5 text-tertiary" />
               {entityName}
             </span>
             {showPeriod && periodLabel && (
@@ -90,7 +91,8 @@ export function TopBar(p: TopBarProps) {
       </div>
       <div className="flex items-center gap-4">
         {!isPortfolio && state != null && (
-          <span className={cn('px-2.5 py-1 text-xs font-medium rounded border', stateClass(state))}>
+          <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border', stateClass(state))}>
+            <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
             {state.replace('_', ' ')}
           </span>
         )}
@@ -106,7 +108,7 @@ export function TopBar(p: TopBarProps) {
             <ChevronDown className={cn('w-3.5 h-3.5 text-text-muted transition-transform', menuOpen && 'rotate-180')} />
           </button>
           {menuOpen && (
-            <div className="absolute right-0 top-full mt-1 w-56 bg-surface border border-border rounded-card shadow-lg py-1 z-50">
+            <div className="absolute right-0 top-full mt-1 w-56 bg-surface border border-border rounded-card shadow-lg py-1 z-50 animate-menu-open">
               <div className="px-4 py-3 border-b border-border">
                 <p className="text-sm font-medium text-primary">{userName || 'User'}</p>
                 <p className="text-xs text-text-secondary mt-0.5">{user?.email ?? ''}</p>

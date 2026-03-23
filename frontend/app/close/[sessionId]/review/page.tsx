@@ -308,25 +308,23 @@ export default function ReviewPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div
-        className="p-6"
-        style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)' }}
-      >
+      <div className="p-6 bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-[var(--radius-lg)]">
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-display mb-2" style={{ color: 'var(--text-primary)' }}>Review &amp; Certify</h1>
-            <p style={{ color: 'var(--text-secondary)' }}>{getSubtitle()}</p>
+            <h1 className="text-2xl font-display mb-2 text-[var(--text-primary)]">Review &amp; Certify</h1>
+            <p className="text-[var(--text-secondary)]">{getSubtitle()}</p>
           </div>
           {primaryAction && (
             <button
               type="button"
               onClick={primaryAction.onClick}
               disabled={!primaryAction.enabled}
-              className="px-6 py-2.5 rounded-full text-sm font-medium transition-all"
-              style={primaryAction.enabled
-                ? { backgroundColor: 'var(--interactive-primary)', color: 'white' }
-                : { backgroundColor: 'var(--bg-surface-sunken)', color: 'var(--text-tertiary)', cursor: 'not-allowed' }
-              }
+              className={cn(
+                'px-6 py-2.5 rounded-full text-sm font-medium transition-all duration-200',
+                primaryAction.enabled
+                  ? 'bg-[var(--interactive-primary)] text-white hover:bg-[var(--interactive-primary-hover)]'
+                  : 'bg-[var(--bg-surface-sunken)] text-[var(--text-tertiary)] cursor-not-allowed'
+              )}
             >
               {primaryAction.label}
             </button>
@@ -336,13 +334,10 @@ export default function ReviewPage() {
 
       {/* Error display */}
       {mutationError && (
-        <div
-          className="p-4 flex items-center gap-3"
-          style={{ backgroundColor: 'var(--status-error-bg)', border: '1px solid var(--status-error)', borderRadius: 'var(--radius-lg)' }}
-        >
-          <AlertCircle className="w-5 h-5 shrink-0" style={{ color: 'var(--status-error)' }} />
-          <div className="flex-1 text-sm" style={{ color: 'var(--status-error)' }}>{mutationError}</div>
-          <button type="button" onClick={() => setMutationError(null)} style={{ color: 'var(--status-error)' }} className="hover:opacity-70">
+        <div className="p-4 flex items-center gap-3 bg-[var(--status-error-bg)] border border-[var(--status-error)] rounded-[var(--radius-lg)]">
+          <AlertCircle className="w-5 h-5 shrink-0 text-[var(--status-error)]" />
+          <div className="flex-1 text-sm text-[var(--status-error)]">{mutationError}</div>
+          <button type="button" onClick={() => setMutationError(null)} className="text-[var(--status-error)] hover:opacity-70">
             <XCircle className="w-4 h-4" />
           </button>
         </div>
@@ -350,14 +345,11 @@ export default function ReviewPage() {
 
       {/* Read-only banner for preparer in UNDER_REVIEW */}
       {currentState === 'UNDER_REVIEW' && isPreparer && (
-        <div
-          className="p-4 flex items-center gap-3"
-          style={{ backgroundColor: 'var(--status-warning-bg)', border: '1px solid var(--status-warning)', borderRadius: 'var(--radius-lg)' }}
-        >
-          <AlertCircle className="w-5 h-5 shrink-0" style={{ color: 'var(--status-warning)' }} />
+        <div className="p-4 flex items-center gap-3 bg-[var(--status-warning-bg)] border border-[var(--status-warning)] rounded-[var(--radius-lg)]">
+          <AlertCircle className="w-5 h-5 shrink-0 text-[var(--status-warning)]" />
           <div className="flex-1">
-            <div className="font-medium" style={{ color: 'var(--status-warning)' }}>Under Review</div>
-            <div className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
+            <div className="font-medium text-[var(--status-warning)]">Under Review</div>
+            <div className="text-sm mt-1 text-[var(--text-secondary)]">
               This period is currently under review. A reviewer will certify or send it back for corrections.
             </div>
           </div>
@@ -373,102 +365,84 @@ export default function ReviewPage() {
       {(currentState === 'IN_PROGRESS' || currentState === 'UNDER_REVIEW' || currentState === 'CERTIFIED') && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Financial Highlights */}
-          <div
-            className="p-6"
-            style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)' }}
-          >
-            <h2 className="text-lg font-display mb-4 flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+          <div className="p-6 bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] transition-shadow duration-300">
+            <h2 className="text-lg font-display mb-4 flex items-center gap-2 text-[var(--text-primary)]">
               <FileText className="w-5 h-5" />
               Financial Highlights
             </h2>
             <div className="space-y-3">
               <div className="flex justify-between items-center">
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Revenue</span>
+                <span className="text-sm text-[var(--text-secondary)]">Revenue</span>
                 <MoneyCell value={financialHighlights.revenue} showDollar />
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Gross Profit</span>
+                <span className="text-sm text-[var(--text-secondary)]">Gross Profit</span>
                 <MoneyCell value={financialHighlights.grossProfit} showDollar />
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Operating Income</span>
+                <span className="text-sm text-[var(--text-secondary)]">Operating Income</span>
                 <MoneyCell value={financialHighlights.operatingIncome} showDollar />
               </div>
-              <div
-                className="flex justify-between items-center pt-3"
-                style={{ borderTop: '1px solid var(--border-subtle)' }}
-              >
-                <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Net Income</span>
+              <div className="flex justify-between items-center pt-3 border-t border-[var(--border-subtle)]">
+                <span className="text-sm font-medium text-[var(--text-primary)]">Net Income</span>
                 <MoneyCell value={financialHighlights.netIncome} showDollar className="font-medium" />
               </div>
-              <div
-                className="flex justify-between items-center pt-3"
-                style={{ borderTop: '1px solid var(--border-subtle)' }}
-              >
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Total Assets</span>
+              <div className="flex justify-between items-center pt-3 border-t border-[var(--border-subtle)]">
+                <span className="text-sm text-[var(--text-secondary)]">Total Assets</span>
                 <MoneyCell value={financialHighlights.assets} showDollar />
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Total Liabilities</span>
+                <span className="text-sm text-[var(--text-secondary)]">Total Liabilities</span>
                 <MoneyCell value={financialHighlights.liabilities} showDollar />
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Total Equity</span>
+                <span className="text-sm text-[var(--text-secondary)]">Total Equity</span>
                 <MoneyCell value={financialHighlights.equity} showDollar />
               </div>
-              <div
-                className="flex justify-between items-center pt-3"
-                style={{ borderTop: '1px solid var(--border-subtle)' }}
-              >
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Cash &amp; Equivalents</span>
+              <div className="flex justify-between items-center pt-3 border-t border-[var(--border-subtle)]">
+                <span className="text-sm text-[var(--text-secondary)]">Cash &amp; Equivalents</span>
                 <MoneyCell value={financialHighlights.cash} showDollar />
               </div>
             </div>
           </div>
 
           {/* Activity Summary */}
-          <div
-            className="p-6"
-            style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)' }}
-          >
-            <h2 className="text-lg font-display mb-4 flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+          <div className="p-6 bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] transition-shadow duration-300">
+            <h2 className="text-lg font-display mb-4 flex items-center gap-2 text-[var(--text-primary)]">
               <CheckCircle2 className="w-5 h-5" />
               Activity Summary
             </h2>
             <div className="space-y-3">
               <div className="flex justify-between items-center">
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Journal Entries</span>
-                <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{activitySummary.adjustingEntries}</span>
+                <span className="text-sm text-[var(--text-secondary)]">Journal Entries</span>
+                <span className="text-sm font-medium text-[var(--text-primary)]">{activitySummary.adjustingEntries}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Reconciliations</span>
-                <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                <span className="text-sm text-[var(--text-secondary)]">Reconciliations</span>
+                <span className="text-sm font-medium text-[var(--text-primary)]">
                   {activitySummary.reconciliationsComplete} / {activitySummary.reconciliations}
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Variances</span>
-                <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                <span className="text-sm text-[var(--text-secondary)]">Variances</span>
+                <span className="text-sm font-medium text-[var(--text-primary)]">
                   {activitySummary.variancesExplained} / {activitySummary.variances} explained
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Evidence Files</span>
-                <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{activitySummary.evidenceFiles}</span>
+                <span className="text-sm text-[var(--text-secondary)]">Evidence Files</span>
+                <span className="text-sm font-medium text-[var(--text-primary)]">{activitySummary.evidenceFiles}</span>
               </div>
-              <div
-                className="pt-3 flex items-center gap-2"
-                style={{ borderTop: '1px solid var(--border-subtle)' }}
-              >
-                <Clock className="w-4 h-4" style={{ color: 'var(--text-tertiary)' }} />
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Duration</span>
-                <span className="text-sm font-medium ml-auto" style={{ color: 'var(--text-primary)' }}>{activitySummary.duration}</span>
+              <div className="pt-3 flex items-center gap-2 border-t border-[var(--border-subtle)]">
+                <Clock className="w-4 h-4 text-[var(--text-tertiary)]" />
+                <span className="text-sm text-[var(--text-secondary)]">Duration</span>
+                <span className="text-sm font-medium ml-auto text-[var(--text-primary)]">{activitySummary.duration}</span>
               </div>
               <div className="pt-2 flex items-start gap-2">
-                <Users className="w-4 h-4 mt-0.5" style={{ color: 'var(--text-tertiary)' }} />
+                <Users className="w-4 h-4 mt-0.5 text-[var(--text-tertiary)]" />
                 <div className="flex-1">
-                  <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Participants</span>
-                  <div className="text-sm mt-1" style={{ color: 'var(--text-primary)' }}>
+                  <span className="text-sm text-[var(--text-secondary)]">Participants</span>
+                  <div className="text-sm mt-1 text-[var(--text-primary)]">
                     {activitySummary.participants.join(', ')}
                   </div>
                 </div>
@@ -477,11 +451,8 @@ export default function ReviewPage() {
           </div>
 
           {/* Evidence Manifest */}
-          <div
-            className="p-6"
-            style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)' }}
-          >
-            <h2 className="text-lg font-display mb-4 flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+          <div className="p-6 bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] transition-shadow duration-300">
+            <h2 className="text-lg font-display mb-4 flex items-center gap-2 text-[var(--text-primary)]">
               <Hash className="w-5 h-5" />
               Evidence Manifest
             </h2>
@@ -489,15 +460,14 @@ export default function ReviewPage() {
               {evidenceManifest.map((evidence, idx) => (
                 <div
                   key={idx}
-                  className="pb-3 last:pb-0"
-                  style={{ borderBottom: idx < evidenceManifest.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}
+                  className={cn('pb-3 last:pb-0', idx < evidenceManifest.length - 1 && 'border-b border-[var(--border-subtle)]')}
                 >
                   <div className="flex items-start justify-between gap-2 mb-1">
-                    <span className="text-sm font-medium break-words flex-1" style={{ color: 'var(--text-primary)' }}>{evidence.filename}</span>
-                    <span className="text-xs shrink-0" style={{ color: 'var(--text-tertiary)' }}>{evidence.size}</span>
+                    <span className="text-sm font-medium break-words flex-1 text-[var(--text-primary)]">{evidence.filename}</span>
+                    <span className="text-xs shrink-0 text-[var(--text-tertiary)]">{evidence.size}</span>
                   </div>
-                  <div className="text-xs font-mono break-all" style={{ color: 'var(--text-secondary)' }}>
-                    SHA-256: {evidence.hash.slice(0, 16)}...
+                  <div className="text-xs font-mono break-all tracking-wider text-[var(--text-secondary)] bg-[var(--bg-surface-sunken)] px-2 py-1 rounded-[var(--radius-sm)]">
+                    SHA-256: {evidence.hash.slice(0, 32)}{evidence.hash.length > 32 ? '...' : ''}
                   </div>
                 </div>
               ))}
@@ -508,12 +478,9 @@ export default function ReviewPage() {
 
       {/* Board Package (visible in CERTIFIED and LOCKED) */}
       {isCertifiedOrLocked && (
-        <div
-          className="p-6"
-          style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)' }}
-        >
+        <div className="p-6 bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-[var(--radius-lg)]">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-display flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+            <h2 className="text-lg font-display flex items-center gap-2 text-[var(--text-primary)]">
               <BookOpen className="w-5 h-5" />
               Board Package
             </h2>
@@ -521,8 +488,7 @@ export default function ReviewPage() {
               <select
                 value={boardPeriodType}
                 onChange={(e) => setBoardPeriodType(e.target.value as 'monthly' | 'QTD' | 'YTD')}
-                className="text-sm px-2 py-1"
-                style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)' }}
+                className="text-sm px-2 py-1 border border-[var(--border-default)] rounded-[var(--radius-md)] transition-colors focus:border-[var(--border-focus)] focus:outline-none"
               >
                 <option value="monthly">Monthly</option>
                 <option value="QTD">Quarter-to-Date</option>
@@ -554,15 +520,14 @@ export default function ReviewPage() {
                     setBoardExporting(false);
                   }
                 }}
-                className="px-3 py-1.5 text-sm flex items-center gap-1.5 disabled:opacity-50"
-                style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', color: 'var(--text-secondary)' }}
+                className="px-3 py-1.5 text-sm flex items-center gap-1.5 disabled:opacity-50 border border-[var(--border-default)] rounded-[var(--radius-md)] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-table-row-hover)]"
               >
                 {boardExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                 {boardExporting ? 'Exporting\u2026' : 'Export'}
               </button>
             </div>
           </div>
-          {boardLoading && <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Loading board package...</p>}
+          {boardLoading && <p className="text-sm text-[var(--text-secondary)]">Loading board package...</p>}
           {boardPackage && (
             <div className="space-y-4">
               {/* Key Metrics */}
@@ -573,20 +538,20 @@ export default function ReviewPage() {
                     className="min-w-[140px] p-3"
                     style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)' }}
                   >
-                    <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{m.label}</div>
-                    <div className="text-lg font-medium" style={{ color: 'var(--text-primary)' }}>{m.value}</div>
+                    <div className="text-xs text-[var(--text-secondary)]">{m.label}</div>
+                    <div className="text-lg font-medium text-[var(--text-primary)]">{m.value}</div>
                   </div>
                 ))}
               </div>
               {/* Validation */}
               {(boardPackage.validationResults ?? []).length > 0 && (
                 <div className="space-y-1">
-                  <div className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Validation</div>
+                  <div className="text-xs font-medium uppercase tracking-wide text-[var(--text-secondary)]">Validation</div>
                   {(boardPackage.validationResults ?? []).map((v) => (
                     <div key={v.check} className="flex items-center gap-2 text-sm">
                       {v.passed
-                        ? <CheckCircle2 className="w-4 h-4" style={{ color: 'var(--status-success)' }} />
-                        : <XCircle className="w-4 h-4" style={{ color: 'var(--status-error)' }} />
+                        ? <CheckCircle2 className="w-4 h-4 text-[var(--status-success)]" />
+                        : <XCircle className="w-4 h-4 text-[var(--status-error)]" />
                       }
                       <span style={{ color: v.passed ? 'var(--text-secondary)' : 'var(--status-error)' }}>{v.check}</span>
                     </div>
@@ -596,16 +561,16 @@ export default function ReviewPage() {
               {/* Material Variances */}
               {(boardPackage.materialVariances ?? []).length > 0 && (
                 <div>
-                  <div className="text-xs font-medium uppercase tracking-wide mb-2" style={{ color: 'var(--text-secondary)' }}>Material Variances ({(boardPackage.materialVariances ?? []).length})</div>
+                  <div className="text-xs font-medium uppercase tracking-wide mb-2 text-[var(--text-secondary)]">Material Variances ({(boardPackage.materialVariances ?? []).length})</div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm border-collapse">
                       <thead>
                         <tr style={{ borderBottom: '1px solid var(--border-default)' }}>
-                          <th className="text-left py-1.5 px-2 font-medium" style={{ color: 'var(--text-secondary)' }}>Line Item</th>
-                          <th className="text-right py-1.5 px-2 font-medium" style={{ color: 'var(--text-secondary)' }}>Current</th>
-                          <th className="text-right py-1.5 px-2 font-medium" style={{ color: 'var(--text-secondary)' }}>Prior</th>
-                          <th className="text-right py-1.5 px-2 font-medium" style={{ color: 'var(--text-secondary)' }}>Change</th>
-                          <th className="text-left py-1.5 px-2 font-medium" style={{ color: 'var(--text-secondary)' }}>Explanation</th>
+                          <th className="text-left py-1.5 px-2 font-medium text-[var(--text-secondary)]">Line Item</th>
+                          <th className="text-right py-1.5 px-2 font-medium text-[var(--text-secondary)]">Current</th>
+                          <th className="text-right py-1.5 px-2 font-medium text-[var(--text-secondary)]">Prior</th>
+                          <th className="text-right py-1.5 px-2 font-medium text-[var(--text-secondary)]">Change</th>
+                          <th className="text-left py-1.5 px-2 font-medium text-[var(--text-secondary)]">Explanation</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -615,7 +580,7 @@ export default function ReviewPage() {
                             <td className="py-1.5 px-2 text-right font-mono">{mv.currentAmount}</td>
                             <td className="py-1.5 px-2 text-right font-mono">{mv.priorAmount}</td>
                             <td className="py-1.5 px-2 text-right font-mono">{mv.changeAmount}</td>
-                            <td className="py-1.5 px-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{mv.explanation ?? '\u2014'}</td>
+                            <td className="py-1.5 px-2 text-xs text-[var(--text-secondary)]">{mv.explanation ?? '\u2014'}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -624,7 +589,7 @@ export default function ReviewPage() {
                 </div>
               )}
               {boardPackage.cumulativeNote && (
-                <p className="text-xs italic" style={{ color: 'var(--text-tertiary)' }}>{boardPackage.cumulativeNote}</p>
+                <p className="text-xs italic text-[var(--text-tertiary)]">{boardPackage.cumulativeNote}</p>
               )}
             </div>
           )}
@@ -640,8 +605,7 @@ export default function ReviewPage() {
               <button
                 type="button"
                 onClick={() => setShowReopenDialog(true)}
-                className="px-4 py-2 text-sm"
-                style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)' }}
+                className="px-4 py-2 text-sm rounded-[var(--radius-md)] border border-[var(--status-warning)] text-[var(--status-warning)] transition-colors hover:bg-[var(--status-warning-bg)]"
               >
                 Reopen Period
               </button>
@@ -681,32 +645,31 @@ export default function ReviewPage() {
           >
             {certifyStep === 'input' && (
               <>
-                <h3 className="font-display text-lg mb-4" style={{ color: 'var(--cert-primary)' }}>Certify {session?.periodLabel ?? 'Period'}</h3>
+                <h3 className="font-display text-lg mb-4 text-[var(--cert-primary)]">Certify {session?.periodLabel ?? 'Period'}</h3>
                 <div
                   className="p-4 mb-4 text-sm space-y-2"
                   style={{ backgroundColor: 'var(--bg-certified)', border: '1px solid var(--cert-primary)', borderRadius: 'var(--radius-md)', opacity: 0.9 }}
                 >
-                  <p className="font-medium" style={{ color: 'var(--text-primary)' }}>By certifying, you attest that:</p>
-                  <ul className="list-disc list-inside space-y-1" style={{ color: 'var(--text-secondary)' }}>
+                  <p className="font-medium text-[var(--text-primary)]">By certifying, you attest that:</p>
+                  <ul className="list-disc list-inside space-y-1 text-[var(--text-secondary)]">
                     <li>All financial data has been reviewed</li>
                     <li>All adjustments are supported and approved</li>
                     <li>All material variances have been explained</li>
                     <li>The financial statements are complete and accurate</li>
                   </ul>
-                  <p className="text-xs mt-2" style={{ color: 'var(--text-tertiary)' }}>
+                  <p className="text-xs mt-2 text-[var(--text-tertiary)]">
                     This will create an immutable, cryptographically signed certification artifact. The system will re-validate all gates at the moment of certification.
                   </p>
                 </div>
-                <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
-                  Type <strong className="font-mono" style={{ color: 'var(--text-primary)' }}>CERTIFY</strong> to confirm:
+                <p className="text-sm mb-3 text-[var(--text-secondary)]">
+                  Type <strong className="font-mono text-[var(--text-primary)]">CERTIFY</strong> to confirm:
                 </p>
                 <input
                   type="text"
                   value={certifyInput}
                   onChange={(e) => setCertifyInput(e.target.value)}
                   placeholder="Type CERTIFY"
-                  className="w-full px-4 py-2 mb-4 font-mono"
-                  style={{ borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-surface)', color: 'var(--text-primary)' }}
+                  className="w-full px-4 py-2 mb-4 font-mono rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] transition-colors duration-200 focus:border-[var(--cert-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--cert-primary)]/20"
                   autoFocus
                 />
                 <div className="flex justify-end gap-3">
@@ -716,8 +679,7 @@ export default function ReviewPage() {
                       setShowCertifyDialog(false);
                       setCertifyInput('');
                     }}
-                    className="px-4 py-2 text-sm font-medium"
-                    style={{ borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)' }}
+                    className="px-4 py-2 text-sm font-medium rounded-[var(--radius-md)] border border-[var(--border-default)] transition-colors hover:bg-[var(--bg-table-row-hover)]"
                   >
                     Cancel
                   </button>
@@ -725,11 +687,14 @@ export default function ReviewPage() {
                     type="button"
                     onClick={handleCertify}
                     disabled={certifyInput !== 'CERTIFY'}
-                    className="px-6 py-2 text-sm font-medium"
-                    style={certifyInput === 'CERTIFY'
-                      ? { borderRadius: 'var(--radius-md)', backgroundColor: 'var(--cert-primary)', color: 'white' }
-                      : { borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-surface-sunken)', color: 'var(--text-tertiary)', cursor: 'not-allowed' }
-                    }
+                    className={cn(
+                      'px-6 py-2 text-sm font-medium rounded-[var(--radius-md)] transition-all duration-300',
+                      certifyInput === 'CERTIFY'
+                        ? 'bg-[var(--cert-primary)] text-white opacity-100 shadow-[0_0_12px_rgba(20,83,45,0.3)]'
+                        : 'bg-[var(--bg-surface-sunken)] text-[var(--text-tertiary)] cursor-not-allowed',
+                      certifyInput.length > 0 && certifyInput !== 'CERTIFY' && `opacity-${Math.min(30 + Math.round((certifyInput.length / 7) * 70), 70)}`
+                    )}
+                    style={certifyInput.length > 0 && certifyInput !== 'CERTIFY' ? { opacity: 0.3 + (certifyInput.length / 7) * 0.7 } : undefined}
                   >
                     Certify {session?.periodLabel ?? 'Period'}
                   </button>
@@ -742,8 +707,8 @@ export default function ReviewPage() {
                   className="animate-spin rounded-full h-12 w-12 mx-auto mb-4"
                   style={{ borderBottom: '2px solid var(--interactive-primary)' }}
                 />
-                <p style={{ color: 'var(--text-secondary)' }}>Certifying period...</p>
-                <p className="text-sm mt-2" style={{ color: 'var(--text-tertiary)' }}>Validating ties and generating certification artifact</p>
+                <p className="text-[var(--text-secondary)]">Certifying period...</p>
+                <p className="text-sm mt-2 text-[var(--text-tertiary)]">Validating ties and generating certification artifact</p>
               </div>
             )}
             {certifyStep === 'complete' && (() => {
@@ -772,134 +737,112 @@ export default function ReviewPage() {
                   <button
                     type="button"
                     onClick={closeCertifyOverlay}
-                    className="absolute top-0 right-0 p-1"
-                    style={{ color: 'var(--text-tertiary)' }}
+                    className="absolute top-0 right-0 p-1 text-[var(--text-tertiary)]"
                     aria-label="Close"
                   >
                     <X className="w-5 h-5" />
                   </button>
 
-                  {/* Post-certification gold banner area */}
+                  {/* Post-certification banner */}
                   <div className="text-center pt-4 pb-6">
-                    {/* Seal: 64px circle with double-ring gold border */}
                     <div
-                      className="flex items-center justify-center mx-auto mb-4"
-                      style={{
-                        width: 64,
-                        height: 64,
-                        borderRadius: '50%',
-                        border: '3px double var(--cert-primary)',
-                        backgroundColor: 'var(--status-success-bg)',
-                      }}
+                      className="flex items-center justify-center mx-auto mb-4 w-16 h-16 rounded-full bg-[var(--status-success-bg)] animate-in zoom-in duration-300"
+                      style={{ border: '3px double var(--cert-primary)', boxShadow: '0 0 20px rgba(20,83,45,0.15)' }}
                     >
-                      <CheckCircle2 className="w-10 h-10" style={{ color: 'var(--status-success)' }} />
+                      <CheckCircle2 className="w-10 h-10 text-[var(--status-success)]" />
                     </div>
-                    <h2 className="text-3xl font-display font-bold mb-1" style={{ color: 'var(--status-success)' }}>CERTIFIED</h2>
-                    <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{session?.entityName ?? ''}</p>
-                    <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{session?.periodLabel ?? ''}</p>
-                    <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>{certifier} &middot; {certifiedAt}</p>
+                    <h2 className="text-3xl font-display font-bold mb-1 text-[var(--status-success)]">CERTIFIED</h2>
+                    <p className="font-medium text-[var(--text-primary)]">{session?.entityName ?? ''}</p>
+                    <p className="text-sm text-[var(--text-secondary)]">{session?.periodLabel ?? ''}</p>
+                    <p className="text-xs mt-1 text-[var(--text-tertiary)]">{certifier} &middot; {certifiedAt}</p>
                   </div>
 
                   {/* Certification attestation text */}
                   <div
-                    className="px-6 py-4 mb-4"
-                    style={{
-                      backgroundColor: 'var(--bg-certified)',
-                      borderRadius: 'var(--radius-md)',
-                      fontFamily: '"Source Serif 4", serif',
-                      fontSize: '15px',
-                      lineHeight: 1.65,
-                      color: 'var(--cert-primary)',
-                    }}
+                    className="px-6 py-4 mb-4 rounded-[var(--radius-md)] bg-[var(--bg-certified)] border border-[var(--cert-border)] text-[var(--cert-primary)]"
+                    style={{ fontFamily: '"Source Serif 4", serif', fontSize: '15px', lineHeight: 1.65 }}
                   >
                     I hereby certify that the financial statements for {session?.entityName ?? 'this entity'} for the period {session?.periodLabel ?? ''} have been prepared in accordance with applicable standards, are free from material misstatement, and present a true and fair view of the financial position and results of operations.
                   </div>
 
-                  <div className="pt-4 pb-4 space-y-3" style={{ borderTop: '1px solid var(--border-default)' }}>
-                    <h3 className="text-xs font-medium uppercase tracking-wide flex items-center gap-1.5" style={{ color: 'var(--text-secondary)' }}>
+                  <div className="pt-4 pb-4 space-y-3 border-t border-[var(--border-default)]">
+                    <h3 className="text-xs font-medium uppercase tracking-wide flex items-center gap-1.5 text-[var(--text-secondary)]">
                       <Shield className="w-3.5 h-3.5" /> Digital Signatures
                     </h3>
-                    <div
-                      className="flex items-center justify-between px-3 py-2"
-                      style={{ backgroundColor: 'var(--bg-surface-sunken)', borderRadius: 'var(--radius-md)' }}
-                    >
+                    <div className="flex items-center justify-between px-3 py-2.5 bg-[var(--bg-surface-sunken)] rounded-[var(--radius-md)]">
                       <div className="min-w-0">
-                        <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>ed25519:</span>
-                        <span className="text-sm font-mono ml-1.5" style={{ color: 'var(--text-secondary)' }}>{sig.slice(0, 16)}...</span>
+                        <span className="text-xs text-[var(--text-tertiary)]">ed25519:</span>
+                        <span className="text-sm font-mono tracking-wider ml-2 text-[var(--text-secondary)]">{sig.slice(0, 24)}...</span>
                       </div>
-                      <button type="button" onClick={() => copyToClipboard(sig, 'sig')} className="shrink-0 p-1" style={{ color: 'var(--text-tertiary)' }} title="Copy signature">
-                        {copiedField === 'sig' ? <Check className="w-4 h-4" style={{ color: 'var(--status-success)' }} /> : <Copy className="w-4 h-4" />}
+                      <button type="button" onClick={() => copyToClipboard(sig, 'sig')} className="shrink-0 p-1 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors" title="Copy signature">
+                        {copiedField === 'sig' ? <Check className="w-4 h-4 text-[var(--status-success)]" /> : <Copy className="w-4 h-4" />}
                       </button>
                     </div>
-                    <div
-                      className="flex items-center justify-between px-3 py-2"
-                      style={{ backgroundColor: 'var(--bg-surface-sunken)', borderRadius: 'var(--radius-md)' }}
-                    >
+                    <div className="flex items-center justify-between px-3 py-2.5 bg-[var(--bg-surface-sunken)] rounded-[var(--radius-md)]">
                       <div className="min-w-0">
-                        <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>sha256:</span>
-                        <span className="text-sm font-mono ml-1.5" style={{ color: 'var(--text-secondary)' }}>{hash.slice(0, 16)}...</span>
+                        <span className="text-xs text-[var(--text-tertiary)]">sha256:</span>
+                        <span className="text-sm font-mono tracking-wider ml-2 text-[var(--text-secondary)]">{hash.slice(0, 24)}...</span>
                       </div>
-                      <button type="button" onClick={() => copyToClipboard(hash, 'hash')} className="shrink-0 p-1" style={{ color: 'var(--text-tertiary)' }} title="Copy hash">
-                        {copiedField === 'hash' ? <Check className="w-4 h-4" style={{ color: 'var(--status-success)' }} /> : <Copy className="w-4 h-4" />}
+                      <button type="button" onClick={() => copyToClipboard(hash, 'hash')} className="shrink-0 p-1 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors" title="Copy hash">
+                        {copiedField === 'hash' ? <Check className="w-4 h-4 text-[var(--status-success)]" /> : <Copy className="w-4 h-4" />}
                       </button>
                     </div>
                     {certArtifact?.id && (
-                      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Artifact ID: <span className="font-mono">{certArtifact.id}</span></p>
+                      <p className="text-xs text-[var(--text-tertiary)]">Artifact ID: <span className="font-mono tracking-wide">{certArtifact.id}</span></p>
                     )}
                   </div>
 
                   <div className="pt-4 pb-4" style={{ borderTop: '1px solid var(--border-default)' }}>
-                    <h3 className="text-xs font-medium uppercase tracking-wide mb-3" style={{ color: 'var(--text-secondary)' }}>Summary</h3>
+                    <h3 className="text-xs font-medium uppercase tracking-wide mb-3 text-[var(--text-secondary)]">Summary</h3>
                     <div className="grid grid-cols-3 gap-3">
                       <div
                         className="text-center p-2"
                         style={{ backgroundColor: 'var(--bg-surface-sunken)', borderRadius: 'var(--radius-md)' }}
                       >
-                        <div className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{gatesWithTies.filter((g) => g.passing).length}/{gatesWithTies.length}</div>
-                        <div className="text-xs uppercase" style={{ color: 'var(--text-tertiary)' }}>Gates</div>
+                        <div className="text-lg font-bold text-[var(--text-primary)]">{gatesWithTies.filter((g) => g.passing).length}/{gatesWithTies.length}</div>
+                        <div className="text-xs uppercase text-[var(--text-tertiary)]">Gates</div>
                       </div>
                       <div
                         className="text-center p-2"
                         style={{ backgroundColor: 'var(--bg-surface-sunken)', borderRadius: 'var(--radius-md)' }}
                       >
-                        <div className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>4</div>
-                        <div className="text-xs uppercase" style={{ color: 'var(--text-tertiary)' }}>Statements</div>
+                        <div className="text-lg font-bold text-[var(--text-primary)]">4</div>
+                        <div className="text-xs uppercase text-[var(--text-tertiary)]">Statements</div>
                       </div>
                       <div
                         className="text-center p-2"
                         style={{ backgroundColor: 'var(--bg-surface-sunken)', borderRadius: 'var(--radius-md)' }}
                       >
-                        <div className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{reconsDone}/{reconciliations.length}</div>
-                        <div className="text-xs uppercase" style={{ color: 'var(--text-tertiary)' }}>Recons</div>
+                        <div className="text-lg font-bold text-[var(--text-primary)]">{reconsDone}/{reconciliations.length}</div>
+                        <div className="text-xs uppercase text-[var(--text-tertiary)]">Recons</div>
                       </div>
                       <div
                         className="text-center p-2"
                         style={{ backgroundColor: 'var(--bg-surface-sunken)', borderRadius: 'var(--radius-md)' }}
                       >
-                        <div className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{journalEntries.length}</div>
-                        <div className="text-xs uppercase" style={{ color: 'var(--text-tertiary)' }}>AJEs</div>
+                        <div className="text-lg font-bold text-[var(--text-primary)]">{journalEntries.length}</div>
+                        <div className="text-xs uppercase text-[var(--text-tertiary)]">AJEs</div>
                       </div>
                       <div
                         className="text-center p-2"
                         style={{ backgroundColor: 'var(--bg-surface-sunken)', borderRadius: 'var(--radius-md)' }}
                       >
-                        <div className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{variancesExplained}/{variances.filter((v) => (v as { isMaterial?: boolean }).isMaterial).length}</div>
-                        <div className="text-xs uppercase" style={{ color: 'var(--text-tertiary)' }}>Variances</div>
+                        <div className="text-lg font-bold text-[var(--text-primary)]">{variancesExplained}/{variances.filter((v) => (v as { isMaterial?: boolean }).isMaterial).length}</div>
+                        <div className="text-xs uppercase text-[var(--text-tertiary)]">Variances</div>
                       </div>
                       <div
                         className="text-center p-2"
                         style={{ backgroundColor: 'var(--bg-surface-sunken)', borderRadius: 'var(--radius-md)' }}
                       >
-                        <div className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{manifestData?.totalFiles ?? 0}</div>
-                        <div className="text-xs uppercase" style={{ color: 'var(--text-tertiary)' }}>Evidence</div>
+                        <div className="text-lg font-bold text-[var(--text-primary)]">{manifestData?.totalFiles ?? 0}</div>
+                        <div className="text-xs uppercase text-[var(--text-tertiary)]">Evidence</div>
                       </div>
                     </div>
                   </div>
 
                   {/* A = L + E verification badge */}
                   <div
-                    className="flex items-center justify-center gap-2 py-2 mb-3 text-sm font-medium"
-                    style={{ backgroundColor: 'var(--status-success-bg)', color: 'var(--status-success)', borderRadius: 'var(--radius-md)' }}
+                    className="flex items-center justify-center gap-2 py-2 mb-3 text-sm font-medium bg-[var(--status-success-bg)] text-[var(--status-success)] rounded-[var(--radius-md)]"
                   >
                     <CheckCircle2 className="w-4 h-4" />
                     A = L + E verified
@@ -929,8 +872,7 @@ export default function ReviewPage() {
                     {roleCanLock && <button
                       type="button"
                       onClick={() => { closeCertifyOverlay(); setShowLockDialog(true); }}
-                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium"
-                      style={{ borderRadius: 'var(--radius-md)', border: '1px solid var(--status-warning)', color: 'var(--status-warning)' }}
+                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-[var(--radius-md)] bg-[var(--cert-primary)] text-white transition-colors hover:bg-[var(--cert-secondary)]"
                     >
                       <Lock className="w-4 h-4" /> Lock Period
                     </button>}
@@ -939,8 +881,7 @@ export default function ReviewPage() {
                         <a
                           href={`/close/${sessionId}/review`}
                           onClick={closeCertifyOverlay}
-                          className="text-xs inline-flex items-center gap-1 hover:underline"
-                          style={{ color: 'var(--interactive-primary)' }}
+                          className="text-xs inline-flex items-center gap-1 hover:underline text-[var(--interactive-primary)]"
                         >
                           <ExternalLink className="w-3 h-3" /> Verify certification
                         </a>
@@ -952,9 +893,9 @@ export default function ReviewPage() {
             })()}
             {certifyStep === 'error' && (
               <div className="py-6">
-                <XCircle className="w-12 h-12 mx-auto mb-4" style={{ color: 'var(--status-error)' }} />
-                <p className="font-medium text-center mb-2" style={{ color: 'var(--status-error)' }}>Certification failed</p>
-                <p className="text-sm text-center" style={{ color: 'var(--text-secondary)' }}>{mutationError}</p>
+                <XCircle className="w-12 h-12 mx-auto mb-4 text-[var(--status-error)]" />
+                <p className="font-medium text-center mb-2 text-[var(--status-error)]">Certification failed</p>
+                <p className="text-sm text-center text-[var(--text-secondary)]">{mutationError}</p>
                 <div className="flex justify-center mt-4">
                   <button
                     type="button"
@@ -985,8 +926,8 @@ export default function ReviewPage() {
             style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)' }}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="font-display text-lg mb-2" style={{ color: 'var(--text-primary)' }}>Send Back for Corrections</h3>
-            <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
+            <h3 className="font-display text-lg mb-2 text-[var(--text-primary)]">Send Back for Corrections</h3>
+            <p className="text-sm mb-4 text-[var(--text-secondary)]">
               Provide a reason for sending this period back to the preparer.
             </p>
             <textarea
@@ -994,8 +935,7 @@ export default function ReviewPage() {
               onChange={(e) => setRejectReason(e.target.value)}
               placeholder="Enter reason..."
               rows={4}
-              className="w-full px-4 py-2 mb-4 resize-none"
-              style={{ borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-surface)', color: 'var(--text-primary)' }}
+              className="w-full px-4 py-2 mb-4 resize-none rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] transition-colors focus:border-[var(--border-focus)] focus:outline-none"
               autoFocus
             />
             <div className="flex justify-end gap-3">
@@ -1005,8 +945,7 @@ export default function ReviewPage() {
                   setShowRejectDialog(false);
                   setRejectReason('');
                 }}
-                className="px-4 py-2 text-sm font-medium"
-                style={{ borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)' }}
+                className="px-4 py-2 text-sm font-medium rounded-[var(--radius-md)] border border-[var(--border-default)] transition-colors hover:bg-[var(--bg-table-row-hover)]"
               >
                 Cancel
               </button>
@@ -1014,11 +953,12 @@ export default function ReviewPage() {
                 type="button"
                 onClick={handleReject}
                 disabled={rejectReason.trim().length < 10 || advanceMutation.isPending}
-                className="px-4 py-2 text-sm font-medium"
-                style={rejectReason.trim().length >= 10
-                  ? { borderRadius: 'var(--radius-md)', backgroundColor: 'var(--status-error)', color: 'white' }
-                  : { borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-surface-sunken)', color: 'var(--text-tertiary)', cursor: 'not-allowed' }
-                }
+                className={cn(
+                  'px-4 py-2 text-sm font-medium rounded-[var(--radius-md)] transition-all duration-200',
+                  rejectReason.trim().length >= 10
+                    ? 'bg-[var(--status-error)] text-white'
+                    : 'bg-[var(--bg-surface-sunken)] text-[var(--text-tertiary)] cursor-not-allowed'
+                )}
               >
                 {advanceMutation.isPending ? 'Sending...' : 'Send Back'}
               </button>
@@ -1055,8 +995,8 @@ export default function ReviewPage() {
             style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)' }}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="font-display text-lg mb-2" style={{ color: 'var(--text-primary)' }}>Reopen Period</h3>
-            <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
+            <h3 className="font-display text-lg mb-2 text-[var(--text-primary)]">Reopen Period</h3>
+            <p className="text-sm mb-4 text-[var(--text-secondary)]">
               Type <strong className="font-mono">REOPEN</strong> and provide a reason to reopen this certified period.
             </p>
             <input
@@ -1064,8 +1004,7 @@ export default function ReviewPage() {
               value={reopenInput}
               onChange={(e) => setReopenInput(e.target.value)}
               placeholder="Type REOPEN"
-              className="w-full px-4 py-2 mb-3 font-mono"
-              style={{ borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-surface)', color: 'var(--text-primary)' }}
+              className="w-full px-4 py-2 mb-3 font-mono rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] transition-colors focus:border-[var(--status-warning)] focus:outline-none"
               autoFocus
             />
             <textarea
@@ -1073,8 +1012,7 @@ export default function ReviewPage() {
               onChange={(e) => setReopenReason(e.target.value)}
               placeholder="Enter reason for reopening..."
               rows={3}
-              className="w-full px-4 py-2 mb-4 resize-none"
-              style={{ borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)', backgroundColor: 'var(--bg-surface)', color: 'var(--text-primary)' }}
+              className="w-full px-4 py-2 mb-4 resize-none rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] transition-colors focus:border-[var(--border-focus)] focus:outline-none"
             />
             <div className="flex justify-end gap-3">
               <button
@@ -1084,8 +1022,7 @@ export default function ReviewPage() {
                   setReopenInput('');
                   setReopenReason('');
                 }}
-                className="px-4 py-2 text-sm font-medium"
-                style={{ borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)' }}
+                className="px-4 py-2 text-sm font-medium rounded-[var(--radius-md)] border border-[var(--border-default)] transition-colors hover:bg-[var(--bg-table-row-hover)]"
               >
                 Cancel
               </button>
@@ -1093,11 +1030,12 @@ export default function ReviewPage() {
                 type="button"
                 onClick={handleReopen}
                 disabled={reopenInput !== 'REOPEN' || reopenReason.trim().length < 10 || reopenMutation.isPending}
-                className="px-4 py-2 text-sm font-medium"
-                style={reopenInput === 'REOPEN' && reopenReason.trim()
-                  ? { borderRadius: 'var(--radius-md)', backgroundColor: 'var(--status-error)', color: 'white' }
-                  : { borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-surface-sunken)', color: 'var(--text-tertiary)', cursor: 'not-allowed' }
-                }
+                className={cn(
+                  'px-4 py-2 text-sm font-medium rounded-[var(--radius-md)] transition-all duration-200',
+                  reopenInput === 'REOPEN' && reopenReason.trim()
+                    ? 'bg-[var(--status-warning)] text-white'
+                    : 'bg-[var(--bg-surface-sunken)] text-[var(--text-tertiary)] cursor-not-allowed'
+                )}
               >
                 Reopen
               </button>
@@ -1108,14 +1046,11 @@ export default function ReviewPage() {
 
       {/* Reviewer actions in UNDER_REVIEW */}
       {currentState === 'UNDER_REVIEW' && roleCanCertify && (
-        <div
-          className="p-4"
-          style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)' }}
-        >
+        <div className="p-4 bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-[var(--radius-lg)]">
           <div className="flex items-center justify-between">
             <div>
-              <div className="font-medium" style={{ color: 'var(--text-primary)' }}>Reviewer Actions</div>
-              <div className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
+              <div className="font-medium text-[var(--text-primary)]">Reviewer Actions</div>
+              <div className="text-sm mt-1 text-[var(--text-secondary)]">
                 Certify this period or send it back for corrections
               </div>
             </div>
@@ -1123,8 +1058,7 @@ export default function ReviewPage() {
               <button
                 type="button"
                 onClick={() => setShowRejectDialog(true)}
-                className="px-4 py-2 text-sm flex items-center gap-2"
-                style={{ borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)' }}
+                className="px-4 py-2 text-sm flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--status-warning)] text-[var(--status-warning)] transition-colors hover:bg-[var(--status-warning-bg)]"
               >
                 <XCircle className="w-4 h-4" />
                 Send Back
@@ -1132,8 +1066,7 @@ export default function ReviewPage() {
               <button
                 type="button"
                 onClick={() => setShowCertifyDialog(true)}
-                className="px-4 py-2 text-sm flex items-center gap-2"
-                style={{ borderRadius: 'var(--radius-md)', backgroundColor: 'var(--interactive-primary)', color: 'white' }}
+                className="px-4 py-2 text-sm flex items-center gap-2 rounded-[var(--radius-md)] bg-[var(--cert-primary)] text-white transition-colors hover:bg-[var(--cert-secondary)]"
               >
                 <CheckCircle2 className="w-4 h-4" />
                 Certify

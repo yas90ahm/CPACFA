@@ -2,9 +2,17 @@
 
 import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useAuth } from '@/lib/auth';
 import { getDefaultLandingPage } from '@/lib/permissions';
-import { Eye, EyeOff, AlertCircle, Shield, Lock, CheckCircle, Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Eye, EyeOff, AlertCircle, Shield, Lock, CheckCircle, Loader2, ChevronDown } from 'lucide-react';
+
+const badges = [
+  { icon: Shield, label: 'SOC 2 Type II' },
+  { icon: Lock, label: '256-bit Encryption' },
+  { icon: CheckCircle, label: 'AICPA Compliant' },
+] as const;
 
 export default function LoginPage() {
   const { login, token, user, isLoading: authLoading } = useAuth();
@@ -15,24 +23,13 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // Already authenticated — redirect away from login
   if (!authLoading && token) {
     router.replace(getDefaultLandingPage(user?.role ?? 'controller'));
     return (
-      <div
-        style={{
-          minHeight: '100vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: 'var(--bg-base)',
-        }}
-      >
-        <Loader2
-          style={{ width: 32, height: 32, color: 'var(--interactive-primary)' }}
-          className="animate-spin"
-        />
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg-base)' }}>
+        <Loader2 className="w-8 h-8 animate-spin" style={{ color: 'var(--interactive-primary)' }} />
       </div>
     );
   }
@@ -51,125 +48,60 @@ export default function LoginPage() {
   };
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        minHeight: '100vh',
-        overflow: 'hidden',
-      }}
-    >
-      {/* Left Panel — Brand */}
+    <div className="flex min-h-screen overflow-hidden">
+      {/* Left Panel -- Brand */}
       <div
-        style={{
-          width: '55%',
-          backgroundColor: 'var(--bg-nav)',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          padding: '0 80px',
-          flexShrink: 0,
-        }}
+        className="hidden lg:flex w-[55%] flex-col justify-center px-20 shrink-0"
+        style={{ backgroundColor: 'var(--bg-nav)' }}
       >
-        <h1
-          style={{
-            fontSize: 42,
-            fontWeight: 700,
-            letterSpacing: '0.12em',
-            color: 'white',
-            textTransform: 'uppercase',
-            fontFamily: 'Inter, sans-serif',
-            margin: 0,
-            lineHeight: 1,
-          }}
-        >
+        <h1 className="text-[2.5rem] font-semibold tracking-[0.12em] uppercase leading-none text-white">
           SABIT
         </h1>
         <p
-          style={{
-            fontSize: 16,
-            fontWeight: 400,
-            letterSpacing: '0.08em',
-            color: 'var(--text-inverse-secondary)',
-            textTransform: 'uppercase',
-            margin: '12px 0 0 0',
-            lineHeight: 1.4,
-          }}
+          className="text-base tracking-[0.08em] uppercase mt-3 leading-relaxed"
+          style={{ color: 'var(--text-inverse-secondary)' }}
         >
           Financial Close Engine
         </p>
 
-        {/* Separator line */}
-        <div
-          style={{
-            width: 80,
-            height: 1,
-            backgroundColor: 'white',
-            opacity: 0.4,
-            marginTop: 48,
-          }}
-        />
+        <div className="w-20 h-px bg-white/40 mt-12" />
 
-        {/* Tagline */}
         <p
-          style={{
-            fontSize: 15,
-            maxWidth: 320,
-            color: 'var(--text-inverse-secondary)',
-            marginTop: 32,
-            lineHeight: 1.6,
-          }}
+          className="text-[15px] max-w-xs mt-8 leading-relaxed"
+          style={{ color: 'var(--text-inverse-secondary)' }}
         >
           Deterministic financial statements. Every dollar provably correct.
         </p>
+
+        <div className="flex items-center gap-3 mt-16">
+          {badges.map(({ icon: Icon, label }) => (
+            <span
+              key={label}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-white/10 text-white/60"
+            >
+              <Icon className="w-3.5 h-3.5" />
+              <span className="text-[11px] font-medium uppercase tracking-wide">{label}</span>
+            </span>
+          ))}
+        </div>
       </div>
 
-      {/* Right Panel — Form */}
+      {/* Right Panel -- Form */}
       <div
-        style={{
-          width: '45%',
-          backgroundColor: 'var(--bg-base)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '0 64px',
-          flexShrink: 0,
-        }}
+        className="w-full lg:w-[45%] flex items-center justify-center px-8 lg:px-16 shrink-0"
+        style={{ backgroundColor: 'var(--bg-base)' }}
       >
-        <div style={{ width: '100%', maxWidth: 360 }}>
-          <h2
-            style={{
-              fontSize: 24,
-              fontWeight: 600,
-              color: 'var(--text-primary)',
-              margin: 0,
-            }}
-          >
-            Sign In
+        <div className="w-full max-w-[360px] animate-fade-in">
+          <h2 className="text-2xl font-semibold" style={{ color: 'var(--text-primary)' }}>
+            Welcome back
           </h2>
-          <p
-            style={{
-              fontSize: 14,
-              color: 'var(--text-secondary)',
-              marginTop: 8,
-              marginBottom: 32,
-            }}
-          >
-            Enter your credentials to continue.
+          <p className="text-sm mt-2 mb-8" style={{ color: 'var(--text-secondary)' }}>
+            Sign in to your account
           </p>
 
-          <form onSubmit={handleSubmit}>
-            {/* Email */}
+          <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label
-                htmlFor="login-email"
-                style={{
-                  display: 'block',
-                  fontSize: 13,
-                  fontWeight: 500,
-                  color: 'var(--text-primary)',
-                  marginBottom: 6,
-                }}
-              >
+              <label htmlFor="login-email" className="block text-[13px] font-medium mb-1.5" style={{ color: 'var(--text-primary)' }}>
                 Email Address
               </label>
               <input
@@ -180,47 +112,15 @@ export default function LoginPage() {
                 placeholder="you@company.com"
                 required
                 autoComplete="email"
-                style={{
-                  width: '100%',
-                  height: 44,
-                  backgroundColor: 'var(--bg-surface-sunken)',
-                  border: '1px solid var(--border-default)',
-                  borderRadius: 6,
-                  padding: '0 12px',
-                  fontSize: 14,
-                  color: 'var(--text-primary)',
-                  outline: 'none',
-                  transition: 'border-color var(--transition-fast), box-shadow var(--transition-fast)',
-                  boxSizing: 'border-box',
-                }}
-                onFocus={(e) => {
-                  e.currentTarget.style.borderColor = 'var(--border-focus)';
-                  e.currentTarget.style.boxShadow = '0 0 0 3px rgba(26,95,180,0.12)';
-                  e.currentTarget.style.backgroundColor = 'white';
-                }}
-                onBlur={(e) => {
-                  e.currentTarget.style.borderColor = 'var(--border-default)';
-                  e.currentTarget.style.boxShadow = 'none';
-                  e.currentTarget.style.backgroundColor = 'var(--bg-surface-sunken)';
-                }}
+                className="w-full h-11 px-3 rounded-md text-sm focus-ring"
               />
             </div>
 
-            {/* Password */}
-            <div style={{ marginTop: 20 }}>
-              <label
-                htmlFor="login-password"
-                style={{
-                  display: 'block',
-                  fontSize: 13,
-                  fontWeight: 500,
-                  color: 'var(--text-primary)',
-                  marginBottom: 6,
-                }}
-              >
+            <div>
+              <label htmlFor="login-password" className="block text-[13px] font-medium mb-1.5" style={{ color: 'var(--text-primary)' }}>
                 Password
               </label>
-              <div style={{ position: 'relative' }}>
+              <div className="relative">
                 <input
                   id="login-password"
                   type={showPassword ? 'text' : 'password'}
@@ -228,290 +128,78 @@ export default function LoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   autoComplete="current-password"
-                  style={{
-                    width: '100%',
-                    height: 44,
-                    backgroundColor: 'var(--bg-surface-sunken)',
-                    border: '1px solid var(--border-default)',
-                    borderRadius: 6,
-                    padding: '0 40px 0 12px',
-                    fontSize: 14,
-                    color: 'var(--text-primary)',
-                    outline: 'none',
-                    transition: 'border-color var(--transition-fast), box-shadow var(--transition-fast)',
-                    boxSizing: 'border-box',
-                  }}
-                  onFocus={(e) => {
-                    e.currentTarget.style.borderColor = 'var(--border-focus)';
-                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(26,95,180,0.12)';
-                    e.currentTarget.style.backgroundColor = 'white';
-                  }}
-                  onBlur={(e) => {
-                    e.currentTarget.style.borderColor = 'var(--border-default)';
-                    e.currentTarget.style.boxShadow = 'none';
-                    e.currentTarget.style.backgroundColor = 'var(--bg-surface-sunken)';
-                  }}
+                  className="w-full h-11 pl-3 pr-10 rounded-md text-sm focus-ring"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  style={{
-                    position: 'absolute',
-                    right: 10,
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    padding: 4,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'var(--text-tertiary)',
-                  }}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 flex items-center justify-center"
+                  style={{ color: 'var(--text-tertiary)', background: 'none', border: 'none' }}
                 >
-                  {showPassword ? (
-                    <EyeOff style={{ width: 20, height: 20 }} />
-                  ) : (
-                    <Eye style={{ width: 20, height: 20 }} />
-                  )}
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
             </div>
 
-            {/* Forgot password link */}
-            <div style={{ marginTop: 12, textAlign: 'right' }}>
-              <a
-                href="#"
-                style={{
-                  fontSize: 13,
-                  color: 'var(--text-link)',
-                  textDecoration: 'none',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.textDecoration = 'underline';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.textDecoration = 'none';
-                }}
-              >
-                Forgot password?
-              </a>
-            </div>
-
-            {/* Tenant ID hidden by default — only needed for multi-tenant switching */}
-            <input type="hidden" value={tenantId} />
-
-            {/* Error state */}
-            {error && (
-              <div
-                style={{
-                  marginTop: 12,
-                  backgroundColor: 'var(--status-error-bg)',
-                  border: '1px solid var(--status-error-border)',
-                  borderRadius: 6,
-                  padding: '12px 16px',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: 8,
-                }}
-              >
-                <AlertCircle
-                  style={{
-                    width: 16,
-                    height: 16,
-                    color: 'var(--status-error)',
-                    flexShrink: 0,
-                    marginTop: 1,
-                  }}
+            {/* Advanced: Tenant ID */}
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="flex items-center gap-1 text-xs font-medium"
+              style={{ color: 'var(--text-tertiary)', background: 'none', border: 'none', padding: 0 }}
+            >
+              Advanced
+              <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', showAdvanced && 'rotate-180')} />
+            </button>
+            {showAdvanced && (
+              <div>
+                <label htmlFor="login-tenant" className="block text-[13px] font-medium mb-1.5" style={{ color: 'var(--text-primary)' }}>
+                  Tenant ID <span style={{ color: 'var(--text-tertiary)' }}>(optional)</span>
+                </label>
+                <input
+                  id="login-tenant"
+                  type="text"
+                  value={tenantId}
+                  onChange={(e) => setTenantId(e.target.value)}
+                  placeholder="tenant-uuid"
+                  autoComplete="off"
+                  className="w-full h-11 px-3 rounded-md text-sm focus-ring"
                 />
-                <span
-                  style={{
-                    fontSize: 13,
-                    color: 'var(--status-error)',
-                    lineHeight: 1.4,
-                  }}
-                >
-                  {error}
-                </span>
               </div>
             )}
 
-            {/* Sign In button */}
+            {error && (
+              <div
+                className="flex items-start gap-2 p-3 rounded-md text-[13px] leading-snug"
+                style={{ backgroundColor: 'var(--status-error-bg)', border: '1px solid var(--status-error-border)' }}
+              >
+                <AlertCircle className="w-4 h-4 shrink-0 mt-px" style={{ color: 'var(--status-error)' }} />
+                <span style={{ color: 'var(--status-error)' }}>{error}</span>
+              </div>
+            )}
+
             <button
               type="submit"
               disabled={loading}
-              style={{
-                marginTop: 32,
-                width: '100%',
-                height: 48,
-                backgroundColor: 'var(--interactive-primary)',
-                color: 'white',
-                fontSize: 15,
-                fontWeight: 600,
-                border: 'none',
-                borderRadius: 6,
-                cursor: loading ? 'default' : 'pointer',
-                pointerEvents: loading ? 'none' : 'auto',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-                transition: 'background-color var(--transition-fast)',
-              }}
-              onMouseEnter={(e) => {
-                if (!loading) {
-                  e.currentTarget.style.backgroundColor = 'var(--interactive-primary-hover)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'var(--interactive-primary)';
-              }}
-            >
-              {loading ? (
-                <>
-                  <Loader2
-                    style={{ width: 16, height: 16 }}
-                    className="animate-spin"
-                  />
-                  Signing In...
-                </>
-              ) : (
-                'Sign In'
+              className={cn(
+                'w-full h-12 rounded-md text-[15px] font-semibold text-white flex items-center justify-center gap-2 transition-colors',
+                loading && 'opacity-80 cursor-default pointer-events-none'
               )}
+              style={{ backgroundColor: 'var(--interactive-primary)' }}
+              onMouseEnter={(e) => { if (!loading) (e.currentTarget.style.backgroundColor = 'var(--interactive-primary-hover)'); }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--interactive-primary)'; }}
+            >
+              {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Signing in...</> : 'Sign In'}
             </button>
           </form>
 
-          {/* Divider */}
-          <div
-            style={{
-              marginTop: 24,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-            }}
-          >
-            <div
-              style={{
-                flex: 1,
-                height: 1,
-                backgroundColor: 'var(--border-default)',
-              }}
-            />
-            <span
-              style={{
-                fontSize: 12,
-                color: 'var(--text-tertiary)',
-              }}
-            >
-              or
-            </span>
-            <div
-              style={{
-                flex: 1,
-                height: 1,
-                backgroundColor: 'var(--border-default)',
-              }}
-            />
-          </div>
-
-          {/* SSO button */}
-          <button
-            type="button"
-            style={{
-              marginTop: 16,
-              width: '100%',
-              height: 44,
-              backgroundColor: 'var(--bg-surface)',
-              border: '1px solid var(--border-default)',
-              borderRadius: 6,
-              fontSize: 14,
-              fontWeight: 500,
-              color: 'var(--text-primary)',
-              cursor: 'pointer',
-              transition: 'background-color var(--transition-fast)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--interactive-secondary-hover)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--bg-surface)';
-            }}
-          >
-            Continue with SSO
-          </button>
-
-          {/* Security badges */}
-          <div
-            style={{
-              marginTop: 32,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 6,
-            }}
-          >
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-              }}
-            >
-              <Shield style={{ width: 14, height: 14, color: 'var(--text-tertiary)' }} />
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  color: 'var(--text-tertiary)',
-                }}
-              >
-                SOC 2 Type II
-              </span>
-            </span>
-            <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>&nbsp;|&nbsp;</span>
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-              }}
-            >
-              <Lock style={{ width: 14, height: 14, color: 'var(--text-tertiary)' }} />
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  color: 'var(--text-tertiary)',
-                }}
-              >
-                256-bit Encryption
-              </span>
-            </span>
-            <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>&nbsp;|&nbsp;</span>
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-              }}
-            >
-              <CheckCircle style={{ width: 14, height: 14, color: 'var(--text-tertiary)' }} />
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  color: 'var(--text-tertiary)',
-                }}
-              >
-                AICPA Compliant
-              </span>
-            </span>
-          </div>
+          <p className="mt-8 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
+            Don&apos;t have an account?{' '}
+            <Link href="/register" className="font-medium hover:underline" style={{ color: 'var(--interactive-primary)' }}>
+              Register
+            </Link>
+          </p>
         </div>
       </div>
     </div>

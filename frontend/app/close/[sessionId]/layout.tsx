@@ -195,7 +195,7 @@ function CloseSessionInner({ children }: { children: React.ReactNode }) {
           paddingTop,
         }}
       >
-        <div className="p-6">{children}</div>
+        <div className="px-8 py-6 max-w-[1400px] animate-fade-in">{children}</div>
       </main>
       <IssuePanel
         issues={issues}

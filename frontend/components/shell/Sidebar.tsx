@@ -186,22 +186,14 @@ export function Sidebar({
       <Link
         key={item.href}
         href={href}
-        className="flex items-center justify-center w-10 h-10 mx-auto rounded-md transition-colors"
-        style={{
-          ...(isActive
-            ? {
-                background: 'var(--bg-table-row-selected)',
-                color: 'var(--interactive-primary)',
-              }
+        className={cn(
+          'flex items-center justify-center w-10 h-10 mx-auto rounded-md transition-colors duration-150',
+          isActive
+            ? 'bg-[var(--bg-table-row-selected)] text-[var(--interactive-primary)]'
             : isPromotedReview
-              ? {
-                  background: 'var(--status-info-bg)',
-                  color: 'var(--interactive-primary)',
-                }
-              : {
-                  color: 'var(--text-secondary)',
-                }),
-        }}
+              ? 'bg-[var(--status-info-bg)] text-[var(--interactive-primary)]'
+              : 'text-[var(--text-secondary)] hover:bg-[var(--bg-nav-hover)] hover:text-[var(--text-primary)]',
+        )}
         title={item.label}
       >
         <item.icon className="w-5 h-5" />
@@ -209,84 +201,62 @@ export function Sidebar({
     );
   };
 
+  const renderBadge = (value: number) => (
+    <span className="inline-flex items-center justify-center min-w-[18px] px-1.5 py-0.5 text-xs font-medium tabular-nums rounded-full bg-[var(--status-warning-bg)] text-[var(--status-warning)]">
+      {value}
+    </span>
+  );
+
   const renderItem = (item: NavItem) => {
     if (collapsed) return renderItemCollapsed(item);
 
     const href = item.external ? item.href : `${base}/${item.href}`;
     const isActive = pathname === href || (item.href !== 'dashboard' && pathname?.startsWith(href));
+    const isPromotedReview = item.href === 'review' && isUnderReview && !isActive;
 
     return (
       <Link
         key={item.href}
         href={href}
         className={cn(
-          'flex items-center gap-3 px-4 py-2 mx-2 rounded-input text-sm transition-colors border-l-3 border-transparent',
-          !isActive && !(item.href === 'review' && isUnderReview) && 'hover:bg-hover hover:text-primary',
-          !isActive && item.href === 'review' && isUnderReview && 'font-medium'
+          'group flex items-center gap-3 pl-3 pr-3 mx-2 h-9 rounded-input text-sm transition-all duration-150',
+          'border-l-2',
+          isActive
+            ? 'bg-[var(--bg-table-row-selected)] text-[var(--interactive-primary)] border-l-[var(--interactive-primary)]'
+            : isPromotedReview
+              ? 'bg-[var(--status-info-bg)] text-[var(--interactive-primary)] border-l-[var(--interactive-primary)] font-medium'
+              : 'text-[var(--text-secondary)] border-l-transparent hover:border-l-[var(--interactive-primary)] hover:bg-[var(--bg-nav-hover)] hover:text-[var(--text-primary)]',
+          !isActive && item.phaseComplete && 'border-l-[var(--status-success)]',
         )}
-        style={{
-          borderLeftWidth: '3px',
-          ...(isActive
-            ? {
-                background: 'var(--bg-table-row-selected)',
-                color: 'var(--interactive-primary)',
-                borderLeftColor: 'var(--interactive-primary)',
-              }
-            : item.href === 'review' && isUnderReview
-              ? {
-                  background: 'var(--status-info-bg)',
-                  color: 'var(--interactive-primary)',
-                  borderLeftColor: 'var(--interactive-primary)',
-                }
-              : {
-                  color: 'var(--text-secondary)',
-                }),
-          ...(!isActive && item.phaseComplete
-            ? { borderLeftColor: 'var(--status-success)' }
-            : {}),
-        }}
+        style={isActive ? { boxShadow: 'inset 2px 0 8px -4px var(--interactive-primary)' } : undefined}
       >
         <item.icon className="w-4 h-4 shrink-0" />
         <span className="flex-1 truncate">{item.label}</span>
-        {item.href === 'trial-balance' && unmappedCount > 0 && (
-          <span className="px-1.5 py-0.5 text-xs rounded" style={{ background: 'var(--status-warning-bg)', color: 'var(--status-warning)' }}>{unmappedCount}</span>
-        )}
-        {item.href === 'mapping' && unmappedCount > 0 && (
-          <span className="px-1.5 py-0.5 text-xs rounded" style={{ background: 'var(--status-warning-bg)', color: 'var(--status-warning)' }}>{unmappedCount}</span>
-        )}
-        {item.badgeProp === 'recon' && reconIncompleteCount > 0 && (
-          <span className="px-1.5 py-0.5 text-xs rounded" style={{ background: 'var(--status-warning-bg)', color: 'var(--status-warning)' }}>{reconIncompleteCount}</span>
-        )}
-        {item.badgeProp === 'adjustments' && adjustmentsBadge > 0 && (
-          <span className="px-1.5 py-0.5 text-xs rounded" style={{ background: 'var(--status-warning-bg)', color: 'var(--status-warning)' }}>{adjustmentsBadge}</span>
-        )}
-        {item.href === 'variance' && varianceUnexplainedCount > 0 && (
-          <span className="px-1.5 py-0.5 text-xs rounded" style={{ background: 'var(--status-warning-bg)', color: 'var(--status-warning)' }}>{varianceUnexplainedCount}</span>
-        )}
+        {item.href === 'trial-balance' && unmappedCount > 0 && renderBadge(unmappedCount)}
+        {item.href === 'mapping' && unmappedCount > 0 && renderBadge(unmappedCount)}
+        {item.badgeProp === 'recon' && reconIncompleteCount > 0 && renderBadge(reconIncompleteCount)}
+        {item.badgeProp === 'adjustments' && adjustmentsBadge > 0 && renderBadge(adjustmentsBadge)}
+        {item.href === 'variance' && varianceUnexplainedCount > 0 && renderBadge(varianceUnexplainedCount)}
         {item.href === 'gl-quality' && glQualityGrade && (
           <div
-            className="rounded-full shrink-0"
-            style={{
-              width: 8,
-              height: 8,
-              backgroundColor:
-                glQualityGrade === 'A' || glQualityGrade === 'B'
-                  ? 'var(--status-success)'
-                  : glQualityGrade === 'C'
-                    ? 'var(--status-warning)'
-                    : 'var(--status-error)',
-            }}
+            className={cn(
+              'w-2 h-2 rounded-full shrink-0',
+              (glQualityGrade === 'A' || glQualityGrade === 'B') && 'bg-[var(--status-success)]',
+              glQualityGrade === 'C' && 'bg-[var(--status-warning)]',
+              glQualityGrade !== 'A' && glQualityGrade !== 'B' && glQualityGrade !== 'C' && 'bg-[var(--status-error)]',
+            )}
             title={`GL Quality: ${glQualityGrade}`}
           />
         )}
         {item.href === 'gl-quality' && !glQualityGrade && glQualityDone && glQualityPending === 0 && (
-          <CheckCircle2 className="w-3.5 h-3.5" style={{ color: 'var(--status-success)' }} />
+          <CheckCircle2 className="w-3.5 h-3.5 text-[var(--status-success)]" />
         )}
-        {item.href === 'gl-quality' && glQualityPending > 0 && (
-          <span className="px-1.5 py-0.5 text-xs rounded" style={{ background: 'var(--status-warning-bg)', color: 'var(--status-warning)' }}>{glQualityPending}</span>
-        )}
+        {item.href === 'gl-quality' && glQualityPending > 0 && renderBadge(glQualityPending)}
         {item.href === 'statements' && statementsStale && (
-          <span className="text-xs" style={{ color: 'var(--status-warning)' }}>STALE</span>
+          <span className="inline-flex items-center gap-1 text-[0.625rem] font-semibold uppercase tracking-wide text-[var(--status-warning)]">
+            <span className="w-1.5 h-1.5 rounded-full bg-[var(--status-warning)]" />
+            Stale
+          </span>
         )}
       </Link>
     );
@@ -296,12 +266,10 @@ export function Sidebar({
 
   return (
     <aside
-      className="fixed left-0 top-[56px] h-[calc(100vh-56px)] border-r flex flex-col z-30 print:hidden transition-[width] duration-200"
-      style={{
-        width: collapsed ? '64px' : '240px',
-        background: 'var(--bg-nav)',
-        borderColor: 'var(--border-default)',
-      }}
+      className={cn(
+        'fixed left-0 top-[56px] h-[calc(100vh-56px)] border-r border-[var(--border-default)] bg-[var(--bg-nav)] flex flex-col z-30 print:hidden transition-[width] duration-200',
+        collapsed ? 'w-16' : 'w-60',
+      )}
     >
       <nav className="flex-1 py-2 overflow-y-auto">
         {/* UNDER_REVIEW promoted link */}
@@ -367,17 +335,13 @@ export function Sidebar({
             <div key={group.label} className="mb-1">
               <button
                 onClick={() => toggleGroup(group.label)}
-                className="flex items-center gap-2 w-full px-4 py-1.5 text-xs font-semibold uppercase tracking-wider hover:text-primary transition-colors"
-                style={{ color: 'var(--text-secondary)' }}
+                className="flex items-center gap-2 w-full px-4 py-1.5 text-[0.6875rem] font-semibold uppercase tracking-widest text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors duration-150"
               >
-                {isOpen
-                  ? <ChevronDown className="w-3 h-3 shrink-0" />
-                  : <ChevronRight className="w-3 h-3 shrink-0" />
-                }
+                <ChevronDown className={cn('w-3 h-3 shrink-0 transition-transform duration-200', !isOpen && '-rotate-90')} />
                 <span>{group.label}</span>
               </button>
               {isOpen && (
-                <div className="space-y-0.5">
+                <div className="space-y-0.5 animate-collapse-down">
                   {visibleItems.map(renderItem)}
                 </div>
               )}
@@ -387,24 +351,17 @@ export function Sidebar({
 
         {/* Settings */}
         {showSettings && (
-          <div
-            className={collapsed ? 'mt-2 pt-2 border-t' : 'mt-2 pt-2 border-t'}
-            style={{ borderColor: 'var(--border-subtle)' }}
-          >
+          <div className="mt-2 pt-2 border-t border-[var(--border-subtle)]">
             {renderItem(settingsItem)}
           </div>
         )}
       </nav>
 
       {/* Collapse toggle button */}
-      <div
-        className="border-t py-2 flex justify-center print:hidden"
-        style={{ borderColor: 'var(--border-subtle)' }}
-      >
+      <div className="border-t border-[var(--border-subtle)] py-2 flex justify-center print:hidden">
         <button
           onClick={onToggleCollapse}
-          className="flex items-center justify-center w-8 h-8 rounded-md transition-colors"
-          style={{ color: 'var(--text-tertiary)' }}
+          className="flex items-center justify-center w-8 h-8 rounded-md text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-nav-hover)] transition-colors duration-150"
           title={collapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)'}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >

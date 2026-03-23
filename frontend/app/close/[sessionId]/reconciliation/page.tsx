@@ -13,6 +13,7 @@ import { StatusBadge } from '@/components/shared/StatusBadge';
 import { FilterBar } from '@/components/shared/FilterBar';
 import type { Reconciliation, ReconStatus } from '@/lib/types/reconciliation';
 import { moneyAbs, cmpMoney, sumMoneyStrings, fmtMoney } from '@/lib/money';
+import { cn } from '@/lib/utils';
 import { Paperclip, Check, AlertCircle, Layers, CheckCircle2, Loader2, ClipboardList, FileDown, Columns } from 'lucide-react';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { ContinueToNextStep } from '@/components/shared/ContinueToNextStep';
@@ -61,16 +62,19 @@ function isOverTolerance(variance: string, tolerance: string): boolean {
 
 // ─── SaveIndicator component ─────────────────────────────────────────────────
 function SaveIndicator({ state, error }: { state: RowSaveState; error?: string }) {
-  if (state === 'saving') {
-    return <Loader2 className="w-4 h-4 animate-spin" style={{ color: 'var(--text-tertiary)' }} />;
-  }
-  if (state === 'saved') {
-    return <CheckCircle2 className="w-4 h-4" style={{ color: 'var(--status-success)' }} />;
-  }
-  if (state === 'error') {
-    return <span title={error ?? 'Save failed'}><AlertCircle className="w-4 h-4" style={{ color: 'var(--status-error)' }} /></span>;
-  }
-  return null;
+  return (
+    <span className="inline-flex items-center transition-opacity duration-200" style={{ opacity: state === 'idle' ? 0 : 1 }}>
+      {state === 'saving' && (
+        <Loader2 className="w-4 h-4 animate-spin text-[var(--text-tertiary)]" />
+      )}
+      {state === 'saved' && (
+        <CheckCircle2 className="w-4 h-4 text-[var(--status-success)]" />
+      )}
+      {state === 'error' && (
+        <span title={error ?? 'Save failed'}><AlertCircle className="w-4 h-4 text-[var(--status-error)]" /></span>
+      )}
+    </span>
+  );
 }
 
 export default function ReconciliationPage() {
@@ -350,7 +354,7 @@ export default function ReconciliationPage() {
       width: undefined,
       align: 'left' as const,
       sortKey: 'accountName',
-      cell: (row: Reconciliation) => <span style={{ color: 'var(--text-primary)' }}>{row.accountName}</span>,
+      cell: (row: Reconciliation) => <span className="text-[var(--text-primary)]">{row.accountName}</span>,
     },
     {
       id: 'glBalance',
@@ -370,7 +374,7 @@ export default function ReconciliationPage() {
         row.supportingBalance != null ? (
           <MoneyCell value={row.supportingBalance} showDollar />
         ) : (
-          <span className="font-mono" style={{ color: 'var(--text-tertiary)' }}>—</span>
+          <span className="font-mono text-[var(--text-tertiary)]">—</span>
         ),
     },
     {
@@ -380,7 +384,7 @@ export default function ReconciliationPage() {
       align: 'right' as const,
       sortKey: 'variance',
       cell: (row: Reconciliation) => {
-        if (row.supportingBalance == null) return <span className="font-mono" style={{ color: 'var(--text-tertiary)' }}>—</span>;
+        if (row.supportingBalance == null) return <span className="font-mono text-[var(--text-tertiary)]">—</span>;
         const over = moneyAbs(row.unexplainedVariance) > moneyAbs(row.tolerance);
         return (
           <MoneyCell
@@ -398,7 +402,7 @@ export default function ReconciliationPage() {
       align: 'right' as const,
       sortKey: 'unexplainedVariance',
       cell: (row: Reconciliation) => {
-        if (row.supportingBalance == null) return <span className="font-mono" style={{ color: 'var(--text-tertiary)' }}>—</span>;
+        if (row.supportingBalance == null) return <span className="font-mono text-[var(--text-tertiary)]">—</span>;
         const over = moneyAbs(row.unexplainedVariance) > moneyAbs(row.tolerance);
         return (
           <MoneyCell
@@ -427,7 +431,7 @@ export default function ReconciliationPage() {
         row.priorPeriodSupportingBalance != null ? (
           <MoneyCell value={row.priorPeriodSupportingBalance} showDollar />
         ) : (
-          <span className="font-mono" style={{ color: 'var(--text-tertiary)' }}>—</span>
+          <span className="font-mono text-[var(--text-tertiary)]">—</span>
         ),
     },
     {
@@ -451,14 +455,14 @@ export default function ReconciliationPage() {
         return (
           <div className="flex justify-center">
             {row.evidenceCount > 0 ? (
-              <span className="inline-flex items-center gap-1" style={{ color: 'var(--text-secondary)' }} title={`${row.evidenceCount} file(s)`}>
+              <span className="inline-flex items-center gap-1 text-[var(--text-secondary)]" title={`${row.evidenceCount} file(s)`}>
                 <Paperclip className="w-4 h-4" />
                 {row.evidenceCount}
               </span>
             ) : missing ? (
-              <span title="Required but missing"><Paperclip className="w-4 h-4" style={{ color: 'var(--status-error)' }} /></span>
+              <span title="Required but missing"><Paperclip className="w-4 h-4 text-[var(--status-error)]" /></span>
             ) : (
-              <span style={{ color: 'var(--text-tertiary)' }}>—</span>
+              <span className="text-[var(--text-tertiary)]">—</span>
             )}
           </div>
         );
@@ -498,7 +502,7 @@ export default function ReconciliationPage() {
       width: undefined,
       align: 'left' as const,
       sortKey: 'accountName',
-      cell: (row: Reconciliation) => <span style={{ color: 'var(--text-primary)' }}>{row.accountName}</span>,
+      cell: (row: Reconciliation) => <span className="text-[var(--text-primary)]">{row.accountName}</span>,
     },
     {
       id: 'glBalance',
@@ -507,7 +511,7 @@ export default function ReconciliationPage() {
       align: 'right' as const,
       sortKey: 'glBalance',
       cell: (row: Reconciliation) => (
-        <span className="font-mono text-sm" style={{ color: 'var(--text-secondary)' }}>{fmtMoney(row.glBalance, { dollar: true })}</span>
+        <span className="font-mono text-sm text-[var(--text-secondary)]">{fmtMoney(row.glBalance, { dollar: true })}</span>
       ),
     },
     {
@@ -540,20 +544,8 @@ export default function ReconciliationPage() {
                 }
               }}
               placeholder="0.00"
-              className="w-28 text-right font-mono text-sm px-2 py-1 border focus:outline-none focus:ring-1"
-              style={{
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: 'var(--bg-surface)',
-                color: 'var(--text-primary)',
-                borderColor: inputBorderColor,
-                ...(rowState.saveState !== 'error' && !rowState.dirty ? {} : {}),
-              }}
-              onFocus={(e) => {
-                e.currentTarget.style.boxShadow = '0 0 0 1px var(--interactive-primary)';
-              }}
-              onBlurCapture={(e) => {
-                e.currentTarget.style.boxShadow = 'none';
-              }}
+              className="w-28 text-right font-mono text-sm px-2 py-1 rounded-[var(--radius-md)] bg-[var(--bg-surface)] text-[var(--text-primary)] border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--interactive-primary)] focus:border-[var(--interactive-primary)]"
+              style={{ borderColor: inputBorderColor }}
             />
             <div className="w-4 flex-shrink-0">
               <SaveIndicator state={rowState.saveState} error={rowState.errorMsg} />
@@ -572,18 +564,17 @@ export default function ReconciliationPage() {
         const rowState = batchRows[row.id];
         const inputVal = rowState?.value ?? row.supportingBalance ?? '';
         const variance = computeVarianceDisplay(row.glBalance, inputVal);
-        if (variance === '') return <span className="font-mono" style={{ color: 'var(--text-tertiary)' }}>—</span>;
+        if (variance === '') return <span className="font-mono text-[var(--text-tertiary)]">—</span>;
         const over = isOverTolerance(variance, row.tolerance);
         const zero = Math.abs(parseFloat(variance) || 0) === 0;
         const varColor = over
-          ? 'var(--status-error)'
+          ? 'text-[var(--status-error)]'
           : zero
-          ? 'var(--status-success)'
-          : 'var(--text-secondary)';
+          ? 'text-[var(--status-success)]'
+          : 'text-[var(--text-secondary)]';
         return (
           <span
-            className="font-mono text-sm"
-            style={{ color: varColor }}
+            className={`font-mono text-sm ${varColor}`}
           >
             {fmtMoney(variance, { dollar: true })}
           </span>
@@ -609,7 +600,7 @@ export default function ReconciliationPage() {
 
   const footer = batchMode ? undefined : (
     <tr>
-      <td colSpan={2} className="px-3 py-2.5 text-xs font-medium text-left" style={{ color: 'var(--text-secondary)' }}>
+      <td colSpan={2} className="px-3 py-2.5 text-xs font-medium text-left text-[var(--text-secondary)]">
         Totals
       </td>
       <td className="px-3 py-2.5 text-right font-mono text-xs">
@@ -632,8 +623,8 @@ export default function ReconciliationPage() {
     return (
       <div className="space-y-4">
         <div>
-          <h1 className="font-display text-2xl" style={{ color: 'var(--text-primary)' }}>Balance Sheet Reconciliation</h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>Loading reconciliations...</p>
+          <h1 className="font-display text-2xl text-[var(--text-primary)]">Balance Sheet Reconciliation</h1>
+          <p className="text-sm mt-0.5 text-[var(--text-secondary)]">Loading reconciliations...</p>
         </div>
       </div>
     );
@@ -643,28 +634,18 @@ export default function ReconciliationPage() {
     return (
       <div className="space-y-4">
         <div>
-          <h1 className="font-display text-2xl" style={{ color: 'var(--text-primary)' }}>Balance Sheet Reconciliation</h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>Prove every significant balance sheet account</p>
+          <h1 className="font-display text-2xl text-[var(--text-primary)]">Balance Sheet Reconciliation</h1>
+          <p className="text-sm mt-0.5 text-[var(--text-secondary)]">Prove every significant balance sheet account</p>
         </div>
         <div
-          className="border p-4 flex items-center gap-3"
-          style={{
-            backgroundColor: 'var(--status-error-bg)',
-            borderColor: 'var(--status-error)',
-            borderRadius: 'var(--radius-lg)',
-          }}
+          className="border p-4 flex items-center gap-3 bg-[var(--status-error-bg)] border-[var(--status-error)] rounded-[var(--radius-lg)]"
         >
-          <AlertCircle className="w-5 h-5 shrink-0" style={{ color: 'var(--status-error)' }} />
-          <div className="flex-1 text-sm" style={{ color: 'var(--status-error)' }}>{initError}</div>
+          <AlertCircle className="w-5 h-5 shrink-0 text-[var(--status-error)]" />
+          <div className="flex-1 text-sm text-[var(--status-error)]">{initError}</div>
           <button
             type="button"
             onClick={() => { setInitError(null); initAttempted.current = false; }}
-            className="px-3 py-1.5 border text-sm hover:opacity-80"
-            style={{
-              borderRadius: 'var(--radius-md)',
-              borderColor: 'var(--status-error)',
-              color: 'var(--status-error)',
-            }}
+            className="px-3 py-1.5 border text-sm hover:opacity-80 rounded-[var(--radius-md)] border-[var(--status-error)] text-[var(--status-error)]"
           >
             Retry
           </button>
@@ -681,8 +662,8 @@ export default function ReconciliationPage() {
     return (
       <div className="space-y-4">
         <div>
-          <h1 className="font-display text-2xl" style={{ color: 'var(--text-primary)' }}>Balance Sheet Reconciliation</h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>Prove every significant balance sheet account</p>
+          <h1 className="font-display text-2xl text-[var(--text-primary)]">Balance Sheet Reconciliation</h1>
+          <p className="text-sm mt-0.5 text-[var(--text-secondary)]">Prove every significant balance sheet account</p>
         </div>
         {accountsToShow.length > 0 ? (
           <EmptyState
@@ -709,16 +690,16 @@ export default function ReconciliationPage() {
           message={
             <div>
               <p className="mb-3">The following accounts will be created for reconciliation:</p>
-              <ul className="space-y-1 text-sm" style={{ color: 'var(--text-primary)' }}>
+              <ul className="space-y-1 text-sm text-[var(--text-primary)]">
                 {accountsToShow.slice(0, previewCount).map((row) => (
                   <li key={row.accountCode} className="flex items-center gap-2">
-                    <span className="font-mono" style={{ color: 'var(--text-secondary)' }}>{row.accountCode}</span>
+                    <span className="font-mono text-[var(--text-secondary)]">{row.accountCode}</span>
                     <span>{row.accountName}</span>
                   </li>
                 ))}
               </ul>
               {remainingCount > 0 && (
-                <p className="mt-2 text-sm" style={{ color: 'var(--text-tertiary)' }}>
+                <p className="mt-2 text-sm text-[var(--text-tertiary)]">
                   + {remainingCount} more account{remainingCount !== 1 ? 's' : ''}
                 </p>
               )}
@@ -735,8 +716,8 @@ export default function ReconciliationPage() {
       {/* Header row */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl" style={{ color: 'var(--text-primary)' }}>Balance Sheet Reconciliation</h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>Prove every significant balance sheet account</p>
+          <h1 className="font-display text-2xl text-[var(--text-primary)]">Balance Sheet Reconciliation</h1>
+          <p className="text-sm mt-0.5 text-[var(--text-secondary)]">Prove every significant balance sheet account</p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -758,13 +739,7 @@ export default function ReconciliationPage() {
               document.body.removeChild(a);
               URL.revokeObjectURL(url);
             }}
-            className="px-3 py-1.5 rounded-full border text-sm transition-colors"
-            style={{
-              borderColor: 'var(--border-default)',
-              color: 'var(--text-secondary)',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--bg-table-row-hover)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+            className="px-3 py-1.5 rounded-full border text-sm transition-colors border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-table-row-hover)]"
           >
             <FileDown className="w-4 h-4 inline mr-1" />
             Export Excel
@@ -773,39 +748,18 @@ export default function ReconciliationPage() {
           {canRecon && <button
             type="button"
             onClick={handleToggleBatch}
-            className="inline-flex items-center gap-2 px-3 py-1.5 border text-sm font-medium transition-colors"
-            style={batchMode
-              ? {
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'var(--interactive-primary)',
-                  color: 'white',
-                  borderColor: 'var(--interactive-primary)',
-                }
-              : {
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'var(--bg-surface)',
-                  color: 'var(--text-secondary)',
-                  borderColor: 'var(--border-default)',
-                }
-            }
-            onMouseEnter={(e) => {
-              if (!batchMode) {
-                e.currentTarget.style.borderColor = 'var(--interactive-primary)';
-                e.currentTarget.style.color = 'var(--interactive-primary)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!batchMode) {
-                e.currentTarget.style.borderColor = 'var(--border-default)';
-                e.currentTarget.style.color = 'var(--text-secondary)';
-              }
-            }}
-            title={batchMode ? 'Exit batch entry mode' : 'Enter batch entry mode — edit supporting balances inline'}
+            className={cn(
+              'inline-flex items-center gap-2 px-3 py-1.5 border text-sm font-medium rounded-[var(--radius-md)] transition-all duration-200',
+              batchMode
+                ? 'bg-[var(--interactive-primary)] text-white border-[var(--interactive-primary)]'
+                : 'bg-[var(--bg-surface)] text-[var(--text-secondary)] border-[var(--border-default)] hover:border-[var(--interactive-primary)] hover:text-[var(--interactive-primary)]'
+            )}
+            title={batchMode ? 'Exit batch entry mode' : 'Enter batch entry mode -- edit supporting balances inline'}
           >
             <Layers className="w-4 h-4" />
             Batch Entry
           </button>}
-          <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+          <span className="text-sm text-[var(--text-secondary)]">
             {completed} of {total} complete ({progressPct}%)
           </span>
         </div>
@@ -814,64 +768,54 @@ export default function ReconciliationPage() {
       {/* Batch mode info banner */}
       {batchMode && (
         <div
-          className="flex items-center gap-3 py-2.5 px-4 text-sm border"
-          style={{
-            borderRadius: 'var(--radius-md)',
-            backgroundColor: 'var(--bg-surface)',
-            borderColor: 'var(--interactive-primary)',
-            color: 'var(--text-secondary)',
-          }}
+          className="flex items-center gap-3 py-2.5 px-4 text-sm border rounded-[var(--radius-md)] bg-[var(--bg-surface)] border-[var(--interactive-primary)] text-[var(--text-secondary)]"
         >
-          <Layers className="w-4 h-4 shrink-0" style={{ color: 'var(--interactive-primary)' }} />
+          <Layers className="w-4 h-4 shrink-0 text-[var(--interactive-primary)]" />
           <span>
             Batch mode: type a supporting balance and press{' '}
             <kbd
-              className="px-1 py-0.5 rounded border font-mono text-xs"
-              style={{
-                backgroundColor: 'var(--bg-surface-sunken)',
-                borderColor: 'var(--border-default)',
-              }}
+              className="px-1 py-0.5 rounded border font-mono text-xs bg-[var(--bg-surface-sunken)] border-[var(--border-default)]"
             >Tab</kbd>{' '}or{' '}
             <kbd
-              className="px-1 py-0.5 rounded border font-mono text-xs"
-              style={{
-                backgroundColor: 'var(--bg-surface-sunken)',
-                borderColor: 'var(--border-default)',
-              }}
+              className="px-1 py-0.5 rounded border font-mono text-xs bg-[var(--bg-surface-sunken)] border-[var(--border-default)]"
             >Enter</kbd>{' '}to auto-save.
             Click any row to open the detail view.
           </span>
         </div>
       )}
 
-      <div
-        className="flex flex-wrap items-center gap-3 py-3 px-4 border"
-        style={{
-          borderRadius: 'var(--radius-lg)',
-          backgroundColor: 'var(--bg-surface)',
-          borderColor: 'var(--border-default)',
-        }}
-      >
-        <StatusBadge variant="success" label={`${completed} Complete`} />
-        <StatusBadge variant="info" label={`${inProgress} In Progress`} />
-        {notStarted > 0 && (
-          <StatusBadge variant="neutral" label={`${notStarted} Not Started`} />
-        )}
+      {/* Summary metrics */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">Complete</div>
+          <div className="text-lg font-semibold text-[var(--status-success)]">{completed}</div>
+        </div>
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">In Progress</div>
+          <div className="text-lg font-semibold text-[var(--status-info)]">{inProgress}</div>
+        </div>
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1">Not Started</div>
+          <div className="text-lg font-semibold text-[var(--text-primary)]">{notStarted}</div>
+        </div>
         {overTolerance > 0 && (
-          <StatusBadge variant="warning" label={`${overTolerance} Over Tolerance`} />
+          <div className="rounded-[var(--radius-lg)] border border-[var(--status-error-border)] bg-[var(--status-error-bg)] p-3">
+            <div className="text-xs text-[var(--text-tertiary)] mb-1">Over Tolerance</div>
+            <div className="text-lg font-semibold text-[var(--status-error)]">{overTolerance}</div>
+          </div>
         )}
-        <div className="flex-1 min-w-[120px] max-w-[200px]">
-          <div
-            className="h-2 rounded-full overflow-hidden"
-            style={{ backgroundColor: 'var(--bg-surface-sunken)' }}
-          >
-            <div
-              className="h-full rounded-full transition-all"
-              style={{ width: `${progressPct}%`, backgroundColor: 'var(--interactive-primary)' }}
-            />
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-3 flex flex-col justify-between">
+          <div className="text-xs text-[var(--text-tertiary)] mb-1.5">Progress</div>
+          <div className="flex items-center gap-2">
+            <div className="flex-1 h-2 rounded-full overflow-hidden bg-[var(--bg-surface-sunken)]">
+              <div
+                className="h-full rounded-full bg-[var(--interactive-primary)] transition-all duration-500 ease-out"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+            <span className="font-mono text-sm font-medium text-[var(--text-primary)]">{progressPct}%</span>
           </div>
         </div>
-        <span className="font-mono text-sm" style={{ color: 'var(--text-primary)' }}>{progressPct}%</span>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -886,8 +830,7 @@ export default function ReconciliationPage() {
               type="checkbox"
               checked={overToleranceOnly}
               onChange={(e) => setOverToleranceOnly(e.target.checked)}
-              className="rounded"
-              style={{ borderColor: 'var(--border-default)' }}
+              className="rounded border-[var(--border-default)]"
             />
             Over tolerance only
           </label>
@@ -896,13 +839,12 @@ export default function ReconciliationPage() {
           <button
             type="button"
             onClick={() => setShowAllColumns((v) => !v)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 border text-sm font-medium transition-colors"
-            style={{
-              borderRadius: 'var(--radius-md)',
-              borderColor: showAllColumns ? 'var(--interactive-primary)' : 'var(--border-default)',
-              color: showAllColumns ? 'var(--interactive-primary)' : 'var(--text-secondary)',
-              backgroundColor: showAllColumns ? 'var(--interactive-primary-bg, rgba(59,130,246,0.08))' : 'transparent',
-            }}
+            className={cn(
+              'inline-flex items-center gap-1.5 px-3 py-1.5 border text-sm font-medium rounded-[var(--radius-md)] transition-all duration-200',
+              showAllColumns
+                ? 'border-[var(--interactive-primary)] text-[var(--interactive-primary)] bg-[rgba(59,130,246,0.08)]'
+                : 'border-[var(--border-default)] text-[var(--text-secondary)] bg-transparent hover:border-[var(--interactive-primary)] hover:text-[var(--interactive-primary)]'
+            )}
           >
             <Columns className="w-4 h-4" />
             {showAllColumns ? 'Fewer Columns' : 'All Columns'}
@@ -935,7 +877,7 @@ export default function ReconciliationPage() {
       {batchMode && (
         <div className="flex items-center justify-end gap-4 pt-1">
           {dirtyCount > 0 && (
-            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+            <span className="text-sm text-[var(--text-secondary)]">
               {dirtyCount} unsaved {dirtyCount === 1 ? 'entry' : 'entries'}
             </span>
           )}
@@ -943,22 +885,12 @@ export default function ReconciliationPage() {
             type="button"
             onClick={handleSaveAll}
             disabled={isSavingAll || dirtyCount === 0}
-            className="inline-flex items-center gap-2 px-4 py-2 border text-sm font-medium transition-colors"
-            style={dirtyCount === 0
-              ? {
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'var(--bg-surface)',
-                  color: 'var(--text-tertiary)',
-                  borderColor: 'var(--border-default)',
-                  cursor: 'not-allowed',
-                }
-              : {
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'var(--interactive-primary)',
-                  color: 'white',
-                  borderColor: 'var(--interactive-primary)',
-                }
-            }
+            className={cn(
+              'inline-flex items-center gap-2 px-4 py-2 border text-sm font-medium rounded-[var(--radius-md)] transition-all duration-200',
+              dirtyCount === 0
+                ? 'bg-[var(--bg-surface)] text-[var(--text-tertiary)] border-[var(--border-default)] cursor-not-allowed'
+                : 'bg-[var(--interactive-primary)] text-white border-[var(--interactive-primary)]'
+            )}
           >
             {isSavingAll ? (
               <>
