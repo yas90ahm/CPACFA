@@ -13,6 +13,7 @@ import {
 } from '../services/export_service.js';
 import { createPdfFromStructuredPayload } from '../services/pdf_export.js';
 import { checkExportGate, TAMPERING_ATTEMPT_DETECTED, RESOLUTION_MISMATCH } from '../services/export_gate_service.js';
+import Decimal from 'decimal.js';
 import { detectIntegrityConflicts } from '../services/integrity_conflict_service.js';
 import { recordMaterialEvent, recordLegacyCertifiedSourceUsed, recordAuditLogAction } from '../services/audit_service.js';
 import { createIssueFromIntegrityFailure } from '../services/issue_service.js';
@@ -50,7 +51,7 @@ function extractIntegrityConflictInput(
   const totalRevenue = pl != null ? Number(pl.total_revenue ?? pl.totalRevenue ?? 0) : undefined;
   const totalExpenses = pl != null ? Number(pl.total_expenses ?? pl.totalExpenses ?? 0) : undefined;
   const netIncome = pl != null ? Number(pl.net_income ?? pl.netIncome ?? 0) : undefined;
-  const ebitda = pl != null ? (Number(pl.ebitda ?? 0) || (netIncome != null && totalExpenses != null ? netIncome + totalExpenses : undefined)) : undefined;
+  const ebitda = pl != null ? (Number(pl.ebitda ?? 0) || (netIncome != null && totalExpenses != null ? new Decimal(netIncome).plus(new Decimal(totalExpenses)).toNumber() : undefined)) : undefined;
   const interestExpense = pl != null ? Number(pl.interest_expense ?? pl.interestExpense ?? 0) : undefined;
   const ratios = (financial_statements.ratios ?? financial_statements) as Record<string, unknown> | undefined;
   const currentRatio = ratios?.current_ratio ?? ratios?.currentRatio;
@@ -289,12 +290,14 @@ router.post('/pdf', async (req: Request, res: Response) => {
     const totalAssets = bs != null ? Number(bs.total_assets ?? bs.totalAssets ?? 0) : 0;
     const totalLiabilities = bs != null ? Number(bs.total_liabilities ?? bs.totalLiabilities ?? 0) : 0;
     const totalEquity = bs != null ? Number(bs.total_equity ?? bs.totalEquity ?? 0) : 0;
-    let totalDebits = 0;
-    let totalCredits = 0;
+    let totalDebitsD = new Decimal(0);
+    let totalCreditsD = new Decimal(0);
     for (const row of clean_ledger_raw) {
-      totalDebits += Number(row.debit) || 0;
-      totalCredits += Number(row.credit) || 0;
+      totalDebitsD = totalDebitsD.plus(new Decimal(row.debit || 0));
+      totalCreditsD = totalCreditsD.plus(new Decimal(row.credit || 0));
     }
+    const totalDebits = totalDebitsD.toNumber();
+    const totalCredits = totalCreditsD.toNumber();
     const finalCheck = finalIntegrityCheck({
       trialBalance: { totalDebits, totalCredits },
       balanceSheet: { totalAssets, totalLiabilities, totalEquity },
@@ -615,12 +618,14 @@ router.post('/csv', async (req: Request, res: Response) => {
         return res.status(422).json(payload);
       }
     }
-    let totalDebitsCsv = 0;
-    let totalCreditsCsv = 0;
+    let totalDebitsCsvD = new Decimal(0);
+    let totalCreditsCsvD = new Decimal(0);
     for (const row of raw) {
-      totalDebitsCsv += Number(row.debit) || 0;
-      totalCreditsCsv += Number(row.credit) || 0;
+      totalDebitsCsvD = totalDebitsCsvD.plus(new Decimal(row.debit || 0));
+      totalCreditsCsvD = totalCreditsCsvD.plus(new Decimal(row.credit || 0));
     }
+    const totalDebitsCsv = totalDebitsCsvD.toNumber();
+    const totalCreditsCsv = totalCreditsCsvD.toNumber();
     const finalCheckCsv = finalIntegrityCheck({
       trialBalance: { totalDebits: totalDebitsCsv, totalCredits: totalCreditsCsv },
       balanceSheet: { totalAssets: 0, totalLiabilities: 0, totalEquity: 0 },

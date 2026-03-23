@@ -319,6 +319,8 @@ Respond with JSON only. One object per account. Shape:
     });
 
     if (result.ok && result.parsed) {
+      // Layer 3 guardrail: verify no dollar amounts leaked into AI output
+      assertNoNumericAmountsInAgentOutput(result.raw ?? JSON.stringify(result.parsed), 'ai_classification_xbrl_rag');
       modelVersion = 'xbrl_rag_ai_v1';
       for (const pick of result.parsed.picks) {
         // Validate the fs_line_id exists in our taxonomy

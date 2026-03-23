@@ -13,6 +13,7 @@
 import type { Pool } from 'pg';
 import * as repo from '../db/repositories/fixed_asset_repository.js';
 import type { FixedAssetRow, DepreciationMethod, DepreciationRunRow, DepreciationRunDetailRow } from '../db/repositories/fixed_asset_repository.js';
+import Decimal from 'decimal.js';
 import { minus as decMinus, round2 } from '../utils/decimal.js';
 import { NotImplementedError } from '../errors.js';
 
@@ -75,13 +76,13 @@ function computePeriodDepreciation(
   const daysInYear = 365.25;
   const fraction = Math.min(1, daysInPeriod / daysInYear);
 
-  const maxAccumulated = Math.max(0, Number(cost) - Number(residual));
-  const remainingToDepreciate = Math.max(0, maxAccumulated - accumulatedBeforePeriod);
+  const maxAccumulated = Math.max(0, new Decimal(cost).minus(new Decimal(residual)).toNumber());
+  const remainingToDepreciate = Math.max(0, new Decimal(maxAccumulated).minus(accumulatedBeforePeriod).toNumber());
 
   if (asset.method === 'straight_line') {
-    const depreciable = Math.max(0, Number(cost) - Number(residual));
-    const annualDep = lifeYears > 0 ? depreciable / lifeYears : 0;
-    const periodDep = annualDep * fraction;
+    const depreciable = Math.max(0, new Decimal(cost).minus(new Decimal(residual)).toNumber());
+    const annualDep = lifeYears > 0 ? new Decimal(depreciable).div(lifeYears).toNumber() : 0;
+    const periodDep = new Decimal(annualDep).mul(fraction).toNumber();
     if (periodDep >= remainingToDepreciate) {
       return round2(remainingToDepreciate);
     }
@@ -89,11 +90,11 @@ function computePeriodDepreciation(
   }
 
   if (asset.method === 'declining_balance') {
-    const bookValue = Math.max(0, Number(cost) - accumulatedBeforePeriod);
+    const bookValue = Math.max(0, new Decimal(cost).minus(accumulatedBeforePeriod).toNumber());
     if (bookValue <= 0) return 0;
-    const rate = 2 / lifeYears; // double-declining
-    const annualDep = bookValue * rate;
-    const periodDep = annualDep * fraction;
+    const rate = new Decimal(2).div(lifeYears).toNumber(); // double-declining
+    const annualDep = new Decimal(bookValue).mul(rate).toNumber();
+    const periodDep = new Decimal(annualDep).mul(fraction).toNumber();
     if (periodDep >= remainingToDepreciate) {
       return round2(remainingToDepreciate);
     }
@@ -117,7 +118,7 @@ function accumulatedToDate(asset: FixedAssetRow, toDate: string): number {
   const to = new Date(toDate);
   if (to <= depStart) return 0;
   let acc = 0;
-  const maxAccumulated = Math.max(0, Number(asset.cost) - Number(asset.residualValue ?? 0));
+  const maxAccumulated = Math.max(0, new Decimal(asset.cost).minus(new Decimal(asset.residualValue ?? 0)).toNumber());
   const lifeYears = Math.ceil(asset.usefulLifeYears) + 2;
   for (let y = 0; y < lifeYears; y++) {
     const rangeStart = new Date(depStart.getFullYear() + y, depStart.getMonth(), depStart.getDate());

@@ -96,6 +96,15 @@ export interface OAuthState {
   nonce: string;
 }
 
+/** Parse a base64url-encoded OAuth state string back into its structured form. */
+export function parseOAuthState(stateStr: string): OAuthState | null {
+  try {
+    return JSON.parse(Buffer.from(stateStr, 'base64url').toString('utf8')) as OAuthState;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Generate the authorization URL for the user to visit.
  * Returns the URL and state parameter for CSRF protection.

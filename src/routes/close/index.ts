@@ -52,8 +52,11 @@ import closeExcelExportRouter from './close_excel_export.js';
 import closeAuditDataRouter from './close_audit_data.js';
 import closeAccountAnalysisRouter from './close_account_analysis.js';
 import closeSubsequentEventsRouter from './close_subsequent_events.js';
+import { createBankTransactionRoutes } from './close_bank_transactions.js';
+import { getTenantPool } from '../../db/index.js';
 
 const router = Router();
+const bankTransactionRouter = createBankTransactionRoutes(getTenantPool);
 router.use(closeJeAccrualsRouter);
 router.use(closeSessionsRouter);
 router.use(closeIssuesRouter);
@@ -102,5 +105,6 @@ router.use(closeExcelExportRouter);
 router.use(closeAuditDataRouter);
 router.use(closeAccountAnalysisRouter);
 router.use(closeSubsequentEventsRouter);
+router.use(bankTransactionRouter);
 
 export default router;

@@ -21,6 +21,7 @@
  */
 
 import type { Pool } from 'pg';
+import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import type { CoaSuggestion } from './ai_classification_service.js';
 
 export interface AutonomousMappingResult {
@@ -64,6 +65,15 @@ export async function runAutonomousMapping(
   });
 
   const suggestions = classificationResult.coaSuggestions;
+
+  // Defense-in-depth: verify no dollar amounts in classification output before auto-accept
+  for (const s of suggestions) {
+    assertNoNumericAmountsInAgentOutput(
+      JSON.stringify({ accountName: s.accountName, fsLineId: s.suggestedFsLineId, confidence: s.confidence }),
+      'autonomous_mapping_pre_accept'
+    );
+  }
+
   if (suggestions.length === 0) {
     return {
       totalAccounts: 0, autoAccepted: 0, needsReview: 0,

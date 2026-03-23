@@ -18,6 +18,7 @@
 
 import { randomUUID } from 'crypto';
 import type { Pool } from 'pg';
+import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import { searchXBRL } from './xbrl_search_service.js';
 import { listFsTaxonomyLines } from '../db/repositories/fs_taxonomy_repository.js';
 
@@ -402,6 +403,8 @@ Respond with JSON only:
     });
 
     if (result.ok && result.parsed) {
+      // Layer 3 guardrail: verify no dollar amounts leaked into AI output
+      assertNoNumericAmountsInAgentOutput(result.raw ?? JSON.stringify(result.parsed), 'mapping_validation_agent');
       for (const p of result.parsed.proposals) {
         if (fsById.has(p.proposed_fs_line_id)) {
           aiProposals.set(p.account_code, {

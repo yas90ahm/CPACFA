@@ -18,7 +18,7 @@ import { listAdjustments } from './close_adjustments_service.js';
 import { getPostableJEAdjustments } from './journal_entry_service.js';
 import { buildDerivedTrialBalance } from './gl_to_tb_aggregation_service.js';
 import * as glRepository from '../db/repositories/general_ledger_repository.js';
-import { plus } from '../utils/decimal.js';
+import { plus, from } from '../utils/decimal.js';
 
 /** Single debit or credit line for an adjustment (journal entry or reclassification). */
 export interface AdjustmentLine {
@@ -194,7 +194,7 @@ export async function enrichWithOpeningBalances(
     const priorByAccount = new Map<string, number>();
     for (const e of priorTB.entries) {
       const key = (e.accountCode ?? e.accountName ?? '').trim() || e.accountName;
-      const netBalance = (e.debit ?? 0) - (e.credit ?? 0);
+      const netBalance = Number(from(e.debit ?? 0).minus(from(e.credit ?? 0)).toFixed(2));
       priorByAccount.set(key, netBalance);
     }
 

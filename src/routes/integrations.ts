@@ -6,7 +6,9 @@
 import { Router, type Request, type Response } from 'express';
 import { setIntegration, getIntegration, listIntegrations } from '../services/integration_store.js';
 import { getTenantId } from '../lib/tenant_context.js';
+import { getTenantPool } from '../db/index.js';
 import { send500 } from '../lib/errorHandler.js';
+import type { AccountingProvider } from '../types/accounting_integration.js';
 
 const router = Router();
 
@@ -103,6 +105,68 @@ router.get('/list', (req: Request, res: Response) => {
     return;
   }
   res.json({ tenantId, integrations: listIntegrations(tenantId) });
+});
+
+// ── ERP OAuth routes (QuickBooks, Xero, NetSuite) ──
+
+router.get('/oauth/start/:provider', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(403).json({ error: 'Tenant context required' }); return; }
+    const provider = req.params.provider as AccountingProvider;
+    if (!['quickbooks', 'xero', 'netsuite'].includes(provider)) {
+      res.status(400).json({ error: `Unsupported provider: ${provider}` }); return;
+    }
+    const { getAuthorizationUrl } = await import('../services/oauth_service.js');
+    const connectionId = req.query.connectionId as string ?? '';
+    const result = getAuthorizationUrl(provider, tenantId, connectionId);
+    res.json(result);
+  } catch (err) {
+    send500(res, err, 'OAuth start failed');
+  }
+});
+
+router.get('/oauth/callback/:provider', async (req: Request, res: Response) => {
+  try {
+    const provider = req.params.provider as AccountingProvider;
+    if (!['quickbooks', 'xero', 'netsuite'].includes(provider)) {
+      res.status(400).json({ error: `Unsupported provider: ${provider}` }); return;
+    }
+    const code = req.query.code as string | undefined;
+    const state = req.query.state as string | undefined;
+    const realmId = req.query.realmId as string | undefined; // QuickBooks-specific
+    if (!code || !state) {
+      res.status(400).json({ error: 'Missing code or state parameter' }); return;
+    }
+    const { exchangeCodeForTokens, parseOAuthState } = await import('../services/oauth_service.js');
+    const stateData = parseOAuthState(state);
+    if (!stateData?.tenantId) {
+      res.status(400).json({ error: 'Invalid OAuth state' }); return;
+    }
+    const pool = await getTenantPool(stateData.tenantId);
+    await exchangeCodeForTokens(pool, provider, code, stateData.tenantId, stateData.connectionId, realmId);
+    // Redirect to frontend integrations page on success
+    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3002';
+    res.redirect(`${frontendUrl}/settings/integrations?connected=${provider}`);
+  } catch (err) {
+    send500(res, err, 'OAuth callback failed');
+  }
+});
+
+router.post('/oauth/revoke/:provider', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(403).json({ error: 'Tenant context required' }); return; }
+    const provider = req.params.provider as AccountingProvider;
+    const connectionId = req.body?.connectionId as string;
+    if (!connectionId) { res.status(400).json({ error: 'connectionId required' }); return; }
+    const { revokeTokens } = await import('../services/oauth_service.js');
+    const pool = await getTenantPool(tenantId);
+    await revokeTokens(pool, tenantId, connectionId);
+    res.json({ ok: true });
+  } catch (err) {
+    send500(res, err, 'OAuth revoke failed');
+  }
 });
 
 router.get('/google/status', (req: Request, res: Response) => {

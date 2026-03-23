@@ -868,8 +868,8 @@ export function autoAdjustTranslationRounding(lines: GeneralLedgerLine[]): { lin
 
   const adjustedLines = [...lines];
   for (const [entryId, entryLines] of entries) {
-    const totalDebits = entryLines.reduce((sum, l) => sum + Number(l.debit ?? 0), 0);
-    const totalCredits = entryLines.reduce((sum, l) => sum + Number(l.credit ?? 0), 0);
+    const totalDebits = sumRound2(entryLines.map((l) => Number(l.debit ?? 0)));
+    const totalCredits = sumRound2(entryLines.map((l) => Number(l.credit ?? 0)));
     const diff = round2(totalDebits - totalCredits);
     const absDiff = Math.abs(diff);
 
@@ -880,10 +880,10 @@ export function autoAdjustTranslationRounding(lines: GeneralLedgerLine[]): { lin
       if (idx >= 0) {
         if (diff > 0) {
           // Debits exceed credits — add to last line's credit
-          adjustedLines[idx] = { ...lastLine, credit: String(round2(Number(lastLine.credit ?? 0) + absDiff)) };
+          adjustedLines[idx] = { ...lastLine, credit: from(lastLine.credit ?? 0).plus(from(absDiff)).toFixed(2) };
         } else {
           // Credits exceed debits — add to last line's debit
-          adjustedLines[idx] = { ...lastLine, debit: String(round2(Number(lastLine.debit ?? 0) + absDiff)) };
+          adjustedLines[idx] = { ...lastLine, debit: from(lastLine.debit ?? 0).plus(from(absDiff)).toFixed(2) };
         }
         warnings.push(`Entry ${entryId}: $${absDiff.toFixed(2)} translation rounding auto-adjusted.`);
       }
