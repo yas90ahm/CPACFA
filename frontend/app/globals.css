@@ -84,6 +84,18 @@ button[type="submit"]:hover {
   background: var(--border-strong);
 }
 
+/* Toast slide-in animation */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 /* Utility button classes */
 @layer utilities {
   .btn-primary {
