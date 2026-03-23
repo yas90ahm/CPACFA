@@ -267,7 +267,9 @@ export function createBankTransactionRoutes(getPool: (tenantId: string) => Promi
       const { sessionId } = req.params;
       const pool = await getPool(tenantId);
       const { listClearingItems } = await import('../../services/clearing_account_service.js');
-      const items = await listClearingItems(pool, tenantId, sessionId);
+      const accountCode = req.query.accountCode as string | undefined;
+      const status = req.query.status as string | undefined;
+      const items = await listClearingItems(pool, tenantId, sessionId, { accountCode, status: status as any });
       return res.json(items);
     } catch (err) {
       return res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to list clearing items' });
@@ -279,7 +281,8 @@ export function createBankTransactionRoutes(getPool: (tenantId: string) => Promi
       const tenantId = (req as unknown as { tenantId: string }).tenantId;
       const pool = await getPool(tenantId);
       const { clearItem } = await import('../../services/clearing_account_service.js');
-      const item = await clearItem(pool, tenantId, req.params.id);
+      const userId = (req as unknown as { userId: string }).userId ?? 'system';
+      const item = await clearItem(pool, tenantId, req.params.id, userId);
       if (!item) return res.status(404).json({ error: 'Item not found' });
       return res.json(item);
     } catch (err) {
