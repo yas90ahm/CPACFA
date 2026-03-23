@@ -64,6 +64,7 @@ const navGroups: NavGroup[] = [
       { href: 'gl-quality', label: 'GL Quality', icon: Sparkles },
       { href: 'mapping', label: 'Mapping', icon: ArrowRightLeft },
       { href: 'reconciliation', label: 'Reconciliation', icon: ShieldCheck, badgeProp: 'recon' },
+      { href: 'bank-reconciliation', label: 'Bank Recon', icon: Calculator },
       { href: 'adjustments', label: 'Adjustments', icon: PenLine, badgeProp: 'adjustments' },
     ],
   },
