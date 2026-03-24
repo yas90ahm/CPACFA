@@ -1,11 +1,15 @@
+DROP TABLE IF EXISTS tenant_ap_cutoff_items CASCADE;
+DROP TABLE IF EXISTS tenant_ap_aging_detail CASCADE;
+DROP TABLE IF EXISTS tenant_ap_aging_snapshots CASCADE;
+
 -- AP Aging + Cutoff Analysis tables
 -- ASC 405-20: Accounts Payable, cutoff testing per AU-C 330
 
 CREATE TABLE IF NOT EXISTS tenant_ap_aging_snapshots (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id       TEXT NOT NULL,
-  entity_id       UUID,
-  close_session_id UUID NOT NULL,
+  entity_id TEXT,
+  close_session_id TEXT NOT NULL,
   snapshot_date   DATE NOT NULL,
   total_ap        NUMERIC(20,2) NOT NULL DEFAULT 0,
   record_count    INT NOT NULL DEFAULT 0,
@@ -38,7 +42,7 @@ CREATE INDEX IF NOT EXISTS idx_ap_aging_detail_snapshot
 CREATE TABLE IF NOT EXISTS tenant_ap_cutoff_items (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id       TEXT NOT NULL,
-  close_session_id UUID NOT NULL,
+  close_session_id TEXT NOT NULL,
   snapshot_id     UUID REFERENCES tenant_ap_aging_snapshots(id),
   vendor_name     TEXT NOT NULL,
   invoice_number  TEXT,

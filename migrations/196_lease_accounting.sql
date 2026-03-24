@@ -1,3 +1,8 @@
+DROP TABLE IF EXISTS tenant_lease_modifications CASCADE;
+DROP TABLE IF EXISTS tenant_lease_period_entries CASCADE;
+DROP TABLE IF EXISTS tenant_lease_payment_schedule CASCADE;
+DROP TABLE IF EXISTS tenant_leases CASCADE;
+
 -- Migration 196: ASC 842 Lease Accounting
 -- Tables for leases, payment schedules, period entries, and modifications.
 
@@ -7,7 +12,7 @@ BEGIN;
 CREATE TABLE IF NOT EXISTS tenant_leases (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id TEXT NOT NULL,
-  entity_id             UUID NOT NULL,
+  entity_id TEXT NOT NULL,
   lease_name            TEXT NOT NULL,
   lease_type            TEXT NOT NULL CHECK (lease_type IN ('finance','operating')),
   commencement_date     DATE NOT NULL,
@@ -57,7 +62,7 @@ CREATE TABLE IF NOT EXISTS tenant_lease_period_entries (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id TEXT NOT NULL,
   lease_id              UUID NOT NULL REFERENCES tenant_leases(id),
-  close_session_id      UUID NOT NULL,
+  close_session_id TEXT NOT NULL,
   schedule_id           UUID NOT NULL REFERENCES tenant_lease_payment_schedule(id),
   journal_entry_id      UUID,
   entry_type            TEXT NOT NULL CHECK (entry_type IN ('interest','amortization','operating_expense')),

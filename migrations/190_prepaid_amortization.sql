@@ -1,11 +1,14 @@
+DROP TABLE IF EXISTS tenant_prepaid_amortization_entries CASCADE;
+DROP TABLE IF EXISTS tenant_prepaid_schedules CASCADE;
+
 -- Prepaid Amortization Schedule tables
 -- ASC 340-10: Prepaid expenses recognized ratably over benefit period
 
 CREATE TABLE IF NOT EXISTS tenant_prepaid_schedules (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id       TEXT NOT NULL,
-  entity_id       UUID,
-  close_session_id UUID NOT NULL,
+  entity_id TEXT,
+  close_session_id TEXT NOT NULL,
   description     TEXT NOT NULL,
   vendor          TEXT,
   prepaid_account TEXT NOT NULL,
@@ -33,7 +36,7 @@ CREATE TABLE IF NOT EXISTS tenant_prepaid_amortization_entries (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id       TEXT NOT NULL,
   schedule_id     UUID NOT NULL REFERENCES tenant_prepaid_schedules(id),
-  close_session_id UUID NOT NULL,
+  close_session_id TEXT NOT NULL,
   period_label    TEXT NOT NULL,
   amount          NUMERIC(20,2) NOT NULL,
   je_id           UUID,

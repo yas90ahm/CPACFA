@@ -1,10 +1,13 @@
+DROP TABLE IF EXISTS tenant_debt_accrual_entries CASCADE;
+DROP TABLE IF EXISTS tenant_debt_schedules CASCADE;
+
 -- Debt Interest Accrual Schedule tables
 -- Module 4: Track debt instruments and compute periodic interest accruals
 
 CREATE TABLE IF NOT EXISTS tenant_debt_schedules (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id TEXT NOT NULL,
-  entity_id UUID NOT NULL,
+  entity_id TEXT NOT NULL,
   lender_name TEXT NOT NULL,
   instrument_type TEXT NOT NULL DEFAULT 'term_loan',
   principal_balance NUMERIC(20,2) NOT NULL,
@@ -24,7 +27,7 @@ CREATE TABLE IF NOT EXISTS tenant_debt_accrual_entries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id TEXT NOT NULL,
   debt_schedule_id UUID NOT NULL REFERENCES tenant_debt_schedules(id),
-  close_session_id UUID NOT NULL,
+  close_session_id TEXT NOT NULL,
   period_start DATE NOT NULL,
   period_end DATE NOT NULL,
   days_in_period INTEGER NOT NULL,

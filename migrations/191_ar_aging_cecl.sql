@@ -1,11 +1,16 @@
+DROP TABLE IF EXISTS tenant_cecl_computations CASCADE;
+DROP TABLE IF EXISTS tenant_cecl_config CASCADE;
+DROP TABLE IF EXISTS tenant_ar_aging_detail CASCADE;
+DROP TABLE IF EXISTS tenant_ar_aging_snapshots CASCADE;
+
 -- AR Aging + CECL Allowance tables
 -- ASC 326-20: Current Expected Credit Losses (CECL)
 
 CREATE TABLE IF NOT EXISTS tenant_ar_aging_snapshots (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id       TEXT NOT NULL,
-  entity_id       UUID,
-  close_session_id UUID NOT NULL,
+  entity_id TEXT,
+  close_session_id TEXT NOT NULL,
   snapshot_date   DATE NOT NULL,
   total_ar        NUMERIC(20,2) NOT NULL DEFAULT 0,
   record_count    INT NOT NULL DEFAULT 0,
@@ -37,7 +42,7 @@ CREATE INDEX IF NOT EXISTS idx_ar_aging_detail_snapshot
 CREATE TABLE IF NOT EXISTS tenant_cecl_config (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id       TEXT NOT NULL,
-  entity_id       UUID,
+  entity_id TEXT,
   bucket_current_rate   NUMERIC(8,6) NOT NULL DEFAULT 0.005,
   bucket_1_30_rate      NUMERIC(8,6) NOT NULL DEFAULT 0.01,
   bucket_31_60_rate     NUMERIC(8,6) NOT NULL DEFAULT 0.03,
@@ -54,7 +59,7 @@ CREATE TABLE IF NOT EXISTS tenant_cecl_computations (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id       TEXT NOT NULL,
   snapshot_id     UUID NOT NULL REFERENCES tenant_ar_aging_snapshots(id),
-  close_session_id UUID NOT NULL,
+  close_session_id TEXT NOT NULL,
   required_allowance NUMERIC(20,2) NOT NULL,
   current_allowance  NUMERIC(20,2) NOT NULL DEFAULT 0,
   adjustment_needed  NUMERIC(20,2) GENERATED ALWAYS AS (required_allowance - current_allowance) STORED,

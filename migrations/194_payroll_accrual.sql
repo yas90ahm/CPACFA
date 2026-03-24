@@ -1,10 +1,13 @@
+DROP TABLE IF EXISTS tenant_payroll_accrual_entries CASCADE;
+DROP TABLE IF EXISTS tenant_payroll_config CASCADE;
+
 -- Payroll Accrual tables
 -- Module 5: Track payroll configuration and compute periodic payroll accruals
 
 CREATE TABLE IF NOT EXISTS tenant_payroll_config (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id TEXT NOT NULL,
-  entity_id UUID NOT NULL,
+  entity_id TEXT NOT NULL,
   average_daily_payroll NUMERIC(20,2) NOT NULL DEFAULT 0,
   last_payroll_date DATE,
   wages_expense_account TEXT NOT NULL,
@@ -25,8 +28,8 @@ CREATE INDEX IF NOT EXISTS idx_payroll_config_tenant ON tenant_payroll_config(te
 CREATE TABLE IF NOT EXISTS tenant_payroll_accrual_entries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id TEXT NOT NULL,
-  entity_id UUID NOT NULL,
-  close_session_id UUID NOT NULL,
+  entity_id TEXT NOT NULL,
+  close_session_id TEXT NOT NULL,
   period_end DATE NOT NULL,
   days_accrued INTEGER NOT NULL,
   wages_amount NUMERIC(20,2) NOT NULL DEFAULT 0,

@@ -1,3 +1,7 @@
+DROP TABLE IF EXISTS tenant_inventory_reserve_computations CASCADE;
+DROP TABLE IF EXISTS tenant_inventory_reserve_config CASCADE;
+DROP TABLE IF EXISTS tenant_inventory_aging CASCADE;
+
 -- Migration 195: Inventory Obsolescence Reserve (ASC 330)
 -- Tables for inventory aging snapshots, reserve configuration, and reserve computations.
 
@@ -7,8 +11,8 @@ BEGIN;
 CREATE TABLE IF NOT EXISTS tenant_inventory_aging (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id      TEXT NOT NULL,
-  entity_id      UUID NOT NULL,
-  close_session_id UUID NOT NULL,
+  entity_id TEXT NOT NULL,
+  close_session_id TEXT NOT NULL,
   snapshot_id    UUID NOT NULL,
   item_code      TEXT NOT NULL,
   description    TEXT NOT NULL DEFAULT '',
@@ -31,7 +35,7 @@ CREATE INDEX IF NOT EXISTS idx_inventory_aging_snapshot
 CREATE TABLE IF NOT EXISTS tenant_inventory_reserve_config (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id      TEXT NOT NULL,
-  entity_id      UUID NOT NULL,
+  entity_id TEXT NOT NULL,
   rate_current   NUMERIC(5,4) NOT NULL DEFAULT 0.0000,
   rate_91_180    NUMERIC(5,4) NOT NULL DEFAULT 0.2500,
   rate_181_365   NUMERIC(5,4) NOT NULL DEFAULT 0.5000,
@@ -45,8 +49,8 @@ CREATE TABLE IF NOT EXISTS tenant_inventory_reserve_config (
 CREATE TABLE IF NOT EXISTS tenant_inventory_reserve_computations (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id TEXT NOT NULL,
-  entity_id         UUID NOT NULL,
-  close_session_id  UUID NOT NULL,
+  entity_id TEXT NOT NULL,
+  close_session_id TEXT NOT NULL,
   snapshot_id       UUID NOT NULL,
   total_inventory   NUMERIC(20,2) NOT NULL DEFAULT 0,
   bucket_current    NUMERIC(20,2) NOT NULL DEFAULT 0,
