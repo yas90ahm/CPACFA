@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS tenant_prepaid_schedules (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id       UUID NOT NULL,
+  tenant_id       TEXT NOT NULL,
   entity_id       UUID,
   close_session_id UUID NOT NULL,
   description     TEXT NOT NULL,
@@ -31,7 +31,7 @@ CREATE INDEX IF NOT EXISTS idx_prepaid_schedules_active
 
 CREATE TABLE IF NOT EXISTS tenant_prepaid_amortization_entries (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id       UUID NOT NULL,
+  tenant_id       TEXT NOT NULL,
   schedule_id     UUID NOT NULL REFERENCES tenant_prepaid_schedules(id),
   close_session_id UUID NOT NULL,
   period_label    TEXT NOT NULL,

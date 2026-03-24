@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS tenant_debt_schedules (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id UUID NOT NULL,
+  tenant_id TEXT NOT NULL,
   entity_id UUID NOT NULL,
   lender_name TEXT NOT NULL,
   instrument_type TEXT NOT NULL DEFAULT 'term_loan',
@@ -22,7 +22,7 @@ CREATE INDEX IF NOT EXISTS idx_debt_schedules_entity ON tenant_debt_schedules(te
 
 CREATE TABLE IF NOT EXISTS tenant_debt_accrual_entries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id UUID NOT NULL,
+  tenant_id TEXT NOT NULL,
   debt_schedule_id UUID NOT NULL REFERENCES tenant_debt_schedules(id),
   close_session_id UUID NOT NULL,
   period_start DATE NOT NULL,

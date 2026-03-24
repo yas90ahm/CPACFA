@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS tenant_ar_aging_snapshots (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id       UUID NOT NULL,
+  tenant_id       TEXT NOT NULL,
   entity_id       UUID,
   close_session_id UUID NOT NULL,
   snapshot_date   DATE NOT NULL,
@@ -19,7 +19,7 @@ CREATE INDEX IF NOT EXISTS idx_ar_aging_snapshots_session
 
 CREATE TABLE IF NOT EXISTS tenant_ar_aging_detail (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id       UUID NOT NULL,
+  tenant_id       TEXT NOT NULL,
   snapshot_id     UUID NOT NULL REFERENCES tenant_ar_aging_snapshots(id),
   customer_name   TEXT NOT NULL,
   invoice_number  TEXT,
@@ -36,7 +36,7 @@ CREATE INDEX IF NOT EXISTS idx_ar_aging_detail_snapshot
 
 CREATE TABLE IF NOT EXISTS tenant_cecl_config (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id       UUID NOT NULL,
+  tenant_id       TEXT NOT NULL,
   entity_id       UUID,
   bucket_current_rate   NUMERIC(8,6) NOT NULL DEFAULT 0.005,
   bucket_1_30_rate      NUMERIC(8,6) NOT NULL DEFAULT 0.01,
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS tenant_cecl_config (
 
 CREATE TABLE IF NOT EXISTS tenant_cecl_computations (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id       UUID NOT NULL,
+  tenant_id       TEXT NOT NULL,
   snapshot_id     UUID NOT NULL REFERENCES tenant_ar_aging_snapshots(id),
   close_session_id UUID NOT NULL,
   required_allowance NUMERIC(20,2) NOT NULL,

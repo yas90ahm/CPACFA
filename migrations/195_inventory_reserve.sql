@@ -6,7 +6,7 @@ BEGIN;
 -- Inventory aging snapshot rows (imported from CSV)
 CREATE TABLE IF NOT EXISTS tenant_inventory_aging (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id      UUID NOT NULL,
+  tenant_id      TEXT NOT NULL,
   entity_id      UUID NOT NULL,
   close_session_id UUID NOT NULL,
   snapshot_id    UUID NOT NULL,
@@ -30,7 +30,7 @@ CREATE INDEX IF NOT EXISTS idx_inventory_aging_snapshot
 -- Reserve configuration per entity (reserve rates per aging bucket)
 CREATE TABLE IF NOT EXISTS tenant_inventory_reserve_config (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id      UUID NOT NULL,
+  tenant_id      TEXT NOT NULL,
   entity_id      UUID NOT NULL,
   rate_current   NUMERIC(5,4) NOT NULL DEFAULT 0.0000,
   rate_91_180    NUMERIC(5,4) NOT NULL DEFAULT 0.2500,
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS tenant_inventory_reserve_config (
 -- Reserve computation results
 CREATE TABLE IF NOT EXISTS tenant_inventory_reserve_computations (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id         UUID NOT NULL,
+  tenant_id TEXT NOT NULL,
   entity_id         UUID NOT NULL,
   close_session_id  UUID NOT NULL,
   snapshot_id       UUID NOT NULL,

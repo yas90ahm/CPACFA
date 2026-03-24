@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS tenant_ap_aging_snapshots (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id       UUID NOT NULL,
+  tenant_id       TEXT NOT NULL,
   entity_id       UUID,
   close_session_id UUID NOT NULL,
   snapshot_date   DATE NOT NULL,
@@ -19,7 +19,7 @@ CREATE INDEX IF NOT EXISTS idx_ap_aging_snapshots_session
 
 CREATE TABLE IF NOT EXISTS tenant_ap_aging_detail (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id       UUID NOT NULL,
+  tenant_id       TEXT NOT NULL,
   snapshot_id     UUID NOT NULL REFERENCES tenant_ap_aging_snapshots(id),
   vendor_name     TEXT NOT NULL,
   invoice_number  TEXT,
@@ -37,7 +37,7 @@ CREATE INDEX IF NOT EXISTS idx_ap_aging_detail_snapshot
 
 CREATE TABLE IF NOT EXISTS tenant_ap_cutoff_items (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id       UUID NOT NULL,
+  tenant_id       TEXT NOT NULL,
   close_session_id UUID NOT NULL,
   snapshot_id     UUID REFERENCES tenant_ap_aging_snapshots(id),
   vendor_name     TEXT NOT NULL,

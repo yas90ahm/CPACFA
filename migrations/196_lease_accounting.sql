@@ -6,7 +6,7 @@ BEGIN;
 -- Lease register
 CREATE TABLE IF NOT EXISTS tenant_leases (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id             UUID NOT NULL,
+  tenant_id TEXT NOT NULL,
   entity_id             UUID NOT NULL,
   lease_name            TEXT NOT NULL,
   lease_type            TEXT NOT NULL CHECK (lease_type IN ('finance','operating')),
@@ -33,7 +33,7 @@ CREATE INDEX IF NOT EXISTS idx_leases_tenant_entity
 -- Payment schedule (one row per period per lease)
 CREATE TABLE IF NOT EXISTS tenant_lease_payment_schedule (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id             UUID NOT NULL,
+  tenant_id TEXT NOT NULL,
   lease_id              UUID NOT NULL REFERENCES tenant_leases(id),
   period_number         INTEGER NOT NULL,
   payment_date          DATE NOT NULL,
@@ -55,7 +55,7 @@ CREATE INDEX IF NOT EXISTS idx_lease_schedule_tenant
 -- Period entries (linking schedule rows to journal entries)
 CREATE TABLE IF NOT EXISTS tenant_lease_period_entries (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id             UUID NOT NULL,
+  tenant_id TEXT NOT NULL,
   lease_id              UUID NOT NULL REFERENCES tenant_leases(id),
   close_session_id      UUID NOT NULL,
   schedule_id           UUID NOT NULL REFERENCES tenant_lease_payment_schedule(id),
@@ -71,7 +71,7 @@ CREATE INDEX IF NOT EXISTS idx_lease_period_entries_session
 -- Lease modifications (remeasurement events)
 CREATE TABLE IF NOT EXISTS tenant_lease_modifications (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id             UUID NOT NULL,
+  tenant_id TEXT NOT NULL,
   lease_id              UUID NOT NULL REFERENCES tenant_leases(id),
   modification_date     DATE NOT NULL,
   new_term_months       INTEGER,
