@@ -68,7 +68,8 @@ router.post('/login', loginLimiter, validateBody(loginSchema), async (req: Reque
     res.cookie('cpa_session', token, {
       httpOnly: true,
       secure: isProd,
-      sameSite: isProd ? 'none' : 'lax', // 'none' required for cross-origin deployments
+      sameSite: 'lax',
+      domain: isProd ? '.sabit.ai' : undefined,
       maxAge: 4 * 60 * 60 * 1000, // 4 hours (match JWT expiry)
       path: '/',
     });
@@ -113,7 +114,8 @@ router.post('/register', registerLimiter, validateBody(registerSchema), async (r
     res.cookie('cpa_session', token, {
       httpOnly: true,
       secure: isProd,
-      sameSite: isProd ? 'none' : 'lax', // 'none' required for cross-origin deployments
+      sameSite: 'lax',
+      domain: isProd ? '.sabit.ai' : undefined,
       maxAge: 4 * 60 * 60 * 1000, // 4 hours (match JWT expiry)
       path: '/',
     });
@@ -129,7 +131,8 @@ router.post('/logout', (_req: Request, res: Response) => {
   res.clearCookie('cpa_session', {
     httpOnly: true,
     secure: isProd,
-    sameSite: isProd ? 'none' : 'lax',
+    sameSite: 'lax',
+    domain: isProd ? '.sabit.ai' : undefined,
     path: '/',
   });
   res.json({ ok: true });

@@ -33,7 +33,7 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 
 const STORAGE_KEY_USER = 'cpa_auth_user';
 
@@ -42,7 +42,6 @@ function loadUserFromStorage(): AuthUser | null {
   try {
     const u = localStorage.getItem(STORAGE_KEY_USER);
     const parsed = u ? JSON.parse(u) as AuthUser : null;
-    // Normalize backend role names (e.g. "preparer" → "controller") when loading from storage
     if (parsed) parsed.role = normalizeRole(parsed.role);
     return parsed;
   } catch {
@@ -55,34 +54,27 @@ function saveUserToStorage(user: AuthUser | null) {
   try {
     if (user) localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(user));
     else localStorage.removeItem(STORAGE_KEY_USER);
-    // Clean up legacy token from localStorage if present
+    // Clean up any legacy token from localStorage
     localStorage.removeItem('cpa_auth_token');
   } catch { /* localStorage may be unavailable */ }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  // Token kept in memory (not localStorage) for API clients that need Bearer auth.
-  // HttpOnly cookie is the primary auth mechanism for the web frontend.
-  const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
-
   const isLoadingRef = useRef(true);
 
-  // Hydrate user from localStorage on client mount (cookie handles auth, user is for display)
+  // Hydrate user from localStorage on client mount (cookie handles auth)
   useEffect(() => {
     const storedUser = loadUserFromStorage();
-    if (storedUser) {
-      setUser(storedUser);
-    }
+    if (storedUser) setUser(storedUser);
     setIsLoading(false);
     isLoadingRef.current = false;
   }, []);
 
-  // Return the in-memory token for API calls that need Bearer auth as fallback
-  const tokenRef = useRef<string | null>(null);
-  const getAuthToken = useCallback(() => tokenRef.current, []);
+  // Cookie handles auth — getAuthToken returns null
+  const getAuthToken = useCallback(() => null, []);
 
   useEffect(() => {
     setAuthTokenGetter(getAuthToken);
@@ -90,8 +82,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setAuthExpiredHandler(() => {
-      // Don't wipe credentials during hydration — a 401 from a stale
-      // getter is a race condition, not a real auth expiry.
       if (isLoadingRef.current) return;
       setUser(null);
       saveUserToStorage(null);
@@ -107,7 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const res = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          credentials: 'include', // Receive and store HttpOnly cookie
+          credentials: 'include',
           body: JSON.stringify({ email, password, tenantId: tenantId || undefined }),
         });
         let data: { error?: string; token?: string; userId?: string; tenantId?: string; role?: string; email?: string; name?: string | null };
@@ -127,10 +117,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
         const role = normalizeRole(rawRole);
         const authUser: AuthUser = { userId, tenantId: tid, role, email: data.email ?? email, name: data.name ?? undefined };
-        // Store token in memory for Bearer auth fallback (cross-origin deployments)
-        const jwt = (data as { token?: string }).token ?? null;
-        tokenRef.current = jwt;
-        setToken(jwt);
         setUser(authUser);
         saveUserToStorage(authUser);
         router.push(getDefaultLandingPage(role));
@@ -144,17 +130,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
-    // Call backend to clear the HttpOnly cookie
     try {
       await fetch(`${API_BASE}/api/auth/logout`, {
         method: 'POST',
         credentials: 'include',
       });
     } catch {
-      // Best-effort; proceed with client-side cleanup even if request fails
+      // Best-effort
     }
-    tokenRef.current = null;
-    setToken(null);
     setUser(null);
     saveUserToStorage(null);
     router.replace('/login');
@@ -162,7 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AuthContextValue>(
     () => ({
-      token, // In-memory token for Bearer auth fallback; cookie is primary
+      token: null, // Auth is via HttpOnly cookie on .sabit.ai domain
       user,
       isLoading,
       login,
