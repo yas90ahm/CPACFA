@@ -64,10 +64,11 @@ router.post('/login', loginLimiter, validateBody(loginSchema), async (req: Reque
       role: user.role,
     });
     // Set HttpOnly cookie as primary auth mechanism for web frontend
+    const isProd = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging';
     res.cookie('cpa_session', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax', // 'none' required for cross-origin deployments
       maxAge: 4 * 60 * 60 * 1000, // 4 hours (match JWT expiry)
       path: '/',
     });
@@ -108,10 +109,11 @@ router.post('/register', registerLimiter, validateBody(registerSchema), async (r
       role: user.role,
     });
     // Set HttpOnly cookie as primary auth mechanism for web frontend
+    const isProd = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging';
     res.cookie('cpa_session', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax', // 'none' required for cross-origin deployments
       maxAge: 4 * 60 * 60 * 1000, // 4 hours (match JWT expiry)
       path: '/',
     });
@@ -123,10 +125,11 @@ router.post('/register', registerLimiter, validateBody(registerSchema), async (r
 
 /** Logout: clear the HttpOnly session cookie. */
 router.post('/logout', (_req: Request, res: Response) => {
+  const isProd = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging';
   res.clearCookie('cpa_session', {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
     path: '/',
   });
   res.json({ ok: true });

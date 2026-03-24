@@ -19,7 +19,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  if (!authLoading && token) {
+  if (!authLoading && user) {
     router.replace(getDefaultLandingPage(user?.role ?? 'controller'));
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg-base)' }}>

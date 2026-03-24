@@ -61,8 +61,9 @@ function saveUserToStorage(user: AuthUser | null) {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  // Token state is no longer stored client-side; auth is via HttpOnly cookie.
-  // We keep a token field in context for backward compatibility (always null for cookie auth).
+  // Token kept in memory (not localStorage) for API clients that need Bearer auth.
+  // HttpOnly cookie is the primary auth mechanism for the web frontend.
+  const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
@@ -79,9 +80,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoadingRef.current = false;
   }, []);
 
-  // getAuthToken returns null — the HttpOnly cookie handles auth automatically.
-  // Kept for interface compatibility.
-  const getAuthToken = useCallback(() => null, []);
+  // Return the in-memory token for API calls that need Bearer auth as fallback
+  const tokenRef = useRef<string | null>(null);
+  const getAuthToken = useCallback(() => tokenRef.current, []);
 
   useEffect(() => {
     setAuthTokenGetter(getAuthToken);
@@ -126,6 +127,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
         const role = normalizeRole(rawRole);
         const authUser: AuthUser = { userId, tenantId: tid, role, email: data.email ?? email, name: data.name ?? undefined };
+        // Store token in memory for Bearer auth fallback (cross-origin deployments)
+        const jwt = (data as { token?: string }).token ?? null;
+        tokenRef.current = jwt;
+        setToken(jwt);
         setUser(authUser);
         saveUserToStorage(authUser);
         router.push(getDefaultLandingPage(role));
@@ -148,6 +153,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Best-effort; proceed with client-side cleanup even if request fails
     }
+    tokenRef.current = null;
+    setToken(null);
     setUser(null);
     saveUserToStorage(null);
     router.replace('/login');
@@ -155,7 +162,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AuthContextValue>(
     () => ({
-      token: null, // Token is now in HttpOnly cookie, not accessible to JS
+      token, // In-memory token for Bearer auth fallback; cookie is primary
       user,
       isLoading,
       login,
