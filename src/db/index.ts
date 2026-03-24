@@ -338,13 +338,13 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 187, file: '187_mapping_agent_proposals.sql' },
   { version: 188, file: '188_cross_tenant_learning_opt_in.sql' },
   { version: 189, file: '189_bank_connections.sql' },
-  { version: 190, file: '190_prepaid_amortization.sql' },
-  { version: 191, file: '191_ar_aging_cecl.sql' },
-  { version: 192, file: '192_ap_aging_cutoff.sql' },
-  { version: 193, file: '193_debt_accrual.sql' },
-  { version: 194, file: '194_payroll_accrual.sql' },
-  { version: 195, file: '195_inventory_reserve.sql' },
-  { version: 196, file: '196_lease_accounting.sql' },
+  { version: 200, file: '200_prepaid_amortization.sql' },
+  { version: 201, file: '201_ar_aging_cecl.sql' },
+  { version: 202, file: '202_ap_aging_cutoff.sql' },
+  { version: 203, file: '203_debt_accrual.sql' },
+  { version: 204, file: '204_payroll_accrual.sql' },
+  { version: 205, file: '205_inventory_reserve.sql' },
+  { version: 206, file: '206_lease_accounting.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 
