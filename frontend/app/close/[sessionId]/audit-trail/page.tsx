@@ -348,7 +348,7 @@ function EventCard({ event, isExpanded, onToggle }: EventCardProps) {
                     : 'var(--status-error)',
                 }}
               >
-                Chain Status: {event.chainValid ? '\u2713 Valid' : '\u2717 Invalid'}
+                Chain Status: {event.chainValid ? '✓ Valid' : '✗ Invalid'}
               </div>
             </div>
           </div>
@@ -533,7 +533,7 @@ export default function AuditTrailPage() {
               className="text-sm font-medium"
               style={{ color: 'var(--status-success)' }}
             >
-              Chain Integrity: Verified \u2713 ({hashChainStatus.totalEvents} events)
+              Chain Integrity: Verified ✓ ({hashChainStatus.totalEvents} events)
             </span>
           </>
         ) : (

@@ -8,9 +8,15 @@
 
 /* === FONT STACKS (set via CSS custom properties in tokens.css via layout.tsx next/font) === */
 :root {
-  --font-primary: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-primary: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', Consolas, monospace;
-  --font-serif: 'Source Serif 4', 'Georgia', 'Times New Roman', serif;
+  --font-serif: 'DM Serif Display', 'Georgia', 'Times New Roman', serif;
+}
+
+/* Headings use DM Serif Display for authoritative, published feel */
+h1, h2, h3 {
+  font-family: var(--font-serif);
+  color: var(--text-primary);
 }
 
 /* === TYPE SCALE CLASSES === */

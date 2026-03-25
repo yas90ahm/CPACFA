@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { ArrowRight } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { canReplaceGL } from '@/lib/permissions';
 import { useTrialBalanceContext } from '../context/trial-balance-context';
@@ -20,6 +22,7 @@ import {
   AttentionItemsCard,
   ActivityTimelineCard,
   QuickStatsPanel,
+  CloseChecklist,
 } from '@/components/dashboard';
 import { useDashboardData } from '@/components/dashboard/useDashboardData';
 
@@ -124,40 +127,69 @@ export default function CloseDashboardPage() {
         <ReplaceUploadCard onCancel={() => setShowReplaceUpload(false)} onFile={(f) => { setReplaceFile(f); setShowReplaceUpload(false); }} />
       )}
 
-      {/* ROW 1: Pipeline header */}
-      <PipelineCard
-        periodLabel={d.session.periodLabel ?? ''}
-        entityName={d.session.entityName ?? ''}
-        sessionState={state}
-        dayElapsed={d.dayElapsed}
-        targetDays={d.targetDays}
-        stepperSteps={d.stepperSteps}
-        sessionId={sessionId}
-        canReplaceGL={canReplaceGL(role)}
-        isInProgress={state === 'IN_PROGRESS'}
-        onReplaceGL={() => setShowReplaceConfirm(true)}
-        timeline={d.timeline}
-      />
-
-      {/* ROW 2: Attention + Stats */}
-      <section className="grid grid-cols-12 gap-6">
-        <div className="col-span-12 lg:col-span-8">
-          <AttentionItemsCard
-            gates={d.gatesWithMapping}
-            sessionId={sessionId}
-            reconComplete={d.reconComplete}
-            reconTotal={d.reconTotal}
-            ajeTemplatePending={d.ajeTemplatePending}
-            ajeTemplateTotal={d.ajeTemplateTotal}
-            varianceExplainedCount={d.varianceExplainedCount}
-            varianceMaterialTotal={d.varianceMaterialTotal}
-            mappedCount={d.mappedCount}
-            totalAccounts={d.totalAccounts}
-            jesAwaitingApproval={d.jesAwaitingApproval}
-            reconsInProgress={d.reconsInProgress}
-          />
+      {/* Close header */}
+      <div className="rounded-[var(--radius-lg)] bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[var(--shadow-sm)] p-6">
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div>
+            <h1 className="font-serif text-2xl" style={{ color: 'var(--text-primary)' }}>
+              {d.session.periodLabel ?? ''} Close
+            </h1>
+            <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+              {d.session.entityName ?? ''} &middot; Day {d.dayElapsed} of {d.targetDays}
+              {d.gatesTotal > 0 && <> &middot; {d.gatesPassing}/{d.gatesTotal} gates passing</>}
+            </p>
+          </div>
+          {state === 'IN_PROGRESS' && (
+            <Link
+              href={(() => {
+                const nextStep = d.stepperSteps.find((s) => s.status === 'active');
+                if (!nextStep) return `/close/${sessionId}/review`;
+                const routes: Record<string, string> = { upload: 'trial-balance', map: 'mapping', recon: 'reconciliation', adjust: 'adjustments', generate: 'statements', variance: 'variance', review: 'review', certify: 'review' };
+                return `/close/${sessionId}/${routes[nextStep.id] ?? 'dashboard'}`;
+              })()}
+              className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white rounded-[var(--radius-md)] transition-colors"
+              style={{ backgroundColor: 'var(--interactive-primary)' }}
+            >
+              Continue Close
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+          )}
         </div>
-        <div className="col-span-12 lg:col-span-4">
+      </div>
+
+      {/* Main content: Checklist + Status sidebar */}
+      <section className="grid grid-cols-12 gap-6">
+        {/* Close Checklist */}
+        <div className="col-span-12 lg:col-span-8">
+          <div className="rounded-[var(--radius-lg)] bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[var(--shadow-sm)] p-6">
+            <h2 className="font-serif text-lg mb-4" style={{ color: 'var(--text-primary)' }}>
+              Close Checklist
+            </h2>
+            <CloseChecklist
+              sessionId={sessionId}
+              stepperSteps={d.stepperSteps}
+              mappedCount={d.mappedCount}
+              totalAccounts={d.totalAccounts}
+              unmappedCount={d.unmappedCount}
+              reconComplete={d.reconComplete}
+              reconTotal={d.reconTotal}
+              reconsInProgress={d.reconsInProgress}
+              ajeTemplatePending={d.ajeTemplatePending}
+              ajeTemplateTotal={d.ajeTemplateTotal}
+              jesAwaitingApproval={d.jesAwaitingApproval}
+              statementsGenerated={d.statementsGenerated}
+              statementsStale={d.statementsStale}
+              varianceExplainedCount={d.varianceExplainedCount}
+              varianceMaterialTotal={d.varianceMaterialTotal}
+              gatesPassing={d.gatesPassing}
+              gatesTotal={d.gatesTotal}
+              sessionState={state}
+            />
+          </div>
+        </div>
+
+        {/* Status sidebar */}
+        <div className="col-span-12 lg:col-span-4 space-y-4">
           <QuickStatsPanel
             gatesPassing={d.gatesPassing}
             gatesTotal={d.gatesTotal}
@@ -168,20 +200,11 @@ export default function CloseDashboardPage() {
             statementsGenerated={d.statementsGenerated}
             statementsStale={d.statementsStale}
           />
-        </div>
-      </section>
-
-      {/* ROW 3: Financials + Gates */}
-      <section className="grid grid-cols-12 gap-6">
-        <div className="col-span-12 lg:col-span-6">
           <FinancialHighlightsCard financialLines={d.financialLines} balanceVerified={d.balanceVerified} sessionId={sessionId} />
         </div>
-        <div className="col-span-12 lg:col-span-6">
-          <GateStatusCard gates={d.gatesWithMapping} gatesPassing={d.gatesPassing} gatesTotal={d.gatesTotal} sessionId={sessionId} />
-        </div>
       </section>
 
-      {/* ROW 4: Activity */}
+      {/* Activity */}
       <section>
         <ActivityTimelineCard events={d.auditEvents} sessionId={sessionId} />
       </section>

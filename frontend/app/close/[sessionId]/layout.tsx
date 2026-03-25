@@ -163,11 +163,13 @@ function CloseSessionInner({ children }: { children: React.ReactNode }) {
         isReadOnly={readOnly}
         canLock={canLockPeriod(role)}
         canSubmit={canSubmitForReview(role)}
+        sidebarCollapsed={sidebarCollapsed}
       />
       {readOnly && (
         <div
-          className="fixed top-[96px] left-0 right-0 z-25 h-8 flex items-center justify-center border-b text-xs font-medium print:hidden"
+          className="fixed top-[96px] right-0 z-25 h-8 flex items-center justify-center border-b text-xs font-medium print:hidden transition-[left] duration-200"
           style={{
+            left: sidebarCollapsed ? '64px' : '240px',
             background: 'var(--status-info-bg)',
             borderColor: 'var(--status-info-border)',
             color: 'var(--status-info)'
@@ -178,8 +180,9 @@ function CloseSessionInner({ children }: { children: React.ReactNode }) {
       )}
       {role === 'reviewer' && !readOnly && (
         <div
-          className="fixed top-[96px] left-0 right-0 z-25 h-8 flex items-center justify-center border-b text-xs font-medium print:hidden"
+          className="fixed top-[96px] right-0 z-25 h-8 flex items-center justify-center border-b text-xs font-medium print:hidden transition-[left] duration-200"
           style={{
+            left: sidebarCollapsed ? '64px' : '240px',
             background: 'var(--status-info-bg)',
             borderColor: 'var(--status-info-border)',
             color: 'var(--status-info)'

@@ -21,6 +21,8 @@ export interface StateMachineBannerProps {
   canLock?: boolean;
   /** Whether user can submit for review (admin, controller). */
   canSubmit?: boolean;
+  /** Whether sidebar is collapsed (affects left offset). */
+  sidebarCollapsed?: boolean;
 }
 
 export function StateMachineBanner({
@@ -32,6 +34,7 @@ export function StateMachineBanner({
   isReadOnly = false,
   canLock = false,
   canSubmit = true,
+  sidebarCollapsed = false,
 }: StateMachineBannerProps) {
   const idx = states.indexOf(currentState);
   const advanceMutation = useAdvanceSession(sessionId);
@@ -61,7 +64,7 @@ export function StateMachineBanner({
 
   return (
     <>
-      <div className="fixed top-14 left-0 right-0 z-30 h-10 flex items-center justify-between px-6 bg-surface border-b border-border-light print:hidden">
+      <div className="fixed top-14 right-0 z-30 h-10 flex items-center justify-between px-6 bg-surface border-b border-border-light print:hidden transition-[left] duration-200" style={{ left: sidebarCollapsed ? '64px' : '240px' }}>
         <div className="flex items-center gap-0.5">
           {states.map((s, i) => {
             const isPast = i < idx;
@@ -87,7 +90,7 @@ export function StateMachineBanner({
             );
           })}
           {gatesRemaining > 0 && currentState === 'IN_PROGRESS' && (
-            <span className="ml-3 text-xs font-mono text-text-tertiary">{gatesRemaining} gates remaining</span>
+            <span className="ml-3 text-xs font-mono text-text-tertiary">{gatesRemaining} steps to certification</span>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -95,7 +98,7 @@ export function StateMachineBanner({
             <button
               type="button"
               disabled={!canAdvance || advanceMutation.isPending}
-              title={!canAdvance ? String(gatesRemaining) + ' gates remaining' : undefined}
+              title={!canAdvance ? String(gatesRemaining) + ' steps to certification' : undefined}
               onClick={handleSubmitForReview}
               className={cn(
                 'px-3 py-1.5 text-xs font-medium rounded border',

@@ -10,6 +10,7 @@ import type { DeferredTaxItem } from '@/lib/types/deferred-tax';
 import { Plus, Calculator, Loader2, FileSpreadsheet } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
+import { ModuleBanner } from '@/components/shared/ModuleBanner';
 
 const TYPE_LABEL: Record<string, string> = { temporary_difference: 'Temporary Diff', nol_carryforward: 'NOL Carryforward', tax_credit: 'Tax Credit' };
 
@@ -47,6 +48,7 @@ export default function DeferredTaxPage() {
 
   return (
     <div className="space-y-6">
+      <ModuleBanner sessionId={sessionId} />
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-display" style={{ color: 'var(--text-primary)' }}>Deferred Tax</h1>

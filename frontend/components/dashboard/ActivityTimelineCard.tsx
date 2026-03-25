@@ -19,6 +19,41 @@ function formatDate(iso: string): string {
   }
 }
 
+const EVENT_LABELS: Record<string, string> = {
+  close_session_transition: 'Close session status changed',
+  close_session_created: 'Close session created',
+  gl_upload: 'General ledger uploaded',
+  gl_ingest: 'General ledger imported',
+  mapping_rule_update: 'Account mapping updated',
+  coa_mapping_rule_created: 'Account mapping rule created',
+  ai_mapping_suggestion_accepted: 'AI mapping suggestion accepted',
+  ai_mapping_suggestion_rejected: 'AI mapping suggestion rejected',
+  journal_entry_posted: 'Journal entry posted',
+  journal_entry_proposed: 'Journal entry proposed',
+  journal_entry_approved: 'Journal entry approved',
+  journal_entry_rejected: 'Journal entry rejected',
+  reconciliation_completed: 'Reconciliation completed',
+  reconciliation_approved: 'Reconciliation approved',
+  recon_supporting_balance_set: 'Supporting balance entered',
+  statements_generated: 'Financial statements generated',
+  variance_explained: 'Variance explanation added',
+  certification: 'Period certified',
+  reopen: 'Period reopened',
+  lock: 'Period locked',
+};
+
+function humanizeEvent(event: AuditEvent): string {
+  if (event.description && !event.description.includes('Material event:')) return event.description;
+  return EVENT_LABELS[event.eventType] ?? event.eventType.replace(/_/g, ' ');
+}
+
+function humanizeUser(event: AuditEvent): string {
+  if (event.userName && !event.userName.startsWith('user-')) return event.userName;
+  if (event.userId?.includes('@')) return event.userId.split('@')[0];
+  if (event.userId?.startsWith('user-')) return 'Controller';
+  return event.userName ?? 'System';
+}
+
 /* ── Types ────────────────────────────────────────────────────────────────── */
 
 export interface ActivityTimelineCardProps {
@@ -81,13 +116,13 @@ export function ActivityTimelineCard({ events, sessionId }: ActivityTimelineCard
                   className="text-sm font-medium flex-shrink-0"
                   style={{ color: 'var(--text-secondary)' }}
                 >
-                  {entry.userName ?? entry.userId ?? 'System'}
+                  {humanizeUser(entry)}
                 </span>
                 <span
                   className="text-sm flex-1"
                   style={{ color: 'var(--text-primary)' }}
                 >
-                  {entry.description || entry.eventType}
+                  {humanizeEvent(entry)}
                 </span>
               </li>
             ))}

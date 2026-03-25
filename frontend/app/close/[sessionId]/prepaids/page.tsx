@@ -7,6 +7,7 @@ import { fmtMoney } from '@/lib/money';
 import { Plus, Play, Loader2, Calendar } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
+import { ModuleBanner } from '@/components/shared/ModuleBanner';
 
 const STATUS_COLORS: Record<string, string> = {
   pending: 'var(--status-warning)',
@@ -58,6 +59,7 @@ export default function PrepaidsPage() {
 
   return (
     <div className="space-y-6">
+      <ModuleBanner sessionId={sessionId} />
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>

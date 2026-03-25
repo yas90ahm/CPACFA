@@ -39,13 +39,32 @@ export interface XBRLStats {
  * Uses trigram similarity (pg_trgm) for fuzzy text matching.
  * Boosts score when balance_type or statement matches the provided filters.
  */
+/**
+ * Clean a GL account name for XBRL search by stripping parenthetical notes,
+ * bank names, account numbers, and common noise.
+ * "Cash - Operating (Chase)" → "Cash Operating"
+ * "Accounts Receivable - Trade (Net)" → "Accounts Receivable Trade"
+ */
+function cleanAccountName(name: string): string {
+  let cleaned = name;
+  // Remove parenthetical content: (Chase), (Net), etc.
+  cleaned = cleaned.replace(/\([^)]*\)/g, '');
+  // Remove trailing account numbers
+  cleaned = cleaned.replace(/\s*#?\d{3,}$/g, '');
+  // Remove common noise separators
+  cleaned = cleaned.replace(/\s*[-–—:]\s*/g, ' ');
+  // Collapse whitespace
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  return cleaned;
+}
+
 export async function searchXBRL(
   pool: Pool,
   query: string,
   options?: XBRLSearchOptions
 ): Promise<XBRLSearchResult[]> {
   const limit = options?.limit ?? 10;
-  const trimmed = query.trim();
+  const trimmed = cleanAccountName(query.trim());
   if (!trimmed) return [];
 
   // Build WHERE clauses for optional filters

@@ -1,12 +1,12 @@
 import type { Metadata } from 'next';
-import { Inter, JetBrains_Mono, Source_Serif_4 } from 'next/font/google';
+import { DM_Sans, DM_Serif_Display, JetBrains_Mono } from 'next/font/google';
 import '../styles/tokens.css';
 import '../styles/typography.css';
 import './globals.css';
 import { Providers } from './providers';
 import { DesktopOnlyGuard } from '@/components/shell/DesktopOnlyGuard';
 
-const inter = Inter({
+const dmSans = DM_Sans({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700'],
   variable: '--font-sans',
@@ -20,7 +20,7 @@ const jetbrainsMono = JetBrains_Mono({
   display: 'swap',
 });
 
-const sourceSerif4 = Source_Serif_4({
+const dmSerifDisplay = DM_Serif_Display({
   subsets: ['latin'],
   weight: ['400'],
   variable: '--font-serif',
@@ -48,7 +48,7 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${inter.variable} ${jetbrainsMono.variable} ${sourceSerif4.variable} font-sans antialiased min-h-screen`}
+        className={`${dmSans.variable} ${jetbrainsMono.variable} ${dmSerifDisplay.variable} font-sans antialiased min-h-screen`}
       >
         <Providers>{children}</Providers>
         <DesktopOnlyGuard />

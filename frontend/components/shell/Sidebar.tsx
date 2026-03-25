@@ -57,40 +57,27 @@ interface NavGroup {
 
 const navGroups: NavGroup[] = [
   {
-    label: 'Close Workflow',
+    label: 'Pipeline',
     defaultOpen: true,
     items: [
       { href: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { href: 'mapping', label: 'Mapping', icon: ArrowRightLeft },
-      { href: 'reconciliation', label: 'Reconciliation', icon: ShieldCheck, badgeProp: 'recon' },
-      { href: 'adjustments', label: 'Adjustments', icon: PenLine, badgeProp: 'adjustments' },
-      { href: 'statements', label: 'Statements', icon: FileText, stale: false },
-      { href: 'variance', label: 'Variance', icon: TrendingUp },
-      { href: 'review', label: 'Review & Certify', icon: Award },
+      { href: 'trial-balance', label: '1 · Upload & Map', icon: Table },
+      { href: 'mapping', label: '2 · Map Accounts', icon: ArrowRightLeft },
+      { href: 'reconciliation', label: '3 · Reconciliation', icon: ShieldCheck, badgeProp: 'recon' },
+      { href: 'adjustments', label: '4 · Adjustments', icon: PenLine, badgeProp: 'adjustments' },
+      { href: 'statements', label: '5 · Statements', icon: FileText, stale: false },
+      { href: 'variance', label: '6 · Variance', icon: TrendingUp },
+      { href: 'review', label: '7 · Review & Certify', icon: Award },
     ],
   },
   {
-    label: 'Workpapers',
-    defaultOpen: false,
-    items: [
-      { href: 'trial-balance', label: 'Trial Balance', icon: Table },
-      { href: 'bank-reconciliation', label: 'Bank Recon', icon: Calculator },
-      { href: 'ar-aging', label: 'AR Aging', icon: Table },
-      { href: 'ap-aging', label: 'AP Aging', icon: Table },
-      { href: 'gl-health', label: 'GL Health', icon: HeartPulse },
-      { href: 'gl-quality', label: 'GL Quality', icon: Sparkles },
-      { href: 'checklist', label: 'Checklist', icon: ListChecks },
-      { href: 'discrepancies', label: 'Discrepancies', icon: Search },
-    ],
-  },
-  {
-    label: 'Modules',
+    label: 'Accounting Modules',
     defaultOpen: false,
     items: [
       { href: 'prepaids', label: 'Prepaids', icon: FileText },
-      { href: 'debt-accrual', label: 'Debt Accrual', icon: Calculator },
-      { href: 'payroll-accrual', label: 'Payroll Accrual', icon: Calculator },
       { href: 'fixed-assets', label: 'Fixed Assets', icon: Building2 },
+      { href: 'payroll-accrual', label: 'Payroll Accrual', icon: Calculator },
+      { href: 'debt-accrual', label: 'Debt Accrual', icon: Calculator },
       { href: 'deferred-tax', label: 'Deferred Tax', icon: Calculator },
       { href: 'leases', label: 'Leases (ASC 842)', icon: Building2 },
       { href: 'inventory-reserve', label: 'Inventory Reserve', icon: AlertTriangle },
@@ -99,18 +86,25 @@ const navGroups: NavGroup[] = [
       { href: 'segments', label: 'Segments', icon: PieChart },
       { href: 'fx-translation', label: 'FX Translation', icon: Globe },
       { href: 'consolidation', label: 'Consolidation', icon: GitMerge },
+      { href: 'bank-reconciliation', label: 'Bank Recon', icon: Calculator },
+      { href: 'ar-aging', label: 'AR Aging', icon: Table },
+      { href: 'ap-aging', label: 'AP Aging', icon: Table },
     ],
   },
   {
     label: 'Governance',
     defaultOpen: false,
     items: [
+      { href: 'gl-health', label: 'GL Health', icon: HeartPulse },
+      { href: 'gl-quality', label: 'GL Quality', icon: Sparkles },
       { href: 'controls', label: 'Controls', icon: Shield },
       { href: 'ai-review', label: 'AI Review', icon: Brain },
-      { href: 'board-package', label: 'Board Package', icon: BookOpen },
       { href: 'audit-trail', label: 'Audit Trail', icon: History },
       { href: 'audit-binder', label: 'Audit Binder', icon: BookOpen },
+      { href: 'board-package', label: 'Board Package', icon: BookOpen },
       { href: 'analytics', label: 'Analytics', icon: BarChart3 },
+      { href: 'checklist', label: 'Checklist', icon: ListChecks },
+      { href: 'discrepancies', label: 'Discrepancies', icon: Search },
     ],
   },
 ];
@@ -277,7 +271,7 @@ export function Sidebar({
   return (
     <aside
       className={cn(
-        'fixed left-0 top-[56px] h-[calc(100vh-56px)] border-r border-[var(--border-default)] bg-[var(--bg-nav)] flex flex-col z-30 print:hidden transition-[width] duration-200',
+        'fixed left-0 top-[56px] h-[calc(100vh-56px)] border-r border-[var(--border-default)] bg-[var(--bg-nav)] flex flex-col z-30 print:hidden transition-[width] duration-200 shadow-[1px_0_0_var(--border-default)]',
         collapsed ? 'w-16' : 'w-60',
       )}
     >
@@ -303,7 +297,7 @@ export function Sidebar({
                   className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2"
                   style={{
                     background: 'var(--status-warning)',
-                    borderColor: 'var(--bg-nav)',
+                    borderColor: 'var(--bg-surface)',
                   }}
                 />
               </Link>

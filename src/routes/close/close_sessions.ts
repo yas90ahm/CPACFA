@@ -231,9 +231,15 @@ router.get('/sessions/:id', async (req: Request, res: Response) => {
     const pkgs = await listStatementPackages(pool, tenantId, id, 1);
     const latestPackage = pkgs[0];
     const entitySettings = await getEntitySettings(pool, tenantId, session.entityId);
+    // Resolve entity name: entity settings → tenant name → entityId fallback
+    let resolvedEntityName = entitySettings.entityName;
+    if (!resolvedEntityName || resolvedEntityName === session.entityId) {
+      const tenantRow = await pool.query<{ name: string }>('SELECT name FROM tenants WHERE id = $1', [tenantId]);
+      resolvedEntityName = tenantRow.rows[0]?.name || session.entityId;
+    }
     const payload: Record<string, unknown> = { ...session };
     payload.periodLabel = derivePeriodLabel(session.periodEnd ?? '');
-    payload.entityName = entitySettings.entityName || session.entityId;
+    payload.entityName = resolvedEntityName;
     payload.statementsGeneratedAt = latestPackage?.generatedAt ?? null;
     payload.statementsStale = !!session.statementsStaleSince;
     res.json(payload);

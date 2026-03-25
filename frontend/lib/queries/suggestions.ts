@@ -97,13 +97,38 @@ export function useAcceptSuggestion() {
         }
       );
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['coa-suggestions'] });
-      qc.invalidateQueries({ queryKey: ['cf-suggestions'] });
-      qc.invalidateQueries({ queryKey: ['ai-suggestions'] });
-      qc.invalidateQueries({ queryKey: ['taxonomy'] });
-      qc.invalidateQueries({ queryKey: ['trial-balance'] });
-      qc.invalidateQueries({ queryKey: ['readiness'] });
+    onMutate: async (variables) => {
+      // Cancel in-flight fetches so they don't overwrite optimistic update
+      await qc.cancelQueries({ queryKey: ['coa-suggestions'] });
+      // Snapshot for rollback
+      const prev = qc.getQueriesData<COASuggestion[]>({ queryKey: ['coa-suggestions'] });
+      // Optimistic update: mark suggestion as accepted immediately
+      qc.setQueriesData<COASuggestion[]>(
+        { queryKey: ['coa-suggestions'] },
+        (old) => {
+          if (!old || !Array.isArray(old)) return old;
+          return old.map((s) =>
+            s.id === variables.suggestionId ? { ...s, status: 'accepted' as const } : s
+          );
+        }
+      );
+      return { prev };
+    },
+    onError: (_err, _vars, context) => {
+      // Rollback on error
+      if (context?.prev) {
+        for (const [key, data] of context.prev) {
+          qc.setQueryData(key, data);
+        }
+      }
+    },
+    onSettled: () => {
+      // Refetch after a short delay to let the backend commit
+      setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ['coa-suggestions'] });
+        qc.invalidateQueries({ queryKey: ['trial-balance'] });
+        qc.invalidateQueries({ queryKey: ['readiness'] });
+      }, 500);
     },
   });
 }
@@ -124,9 +149,31 @@ export function useRejectSuggestion() {
         }
       );
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['coa-suggestions'] });
-      qc.invalidateQueries({ queryKey: ['cf-suggestions'] });
+    onMutate: async (variables) => {
+      await qc.cancelQueries({ queryKey: ['coa-suggestions'] });
+      const prev = qc.getQueriesData<COASuggestion[]>({ queryKey: ['coa-suggestions'] });
+      qc.setQueriesData<COASuggestion[]>(
+        { queryKey: ['coa-suggestions'] },
+        (old) => {
+          if (!old || !Array.isArray(old)) return old;
+          return old.map((s) =>
+            s.id === variables.suggestionId ? { ...s, status: 'rejected' as const } : s
+          );
+        }
+      );
+      return { prev };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.prev) {
+        for (const [key, data] of context.prev) {
+          qc.setQueryData(key, data);
+        }
+      }
+    },
+    onSettled: () => {
+      setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ['coa-suggestions'] });
+      }, 500);
     },
   });
 }

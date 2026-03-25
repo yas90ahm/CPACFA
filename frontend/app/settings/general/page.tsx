@@ -226,6 +226,9 @@ export default function GeneralSettingsPage() {
         </button>
       </div>
 
+      {/* Demo & Testing Section */}
+      <DemoResetSection />
+
       {toast && (
         <div
           className={cn(
@@ -239,5 +242,84 @@ export default function GeneralSettingsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/* ── Demo Reset Section ── */
+
+function DemoResetSection() {
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmInput, setConfirmInput] = useState('');
+  const [resetResult, setResetResult] = useState<string | null>(null);
+
+  const resetMutation = useMutation({
+    mutationFn: () => apiFetch<{ success: boolean; deleted: Record<string, number>; preserved: Record<string, number> }>('/api/settings/demo-reset', { method: 'POST' }),
+    onSuccess: (data) => {
+      const totalDeleted = Object.values(data.deleted).reduce((a, b) => a + b, 0);
+      setResetResult(`Reset complete. ${totalDeleted} records deleted across ${Object.keys(data.deleted).length} tables. ${data.preserved.users} users preserved.`);
+      setShowConfirm(false);
+      setConfirmInput('');
+      setTimeout(() => { window.location.href = '/close'; }, 3000);
+    },
+    onError: (err) => {
+      setResetResult(`Reset failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    },
+  });
+
+  return (
+    <>
+      <div className="mt-8 pt-8" style={{ borderTop: '1px solid var(--border-default)' }}>
+        <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>Demo & Testing</h3>
+        <p className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>
+          Removes all sessions, GL data, mappings, reconciliations, journal entries, and statements.
+          Preserves your users, chart of accounts, and configuration.
+        </p>
+        <button
+          type="button"
+          onClick={() => setShowConfirm(true)}
+          className="px-4 py-2 text-sm font-medium rounded-[var(--radius-md)] transition-colors"
+          style={{ backgroundColor: 'var(--status-error-bg)', color: 'var(--status-error)', border: '1px solid var(--status-error-border)' }}
+        >
+          Reset All Close Data
+        </button>
+        {resetResult && (
+          <p className="mt-3 text-xs" style={{ color: resetResult.includes('failed') ? 'var(--status-error)' : 'var(--status-success)' }}>
+            {resetResult}
+          </p>
+        )}
+      </div>
+
+      {showConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/50" onClick={() => { setShowConfirm(false); setConfirmInput(''); }} />
+          <div className="relative bg-surface border border-border rounded-card shadow-xl max-w-sm w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-serif text-lg text-primary mb-2">Reset All Close Data</h3>
+            <p className="text-text-secondary text-sm mb-4">
+              This will permanently delete all close data. Type <strong className="font-mono">RESET</strong> to confirm.
+            </p>
+            <input
+              type="text"
+              value={confirmInput}
+              onChange={(e) => setConfirmInput(e.target.value)}
+              placeholder="Type RESET"
+              className="w-full px-3 py-2 rounded-input border border-border bg-surface text-primary mb-4 font-mono"
+              autoFocus
+            />
+            <div className="flex justify-end gap-3">
+              <button type="button" onClick={() => { setShowConfirm(false); setConfirmInput(''); }} className="px-4 py-2 rounded-input border border-border text-sm">Cancel</button>
+              <button
+                type="button"
+                onClick={() => resetMutation.mutate()}
+                disabled={confirmInput !== 'RESET' || resetMutation.isPending}
+                className={cn('px-4 py-2 rounded-input text-sm font-medium', confirmInput === 'RESET' ? 'text-white' : 'cursor-not-allowed opacity-50')}
+                style={{ backgroundColor: confirmInput === 'RESET' ? 'var(--status-error)' : 'var(--bg-surface-sunken)', color: confirmInput === 'RESET' ? 'white' : 'var(--text-tertiary)' }}
+              >
+                {resetMutation.isPending ? 'Resetting...' : 'Confirm Reset'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

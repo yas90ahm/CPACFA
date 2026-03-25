@@ -214,4 +214,68 @@ router.put('/cross-tenant-learning', async (req: Request, res: Response) => {
   }
 });
 
+/** POST /api/settings/demo-reset — Wipe all period data for the tenant (preserves users, COA, templates). */
+router.post('/demo-reset', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+
+    const tables = [
+      'audit_ledger', 'close_audit_trail', 'certification_artifacts', 'ledger_snapshots',
+      'statement_generations', 'tenant_variance_analysis', 'evidence_links', 'evidence_records',
+      'journal_entries', 'tenant_aje_template_applications',
+      'reconciliation_resolutions', 'reconciliation_todos',
+      'tenant_recon_source_data', 'tenant_period_reconciliations',
+      'tenant_close_issue_history', 'tenant_close_issues',
+      'coa_mapping_history', 'coa_mapping_rules',
+      'mapping_correction_proposals', 'mapping_corrections_log',
+      'ai_coa_suggestions', 'ai_cf_suggestions', 'tenant_ai_proposals',
+      'period_trial_balance', 'general_ledger',
+      'gl_account_analysis', 'gl_health_analysis', 'gl_upload_history',
+      'tenant_session_uploads', 'tenant_supervisor_sessions',
+      'tenant_gate_snapshots', 'tenant_draft_adjustments', 'tenant_hitl_staging',
+      'period_financial_data_state', 'tenant_close_tasks', 'close_checklist',
+      'close_sessions',
+    ];
+
+    // Disable protective triggers
+    const protectedTables = ['audit_ledger', 'journal_entries', 'evidence_records', 'tenant_close_issue_history'];
+    for (const t of protectedTables) {
+      try { await pool.query(`ALTER TABLE ${t} DISABLE TRIGGER USER`); } catch { /* table may not exist */ }
+    }
+
+    const deleted: Record<string, number> = {};
+    for (const table of tables) {
+      try {
+        const r = await pool.query(`DELETE FROM ${table} WHERE tenant_id = $1`, [tenantId]);
+        if (r.rowCount && r.rowCount > 0) deleted[table] = r.rowCount;
+      } catch { /* skip tables that don't exist or have FK issues */ }
+    }
+
+    // Re-enable triggers
+    for (const t of protectedTables) {
+      try { await pool.query(`ALTER TABLE ${t} ENABLE TRIGGER USER`); } catch { /* ignore */ }
+    }
+
+    // Count preserved
+    const usersResult = await pool.query('SELECT COUNT(*)::int AS cnt FROM users WHERE tenant_id = $1', [tenantId]);
+    const coaResult = await pool.query('SELECT COUNT(*)::int AS cnt FROM tenant_chart_of_accounts WHERE tenant_id = $1', [tenantId]);
+
+    res.json({
+      success: true,
+      deleted,
+      preserved: {
+        users: usersResult.rows[0]?.cnt ?? 0,
+        coaAccounts: coaResult.rows[0]?.cnt ?? 0,
+      },
+    });
+  } catch (e) {
+    send500(res, e, 'Demo reset failed');
+  }
+});
+
 export default router;

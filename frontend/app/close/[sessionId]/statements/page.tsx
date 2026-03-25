@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useCloseSession } from '@/lib/queries/close-session';
+import { useTrialBalanceContext } from '../context/trial-balance-context';
 import { useStatements, useValidation } from '@/lib/queries/statements';
 import { useCumulativePeriods, useGenerateCumulative } from '@/lib/queries/cumulative';
 import { useBudgetVariance } from '@/lib/queries/budget';
@@ -85,6 +86,7 @@ export default function StatementsPage() {
   const tab = (searchParams.get('tab') as TabId) || 'income-statement';
 
   const { data: session } = useCloseSession(sessionId);
+  const tbCtx = useTrialBalanceContext();
   const { data: statements } = useStatements(sessionId);
   const { data: validation } = useValidation(sessionId);
   const { data: cumulativePeriods } = useCumulativePeriods(sessionId);
@@ -542,14 +544,35 @@ export default function StatementsPage() {
         }}
       >
         {!hasStatements && tab !== 'validation' && tab !== 'ebitda' && (
-          <EmptyState
-            icon={FileText}
-            title="Statements not yet generated"
-            description="Generate your financial statements once all accounts are mapped and adjusting entries are posted."
-            ctaLabel={generating ? 'Generating...' : 'Generate Statements'}
-            onCtaClick={handleRegenerate}
-            variant="first-time"
-          />
+          tbCtx.unmappedCount > 0 && tbCtx.rows.length > 0 ? (
+            <div className="py-12 px-8 text-center">
+              <FileText className="w-10 h-10 mx-auto mb-4" style={{ color: 'var(--text-tertiary)' }} />
+              <h3 className="font-serif text-lg mb-2" style={{ color: 'var(--text-primary)' }}>Statements cannot be generated yet</h3>
+              <p className="text-sm max-w-md mx-auto mb-4" style={{ color: 'var(--text-secondary)' }}>
+                Account mapping is required before generating financial statements. Your accounts must be mapped to
+                financial statement line items so Sabit knows where to place each balance.
+              </p>
+              <p className="text-sm font-medium mb-6" style={{ color: 'var(--status-warning)' }}>
+                {tbCtx.mappedCount} of {tbCtx.rows.length} accounts mapped
+              </p>
+              <Link
+                href={`/close/${sessionId}/mapping`}
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white rounded-[var(--radius-md)]"
+                style={{ backgroundColor: 'var(--interactive-primary)' }}
+              >
+                Go to Account Mapping
+              </Link>
+            </div>
+          ) : (
+            <EmptyState
+              icon={FileText}
+              title="Statements not yet generated"
+              description="Generate your financial statements once all accounts are mapped and adjusting entries are posted."
+              ctaLabel={generating ? 'Generating...' : 'Generate Statements'}
+              onCtaClick={handleRegenerate}
+              variant="first-time"
+            />
+          )
         )}
         {tab === 'income-statement' && statements?.incomeStatement && (
           <>

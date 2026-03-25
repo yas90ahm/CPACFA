@@ -8,13 +8,13 @@ import { getDefaultLandingPage } from '@/lib/permissions';
 const FALLBACK_REDIRECT_MS = 2000;
 
 export default function HomePage() {
-  const { user, token, isLoading } = useAuth();
+  const { user, isLoading } = useAuth();
   const router = useRouter();
   const fallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (isLoading) return;
-    if (!user && token === null) {
+    if (!user) {
       router.push('/login');
       fallbackRef.current = setTimeout(() => {
         if (typeof window !== 'undefined') {
@@ -29,9 +29,8 @@ export default function HomePage() {
       clearTimeout(fallbackRef.current);
       fallbackRef.current = null;
     }
-    if (!user) return;
     router.push(getDefaultLandingPage(user.role));
-  }, [user, token, isLoading, router]);
+  }, [user, isLoading, router]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-primary">

@@ -1,7 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { CheckCircle2, XCircle, AlertCircle, Loader2, MinusCircle, Lock } from 'lucide-react';
+import { CheckCircle2, XCircle, AlertCircle, MinusCircle, Lock, Circle } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
 /*  Canonical status types and their semantic groups                    */
@@ -42,12 +42,11 @@ export interface StatusBadgeProps {
 /* ------------------------------------------------------------------ */
 
 interface StatusConfig {
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string; fill?: string }>;
   color: string;
   bg: string;
   border: string;
   label: string;
-  spin?: boolean;
 }
 
 const STATUS_CONFIG: Record<StatusType, StatusConfig> = {
@@ -90,36 +89,32 @@ const STATUS_CONFIG: Record<StatusType, StatusConfig> = {
 
   /* ── Blue: active / in-flight ── */
   'active': {
-    icon: Loader2,
+    icon: Circle,
     color: 'var(--status-info)',
     bg: 'var(--status-info-bg)',
     border: 'var(--status-info-border)',
     label: 'ACTIVE',
-    spin: true,
   },
   'in-progress': {
-    icon: Loader2,
+    icon: Circle,
     color: 'var(--status-info)',
     bg: 'var(--status-info-bg)',
     border: 'var(--status-info-border)',
     label: 'IN PROGRESS',
-    spin: true,
   },
   'proposed': {
-    icon: Loader2,
+    icon: Circle,
     color: 'var(--status-info)',
     bg: 'var(--status-info-bg)',
     border: 'var(--status-info-border)',
     label: 'PROPOSED',
-    spin: true,
   },
   'generating': {
-    icon: Loader2,
+    icon: Circle,
     color: 'var(--status-info)',
     bg: 'var(--status-info-bg)',
     border: 'var(--status-info-border)',
     label: 'GENERATING',
-    spin: true,
   },
 
   /* ── Amber: warning / needs attention ── */
@@ -301,8 +296,8 @@ export function StatusBadge(p: StatusBadgeProps) {
         <Icon
           className={cn(
             size === 'sm' ? 'w-3 h-3' : 'w-[18px] h-[18px]',
-            config.spin && 'animate-spin'
           )}
+          {...(Icon === Circle ? { fill: 'currentColor' } : {})}
         />
       )}
       {showLabel && label}

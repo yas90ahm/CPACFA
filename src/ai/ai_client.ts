@@ -69,7 +69,12 @@ async function _callAIWithSchemaImpl<T>(params: CallAIWithSchemaParams<T>): Prom
 
   if (adapterOut.ok && adapterOut.rawText) {
     try {
-      const json = JSON.parse(adapterOut.rawText) as unknown;
+      // Strip markdown code fences if present (```json ... ```)
+      let rawText = adapterOut.rawText.trim();
+      if (rawText.startsWith('```')) {
+        rawText = rawText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
+      }
+      const json = JSON.parse(rawText) as unknown;
       parsed = schema.parse(json) as T;
       responseJson = json as Record<string, unknown>;
     } catch (e) {

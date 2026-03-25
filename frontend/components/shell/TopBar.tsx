@@ -10,12 +10,12 @@ import { canAccessSettings, getRoleLabel } from '@/lib/permissions';
 import { useTheme } from '@/components/ThemeProvider';
 import type { CloseState } from '@/lib/types/close-session';
 
-function stateClass(s: CloseState): string {
-  if (s === 'OPEN') return 'bg-status-blue-dim text-status-blue border-status-blue/30';
-  if (s === 'IN_PROGRESS') return 'bg-status-amber-dim text-status-amber border-status-amber/30';
-  if (s === 'UNDER_REVIEW') return 'bg-accent-dim text-accent border-accent/30';
-  if (s === 'CERTIFIED') return 'bg-status-green-dim text-status-green border-status-green/30';
-  return 'bg-text-muted/20 text-text-secondary border-border-light';
+function stateColor(s: CloseState): string {
+  if (s === 'OPEN') return 'var(--status-info)';
+  if (s === 'IN_PROGRESS') return 'var(--status-warning)';
+  if (s === 'UNDER_REVIEW') return 'var(--interactive-primary)';
+  if (s === 'CERTIFIED') return 'var(--status-success)';
+  return 'var(--text-tertiary)';
 }
 
 const ROLE_BADGE_STYLE: Record<string, string> = {
@@ -66,7 +66,7 @@ export function TopBar(p: TopBarProps) {
   return (
     <header className="fixed top-0 left-0 right-0 h-14 z-40 flex items-center justify-between px-5 bg-surface border-b border-border shadow-sm print:hidden">
       <div className="flex items-center gap-6">
-        <span className="font-display text-lg tracking-[0.2em] uppercase text-primary">Sabit</span>
+        <span className="font-serif text-xl tracking-[0.15em] uppercase" style={{ color: 'var(--interactive-primary)' }}>Sabit</span>
         {isPortfolio ? (
           <span className="text-base font-medium text-primary">Portfolio Dashboard</span>
         ) : (
@@ -91,8 +91,11 @@ export function TopBar(p: TopBarProps) {
       </div>
       <div className="flex items-center gap-4">
         {!isPortfolio && state != null && (
-          <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border', stateClass(state))}>
-            <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+          <span
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold tracking-wide"
+            style={{ color: stateColor(state) }}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-current" />
             {state.replace('_', ' ')}
           </span>
         )}

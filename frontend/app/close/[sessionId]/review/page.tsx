@@ -159,6 +159,7 @@ export default function ReviewPage() {
   const [reopenReason, setReopenReason] = useState('');
   const [certifyStep, setCertifyStep] = useState<'input' | 'progress' | 'complete' | 'error'>('input');
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [showBlockingGates, setShowBlockingGates] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   const currentState = session?.state || 'IN_PROGRESS';
@@ -195,7 +196,7 @@ export default function ReviewPage() {
   const getSubtitle = () => {
     switch (currentState) {
       case 'IN_PROGRESS':
-        return 'Pre-submission checklist';
+        return 'Once all gates pass, submit for review. Your designated reviewer will receive a notification and can approve the close.';
       case 'UNDER_REVIEW':
         return 'Review in progress';
       case 'CERTIFIED':
@@ -211,9 +212,15 @@ export default function ReviewPage() {
   const getPrimaryAction = () => {
     if (currentState === 'IN_PROGRESS' && roleCanSubmit) {
       return {
-        label: 'Submit for Review',
-        enabled: canSubmit,
-        onClick: () => setShowSubmitDialog(true),
+        label: canSubmit ? 'Submit for Review' : `Submit for Review (${gatesPassingExceptTies}/${gatesTotalExceptTies} gates)`,
+        enabled: true, // Always clickable — shows blocking modal if gates fail
+        onClick: () => {
+          if (canSubmit) {
+            setShowSubmitDialog(true);
+          } else {
+            setShowBlockingGates(true);
+          }
+        },
       };
     }
     if (currentState === 'UNDER_REVIEW') {
@@ -624,6 +631,43 @@ export default function ReviewPage() {
         detail="Once submitted, the period will be locked for editing until a reviewer certifies it or sends it back for corrections."
         confirmLabel="Submit"
       />
+
+      {/* Blocking Gates Modal */}
+      {showBlockingGates && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/50" onClick={() => setShowBlockingGates(false)} />
+          <div className="relative bg-surface border border-border rounded-card shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-serif text-lg text-primary mb-2">Cannot Submit for Review</h3>
+            <p className="text-text-secondary text-sm mb-4">
+              The following gates must pass before submitting:
+            </p>
+            <ul className="space-y-2 mb-5">
+              {gatesWithTies.filter(g => g.id !== 'ties' && !g.passing).map((g) => (
+                <li key={g.id} className="flex items-start gap-2 text-sm">
+                  <span className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" style={{ backgroundColor: 'var(--status-error)' }} />
+                  <div>
+                    <span style={{ color: 'var(--text-primary)' }}>{g.name}</span>
+                    {g.detail && <span className="block text-xs" style={{ color: 'var(--text-secondary)' }}>{g.detail}</span>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <div className="flex justify-end gap-3">
+              {(() => {
+                const firstFailing = gatesWithTies.find(g => g.id !== 'ties' && !g.passing && g.navigateTo);
+                if (!firstFailing) return null;
+                const href = firstFailing.navigateTo?.startsWith('/close') ? firstFailing.navigateTo : `/close/${sessionId}${firstFailing.navigateTo}`;
+                return (
+                  <a href={href} className="px-4 py-2 text-sm font-medium text-white rounded-input" style={{ backgroundColor: 'var(--interactive-primary)' }}>
+                    Go to First Blocking Gate
+                  </a>
+                );
+              })()}
+              <button type="button" onClick={() => setShowBlockingGates(false)} className="px-4 py-2 rounded-input border border-border text-sm">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Certify Period Dialog */}
       {showCertifyDialog && (

@@ -8,6 +8,7 @@
 import type { Pool } from 'pg';
 import { from, minus, plus, div, round2 } from '../utils/decimal.js';
 import type { CoaMappingRule } from '../types/coa_mapping.js';
+import { patternToRegExp as _patternToRegExp, ruleMatchesAccount } from '../utils/gl_pattern_matching.js';
 import type { AccountType } from '../types/financial.js';
 import * as rulesRepo from '../db/repositories/coa_mapping_rules_repository.js';
 import * as taxonomyRepo from '../db/repositories/fs_taxonomy_repository.js';
@@ -31,21 +32,9 @@ const DEFAULT_FS_LINE_BY_TYPE: Record<AccountType, string> = {
   EXPENSE: 'fs_expense',
 };
 
-/** Convert SQL LIKE pattern (% = any) to RegExp. Deterministic. */
-function patternToRegExp(pattern: string): RegExp {
-  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*');
-  return new RegExp(`^${escaped}$`, 'i');
-}
-
-/** Check if account matches a mapping rule (name and optional number pattern). */
+const patternToRegExp = _patternToRegExp;
 function ruleMatches(rule: CoaMappingRule, accountName: string, accountCode?: string): boolean {
-  const nameRe = patternToRegExp(rule.sourceAccountNamePattern);
-  if (!nameRe.test(accountName.trim())) return false;
-  if (rule.sourceAccountNumberPattern != null && rule.sourceAccountNumberPattern !== '') {
-    const numRe = patternToRegExp(rule.sourceAccountNumberPattern);
-    if (!numRe.test((accountCode ?? '').trim())) return false;
-  }
-  return true;
+  return ruleMatchesAccount(rule, accountName, accountCode);
 }
 
 /** Resolve fsLineId for an account: rules first, then classifier fallback. */

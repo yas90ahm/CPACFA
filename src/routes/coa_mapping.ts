@@ -21,6 +21,10 @@ import { listFsTaxonomyLines, upsertFsTaxonomyLine, toggleFsTaxonomyLineHidden }
 
 const router = Router();
 
+/** In-memory cache for Claude taxonomy search results. Prevents repeated API calls for the same term. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const taxonomyClaudeCache = new Map<string, any[]>();
+
 /** Multer instance for CSV import — memory storage, 10 MB limit. */
 const csvUpload = multer({
   storage: multer.memoryStorage(),
@@ -149,8 +153,11 @@ const SECTION_NODE_IDS = new Set([
   'fs_liability_current', 'fs_liability_noncurrent',
   'fs_opex', 'fs_other_income',
 ]);
-/** CF lines should not be mapping targets (CF is derived, not mapped) */
-const CF_LINE_IDS = new Set(['fs_cf_operating', 'fs_cf_investing', 'fs_cf_financing']);
+/** CF and OCI lines should not be mapping targets (CF is derived, OCI is specialized) */
+const CF_LINE_IDS = new Set([
+  'fs_cf_operating', 'fs_cf_investing', 'fs_cf_financing',
+  'fs_oci', 'fs_oci_hedge', 'fs_oci_fx_translation', 'fs_oci_pension', 'fs_oci_unrealized_gains',
+]);
 
 /** GET /api/coa-mapping/taxonomy — list FS taxonomy lines */
 router.get('/taxonomy', async (req: Request, res: Response) => {
@@ -160,12 +167,104 @@ router.get('/taxonomy', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Tenant context required' });
       return;
     }
+    const search = ((req.query.search ?? req.query.q ?? req.query.query ?? '') as string).trim();
+    const limit = parseInt(req.query.limit as string) || 0;
     const allLines = await listTaxonomyLines(pool);
-    // Enrich with mappable flag
-    const lines = allLines.map((l) => ({
+    // Enrich with mappable flag and filter by search
+    let lines = allLines.map((l) => ({
       ...l,
       mappable: !l.isSubtotal && !SECTION_NODE_IDS.has(l.id) && !CF_LINE_IDS.has(l.id),
     }));
+    if (search) {
+      const q = search.toLowerCase();
+      // ILIKE filter — only mappable lines that match name, code, or statement
+      lines = lines.filter((l) =>
+        l.mappable && (
+          l.name.toLowerCase().includes(q) ||
+          l.code.toLowerCase().includes(q) ||
+          (l.statement ?? '').toLowerCase().includes(q)
+        )
+      );
+      // Sort: exact match first, starts-with second, shorter names third (more specific)
+      lines.sort((a, b) => {
+        const an = a.name.toLowerCase();
+        const bn = b.name.toLowerCase();
+        // Exact match
+        if (an === q && bn !== q) return -1;
+        if (bn === q && an !== q) return 1;
+        // Starts-with
+        const aStarts = an.startsWith(q) ? 0 : 1;
+        const bStarts = bn.startsWith(q) ? 0 : 1;
+        if (aStarts !== bStarts) return aStarts - bStarts;
+        // Shorter name = more specific match
+        return an.length - bn.length;
+      });
+    }
+
+    // If ILIKE found nothing, ask Claude to bridge vocabulary
+    // Claude handles ALL naming conventions: UK (trade debtors), Canadian (chequing),
+    // IFRS (provisions), industry-specific (motor vehicles vs vehicle expense), etc.
+    if (lines.length === 0 && search && process.env.ANTHROPIC_API_KEY) {
+      // Check in-memory cache first
+      const cacheKey = search.toLowerCase().trim();
+      const cached = taxonomyClaudeCache.get(cacheKey);
+      if (cached !== undefined) {
+        lines = cached;
+      } else {
+        const pool = getTenantPool(req);
+        const tenantId = getTenantId(req) ?? '';
+        if (pool) {
+          try {
+            const { callAIWithSchema } = await import('../ai/ai_client.js');
+            const { z } = await import('zod');
+            const allMappable = allLines.filter((l) => !l.isSubtotal && !SECTION_NODE_IDS.has(l.id) && !CF_LINE_IDS.has(l.id));
+            const linesList = allMappable.map((l) => `${l.id}: "${l.name}" (${l.statement})`).join('\n');
+
+            const SearchSchema = z.object({ fsLineIds: z.array(z.string()), reasoning: z.string() });
+            const result = await callAIWithSchema({
+              pool, tenantId, pillar: 'taxonomy_search', promptVersion: 'v3',
+              systemPrompt: 'You are an expert US GAAP accountant matching GL account terminology to financial statement lines. Respond with JSON only. No markdown fences.',
+              userPrompt: `A user searched for "${search}" in the financial statement taxonomy.
+
+Available lines (id: name):
+${linesList}
+
+Rules:
+1. If "${search}" is a recognized accounting term in ANY language or convention, return the matching line IDs
+2. If "${search}" is NOT a recognizable accounting term, return EMPTY array
+3. Key mappings:
+   - Physical assets ("motor vehicles", "leasehold improvements", "plant", "machinery", "computers") → PP&E lines (fs_asset_ppe)
+   - Asset expenses ("vehicle expense", "fuel", "repairs") → SG&A (fs_opex_sga)
+   - Banking terms ("bank", "chequing", "checking", "caisse", "kasse") → Cash (fs_asset_cash)
+   - UK terms ("trade debtors") → AR, ("trade creditors") → AP, ("stock") → Inventory
+   - Payroll ("wages", "salaries", "labour") → SG&A (fs_opex_sga)
+   - "drawings" → Retained Earnings (fs_equity_retained)
+   - "cost of sales"/"direct costs" → COGS (fs_cogs)
+
+Return JSON: {"fsLineIds":["best_id","second_id"],"reasoning":"brief"}
+If no match: {"fsLineIds":[],"reasoning":"not an accounting term"}`,
+              schema: SearchSchema,
+              requestJson: { search },
+            });
+            if (result.ok && result.parsed) {
+              const matchedIds = new Set(result.parsed.fsLineIds);
+              lines = allMappable
+                .filter((l) => matchedIds.has(l.id))
+                .map((l) => ({ ...l, mappable: true }));
+              taxonomyClaudeCache.set(cacheKey, lines);
+            } else {
+              console.warn('[taxonomy] Claude search failed:', result.error);
+              taxonomyClaudeCache.set(cacheKey, []);
+            }
+          } catch (e) {
+            console.warn('[taxonomy] Claude search error:', e instanceof Error ? e.message : String(e));
+            taxonomyClaudeCache.set(cacheKey, []);
+          }
+        }
+      }
+    }
+
+    if (limit > 0) lines = lines.slice(0, limit);
     res.json({ lines });
   } catch (e) {
     send500(res, e, 'List taxonomy failed');

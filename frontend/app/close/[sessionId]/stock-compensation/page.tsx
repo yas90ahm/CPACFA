@@ -11,6 +11,7 @@ import type { StockGrant, StockExpense } from '@/lib/types/stock-compensation';
 import { Plus, Play, Loader2, Award } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
+import { ModuleBanner } from '@/components/shared/ModuleBanner';
 
 const TYPE_LABEL: Record<string, string> = { rsu: 'RSU', option: 'Option', espp: 'ESPP', sar: 'SAR' };
 const STATUS_STYLES: Record<string, React.CSSProperties> = {
@@ -52,6 +53,7 @@ export default function StockCompensationPage() {
 
   return (
     <div className="space-y-6">
+      <ModuleBanner sessionId={sessionId} />
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-display" style={{ color: 'var(--text-primary)' }}>Stock Compensation</h1>

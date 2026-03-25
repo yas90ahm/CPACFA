@@ -49,12 +49,22 @@ router.post('/sessions/:closeSessionId/suggestions/generate', async (req: Reques
     }
 
     const body = req.body as { accountNames?: string[] } | undefined;
-    const result = await generateClassificationSuggestions(pool, {
-      tenantId,
-      entityId: session.entityId,
-      closeSessionId,
-      accountNames: body?.accountNames,
-    });
+    let result;
+    try {
+      result = await generateClassificationSuggestions(pool, {
+        tenantId,
+        entityId: session.entityId,
+        closeSessionId,
+        accountNames: body?.accountNames,
+      });
+    } catch (slmErr) {
+      // SLM/primary pathway unavailable — fall back to autonomous pipeline
+      console.warn('[suggestions/generate] Primary pathway failed, falling back to auto-classify:', slmErr instanceof Error ? slmErr.message : String(slmErr));
+      const { runAutonomousMapping } = await import('../../services/autonomous_mapping_service.js');
+      const autoResult = await runAutonomousMapping(pool, tenantId, session.entityId, closeSessionId);
+      const allSuggestions = await listCoaSuggestions(pool, tenantId, closeSessionId);
+      result = { coaSuggestions: allSuggestions, cfSuggestions: [], errors: [], autonomous: autoResult };
+    }
 
     res.json(result);
   } catch (e) {
@@ -465,6 +475,92 @@ router.post('/suggestions/:proposalId/accept-correction', async (req: Request, r
     res.json({ accepted: true, version });
   } catch (e) {
     send500(res, e, 'Accept correction proposal failed');
+  }
+});
+
+/**
+ * POST /sessions/:closeSessionId/suggestions/test-layer3
+ *
+ * Test Layer 3 (AI validation) directly with a given account name.
+ * Body: { accountName: string, glType?: string }
+ * Returns Layer 0 (curated), Layer 2 (XBRL), and Layer 3 (AI) results for comparison.
+ */
+router.post('/sessions/:closeSessionId/suggestions/test-layer3', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const { accountName, glType } = req.body as { accountName?: string; glType?: string };
+    if (!accountName) {
+      res.status(400).json({ error: 'accountName required' });
+      return;
+    }
+
+    const { listFsTaxonomyLines } = await import('../../db/repositories/fs_taxonomy_repository.js');
+    const fsLines = await listFsTaxonomyLines(pool);
+    const fsById = new Map(fsLines.map((l) => [l.id, l]));
+    const fsByName = new Map(fsLines.map((l) => [l.name.toLowerCase(), l]));
+    const accountType = (glType ?? '').toUpperCase();
+
+    // Layer 0: Curated pattern
+    const { classifyWithXBRL } = await import('../../services/ai_classification_service.js');
+    // We'll test each layer independently
+
+    // Layer 2: XBRL trigram
+    const { searchXBRL } = await import('../../services/xbrl_search_service.js');
+    const statementByType: Record<string, string> = { ASSET: 'BS', LIABILITY: 'BS', EQUITY: 'BS', REVENUE: 'PL', EXPENSE: 'PL' };
+    const xbrlResults = await searchXBRL(pool, accountName, {
+      statement: statementByType[accountType] || undefined,
+      limit: 5,
+    });
+    const xbrlTop = xbrlResults[0];
+    const xbrlMapped = xbrlTop ? (() => {
+      for (const l of fsLines) {
+        if (l.xbrlElement === xbrlTop.id) return { fsLineId: l.id, fsLineName: l.name, confidence: xbrlTop.similarity };
+      }
+      return null;
+    })() : null;
+
+    // Layer 3: Validation agent
+    let layer3Result = null;
+    try {
+      const { runValidationAgent } = await import('../../services/mapping_validation_agent.js');
+      const { closeSessionId } = req.params;
+      const testMappedAccount = {
+        accountCode: 'TEST001',
+        accountName,
+        accountType,
+        fsLineId: xbrlMapped?.fsLineId ?? 'fs_opex_sga',
+        fsLineName: xbrlMapped?.fsLineName ?? 'Unknown',
+        fsLineStatement: 'PL',
+        netBalance: 0,
+      };
+      const agentResult = await runValidationAgent(pool, tenantId, 'default', closeSessionId, [testMappedAccount]);
+      layer3Result = {
+        suspects: agentResult.suspects,
+        proposals: agentResult.proposals,
+        fired: true,
+      };
+    } catch (e) {
+      layer3Result = { fired: false, error: e instanceof Error ? e.message : String(e) };
+    }
+
+    res.json({
+      accountName,
+      glType: accountType,
+      layer0_curated: 'check curated patterns inline — see full auto-classify for this',
+      layer2_xbrl: {
+        topResult: xbrlTop ? { id: xbrlTop.id, label: xbrlTop.label, similarity: xbrlTop.similarity } : null,
+        mappedToFsLine: xbrlMapped,
+        allResults: xbrlResults.slice(0, 3).map(r => ({ id: r.id, label: r.label, sim: r.similarity })),
+      },
+      layer3_validation: layer3Result,
+    });
+  } catch (e) {
+    send500(res, e, 'Test Layer 3 failed');
   }
 });
 

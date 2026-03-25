@@ -10,10 +10,10 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['var(--font-sans)', 'Inter', 'system-ui', 'sans-serif'],
+        sans: ['var(--font-sans)', 'DM Sans', 'system-ui', 'sans-serif'],
         mono: ['var(--font-mono)', 'JetBrains Mono', 'monospace'],
-        display: ['var(--font-sans)', 'Inter', 'system-ui', 'sans-serif'],
-        serif: ['var(--font-serif)', 'Source Serif 4', 'Georgia', 'serif'],
+        display: ['var(--font-serif)', 'DM Serif Display', 'Georgia', 'serif'],
+        serif: ['var(--font-serif)', 'DM Serif Display', 'Georgia', 'serif'],
       },
       colors: {
         /* Map existing Tailwind color names to CSS custom properties */

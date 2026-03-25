@@ -142,9 +142,17 @@ export default function ClosePage() {
               <div className="mx-auto mb-6 w-16 h-16 rounded-full flex items-center justify-center bg-[var(--status-info-bg)]">
                 <Briefcase className="w-8 h-8 text-[var(--interactive-primary)]" />
               </div>
-              <h2 className="text-lg font-semibold mb-2 text-[var(--text-primary)]">Welcome to your close workspace</h2>
-              <p className="text-sm mb-6 max-w-md mx-auto text-[var(--text-secondary)]">Start your first month-end close by creating a new period. Upload your general ledger, map accounts, reconcile, and generate certified financial statements.</p>
+              <h2 className="font-serif text-xl mb-2 text-[var(--text-primary)]">Start your first month-end close</h2>
+              <p className="text-sm mb-6 max-w-lg mx-auto text-[var(--text-secondary)]">
+                Upload your general ledger, let Sabit classify your accounts, reconcile balances, post adjustments,
+                and generate certified financial statements. Your first close takes about 2 hours — subsequent closes take 20 minutes.
+              </p>
               <button type="button" onClick={() => setOpen(true)} className={BTN_PRIMARY}><Plus className="w-4 h-4" />Create Your First Close Period</button>
+              <div className="flex items-center justify-center gap-6 mt-8 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                <span>✓ AI classifies 80%+ of accounts automatically</span>
+                <span>✓ GL health analysis detects anomalies instantly</span>
+                <span>✓ Cryptographic certification for every close</span>
+              </div>
             </div>
           ) : rows.length === 0 ? (
             <div className="rounded-[var(--radius-lg)] py-12 px-8 text-center bg-[var(--bg-surface)] border border-[var(--border-default)]">

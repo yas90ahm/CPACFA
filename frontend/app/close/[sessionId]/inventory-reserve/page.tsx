@@ -15,6 +15,7 @@ import type { InventoryReserveComputation } from '@/lib/types/inventory-reserve'
 import { Upload, Calculator, FileText } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
+import { ModuleBanner } from '@/components/shared/ModuleBanner';
 
 const BUCKET_LABELS: Record<string, string> = {
   current: 'Current (0-90 days)',
@@ -63,6 +64,7 @@ export default function InventoryReservePage() {
 
   return (
     <div className="space-y-6">
+      <ModuleBanner sessionId={sessionId} />
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-display" style={{ color: 'var(--text-primary)' }}>
           Inventory Obsolescence Reserve (ASC 330)

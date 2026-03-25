@@ -7,6 +7,7 @@ import { fmtMoney } from '@/lib/money';
 import { Play, Loader2, Users, Settings } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
+import { ModuleBanner } from '@/components/shared/ModuleBanner';
 
 export default function PayrollAccrualPage() {
   const params = useParams();
@@ -32,6 +33,7 @@ export default function PayrollAccrualPage() {
 
   return (
     <div className="space-y-6">
+      <ModuleBanner sessionId={sessionId} />
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-display" style={{ color: 'var(--text-primary)' }}>Payroll Accrual</h1>

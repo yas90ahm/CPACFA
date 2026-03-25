@@ -112,10 +112,8 @@ function ruleMatches(rule: CoaMappingRule, accountName: string, accountCode?: st
   return true;
 }
 
-function patternToRegExp(pattern: string): RegExp {
-  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*');
-  return new RegExp(`^${escaped}$`, 'i');
-}
+// Imported from shared utility
+import { patternToRegExp } from '../utils/gl_pattern_matching.js';
 
 /** Compute net amount for a TB entry (sign-normalized by account type). */
 function computeNet(entry: TrialBalanceEntry): number {

@@ -144,6 +144,33 @@ export async function runAutonomousMapping(
       agentSuspectCodes = new Set(agentResult.suspects.map((s) => s.accountCode));
       correctionProposalCount = agentResult.proposals.length;
 
+      // Apply Layer 3 correction proposals to suggestions
+      // When the agent proposes a BETTER mapping, update the suggestion before auto-accept
+      for (const proposal of agentResult.proposals) {
+        if (!proposal.proposedFsLineId || proposal.confidence < 0.7) continue;
+        const matchingSuggestion = suggestions.find(
+          (s) => s.accountCode === proposal.accountCode && s.status === 'pending'
+        );
+        if (matchingSuggestion && proposal.confidence > matchingSuggestion.confidence) {
+          // Update the suggestion with the agent's better mapping
+          matchingSuggestion.suggestedFsLineId = proposal.proposedFsLineId;
+          matchingSuggestion.suggestedFsLineLabel = proposal.proposedFsLineName ?? matchingSuggestion.suggestedFsLineLabel;
+          matchingSuggestion.confidence = proposal.confidence;
+          matchingSuggestion.modelVersion = 'layer3_ai_validated';
+          // Persist the update
+          await pool.query(
+            `UPDATE ai_coa_suggestions SET suggested_fs_line_id = $1, suggested_fs_line_label = $2,
+             confidence = $3, model_version = 'layer3_ai_validated', tier = $4
+             WHERE id = $5 AND tenant_id = $6`,
+            [proposal.proposedFsLineId, proposal.proposedFsLineName, proposal.confidence,
+             proposal.ascReference ? `asc:${proposal.ascReference}` : null,
+             matchingSuggestion.id, tenantId]
+          ).catch(() => {});
+          // Remove from suspect set since agent corrected it
+          agentSuspectCodes.delete(proposal.accountCode);
+        }
+      }
+
       // Layer 4: Cross-validation
       const { runMappingCrossValidation } = await import('./mapping_cross_validation_service.js');
       const crossResult = runMappingCrossValidation(

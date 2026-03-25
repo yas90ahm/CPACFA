@@ -1,8 +1,7 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { cn } from '@/lib/utils';
-import { parseMoney, formatMoneyString } from '@/lib/format';
 
 export interface MoneyInputProps {
   value: string | null;
@@ -17,38 +16,85 @@ export interface MoneyInputProps {
 
 const sizeMap: Record<string, string> = { sm: 'py-1.5 text-sm', md: 'py-2 text-base', lg: 'py-2.5 text-lg' };
 
+/** Format a clean numeric string for display (add commas). */
+function formatForDisplay(raw: string | null): string {
+  if (raw == null || raw.trim() === '') return '';
+  // Strip any existing formatting
+  const cleaned = raw.replace(/[$,]/g, '').trim();
+  if (cleaned === '' || cleaned === '-') return cleaned;
+  // Parse to parts
+  const parts = cleaned.split('.');
+  const intPart = parts[0];
+  const decPart = parts.length > 1 ? parts[1] : undefined;
+  // Add thousand separators to integer part
+  const negative = intPart.startsWith('-');
+  const digits = negative ? intPart.slice(1) : intPart;
+  const withCommas = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const formatted = negative ? `-${withCommas}` : withCommas;
+  return decPart !== undefined ? `${formatted}.${decPart}` : formatted;
+}
+
+/** Strip formatting to get a clean decimal string for API calls. */
+function stripToDecimal(raw: string): string {
+  return raw.replace(/[$,]/g, '').trim();
+}
+
 export function MoneyInput(props: MoneyInputProps) {
-  const [focus, setFocus] = useState(false);
+  const [focused, setFocused] = useState(false);
   const sz = props.size ?? 'md';
+  // Track the raw editing value separately from the prop value
+  const [editValue, setEditValue] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFocus = useCallback(() => {
-    setFocus(true);
-    if (props.value) {
-      const n = parseMoney(props.value);
-      props.onChange(n === 0 ? null : String(n));
+    setFocused(true);
+    // Show raw unformatted value for editing
+    if (props.value != null) {
+      setEditValue(stripToDecimal(props.value));
     }
-  }, [props.value, props.onChange]);
+  }, [props.value]);
 
   const handleBlur = useCallback(() => {
-    setFocus(false);
-    if (props.value != null && props.value.trim() !== '') {
-      props.onChange(formatMoneyString(parseMoney(props.value)));
+    setFocused(false);
+    if (editValue != null && editValue.trim() !== '') {
+      // Commit the clean value to parent
+      const clean = stripToDecimal(editValue);
+      // Validate it's a reasonable number
+      if (/^-?\d+(\.\d{0,2})?$/.test(clean)) {
+        props.onChange(clean);
+      } else if (/^-?\d+\.\d+$/.test(clean)) {
+        // Truncate to 2 decimals
+        const parts = clean.split('.');
+        props.onChange(`${parts[0]}.${parts[1].slice(0, 2)}`);
+      } else {
+        props.onChange(clean || null);
+      }
     } else {
       props.onChange(null);
     }
-  }, [props.value, props.onChange]);
+    setEditValue(null);
+  }, [editValue, props]);
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      let v = e.target.value.replace(/[^0-9.-]/g, '');
+      let v = e.target.value;
+      // Only allow digits, one decimal point, and optionally a leading minus
+      v = v.replace(/[^0-9.-]/g, '');
       if (props.allowNegative === false) v = v.replace(/-/g, '');
-      if ((v.match(/\./g) || []).length > 1) v = v.slice(0, v.lastIndexOf('.'));
-      props.onChange(v === '' || v === '-' ? (v === '' ? null : v) : v);
+      // Only allow one decimal point
+      const dots = (v.match(/\./g) || []).length;
+      if (dots > 1) v = v.slice(0, v.lastIndexOf('.'));
+      // Only allow minus at start
+      if (v.indexOf('-') > 0) v = v.replace(/-/g, '');
+      setEditValue(v === '' ? null : v);
     },
-    [props.onChange, props.allowNegative]
+    [props.allowNegative]
   );
 
-  const val = props.value ?? '';
+  // What to show in the input
+  const displayValue = focused
+    ? (editValue ?? '')
+    : formatForDisplay(props.value);
 
   return (
     <div className="space-y-1">
@@ -56,17 +102,18 @@ export function MoneyInput(props: MoneyInputProps) {
       <div
         className={cn(
           'flex items-center rounded-input border bg-input font-mono text-right',
-          focus && 'border-border-focus ring-1 ring-border-focus',
-          !focus && 'border-border',
+          focused && 'border-border-focus ring-1 ring-border-focus',
+          !focused && 'border-border',
           props.error && 'border-status-red',
           props.disabled && 'opacity-60 cursor-not-allowed'
         )}
       >
         <span className="pl-3 text-text-secondary">$</span>
         <input
+          ref={inputRef}
           type="text"
           inputMode="decimal"
-          value={val}
+          value={displayValue}
           onChange={handleChange}
           onFocus={handleFocus}
           onBlur={handleBlur}

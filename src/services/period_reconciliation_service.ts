@@ -278,7 +278,9 @@ export async function setSupportingBalance(
 ): Promise<PeriodReconciliation> {
   const recon = await reconRepo.getPeriodReconciliationById(pool, tenantId, reconId);
   if (!recon) throw new PeriodReconciliationError('Reconciliation not found', 'NOT_FOUND');
-  const amountStr = from(amount).toDecimalPlaces(2).toNumber().toString();
+  // Strip commas/currency symbols before Decimal.js parsing
+  const sanitized = typeof amount === 'string' ? amount.replace(/[$,]/g, '') : amount;
+  const amountStr = from(sanitized).toDecimalPlaces(2).toNumber().toString();
   const updated = await reconRepo.updateReconSupportingBalance(
     pool,
     tenantId,
@@ -287,6 +289,10 @@ export async function setSupportingBalance(
     source
   );
   if (!updated) throw new PeriodReconciliationError('Reconciliation not found', 'NOT_FOUND');
+  // Auto-advance status from not_started to in_progress when supporting balance is set
+  if (recon.status === 'not_started') {
+    await reconRepo.updateReconStatus(pool, tenantId, reconId, 'in_progress');
+  }
   await recordMaterialEvent(pool, {
     tenantId,
     periodLabel: recon.periodId?.slice(0, 7),

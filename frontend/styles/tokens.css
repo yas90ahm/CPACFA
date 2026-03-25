@@ -8,71 +8,71 @@
 
 :root {
   /* === BACKGROUNDS === */
-  --bg-base: #F8F7F4;
+  --bg-base: #F9F8F6;
   --bg-surface: #FFFFFF;
   --bg-surface-raised: #FFFFFF;
-  --bg-surface-sunken: #F1F0EC;
+  --bg-surface-sunken: #F3F1ED;
   --bg-overlay: rgba(10, 10, 8, 0.52);
-  --bg-nav: #1B1F27;
-  --bg-nav-hover: #272C36;
-  --bg-nav-active: #2F3542;
+  --bg-nav: #FFFFFF;
+  --bg-nav-hover: #F5F3F0;
+  --bg-nav-active: #EDF1F7;
   --bg-header: #FFFFFF;
-  --bg-table-row-alt: #FAFAF6;
-  --bg-table-row-hover: #F0EFE8;
-  --bg-table-row-selected: #EBF0FA;
+  --bg-table-row-alt: #FCFBF9;
+  --bg-table-row-hover: #F5F3F0;
+  --bg-table-row-selected: #EDF1F7;
   --bg-ai: #F5F0FF;
   --bg-certified: #F0F7F1;
   --bg-certification-ceremony: #FAFBFC;
 
   /* === TEXT === */
   --text-primary: #1A1A1A;
-  --text-secondary: #5C5C5C;
-  --text-tertiary: #8A8A8A;
-  --text-inverse: #F0F0F0;
-  --text-inverse-secondary: #A0A4AB;
-  --text-link: #1A6CB4;
-  --text-link-hover: #134E82;
+  --text-secondary: #5C5752;
+  --text-tertiary: #9C9590;
+  --text-inverse: #FFFFFF;
+  --text-inverse-secondary: rgba(255,255,255,0.72);
+  --text-link: #1B3A5C;
+  --text-link-hover: #142D47;
   --text-number: #1A1A1A;
-  --text-number-negative: #B91C1C;
+  --text-number-negative: #DC2626;
   --text-number-total: #111111;
   --text-ai-label: #6B21A8;
 
   /* === BORDERS === */
-  --border-default: #E2E0DB;
-  --border-strong: #C8C5BD;
-  --border-subtle: #EEEDE9;
-  --border-focus: #1A6CB4;
+  --border-default: #E8E4DE;
+  --border-strong: #C8C2B8;
+  --border-subtle: #F0EDE8;
+  --border-focus: #1B3A5C;
   --border-ai: #C4B5DC;
-  --border-table-header: #D4D2CC;
+  --border-table-header: #DDD9D2;
   --border-total-single: #1A1A1A;
   --border-total-double: #1A1A1A;
 
   /* === INTERACTIVE === */
-  --interactive-primary: #1A5FB4;
-  --interactive-primary-hover: #154A8F;
-  --interactive-primary-pressed: #0F3668;
+  --interactive-primary: #1B3A5C;
+  --interactive-primary-hover: #142D47;
+  --interactive-primary-pressed: #0F2236;
   --interactive-secondary: #FFFFFF;
-  --interactive-secondary-hover: #F0F4FA;
+  --interactive-secondary-hover: #F5F3F0;
   --interactive-ghost: transparent;
-  --interactive-ghost-hover: #F0F0EC;
-  --interactive-destructive: #B91C1C;
-  --interactive-destructive-hover: #991B1B;
+  --interactive-ghost-hover: #F5F3F0;
+  --interactive-destructive: #DC2626;
+  --interactive-destructive-hover: #B91C1C;
 
   /* === STATUS === */
-  --status-success: #15803D;
-  --status-success-bg: #F0FDF4;
+  --status-success: #16A34A;
+  --status-success-bg: #DCFCE7;
   --status-success-border: #BBF7D0;
-  --status-warning: #B45309;
-  --status-warning-bg: #FFFBEB;
+  --status-warning: #D97706;
+  --status-warning-bg: #FEF3C7;
   --status-warning-border: #FDE68A;
-  --status-error: #B91C1C;
-  --status-error-bg: #FEF2F2;
+  --status-error: #DC2626;
+  --status-error-bg: #FEE2E2;
   --status-error-border: #FECACA;
-  --status-info: #1A5FB4;
-  --status-info-bg: #EFF6FF;
-  --status-info-border: #BFDBFE;
-  --status-neutral: #5C5C5C;
-  --status-neutral-bg: #F5F5F3;
+  --status-info: #1B3A5C;
+  --status-info-bg: #EDF1F7;
+  --status-info-border: #C3D4E9;
+  --status-neutral: #6B7280;
+  --status-neutral-bg: #F3F4F6;
 
   /* === AI === */
   --ai-primary: #7C3AED;

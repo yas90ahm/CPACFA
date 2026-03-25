@@ -1,7 +1,7 @@
 'use client';
 
 import { useParams, useRouter } from 'next/navigation';
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useReconciliations, useReconciliation, useCopyPriorPeriod } from '@/lib/queries/reconciliations';
@@ -163,6 +163,14 @@ export default function ReconDetailPage() {
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [savingSupporting, setSavingSupporting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // Auto-dismiss error after 6 seconds
+  useEffect(() => {
+    if (!actionError) return;
+    const t = setTimeout(() => setActionError(null), 6000);
+    return () => clearTimeout(t);
+  }, [actionError]);
 
   /* ── Supporting Balance Mutation ── */
   const supportingBalanceMutation = useMutation({
@@ -177,8 +185,12 @@ export default function ReconDetailPage() {
       setSupportingBalanceLocal(null);
       setEditingSupporting(false);
       setSavingSupporting(false);
+      setActionError(null);
     },
-    onError: () => setSavingSupporting(false),
+    onError: (err) => {
+      setSavingSupporting(false);
+      setActionError(err instanceof Error ? err.message : 'Failed to save supporting balance');
+    },
   });
 
   /* ── Add Reconciling Item Mutation ── */
@@ -347,7 +359,9 @@ export default function ReconDetailPage() {
   const handleSaveSupporting = useCallback(() => {
     if (supportingBalanceLocal != null && supportingBalanceLocal.trim() !== '') {
       setSavingSupporting(true);
-      supportingBalanceMutation.mutate(supportingBalanceLocal.trim());
+      // Strip commas and dollar signs — send clean decimal string to API
+      const cleaned = supportingBalanceLocal.trim().replace(/[$,]/g, '');
+      supportingBalanceMutation.mutate(cleaned);
     }
   }, [supportingBalanceLocal, supportingBalanceMutation]);
 
@@ -402,9 +416,18 @@ export default function ReconDetailPage() {
   }, []);
 
   const handleMarkComplete = useCallback(() => {
-    if (!canMarkComplete) return;
-    completeMutation.mutate(undefined, { onSuccess: () => router.refresh() });
-  }, [canMarkComplete, completeMutation, router]);
+    if (!canMarkComplete) {
+      if (missingForComplete.length > 0) {
+        setActionError(missingForComplete.join('. '));
+      }
+      return;
+    }
+    setActionError(null);
+    completeMutation.mutate(undefined, {
+      onSuccess: () => router.refresh(),
+      onError: (err) => setActionError(err instanceof Error ? err.message : 'Failed to mark complete'),
+    });
+  }, [canMarkComplete, missingForComplete, completeMutation, router]);
 
   const handleApprove = useCallback(() => {
     if (!recon || recon.status !== 'completed' || !isReviewer || canApproveOwn) return;
@@ -439,6 +462,16 @@ export default function ReconDetailPage() {
 
   return (
     <div className="space-y-6">
+      {/* Error toast */}
+      {actionError && (
+        <div
+          className="flex items-center justify-between px-4 py-3 text-sm rounded-[var(--radius-lg)]"
+          style={{ border: '1px solid var(--status-error)', backgroundColor: 'var(--status-error-bg)', color: 'var(--status-error)' }}
+        >
+          <span>{actionError}</span>
+          <button type="button" onClick={() => setActionError(null)} className="hover:opacity-80 ml-4 font-medium" aria-label="Dismiss">x</button>
+        </div>
+      )}
       <Breadcrumb items={[
         { label: 'Close', href: `/close/${sessionId}/dashboard` },
         { label: 'Reconciliation', href: `/close/${sessionId}/reconciliation` },
@@ -647,7 +680,8 @@ export default function ReconDetailPage() {
                       className="mt-2 text-xs hover:underline disabled:opacity-50"
                       style={{ color: 'var(--interactive-primary)' }}
                       onClick={handleSaveSupporting}
-                      disabled={savingSupporting || !supportingBalanceLocal?.trim()}
+                      disabled={savingSupporting || !supportingBalanceLocal?.trim() || !/^-?\d+(\.\d{0,2})?$/.test(supportingBalanceLocal?.replace(/[$,]/g, '') ?? '')}
+                      title={supportingBalanceLocal && !/^-?\d+(\.\d{0,2})?$/.test(supportingBalanceLocal.replace(/[$,]/g, '')) ? 'Enter a valid dollar amount (e.g. 342521.22)' : undefined}
                     >
                       {savingSupporting ? 'Saving...' : 'Save'}
                     </button>

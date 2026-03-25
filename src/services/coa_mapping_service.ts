@@ -13,6 +13,7 @@ import type {
   FsTaxonomyLine,
   UpsertCoaRuleInput,
 } from '../types/coa_mapping.js';
+import { ruleMatchesAccount } from '../utils/gl_pattern_matching.js';
 import { classifyAccount } from './accountClassifier.js';
 import * as taxonomyRepo from '../db/repositories/fs_taxonomy_repository.js';
 import * as rulesRepo from '../db/repositories/coa_mapping_rules_repository.js';
@@ -27,26 +28,9 @@ const DEFAULT_FS_LINE_BY_TYPE: Record<AccountType, string> = {
   EXPENSE: 'fs_expense',
 };
 
-/** Convert SQL-style pattern (% = any) to RegExp. Deterministic. */
-function patternToRegExp(pattern: string): RegExp {
-  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*');
-  return new RegExp(`^${escaped}$`, 'i');
-}
-
-/** Return true if account matches rule (name and optional number). Deterministic. */
-function ruleMatches(
-  rule: CoaMappingRule,
-  accountName: string,
-  accountNumber?: string
-): boolean {
-  const nameRe = patternToRegExp(rule.sourceAccountNamePattern);
-  if (!nameRe.test(accountName.trim())) return false;
-  if (rule.sourceAccountNumberPattern != null && rule.sourceAccountNumberPattern !== '') {
-    const num = (accountNumber ?? '').trim();
-    const numRe = patternToRegExp(rule.sourceAccountNumberPattern);
-    if (!numRe.test(num)) return false;
-  }
-  return true;
+/** @deprecated Use ruleMatchesAccount from utils/gl_pattern_matching. Thin wrapper for compat. */
+function ruleMatches(rule: CoaMappingRule, accountName: string, accountNumber?: string): boolean {
+  return ruleMatchesAccount(rule, accountName, accountNumber);
 }
 
 /**

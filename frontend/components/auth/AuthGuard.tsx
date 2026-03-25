@@ -5,14 +5,14 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { token, isLoading } = useAuth();
+  const { user, isLoading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!isLoading && token === null) {
+    if (!isLoading && !user) {
       router.replace('/login');
     }
-  }, [isLoading, token, router]);
+  }, [isLoading, user, router]);
 
   // Still loading auth state from localStorage — don't redirect
   if (isLoading) {
@@ -23,7 +23,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (token === null) {
+  if (!user) {
     return (
       <div className="min-h-screen bg-primary flex items-center justify-center">
         <span className="text-text-secondary text-sm">Redirecting to login...</span>

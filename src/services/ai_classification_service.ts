@@ -185,11 +185,201 @@ export async function classifyWithXBRL(
     candidates: Array<{ fsLineId: string; fsLineName: string; xbrlId: string; xbrlLabel: string; similarity: number }>;
   }
 
+  // ── LAYER 0: Curated GL pattern → FS line mappings ──
+  // Resolves common account names to known FS lines with high confidence.
+  // Patterns use SQL ILIKE syntax (% = wildcard). Checked before XBRL trigram.
+  interface PatternMapping { pattern: string; glType?: string; fsLineId: string; confidence: number }
+  const CURATED_PATTERNS: PatternMapping[] = [
+    // Cash & equivalents
+    { pattern: 'cash%', glType: 'ASSET', fsLineId: 'fs_asset_cash', confidence: 0.98 },
+    { pattern: 'petty cash%', glType: 'ASSET', fsLineId: 'fs_asset_cash', confidence: 0.98 },
+    // Receivables
+    { pattern: 'accounts receivable%', glType: 'ASSET', fsLineId: 'fs_asset_ar', confidence: 0.97 },
+    { pattern: 'allowance for doubtful%', glType: 'ASSET', fsLineId: 'fs_asset_ar_allowance', confidence: 0.97 },
+    { pattern: 'allowance for bad%', glType: 'ASSET', fsLineId: 'fs_asset_ar_allowance', confidence: 0.97 },
+    // Inventory
+    { pattern: 'inventory%', glType: 'ASSET', fsLineId: 'fs_asset_inventory', confidence: 0.96 },
+    { pattern: 'work in progress%', glType: 'ASSET', fsLineId: 'fs_asset_inventory', confidence: 0.95 },
+    // Prepaids
+    { pattern: 'prepaid%', glType: 'ASSET', fsLineId: 'fs_asset_prepaid', confidence: 0.96 },
+    // Fixed assets
+    { pattern: '%depreciation%', glType: 'ASSET', fsLineId: 'fs_asset_ppe_accum_dep', confidence: 0.95 },
+    { pattern: '%equipment%', glType: 'ASSET', fsLineId: 'fs_asset_ppe', confidence: 0.93 },
+    { pattern: '%machinery%', glType: 'ASSET', fsLineId: 'fs_asset_ppe', confidence: 0.93 },
+    { pattern: '%building%', glType: 'ASSET', fsLineId: 'fs_asset_ppe', confidence: 0.93 },
+    { pattern: '%vehicle%', glType: 'ASSET', fsLineId: 'fs_asset_ppe', confidence: 0.90 },
+    { pattern: '%furniture%', glType: 'ASSET', fsLineId: 'fs_asset_ppe', confidence: 0.90 },
+    { pattern: '%leasehold improvement%', glType: 'ASSET', fsLineId: 'fs_asset_ppe', confidence: 0.90 },
+    { pattern: '%amortization%', glType: 'ASSET', fsLineId: 'fs_asset_intangible_amort', confidence: 0.92 },
+    { pattern: 'goodwill%', glType: 'ASSET', fsLineId: 'fs_asset_goodwill', confidence: 0.97 },
+    { pattern: 'deferred tax asset%', glType: 'ASSET', fsLineId: 'fs_asset_dta', confidence: 0.96 },
+    // Payables & liabilities
+    { pattern: 'accounts payable%', glType: 'LIABILITY', fsLineId: 'fs_liability_ap', confidence: 0.97 },
+    { pattern: 'accrued%', glType: 'LIABILITY', fsLineId: 'fs_liability_accrued', confidence: 0.95 },
+    { pattern: '%tax payable%', glType: 'LIABILITY', fsLineId: 'fs_liability_accrued', confidence: 0.93 },
+    { pattern: '%taxes payable%', glType: 'LIABILITY', fsLineId: 'fs_liability_accrued', confidence: 0.93 },
+    { pattern: 'customer deposit%', glType: 'LIABILITY', fsLineId: 'fs_liability_deferred_rev_current', confidence: 0.93 },
+    { pattern: 'deferred revenue%', glType: 'LIABILITY', fsLineId: 'fs_liability_deferred_rev_current', confidence: 0.96 },
+    { pattern: 'deferred tax liabilit%', glType: 'LIABILITY', fsLineId: 'fs_liability_deferred_tax', confidence: 0.96 },
+    { pattern: '%loan%', glType: 'LIABILITY', fsLineId: 'fs_liability_lt_debt', confidence: 0.88 },
+    { pattern: '%term loan%', glType: 'LIABILITY', fsLineId: 'fs_liability_lt_debt', confidence: 0.93 },
+    { pattern: '%line of credit%', glType: 'LIABILITY', fsLineId: 'fs_liability_current_debt', confidence: 0.93 },
+    // Equity
+    { pattern: 'common stock%', glType: 'EQUITY', fsLineId: 'fs_equity_common', confidence: 0.97 },
+    { pattern: 'retained earnings%', glType: 'EQUITY', fsLineId: 'fs_equity_retained', confidence: 0.97 },
+    { pattern: 'additional paid%', glType: 'EQUITY', fsLineId: 'fs_equity_apic', confidence: 0.96 },
+    { pattern: 'treasury stock%', glType: 'EQUITY', fsLineId: 'fs_equity_treasury', confidence: 0.96 },
+    { pattern: 'dividend%', glType: 'EQUITY', fsLineId: 'fs_equity_dividends', confidence: 0.95 },
+    // Revenue
+    { pattern: '%revenue%', glType: 'REVENUE', fsLineId: 'fs_revenue', confidence: 0.93 },
+    { pattern: 'product revenue%', glType: 'REVENUE', fsLineId: 'fs_revenue_product', confidence: 0.96 },
+    { pattern: 'service revenue%', glType: 'REVENUE', fsLineId: 'fs_revenue_service', confidence: 0.96 },
+    { pattern: '%sales%', glType: 'REVENUE', fsLineId: 'fs_revenue', confidence: 0.90 },
+    { pattern: 'sales returns%', glType: 'REVENUE', fsLineId: 'fs_revenue_contra', confidence: 0.95 },
+    { pattern: 'sales discount%', glType: 'REVENUE', fsLineId: 'fs_revenue_contra', confidence: 0.95 },
+    { pattern: 'interest income%', glType: 'REVENUE', fsLineId: 'fs_interest_income', confidence: 0.96 },
+    // COGS
+    { pattern: 'cogs%', glType: 'EXPENSE', fsLineId: 'fs_cogs', confidence: 0.96 },
+    { pattern: 'cost of goods%', glType: 'EXPENSE', fsLineId: 'fs_cogs', confidence: 0.96 },
+    { pattern: 'cost of sales%', glType: 'EXPENSE', fsLineId: 'fs_cogs', confidence: 0.95 },
+    { pattern: 'direct material%', glType: 'EXPENSE', fsLineId: 'fs_cogs_materials', confidence: 0.95 },
+    { pattern: 'direct labor%', glType: 'EXPENSE', fsLineId: 'fs_cogs_labor', confidence: 0.95 },
+    { pattern: 'manufacturing overhead%', glType: 'EXPENSE', fsLineId: 'fs_cogs_overhead', confidence: 0.95 },
+    { pattern: 'warranty expense%', glType: 'EXPENSE', fsLineId: 'fs_cogs', confidence: 0.90 },
+    { pattern: 'inventory adjustment%', glType: 'EXPENSE', fsLineId: 'fs_cogs', confidence: 0.90 },
+    // SGA operating expenses
+    { pattern: 'salaries%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.95 },
+    { pattern: 'wages%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.95 },
+    { pattern: 'payroll%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.93 },
+    { pattern: 'employee benefit%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.93 },
+    { pattern: 'health insurance%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.93 },
+    { pattern: 'rent expense%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.93 },
+    { pattern: 'utilit%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.93 },
+    { pattern: 'insurance%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.90 },
+    { pattern: 'office%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.93 },
+    { pattern: 'repair%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.90 },
+    { pattern: 'maintenance%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.90 },
+    { pattern: 'travel%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.93 },
+    { pattern: 'meals%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.90 },
+    { pattern: 'entertainment%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.90 },
+    { pattern: 'marketing%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.93 },
+    { pattern: 'advertising%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.93 },
+    { pattern: 'telecommunication%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.93 },
+    { pattern: 'software%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.90 },
+    { pattern: 'vehicle expense%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.93 },
+    { pattern: 'shipping%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.90 },
+    { pattern: 'professional fee%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.93 },
+    { pattern: 'legal%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.90 },
+    { pattern: 'consulting%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.90 },
+    { pattern: 'trade show%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.90 },
+    { pattern: 'postage%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.90 },
+    { pattern: 'bank%charge%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.88 },
+    { pattern: 'bank%fee%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.88 },
+    { pattern: 'dues%subscription%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.90 },
+    { pattern: 'training%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.90 },
+    // Depreciation & amortization expense
+    { pattern: 'depreciation expense%', glType: 'EXPENSE', fsLineId: 'fs_opex_da', confidence: 0.96 },
+    { pattern: 'amortization expense%', glType: 'EXPENSE', fsLineId: 'fs_opex_da', confidence: 0.96 },
+    // R&D
+    { pattern: 'r&d%', glType: 'EXPENSE', fsLineId: 'fs_opex_rd', confidence: 0.95 },
+    { pattern: 'research%', glType: 'EXPENSE', fsLineId: 'fs_opex_rd', confidence: 0.93 },
+    // Interest & other
+    { pattern: 'interest expense%', glType: 'EXPENSE', fsLineId: 'fs_interest_expense', confidence: 0.96 },
+    { pattern: 'gain%loss%', glType: 'EXPENSE', fsLineId: 'fs_other_gain_loss', confidence: 0.88 },
+    { pattern: 'foreign currency%', glType: 'EXPENSE', fsLineId: 'fs_other_other', confidence: 0.88 },
+    // Income tax expense
+    { pattern: 'income tax expense%', glType: 'EXPENSE', fsLineId: 'fs_tax_expense', confidence: 0.96 },
+    { pattern: 'deferred%tax%expense%', glType: 'EXPENSE', fsLineId: 'fs_tax_deferred', confidence: 0.95 },
+    { pattern: 'current%tax%expense%', glType: 'EXPENSE', fsLineId: 'fs_tax_current', confidence: 0.95 },
+    // ── International / non-standard naming variants ──
+    // Cash variants (UK, Canada, QuickBooks)
+    { pattern: 'bank%', glType: 'ASSET', fsLineId: 'fs_asset_cash', confidence: 0.95 },
+    { pattern: 'chequing%', glType: 'ASSET', fsLineId: 'fs_asset_cash', confidence: 0.95 },
+    { pattern: 'checking%', glType: 'ASSET', fsLineId: 'fs_asset_cash', confidence: 0.95 },
+    { pattern: 'current account%', glType: 'ASSET', fsLineId: 'fs_asset_cash', confidence: 0.93 },
+    { pattern: 'undeposited funds%', glType: 'ASSET', fsLineId: 'fs_asset_cash', confidence: 0.93 },
+    { pattern: 'money market%', glType: 'ASSET', fsLineId: 'fs_asset_cash', confidence: 0.90 },
+    // UK/IFRS receivables/payables
+    { pattern: 'trade debtors%', glType: 'ASSET', fsLineId: 'fs_asset_ar', confidence: 0.95 },
+    { pattern: 'debtors%', glType: 'ASSET', fsLineId: 'fs_asset_ar', confidence: 0.90 },
+    { pattern: 'trade creditors%', glType: 'LIABILITY', fsLineId: 'fs_liability_ap', confidence: 0.95 },
+    { pattern: 'creditors%', glType: 'LIABILITY', fsLineId: 'fs_liability_ap', confidence: 0.90 },
+    // Inventory variants
+    { pattern: 'stock%', glType: 'ASSET', fsLineId: 'fs_asset_inventory', confidence: 0.88 },
+    { pattern: 'merchandise%', glType: 'ASSET', fsLineId: 'fs_asset_inventory', confidence: 0.90 },
+    { pattern: 'work-in-progress%', glType: 'ASSET', fsLineId: 'fs_asset_inventory', confidence: 0.93 },
+    { pattern: 'wip%', glType: 'ASSET', fsLineId: 'fs_asset_inventory', confidence: 0.90 },
+    // COGS variants
+    { pattern: 'cost of revenue%', glType: 'EXPENSE', fsLineId: 'fs_cogs', confidence: 0.95 },
+    { pattern: 'direct costs%', glType: 'EXPENSE', fsLineId: 'fs_cogs', confidence: 0.93 },
+    // Payroll / staff cost variants
+    { pattern: 'labour%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.90 },
+    { pattern: 'labor%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.90 },
+    { pattern: 'staff cost%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.93 },
+    { pattern: 'compensation%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.90 },
+    { pattern: 'bonus%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.88 },
+    { pattern: 'commission%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.88 },
+    // Operating expense variants
+    { pattern: 'motor vehicle%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.90 },
+    { pattern: 'telephone%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.90 },
+    { pattern: 'sundry%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.85 },
+    { pattern: 'miscellaneous%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.85 },
+    { pattern: 'overheads%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.88 },
+    { pattern: 'printing%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.88 },
+    { pattern: 'cleaning%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.85 },
+    { pattern: 'security%', glType: 'EXPENSE', fsLineId: 'fs_opex_sga', confidence: 0.85 },
+    // Revenue variants
+    { pattern: 'turnover%', glType: 'REVENUE', fsLineId: 'fs_revenue', confidence: 0.93 },
+    { pattern: 'billings%', glType: 'REVENUE', fsLineId: 'fs_revenue', confidence: 0.90 },
+    { pattern: 'fees earned%', glType: 'REVENUE', fsLineId: 'fs_revenue', confidence: 0.93 },
+    { pattern: 'income from services%', glType: 'REVENUE', fsLineId: 'fs_revenue_service', confidence: 0.93 },
+    { pattern: 'rental income%', glType: 'REVENUE', fsLineId: 'fs_revenue_other', confidence: 0.90 },
+    { pattern: 'royalty%income%', glType: 'REVENUE', fsLineId: 'fs_revenue_other', confidence: 0.88 },
+  ];
+
+  /** Match account name against curated patterns. Returns first match with highest confidence. */
+  function matchCuratedPattern(accountName: string, glType: string): PatternMapping | null {
+    const name = accountName.toLowerCase()
+      .replace(/\([^)]*\)/g, '')      // strip (Chase) etc
+      .replace(/\s*[-–—]\s*/g, ' ')   // strip separators
+      .replace(/\s+/g, ' ').trim();
+    let bestMatch: PatternMapping | null = null;
+    for (const p of CURATED_PATTERNS) {
+      // Check GL type filter if specified
+      if (p.glType && glType && p.glType !== glType) continue;
+      // Convert SQL ILIKE pattern to regex
+      const regex = new RegExp('^' + p.pattern.replace(/%/g, '.*') + '$', 'i');
+      if (regex.test(name)) {
+        if (!bestMatch || p.confidence > bestMatch.confidence) {
+          bestMatch = p;
+        }
+      }
+    }
+    return bestMatch;
+  }
+
   const retrievals: XbrlRetrievalResult[] = [];
 
   for (const acc of unmappedAccounts) {
     const accountType = ((acc as Record<string, unknown>).account_type as string ?? '').toUpperCase();
     const xbrlStatement = statementByType[accountType] || undefined;
+
+    // ── LAYER 0: Curated pattern matching ──
+    const curatedMatch = matchCuratedPattern(acc.account_name, accountType);
+    if (curatedMatch) {
+      const fsLine = fsById.get(curatedMatch.fsLineId);
+      retrievals.push({
+        account: acc,
+        xbrlResults: [],
+        bestFsLineId: curatedMatch.fsLineId,
+        bestFsLineName: fsLine?.name ?? curatedMatch.fsLineId,
+        bestConfidence: curatedMatch.confidence,
+        bestXbrlId: null,
+        bestXbrlLabel: null,
+        candidates: [],
+      });
+      continue; // Skip XBRL trigram for curated matches
+    }
 
     const xbrlResults = await searchXBRL(pool, acc.account_name, {
       statement: xbrlStatement,
@@ -203,41 +393,74 @@ export async function classifyWithXBRL(
     let bestXbrlLabel: string | null = null;
     const candidates: XbrlRetrievalResult['candidates'] = [];
 
+    // Expected statement for this account type (BS for assets/liabilities/equity, PL for revenue/expense)
+    const expectedStatement = xbrlStatement; // 'BS', 'PL', 'CF', or undefined
+
     // Build candidate list: every XBRL result that maps to a Sabit fs_line
+    // Filter by statement alignment — ASSET accounts should only match BS lines
     for (const xr of xbrlResults) {
       const mapped = fsByXbrlId.get(xr.id);
       if (mapped) {
+        // Penalise cross-statement matches: ASSET account shouldn't map to CF/PL lines
+        const lineStatement = mapped.statement;
+        const statementMatch = !expectedStatement || lineStatement === expectedStatement
+          || (expectedStatement === 'PL' && lineStatement === 'IS')
+          || (expectedStatement === 'IS' && lineStatement === 'PL');
+        const adjustedSimilarity = statementMatch
+          ? xr.similarity + 0.15  // boost for correct statement
+          : xr.similarity * 0.3;  // heavy penalty for wrong statement
+
         candidates.push({
           fsLineId: mapped.id,
           fsLineName: mapped.name,
           xbrlId: xr.id,
           xbrlLabel: xr.label,
-          similarity: xr.similarity,
+          similarity: adjustedSimilarity,
         });
       }
     }
 
-    // Best deterministic pick: highest-similarity candidate that maps to Sabit
+    // Sort candidates by adjusted similarity (statement-aligned ones float to top)
+    candidates.sort((a, b) => b.similarity - a.similarity);
+
+    // Best deterministic pick: highest-similarity statement-aligned candidate
     if (candidates.length > 0) {
       const best = candidates[0];
       bestFsLineId = best.fsLineId;
       bestFsLineName = best.fsLineName;
-      bestConfidence = best.similarity;
+      bestConfidence = Math.min(0.95, best.similarity);
       bestXbrlId = best.xbrlId;
       bestXbrlLabel = best.xbrlLabel;
-    } else if (xbrlResults.length > 0) {
-      // No direct XBRL→Sabit mapping, try name similarity
-      const best = xbrlResults[0];
-      bestXbrlId = best.id;
-      bestXbrlLabel = best.label;
-      const bestLabel = best.label.toLowerCase();
+    }
+
+    // Direct fs_taxonomy_lines name match — runs if XBRL bridge produced nothing or low confidence
+    if (!bestFsLineId || bestConfidence < 0.5) {
+      const cleanedName = acc.account_name.toLowerCase()
+        .replace(/\([^)]*\)/g, '')       // strip (Chase), (Wells Fargo) etc
+        .replace(/\s*[-–—]\s*/g, ' ')    // strip separators
+        .replace(/\s+/g, ' ').trim();
+      const accountWords = cleanedName.split(/\s+/).filter(w => w.length > 2
+        && !['the', 'and', 'for', 'net', 'current', 'admin', 'executive', 'general'].includes(w));
+      let bestNameScore = 0;
+      let bestNameLine: { id: string; name: string; statement: string } | null = null;
       for (const [name, line] of fsByName) {
-        if (bestLabel.includes(name) || name.includes(bestLabel)) {
-          bestFsLineId = line.id;
-          bestFsLineName = line.name;
-          bestConfidence = best.similarity * 0.9;
-          break;
+        // Filter by statement alignment
+        const lineMatch = !expectedStatement || line.statement === expectedStatement
+          || (expectedStatement === 'PL' && line.statement === 'IS')
+          || (expectedStatement === 'IS' && line.statement === 'PL');
+        if (!lineMatch) continue;
+        const nameWords = name.split(/\s+/);
+        const matchCount = accountWords.filter(w => nameWords.some(nw => nw.includes(w) || w.includes(nw))).length;
+        const score = matchCount / Math.max(accountWords.length, 1);
+        if (score > bestNameScore && score >= 0.25) {
+          bestNameScore = score;
+          bestNameLine = line;
         }
+      }
+      if (bestNameLine && bestNameScore > bestConfidence) {
+        bestFsLineId = bestNameLine.id;
+        bestFsLineName = bestNameLine.name;
+        bestConfidence = Math.min(0.90, bestNameScore + 0.15); // boost for direct name match
       }
     }
 
@@ -247,6 +470,76 @@ export async function classifyWithXBRL(
       const fallback = fsLines.find((l) => l.id === bestFsLineId);
       bestFsLineName = fallback?.name ?? accountType;
       bestConfidence = 0.3;
+    }
+
+    // ── LAYER 3 FALLBACK: Direct Claude classification for low-confidence results ──
+    // When curated patterns miss and XBRL returns weak results, ask Claude directly.
+    const CLAUDE_FALLBACK_THRESHOLD = 0.80;
+    if (bestConfidence < CLAUDE_FALLBACK_THRESHOLD && process.env.ANTHROPIC_API_KEY) {
+      try {
+        const { callAIWithSchema } = await import('../ai/ai_client.js');
+        const { z } = await import('zod');
+
+        // Filter fs lines by GL type to reduce noise
+        const relevantLines = fsLines.filter((l) => {
+          if (l.isSubtotal || l.isHidden) return false;
+          const stmt = l.statement as string;
+          if (accountType === 'ASSET' || accountType === 'CURRENT_ASSET' || accountType === 'NON_CURRENT_ASSET')
+            return stmt === 'BS';
+          if (accountType === 'LIABILITY' || accountType === 'CURRENT_LIABILITY' || accountType === 'NON_CURRENT_LIABILITY')
+            return stmt === 'BS';
+          if (accountType === 'EQUITY') return stmt === 'BS' || stmt === 'EQ';
+          if (accountType === 'REVENUE') return stmt === 'PL' || stmt === 'IS';
+          if (accountType === 'EXPENSE') return stmt === 'PL' || stmt === 'IS';
+          return true;
+        });
+        const linesList = relevantLines.map((l) => `${l.id}: "${l.name}" (${l.statement})`).join('\n');
+
+        const ClassifySchema = z.object({
+          fsLineId: z.string(),
+          fsLineName: z.string(),
+          confidence: z.number(),
+          reasoning: z.string(),
+          ascCitation: z.string().optional(),
+        });
+
+        const claudeResult = await callAIWithSchema({
+          pool,
+          tenantId,
+          pillar: 'classifier_layer3',
+          promptVersion: 'direct_classify_v1',
+          systemPrompt: 'You are an expert US GAAP accountant. Classify the GL account to the correct financial statement line. Respond with ONLY valid JSON.',
+          userPrompt: `GL Account: "${acc.account_name}"
+Account Code: ${acc.account_code ?? 'unknown'}
+GL Type: ${accountType}
+Current best guess: "${bestFsLineName ?? 'none'}" (confidence: ${Math.round(bestConfidence * 100)}% — too low)
+
+Available financial statement lines:
+${linesList}
+
+Pick the single best line. If this is a non-English/non-standard name (e.g. "Trade Debtors" = Accounts Receivable, "Bank - RBC" = Cash), recognize it.
+
+Respond with JSON only:
+{"fsLineId":"id_from_list","fsLineName":"name","confidence":0.95,"reasoning":"one sentence","ascCitation":"ASC XXX"}`,
+          schema: ClassifySchema,
+          requestJson: { pillar: 'classifier_layer3', accountName: acc.account_name, currentConfidence: bestConfidence },
+        });
+
+        if (claudeResult.ok && claudeResult.parsed) {
+          const pick = claudeResult.parsed;
+          // Validate the fs_line_id exists
+          const matched = fsById.get(pick.fsLineId);
+          if (matched && pick.confidence > bestConfidence) {
+            bestFsLineId = pick.fsLineId;
+            bestFsLineName = pick.fsLineName;
+            bestConfidence = Math.min(0.95, pick.confidence);
+            bestXbrlId = null;
+            bestXbrlLabel = pick.ascCitation ?? null;
+          }
+        }
+      } catch {
+        // Fail-open — keep XBRL/fallback result
+      }
     }
 
     retrievals.push({
@@ -396,6 +689,11 @@ Respond with JSON only. One object per account. Shape:
         xbrl_element: c.xbrlId,
       }));
 
+    // Determine model version and tier based on source
+    const isCurated = r.xbrlResults.length === 0 && !r.bestXbrlId;
+    const effectiveModelVersion = isCurated ? 'curated_pattern_v1' : modelVersion;
+    const effectiveTier = isCurated ? 'pattern:curated' : (r.bestXbrlLabel ? `xbrl:${r.bestXbrlId}` : null);
+
     // Persist suggestion
     const id = randomUUID();
     await pool.query(
@@ -409,9 +707,9 @@ Respond with JSON only. One object per account. Shape:
         r.account.account_code, r.account.account_name,
         fsLineId, fsLineName,
         confidence, confidenceBand,
-        r.bestXbrlLabel ? `xbrl:${r.bestXbrlId}` : null,
+        effectiveTier,
         JSON.stringify(alternatives),
-        modelVersion,
+        effectiveModelVersion,
       ]
     ).catch(() => { /* non-fatal: duplicate */ });
 

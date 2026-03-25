@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useParams } from 'next/navigation';
-import { Search, Sparkles, Check, X, ChevronDown, GitBranch, Loader2 } from 'lucide-react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Search, Sparkles, Check, X, ChevronDown, GitBranch, Loader2, Pencil } from 'lucide-react';
 import { useTrialBalance } from '@/lib/queries/trial-balance';
+import { useCloseSession } from '@/lib/queries/close-session';
 import {
   useCOASuggestions,
   useAcceptSuggestion,
@@ -60,6 +62,18 @@ function groupByCategory(items: TaxonomyItem[]): Record<string, TaxonomyItem[]> 
   return groups;
 }
 
+const STATEMENT_LABELS: Record<string, string> = {
+  BS: 'Balance Sheet',
+  IS: 'Income Statement',
+  CF: 'Cash Flow',
+  OCI: 'Other Comprehensive Income',
+  EQ: "Stockholders' Equity",
+};
+
+function formatCategoryLabel(key: string): string {
+  return STATEMENT_LABELS[key] ?? key;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Skeleton Row                                                       */
 /* ------------------------------------------------------------------ */
@@ -92,6 +106,8 @@ export default function AccountMappingPage() {
   const sessionId = (params.sessionId as string) ?? null;
 
   /* ── Data fetching ── */
+  const { data: session } = useCloseSession(sessionId);
+  const entityId = session?.entityId ?? null;
   const {
     data: tbData,
     isLoading: tbLoading,
@@ -108,6 +124,56 @@ export default function AccountMappingPage() {
   const rejectMutation = useRejectSuggestion();
   const generateMutation = useGenerateSuggestions(sessionId);
   const autoClassifyMutation = useAutoClassify(sessionId);
+  const queryClient = useQueryClient();
+
+  /* ── Manual mapping mutation ── */
+  const [mapError, setMapError] = useState<string | null>(null);
+  const manualMapMutation = useMutation({
+    mutationFn: async (params: { accountCode: string; fsLineId: string; fsLineName: string }) => {
+      return apiFetch<{ saved: number; version: number }>('/api/coa-mapping/map', {
+        method: 'POST',
+        body: {
+          accountCode: params.accountCode,
+          fsLineId: params.fsLineId,
+          entityId: entityId ?? undefined,
+        },
+      });
+    },
+    onError: (err) => {
+      setMapError(err instanceof Error ? err.message : 'Failed to save mapping');
+      setTimeout(() => setMapError(null), 6000);
+    },
+    onSuccess: (_data, variables) => {
+      setMapError(null);
+      // Optimistic update: patch the trial balance cache so the row updates immediately
+      queryClient.setQueriesData<{ rows: TrialBalanceRow[]; [k: string]: unknown }>(
+        { queryKey: ['trial-balance'] },
+        (old) => {
+          if (!old?.rows) return old;
+          return {
+            ...old,
+            rows: old.rows.map((r) =>
+              r.accountCode === variables.accountCode
+                ? { ...r, mappingReportingLineId: variables.fsLineId, mappingReportingLineName: variables.fsLineName, mappingStatus: 'mapped' as const }
+                : r
+            ),
+          };
+        }
+      );
+      if (sessionId) {
+        queryClient.invalidateQueries({ queryKey: ['trial-balance'] });
+        queryClient.invalidateQueries({ queryKey: ['coa-suggestions', sessionId] });
+        queryClient.invalidateQueries({ queryKey: ['readiness'] });
+      }
+    },
+  });
+
+  const handleManualMap = useCallback(
+    (accountCode: string, fsLineId: string, fsLineName: string) => {
+      manualMapMutation.mutate({ accountCode, fsLineId, fsLineName });
+    },
+    [manualMapMutation]
+  );
 
   /* ── Auto-classify on page load when unmapped accounts exist ── */
   const [autoClassifyTriggered, setAutoClassifyTriggered] = useState(false);
@@ -233,7 +299,7 @@ export default function AccountMappingPage() {
     [coaSuggestions]
   );
   const highConfPending = useMemo(
-    () => coaSuggestions.filter((s) => s.status === 'pending' && s.confidence > 0.90),
+    () => coaSuggestions.filter((s) => s.status === 'pending' && s.confidence >= 0.80),
     [coaSuggestions]
   );
   const [bulkAccepting, setBulkAccepting] = useState(false);
@@ -350,7 +416,7 @@ export default function AccountMappingPage() {
   useEffect(() => {
     if (!autoAcceptEnabled) return;
     const highConfPending = coaSuggestions.filter(
-      (s) => s.status === 'pending' && s.confidence > 0.95
+      (s) => s.status === 'pending' && s.confidence >= 0.80
     );
     for (const s of highConfPending) {
       acceptMutation.mutate({ suggestionId: s.id, type: 'coa' });
@@ -373,6 +439,16 @@ export default function AccountMappingPage() {
   /* ── Render ── */
   return (
     <div style={{ padding: '24px' }}>
+      {/* Mapping error toast */}
+      {mapError && (
+        <div
+          className="flex items-center justify-between px-4 py-3 mb-4 text-sm rounded-[var(--radius-lg)]"
+          style={{ border: '1px solid var(--status-error)', backgroundColor: 'var(--status-error-bg)', color: 'var(--status-error)' }}
+        >
+          <span>{mapError}</span>
+          <button type="button" onClick={() => setMapError(null)} className="hover:opacity-80 ml-4 font-medium" aria-label="Dismiss">x</button>
+        </div>
+      )}
       {/* ================================================================ */}
       {/* STICKY PROGRESS HEADER                                           */}
       {/* ================================================================ */}
@@ -433,7 +509,7 @@ export default function AccountMappingPage() {
             ) : (
               <>
                 <Check className="w-3.5 h-3.5" />
-                Accept All High Confidence ({'>'}90%) &middot; {highConfPending.length}
+                Accept All High Confidence (&ge;80%) &middot; {highConfPending.length}
               </>
             )}
           </button>
@@ -510,6 +586,20 @@ export default function AccountMappingPage() {
       </div>
 
       {/* ================================================================ */}
+      {/* EXPLANATION BANNER FOR FIRST-TIME USERS                          */}
+      {/* ================================================================ */}
+      {!isLoading && rows.length > 0 && unmappedCount > 0 && !hasSuggestions && !autoClassifyMutation.isPending && (
+        <div
+          className="rounded-[var(--radius-lg)] border p-4 mt-4 text-sm"
+          style={{ borderColor: 'var(--border-default)', backgroundColor: 'var(--bg-surface)', color: 'var(--text-secondary)' }}
+        >
+          Account mapping connects your GL accounts to standardized financial statement line items.
+          Sabit uses XBRL taxonomy matching to suggest mappings automatically — review and confirm each one,
+          or map manually using the dropdown.
+        </div>
+      )}
+
+      {/* ================================================================ */}
       {/* EMPTY / GENERATE STATE                                           */}
       {/* ================================================================ */}
       {!isLoading && rows.length === 0 && (
@@ -524,19 +614,43 @@ export default function AccountMappingPage() {
 
       {/* Auto-classifying loading state */}
       {autoClassifyMutation.isPending && (
-        <EmptyState
-          loading
-          loadingMessage={`Classifying your ${rows.filter((r) => !r.mappingReportingLineId).length} accounts — this takes about 30 seconds`}
-          title=""
-        />
+        <div
+          className="rounded-[var(--radius-lg)] border p-6 mt-4 text-center"
+          style={{ borderColor: 'var(--interactive-primary)', backgroundColor: 'var(--status-info-bg)' }}
+        >
+          <p className="text-sm font-medium mb-2" style={{ color: 'var(--interactive-primary)' }}>
+            Sabit is classifying your {rows.filter((r) => !r.mappingReportingLineId).length} accounts using the XBRL taxonomy...
+          </p>
+          <div className="w-48 h-1.5 mx-auto rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border-default)' }}>
+            <div className="h-full rounded-full animate-pulse" style={{ width: '60%', backgroundColor: 'var(--interactive-primary)' }} />
+          </div>
+          <p className="text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>
+            Matching account names against XBRL elements
+          </p>
+        </div>
       )}
 
-      {/* Fallback: manual re-classify button if auto-classify failed */}
+      {/* Classification complete banner */}
+      {!isLoading && rows.length > 0 && hasSuggestions && !autoClassifyMutation.isPending && (
+        <div
+          className="rounded-[var(--radius-lg)] border p-3 mt-4 text-sm flex items-center gap-2"
+          style={{ borderColor: 'var(--status-success-border)', backgroundColor: 'var(--status-success-bg)', color: 'var(--status-success)' }}
+        >
+          <Check className="w-4 h-4 flex-shrink-0" />
+          AI classified {coaSuggestions.filter(s => s.status === 'pending').length} accounts automatically.
+          {needsReviewCount > 0 && <span>{needsReviewCount} need your review.</span>}
+        </div>
+      )}
+
+      {/* Fallback: manual classification required */}
       {!isLoading && rows.length > 0 && !hasSuggestions && !autoClassifyMutation.isPending && autoClassifyMutation.isError && (
         <div className="flex justify-center" style={{ marginTop: '24px' }}>
           <div className="text-center">
+            <p className="text-sm mb-1 font-medium" style={{ color: 'var(--status-warning)' }}>
+              Automatic classification unavailable
+            </p>
             <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
-              Auto-classification failed. Click to retry.
+              Manual mapping required — use the Map button on each row to assign a taxonomy line item.
             </p>
             <button
               type="button"
@@ -636,6 +750,8 @@ export default function AccountMappingPage() {
                       }
                       onSaveOverride={handleSaveOverride}
                       taxonomyGroups={taxonomyGroups}
+                      taxonomy={taxonomy}
+                      onManualMap={handleManualMap}
                     />
                   ))}
             </tbody>
@@ -670,7 +786,7 @@ export default function AccountMappingPage() {
           className="fixed bottom-0 left-0 right-0 flex items-center justify-between px-6"
           style={{
             height: '52px',
-            backgroundColor: 'var(--bg-nav)',
+            backgroundColor: 'var(--interactive-primary)',
             color: 'white',
             zIndex: 50,
           }}
@@ -730,6 +846,8 @@ interface MappingRowProps {
   onOverrideChange: (code: string, lineId: string) => void;
   onSaveOverride: (code: string, suggestion: COASuggestion) => void;
   taxonomyGroups: Record<string, TaxonomyItem[]>;
+  taxonomy: TaxonomyItem[];
+  onManualMap: (accountCode: string, fsLineId: string, fsLineName: string) => void;
 }
 
 function MappingRow({
@@ -742,8 +860,49 @@ function MappingRow({
   onOverrideChange,
   onSaveOverride,
   taxonomyGroups,
+  taxonomy,
+  onManualMap,
 }: MappingRowProps) {
   const { row, suggestion, displayStatus } = merged;
+  const [mapOpen, setMapOpen] = useState(false);
+  const [mapSearch, setMapSearch] = useState('');
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!mapOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setMapOpen(false);
+        setMapSearch('');
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [mapOpen]);
+
+  // Focus search input when dropdown opens (defer to next frame so DOM is rendered)
+  useEffect(() => {
+    if (!mapOpen) return;
+    const raf = requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [mapOpen]);
+
+  const filteredTaxonomy = useMemo(() => {
+    if (!mapSearch.trim()) return taxonomy;
+    const q = mapSearch.trim().toLowerCase();
+    return taxonomy.filter(
+      (t) =>
+        t.label.toLowerCase().includes(q) ||
+        t.category.toLowerCase().includes(q) ||
+        (t.xbrl_label?.toLowerCase().includes(q) ?? false)
+    );
+  }, [taxonomy, mapSearch]);
+
+  const filteredTaxonomyGroups = useMemo(() => groupByCategory(filteredTaxonomy), [filteredTaxonomy]);
 
   // Row background and left border by status
   const rowStyle: React.CSSProperties = {};
@@ -866,7 +1025,7 @@ function MappingRow({
                 >
                   <option value="">Select mapping...</option>
                   {Object.entries(taxonomyGroups).map(([category, items]) => (
-                    <optgroup key={category} label={category}>
+                    <optgroup key={category} label={formatCategoryLabel(category)}>
                       {items.map((item) => (
                         <option key={item.id} value={item.id}>
                           {item.label}{item.xbrl_label ? ` (XBRL: ${item.xbrl_label})` : ''}
@@ -904,10 +1063,75 @@ function MappingRow({
             </p>
           </div>
         )}
-        {displayStatus === 'unmapped' && (
+        {displayStatus === 'unmapped' && !mapOpen && (
           <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
             —
           </span>
+        )}
+        {displayStatus === 'unmapped' && mapOpen && (
+          <div ref={dropdownRef} className="relative" style={{ minWidth: '200px' }}>
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search taxonomy..."
+              value={mapSearch}
+              onChange={(e) => setMapSearch(e.target.value)}
+              className="w-full pl-2 pr-7 py-1.5 text-xs rounded-md outline-none"
+              style={{
+                border: '1px solid var(--interactive-primary)',
+                backgroundColor: 'var(--bg-surface)',
+                color: 'var(--text-primary)',
+              }}
+            />
+            <div
+              className="absolute left-0 right-0 mt-1 rounded-md shadow-lg overflow-auto"
+              style={{
+                maxHeight: '240px',
+                border: '1px solid var(--border-default)',
+                backgroundColor: 'var(--bg-surface)',
+                zIndex: 30,
+              }}
+            >
+              {Object.entries(filteredTaxonomyGroups).map(([category, items]) => (
+                <div key={category}>
+                  <div
+                    className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider sticky top-0"
+                    style={{
+                      backgroundColor: 'var(--bg-surface-sunken)',
+                      color: 'var(--text-secondary)',
+                    }}
+                  >
+                    {formatCategoryLabel(category)}
+                  </div>
+                  {items.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--bg-surface-sunken)] transition-colors"
+                      style={{ color: 'var(--text-primary)' }}
+                      onClick={() => {
+                        onManualMap(row.accountCode, item.id, item.label);
+                        setMapOpen(false);
+                        setMapSearch('');
+                      }}
+                    >
+                      {item.label}
+                      {item.xbrl_label && (
+                        <span className="ml-1" style={{ color: 'var(--text-tertiary)', fontSize: '10px' }}>
+                          {item.xbrl_label}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              ))}
+              {filteredTaxonomy.length === 0 && (
+                <div className="px-3 py-3 text-xs text-center" style={{ color: 'var(--text-tertiary)' }}>
+                  No matching line items
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </td>
 
@@ -956,6 +1180,17 @@ function MappingRow({
             }}
           >
             {suggestion.modelVersion?.startsWith('xbrl') ? 'XBRL' : 'AI'}
+          </span>
+        )}
+        {!suggestion && row.mappingReportingLineId && (
+          <span
+            className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium uppercase"
+            style={{
+              backgroundColor: 'var(--bg-surface-sunken)',
+              color: 'var(--interactive-primary)',
+            }}
+          >
+            MANUAL
           </span>
         )}
       </td>
@@ -1024,6 +1259,38 @@ function MappingRow({
             size="sm"
             showIcon={false}
           />
+        )}
+        {displayStatus === 'unmapped' && !mapOpen && (
+          <button
+            type="button"
+            onClick={() => setMapOpen(true)}
+            className="inline-flex items-center gap-1 text-xs font-medium rounded-md transition-colors"
+            style={{
+              height: '26px',
+              padding: '0 8px',
+              backgroundColor: 'var(--interactive-primary)',
+              color: 'white',
+            }}
+          >
+            <Pencil className="w-3 h-3" />
+            Map
+          </button>
+        )}
+        {displayStatus === 'unmapped' && mapOpen && (
+          <button
+            type="button"
+            onClick={() => { setMapOpen(false); setMapSearch(''); }}
+            className="inline-flex items-center gap-1 text-xs font-medium rounded-md transition-colors"
+            style={{
+              height: '26px',
+              padding: '0 8px',
+              border: '1px solid var(--border-default)',
+              backgroundColor: 'var(--bg-surface)',
+              color: 'var(--text-secondary)',
+            }}
+          >
+            Cancel
+          </button>
         )}
       </td>
     </tr>

@@ -7,6 +7,7 @@ import { fmtMoney } from '@/lib/money';
 import { Plus, Play, Loader2, Landmark } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
+import { ModuleBanner } from '@/components/shared/ModuleBanner';
 
 export default function DebtAccrualPage() {
   const params = useParams();
@@ -32,6 +33,7 @@ export default function DebtAccrualPage() {
 
   return (
     <div className="space-y-6">
+      <ModuleBanner sessionId={sessionId} />
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-display" style={{ color: 'var(--text-primary)' }}>Debt Interest Accrual</h1>

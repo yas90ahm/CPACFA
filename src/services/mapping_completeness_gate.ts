@@ -10,6 +10,7 @@ import type { CoaMappingRule } from '../types/coa_mapping.js';
 import { listCoaMappingRules } from '../db/repositories/coa_mapping_rules_repository.js';
 import { getTrialBalanceForCertification } from './adjusted_trial_balance_service.js';
 import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
+import { ruleMatchesAccount } from '../utils/gl_pattern_matching.js';
 
 export interface UnmappedAccount {
   account_code: string;
@@ -25,26 +26,9 @@ export interface MappingCompletenessResult {
   unmapped_accounts: UnmappedAccount[];
 }
 
-/** Convert SQL-style pattern (% = any) to RegExp. Matches coa_mapping_service logic. */
-function patternToRegExp(pattern: string): RegExp {
-  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*');
-  return new RegExp(`^${escaped}$`, 'i');
-}
-
-/** Return true if account matches rule (name and optional number). */
-function ruleMatches(
-  rule: CoaMappingRule,
-  accountName: string,
-  accountNumber?: string
-): boolean {
-  const nameRe = patternToRegExp(rule.sourceAccountNamePattern);
-  if (!nameRe.test((accountName ?? '').trim())) return false;
-  if (rule.sourceAccountNumberPattern != null && rule.sourceAccountNumberPattern !== '') {
-    const num = (accountNumber ?? '').trim();
-    const numRe = patternToRegExp(rule.sourceAccountNumberPattern);
-    if (!numRe.test(num)) return false;
-  }
-  return true;
+/** @deprecated Use ruleMatchesAccount from utils/gl_pattern_matching instead. Kept as thin wrapper for call-site compat. */
+function ruleMatches(rule: CoaMappingRule, accountName: string, accountNumber?: string): boolean {
+  return ruleMatchesAccount(rule, accountName, accountNumber);
 }
 
 /** Format balance for display (debit - credit for assets/expenses, credit - debit otherwise). */

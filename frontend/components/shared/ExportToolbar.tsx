@@ -40,7 +40,7 @@ function ExportBtn({ onClick, loading, icon, label }: ExportBtnProps) {
       <span
         className={cn(
           'absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 text-[10px] font-medium',
-          'bg-[var(--bg-nav)] text-[var(--text-inverse)] rounded-[var(--radius-sm)]',
+          'bg-[var(--interactive-primary)] text-white rounded-[var(--radius-sm)]',
           'opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap',
         )}
       >

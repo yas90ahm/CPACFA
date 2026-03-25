@@ -127,7 +127,7 @@ async function mapSabitToXbrl(): Promise<void> {
 
       // Update the fs_taxonomy_lines table
       await pool.query(
-        'UPDATE fs_taxonomy_lines SET xbrl_element_id = $1 WHERE id = $2',
+        'UPDATE fs_taxonomy_lines SET xbrl_element = $1, xbrl_element_id = $1 WHERE id = $2',
         [xbrlId, line.id]
       );
       hardcoded++;
@@ -155,7 +155,7 @@ async function mapSabitToXbrl(): Promise<void> {
       });
 
       await pool.query(
-        'UPDATE fs_taxonomy_lines SET xbrl_element_id = $1 WHERE id = $2',
+        'UPDATE fs_taxonomy_lines SET xbrl_element = $1, xbrl_element_id = $1 WHERE id = $2',
         [best.id, line.id]
       );
       searched++;

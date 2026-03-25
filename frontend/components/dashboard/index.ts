@@ -17,3 +17,6 @@ export { QuickStatsPanel } from './QuickStatsPanel';
 export type { QuickStatsPanelProps } from './QuickStatsPanel';
 
 export { useDashboardData } from './useDashboardData';
+
+export { CloseChecklist } from './CloseChecklist';
+export type { CloseChecklistProps } from './CloseChecklist';

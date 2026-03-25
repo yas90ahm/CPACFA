@@ -12,6 +12,7 @@ import type { DepreciationRun } from '@/lib/types/fixed-assets';
 import { Plus, Play, Trash2, Loader2, Package } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
+import { ModuleBanner } from '@/components/shared/ModuleBanner';
 
 const METHOD_LABEL: Record<string, string> = { straight_line: 'Straight Line', declining_balance: 'Declining Balance', units_of_production: 'Units of Prod.' };
 
@@ -49,6 +50,7 @@ export default function FixedAssetsPage() {
 
   return (
     <div className="space-y-6">
+      <ModuleBanner sessionId={sessionId} />
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-display" style={{ color: 'var(--text-primary)' }}>Fixed Assets</h1>

@@ -9,6 +9,26 @@ import { getUnadjustedOrRollup } from './trial_balance_rollup_service.js';
 import { checkMappingCompleteness } from './mapping_completeness_gate.js';
 import * as coaRepository from '../db/repositories/coa_repository.js';
 import { from as decimalFrom } from '../utils/decimal.js';
+import { ruleMatchesAccount } from '../utils/gl_pattern_matching.js';
+
+/** Infer account type from account code prefix (US GAAP convention). Returns uppercase. */
+function inferAccountType(accountCode: string): string {
+  const prefix = parseInt(accountCode.charAt(0));
+  if (prefix === 1) return 'ASSET';
+  if (prefix === 2) return 'LIABILITY';
+  if (prefix === 3) return 'EQUITY';
+  if (prefix === 4) return 'REVENUE';
+  if (prefix >= 5 && prefix <= 9) return 'EXPENSE';
+  return 'UNKNOWN';
+}
+
+/** Normalize mixed-case account type strings (e.g. 'Asset' → 'ASSET'). */
+function normalizeAccountType(raw: string | undefined | null): string | undefined {
+  if (!raw || raw === 'UNKNOWN') return undefined;
+  const upper = raw.toUpperCase();
+  if (['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'].includes(upper)) return upper;
+  return undefined;
+}
 
 export interface SessionTrialBalanceRow {
   accountCode: string;
@@ -90,25 +110,20 @@ export async function getSessionTrialBalance(
   const rules = await import('../db/repositories/coa_mapping_rules_repository.js').then((m) =>
     m.listCoaMappingRules(pool, tenantId, entityId, { asOfDate: session.periodEnd ?? undefined })
   );
-  const patternToRegExp = (p: string) => {
-    const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*');
-    return new RegExp(`^${escaped}$`, 'i');
-  };
   for (const rule of rules) {
-    const nameRe = patternToRegExp(rule.sourceAccountNamePattern);
     for (const e of entries) {
       const name = (e.accountName ?? '').trim();
       const code = (e.accountCode ?? '').trim();
-      if (nameRe.test(name)) {
-        if (!rule.sourceAccountNumberPattern || rule.sourceAccountNumberPattern === '') {
-          mappedByAccount.set(code || name, rule.mappedFsLineId);
-        } else {
-          const numRe = patternToRegExp(rule.sourceAccountNumberPattern);
-          if (numRe.test(code)) mappedByAccount.set(code || name, rule.mappedFsLineId);
-        }
+      if (ruleMatchesAccount(rule, name, code)) {
+        mappedByAccount.set(code || name, rule.mappedFsLineId);
       }
     }
   }
+
+  // Build taxonomy name lookup for mapping display names
+  const { listFsTaxonomyLines } = await import('../db/repositories/fs_taxonomy_repository.js');
+  const taxonomyLines = await listFsTaxonomyLines(pool);
+  const taxonomyNameMap = new Map(taxonomyLines.map((l) => [l.id, l.name]));
 
   const coaAccounts = await coaRepository.getAccountsByTenant(pool, tenantId);
   const coaMap = new Map(coaAccounts.map((a) => [a.account_code, a]));
@@ -127,17 +142,17 @@ export async function getSessionTrialBalance(
     const net = debit.minus(credit);
     const account = coaMap.get(code);
     const mappingLineId = mappedByAccount.get(code) ?? null;
-    const mappingStatus: 'mapped' | 'unmapped' = unmappedSet.has(code) ? 'unmapped' : 'mapped';
+    const mappingStatus: 'mapped' | 'unmapped' = mappingLineId ? 'mapped' : (unmappedSet.has(code) ? 'unmapped' : 'mapped');
 
     rows.push({
       accountCode: code,
       accountName: (name || account?.account_name) ?? code,
-      accountType: account?.account_type ?? e.accountType ?? 'UNKNOWN',
+      accountType: normalizeAccountType(account?.account_type) ?? normalizeAccountType(e.accountType) ?? inferAccountType(code),
       debitBalance: debit.toDecimalPlaces(2).toString(),
       creditBalance: credit.toDecimalPlaces(2).toString(),
       netBalance: net.toDecimalPlaces(2).toString(),
       mappingReportingLineId: mappingLineId,
-      mappingReportingLineName: mappingLineId, // taxonomy name lookup would require fs_taxonomy_lines
+      mappingReportingLineName: mappingLineId ? (taxonomyNameMap.get(mappingLineId) ?? mappingLineId) : null,
       mappingStatus,
     });
   }

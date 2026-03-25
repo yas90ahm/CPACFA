@@ -584,14 +584,31 @@ export default function AdjustmentsPage() {
       </div>
 
       {allEntries.length === 0 && templates.length === 0 && (
-        <EmptyState
-          icon={PenLine}
-          title="No adjusting entries yet"
-          description="Recurring entries from your templates will appear here when proposed. You can also create manual entries."
-          actionLabel="Create Entry"
-          onAction={openCreate}
-          variant="first-time"
-        />
+        <div className="rounded-[var(--radius-lg)] bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[var(--shadow-sm)] p-8 text-center">
+          <PenLine className="w-10 h-10 mx-auto mb-4" style={{ color: 'var(--text-tertiary)' }} />
+          <h3 className="font-serif text-lg mb-2" style={{ color: 'var(--text-primary)' }}>Set up recurring templates to automate your close</h3>
+          <p className="text-sm max-w-md mx-auto mb-6" style={{ color: 'var(--text-secondary)' }}>
+            Sabit proposes these entries automatically every close period: depreciation from your fixed assets schedule,
+            payroll accrual based on unpaid days, prepaid amortization from your schedules, and interest accrual from debt schedules.
+          </p>
+          <div className="flex items-center justify-center gap-3">
+            <a
+              href="/settings/templates"
+              className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white rounded-[var(--radius-md)] transition-colors"
+              style={{ backgroundColor: 'var(--interactive-primary)' }}
+            >
+              Set up templates in Settings
+            </a>
+            <button
+              type="button"
+              onClick={openCreate}
+              className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-[var(--radius-md)] border transition-colors"
+              style={{ borderColor: 'var(--border-strong)', color: 'var(--text-primary)', backgroundColor: 'var(--bg-surface)' }}
+            >
+              Add entries manually
+            </button>
+          </div>
+        </div>
       )}
 
       {(allEntries.length > 0 || templates.length > 0) && (<>

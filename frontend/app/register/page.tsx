@@ -57,13 +57,13 @@ export default function RegisterPage() {
       {/* Left Panel -- Brand */}
       <div
         className="hidden lg:flex w-[55%] flex-col justify-center px-20 shrink-0"
-        style={{ backgroundColor: 'var(--bg-nav)' }}
+        style={{ backgroundColor: 'var(--interactive-primary)' }}
       >
-        <h1 className="text-[2.5rem] font-semibold tracking-[0.12em] uppercase leading-none text-white">
+        <h1 className="font-serif text-[2.5rem] tracking-[0.12em] uppercase leading-none text-white">
           SABIT
         </h1>
 
-        <div className="w-20 h-px bg-white/40 mt-12" />
+        <div className="w-20 h-px bg-white/30 mt-12" />
 
         <p
           className="text-[15px] max-w-xs mt-8 leading-relaxed"

@@ -18,6 +18,7 @@ import { useAuth } from '@/lib/auth';
 import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 import { apiFetch } from '@/lib/api';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { ModuleBanner } from '@/components/shared/ModuleBanner';
 
 const TYPE_LABEL: Record<string, string> = { finance: 'Finance', operating: 'Operating' };
 const STATUS_LABEL: Record<string, string> = { active: 'Active', expired: 'Expired', terminated: 'Terminated', modified: 'Modified' };
@@ -98,6 +99,7 @@ export default function LeasesPage() {
 
   return (
     <div className="space-y-6">
+      <ModuleBanner sessionId={sessionId} />
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-display" style={{ color: 'var(--text-primary)' }}>
           Lease Accounting (ASC 842)
