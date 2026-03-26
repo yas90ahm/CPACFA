@@ -26,6 +26,7 @@ import { runClassifier, type RunClassifierResult } from '../ai/ai_orchestrator.j
 import { searchXBRL } from './xbrl_search_service.js';
 import { listFsTaxonomyLines, getFsTaxonomyLineById } from '../db/repositories/fs_taxonomy_repository.js';
 import { detectSuspects, type MappingSuspect } from './mapping_validation_agent.js';
+import { minus } from '../utils/decimal.js';
 
 // ---------- Prompt sanitization (H7 fix) ----------
 
@@ -747,7 +748,7 @@ Respond with JSON only. One object per account. Shape:
         tbBalances = new Map();
         for (const row of tbRows) {
           tbBalances.set(row.account_name.toLowerCase(), {
-            netBalance: parseFloat(row.debit) - parseFloat(row.credit),
+            netBalance: minus(row.debit ?? '0', row.credit ?? '0'),
             accountType: row.account_type,
           });
         }

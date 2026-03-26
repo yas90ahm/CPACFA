@@ -344,7 +344,7 @@ export async function getDepreciationSummary(
       depreciationAmount: Number(d.depreciationAmount),
     });
     const t = asset?.assetType ?? 'Unknown';
-    byType[t] = (byType[t] ?? 0) + Number(d.depreciationAmount);
+    byType[t] = new Decimal(byType[t] ?? 0).plus(new Decimal(String(d.depreciationAmount))).toDecimalPlaces(2).toNumber();
   }
 
   return {

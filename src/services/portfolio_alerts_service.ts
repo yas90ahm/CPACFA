@@ -11,6 +11,7 @@ import type { Pool } from 'pg';
 import { randomUUID } from 'crypto';
 import { getTenantPool } from '../db/index.js';
 import { getPortfolioEntities } from './portfolio_service.js';
+import { plus, round2 } from '../utils/decimal.js';
 
 export interface PortfolioAlert {
   id: string;
@@ -269,12 +270,12 @@ export async function getPortfolioMetrics(
           [session.id]
         );
         for (const row of finResult.rows) {
-          const amt = Number(row.amount) || 0;
+          const amt = round2(row.amount ?? 0);
           if (row.fs_line_id === 'total_revenue' || row.fs_line_id === 'revenue') {
-            totalRevenue += amt;
+            totalRevenue = plus(totalRevenue, amt);
           }
           if (row.fs_line_id === 'pl_ebitda' || row.fs_line_id === 'ebitda') {
-            totalEbitda += amt;
+            totalEbitda = plus(totalEbitda, amt);
           }
         }
       }

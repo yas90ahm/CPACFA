@@ -234,9 +234,14 @@ function shiftDateByYear(dateStr: string, years: number): string {
 
 function shiftDateByMonths(dateStr: string, months: number): string {
   const date = new Date(dateStr + 'T00:00:00');
-  date.setMonth(date.getMonth() + months);
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
+  // End-of-month-aware month addition (avoids JS Date overflow, e.g. Jan 31 + 1 → Feb 28)
+  const targetYear = date.getFullYear() + Math.floor((date.getMonth() + months) / 12);
+  const targetMonth = (date.getMonth() + months) % 12;
+  const maxDay = new Date(targetYear, targetMonth + 1, 0).getDate();
+  const clampedDay = Math.min(date.getDate(), maxDay);
+  const result = new Date(targetYear, targetMonth, clampedDay);
+  const y = result.getFullYear();
+  const m = String(result.getMonth() + 1).padStart(2, '0');
+  const day = String(result.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }

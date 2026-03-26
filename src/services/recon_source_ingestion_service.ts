@@ -57,8 +57,9 @@ export function parseCsvSource(csvContent: string, _sourceType: string): ReconSo
 
     if (!dateVal || !amountStr) continue;
 
-    const amountNum = parseFloat(amountStr);
-    if (isNaN(amountNum)) continue;
+    let amountNum: number;
+    try { amountNum = from(amountStr).toDecimalPlaces(2).toNumber(); } catch { continue; }
+    if (!Number.isFinite(amountNum)) continue;
 
     // If the original field had parentheses, it's negative
     const rawAmountField = (fields[amountIdx] ?? '').trim();

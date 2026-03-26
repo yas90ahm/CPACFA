@@ -271,6 +271,15 @@ function normalizeScheduleToTotal(entries: RecognitionScheduleEntry[], total: nu
   return out;
 }
 
+/** Add months with end-of-month clamping (avoids JS Date overflow). */
+function addMonthsClamped(base: Date, months: number): Date {
+  const targetYear = base.getFullYear() + Math.floor((base.getMonth() + months) / 12);
+  const targetMonth = (base.getMonth() + months) % 12;
+  const maxDay = new Date(targetYear, targetMonth + 1, 0).getDate();
+  const clampedDay = Math.min(base.getDate(), maxDay);
+  return new Date(targetYear, targetMonth, clampedDay);
+}
+
 /**
  * Deterministic: build straight-line recognition schedule (amount over N periods from start_date).
  * Used by CPA bridge for agentic → deterministic execution. ASC 606 / IFRS 15.
@@ -281,8 +290,7 @@ export function buildLinearRecognitionSchedule(
   startDate: string
 ): RecognitionScheduleEntry[] {
   const start = new Date(startDate);
-  const end = new Date(start);
-  end.setMonth(end.getMonth() + Math.max(1, periods));
+  const end = addMonthsClamped(start, Math.max(1, periods));
   const endStr = end.toISOString().slice(0, 10);
   return linearSchedule(startDate, endStr, amount);
 }
@@ -300,11 +308,9 @@ function linearSchedule(start: string, end: string, total: number): RecognitionS
   const perMonth = total / months;
   let sumAmounts = 0;
   for (let i = 0; i < months; i++) {
-    const periodStart = new Date(startDate);
-    periodStart.setMonth(periodStart.getMonth() + i);
-    const periodEnd = new Date(periodStart);
-    periodEnd.setMonth(periodEnd.getMonth() + 1);
-    periodEnd.setDate(0);
+    const periodStart = addMonthsClamped(new Date(startDate), i);
+    const periodEnd = addMonthsClamped(periodStart, 1);
+    periodEnd.setDate(0); // last day of previous month = end of period
     const amt =
       i < months - 1 ? round2(perMonth) : round2(decMinus(total, sumAmounts));
     sumAmounts = decPlus(sumAmounts, amt);

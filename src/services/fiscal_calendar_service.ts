@@ -82,11 +82,19 @@ export function buildQuarterBoundaries(fiscalYear: number, fye: FiscalYearEnd): 
   const quarters: QuarterInfo[] = [];
 
   for (let q = 1; q <= 4; q++) {
-    const qStart = new Date(fyStart);
-    qStart.setMonth(qStart.getMonth() + (q - 1) * 3);
+    // End-of-month-aware month addition (avoids JS Date overflow)
+    const qStartMonths = (q - 1) * 3;
+    const qStartYear = fyStart.getFullYear() + Math.floor((fyStart.getMonth() + qStartMonths) / 12);
+    const qStartMonth = (fyStart.getMonth() + qStartMonths) % 12;
+    const qStartMaxDay = new Date(qStartYear, qStartMonth + 1, 0).getDate();
+    const qStart = new Date(qStartYear, qStartMonth, Math.min(fyStart.getDate(), qStartMaxDay));
 
-    const qEnd = new Date(fyStart);
-    qEnd.setMonth(qEnd.getMonth() + q * 3);
+    const qEndMonths = q * 3;
+    const qEndYear = fyStart.getFullYear() + Math.floor((fyStart.getMonth() + qEndMonths) / 12);
+    const qEndMonth = (fyStart.getMonth() + qEndMonths) % 12;
+    const qEndMaxDay = new Date(qEndYear, qEndMonth + 1, 0).getDate();
+    const qEndBase = new Date(qEndYear, qEndMonth, Math.min(fyStart.getDate(), qEndMaxDay));
+    const qEnd = new Date(qEndBase);
     qEnd.setDate(qEnd.getDate() - 1);
 
     quarters.push({

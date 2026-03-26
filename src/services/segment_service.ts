@@ -102,7 +102,7 @@ export async function checkReportabilityThresholds(
     });
   }
 
-  const aggregateRevenuePercent = totalRevenue > 0 ? round2((reportableRevenue / totalRevenue) * 100) : 0;
+  const aggregateRevenuePercent = totalRevenue > 0 ? dec(reportableRevenue).div(totalRevenue).times(100).toDecimalPlaces(2).toNumber() : 0;
 
   return {
     segments: results,
