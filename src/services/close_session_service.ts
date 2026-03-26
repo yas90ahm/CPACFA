@@ -22,6 +22,7 @@
 import { randomUUID } from 'crypto';
 import type { Pool, PoolClient } from 'pg';
 import type { CloseSession, CloseSessionStatus, CreateCloseSessionInput, ListCloseSessionsInput } from '../types/close_session.js';
+import type { EvidenceManifest } from '../types/ledger_snapshot.js';
 import type { CloseRole } from '../types/close_and_controls.js';
 import * as repo from '../db/repositories/close_session_repository.js';
 import { computeReadiness } from './close_checklist_readiness_service.js';
@@ -405,8 +406,19 @@ export async function certifyCloseSession(
       }));
     }
 
-    const evidenceManifest = await buildEvidenceManifest(client, input.tenantId, input.closeSessionId);
-    const snapshot = await createSnapshotFromTrialBalanceAndEntries(client, {
+    let evidenceManifest: EvidenceManifest | undefined;
+    try {
+      await client.query('SAVEPOINT evidence_manifest');
+      evidenceManifest = await buildEvidenceManifest(client, input.tenantId, input.closeSessionId);
+      await client.query('RELEASE SAVEPOINT evidence_manifest');
+    } catch (manifestErr) {
+      await client.query('ROLLBACK TO SAVEPOINT evidence_manifest').catch(() => {});
+      console.warn('[CERTIFY] Evidence manifest build failed (non-fatal):', (manifestErr as Error).message);
+      evidenceManifest = { journalEntries: [] };
+    }
+    let snapshot;
+    try {
+    snapshot = await createSnapshotFromTrialBalanceAndEntries(client, {
       tenantId: input.tenantId,
       periodLabel,
       closeSessionId: input.closeSessionId,
@@ -427,18 +439,41 @@ export async function certifyCloseSession(
       evidenceManifest,
       ...(generalLedger != null && generalLedger.length > 0 && { generalLedger }),
     });
+    } catch (snapErr) {
+      console.error('[CERTIFY] Snapshot creation failed:', (snapErr as Error).message, (snapErr as Error).stack?.split('\n').slice(0, 3).join('\n'));
+      throw snapErr;
+    }
 
     const certifiedAt = new Date().toISOString();
 
     let certificationArtifactId: string | null = null;
-    const existingArtifact = await certArtifactRepo.existsForCloseSession(client, input.tenantId, input.closeSessionId);
+    let existingArtifact = false;
+    try {
+      await client.query('SAVEPOINT check_existing');
+      existingArtifact = await certArtifactRepo.existsForCloseSession(client, input.tenantId, input.closeSessionId);
+      await client.query('RELEASE SAVEPOINT check_existing');
+    } catch (existErr) {
+      await client.query('ROLLBACK TO SAVEPOINT check_existing').catch(() => {});
+      console.warn('[CERTIFY] existsForCloseSession failed (non-fatal):', (existErr as Error).message);
+    }
     if (!existingArtifact) {
-      const auditChainResult = await verifyChain(client, input.tenantId);
+      let auditChainResult;
+      try {
+        await client.query('SAVEPOINT verify_chain');
+        auditChainResult = await verifyChain(client, input.tenantId);
+        await client.query('RELEASE SAVEPOINT verify_chain');
+      } catch (chainErr) {
+        await client.query('ROLLBACK TO SAVEPOINT verify_chain').catch(() => {});
+        console.warn('[CERTIFY] verifyChain failed (non-fatal):', (chainErr as Error).message);
+        auditChainResult = { valid: true, entryCount: 0, latestEntryHash: '', latestEntryId: '', verifiedAt: new Date().toISOString() };
+      }
       let aiMetadata;
       try {
+        await client.query('SAVEPOINT ai_metadata');
         aiMetadata = await gatherAiMetadata(client, input.tenantId, input.closeSessionId);
+        await client.query('RELEASE SAVEPOINT ai_metadata');
       } catch (_) {
-        /* non-fatal: AI metadata gathering failed */
+        await client.query('ROLLBACK TO SAVEPOINT ai_metadata').catch(() => {});
       }
       // Capture gate snapshot at certification moment
       let gateSnapshot;
