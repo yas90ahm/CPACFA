@@ -422,6 +422,22 @@ router.post(
         status: 'approved',
         approvedBy: createdBy,
       });
+
+      // Auto-resolve staged_gl_entries issue if all staged items are now resolved
+      try {
+        const allStaged = await persistence.listStagingItems(pool, tenantId, { status: 'pending' });
+        const glPending = allStaged.filter((s) => (s.payload as Record<string, unknown>)?.kind === 'gl_ingest');
+        if (glPending.length === 0) {
+          const { getOpenIssuesForPeriod, autoVerifyIssue } = await import('../services/issue_service.js');
+          // Find sessions that might have this issue — check all sessions for this tenant
+          const openIssues = await getOpenIssuesForPeriod(pool, tenantId, periodLabel ?? '');
+          const stagedIssues = openIssues.filter((i) => i.issueType === 'staged_gl_entries');
+          for (const issue of stagedIssues) {
+            await autoVerifyIssue(pool, tenantId, issue.issueId);
+          }
+        }
+      } catch { /* non-fatal */ }
+
       return res.json({
         success: true,
         message: 'Entry corrected and saved to general_ledger.',

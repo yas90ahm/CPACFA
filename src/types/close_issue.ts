@@ -29,7 +29,8 @@ export type IssueType =
   | 'round_number_suspicious'
   | 'period_reopened'
   | 'manual_flag'
-  | 'review_rejection';
+  | 'review_rejection'
+  | 'staged_gl_entries';
 
 export type CloseIssueSeverity = 'critical' | 'blocking' | 'warning' | 'info';
 

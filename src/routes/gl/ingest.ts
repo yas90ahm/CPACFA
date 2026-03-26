@@ -144,6 +144,23 @@ router.post(
 
       if (!result.success) {
         if (result.imbalancedCount > 0) {
+          // Create a blocking issue for imbalanced GL entries
+          const sessionId = req.query.sessionId as string | undefined;
+          if (sessionId && pool && tenantId) {
+            try {
+              const { createIssueForSession } = await import('../../services/issue_service.js');
+              await createIssueForSession(pool, {
+                closeSessionId: sessionId,
+                tenantId,
+                category: 'ingestion',
+                severity: 'blocking',
+                title: `${result.imbalancedCount} GL entries could not be imported`,
+                description: `${result.imbalancedCount} imbalanced GL entries are queued for review. The close cannot advance until these are resolved or explicitly excluded.`,
+                issueType: 'staged_gl_entries',
+                sourceRef: { imbalancedCount: result.imbalancedCount, balancedCount: result.balancedCount },
+              });
+            } catch { /* non-fatal */ }
+          }
           return res.status(207).json({
             status: 'partial',
             message: `${result.balancedCount} entries saved, ${result.imbalancedCount} entries imbalanced`,
