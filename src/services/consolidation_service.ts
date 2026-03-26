@@ -35,7 +35,7 @@ function evalFormula(formula: string, balanceByAccount: Map<string, number>): nu
   const matchSum = /^sum\s*\(\s*(.+)\s*\)$/i.exec(trimmed);
   if (matchSum) {
     const parts = matchSum[1]!.split(',').map((p) => resolveFormulaValue(p.trim(), balanceByAccount));
-    if (parts.every((p) => p != null)) return Math.abs((parts as number[]).reduce((s, p) => s + p, 0));
+    if (parts.every((p) => p != null)) return Math.abs(sumRound2(parts as number[]));
   }
 
   return resolveFormulaValue(trimmed, balanceByAccount) ?? undefined;
@@ -97,10 +97,10 @@ export function buildConsolidation(input: ConsolidationInput): ConsolidationResu
     let entityDebit = 0;
     let entityCredit = 0;
     for (const [, { debit, credit }] of byAccount) {
-      entityDebit += debit;
-      entityCredit += credit;
+      entityDebit = from(entityDebit).plus(debit).toDecimalPlaces(2).toNumber();
+      entityCredit = from(entityCredit).plus(credit).toDecimalPlaces(2).toNumber();
     }
-    sumEntityGaps += from(entityDebit).minus(entityCredit).abs().toNumber();
+    sumEntityGaps = from(sumEntityGaps).plus(from(entityDebit).minus(entityCredit).abs()).toDecimalPlaces(2).toNumber();
 
     for (const [accountName, { debit, credit }] of byAccount) {
       let entry = consolidatedMap.get(accountName);
@@ -116,7 +116,7 @@ export function buildConsolidation(input: ConsolidationInput): ConsolidationResu
   // Build balance-by-account for elimination "balance" / "formula"
   const balanceByAccount = new Map<string, number>();
   for (const [accountName, entry] of consolidatedMap) {
-    balanceByAccount.set(accountName, entry.debit - entry.credit);
+    balanceByAccount.set(accountName, minus(entry.debit, entry.credit));
   }
 
   const eliminationsApplied: ConsolidationResult['eliminationsApplied'] = [];

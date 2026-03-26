@@ -132,7 +132,7 @@ function accumulatedToDate(asset: FixedAssetRow, toDate: string): number {
       end.toISOString().slice(0, 10),
       acc
     );
-    acc += periodDep;
+    acc = new Decimal(acc).plus(new Decimal(periodDep)).toDecimalPlaces(2).toNumber();
     if (acc >= maxAccumulated) return maxAccumulated;
   }
   return Math.min(acc, maxAccumulated);
@@ -202,7 +202,7 @@ export function depreciationScheduleSl(
     const periodEndStr = periodEnd.toISOString().slice(0, 10);
     const remaining = Math.max(0, cost - salvageValue - accDep);
     const exp = round2(Math.min(annual, remaining));
-    accDep += exp;
+    accDep = new Decimal(accDep).plus(new Decimal(exp)).toDecimalPlaces(2).toNumber();
     const bv = round2(cost - accDep);
     lines.push({
       period: year,
@@ -251,7 +251,7 @@ export function depreciationScheduleDdb(
     const remaining = Math.max(0, cost - salvageValue - accDep);
     if (exp > remaining || year === usefulLifeYears) exp = remaining;
     exp = round2(Math.max(0, exp));
-    accDep += exp;
+    accDep = new Decimal(accDep).plus(new Decimal(exp)).toDecimalPlaces(2).toNumber();
     bv = round2(cost - accDep);
     lines.push({
       period: year,
@@ -291,7 +291,7 @@ export async function runDepreciation(
 
   for (const asset of assets) {
     const entry = buildDepreciationEntriesForAsset(asset, periodStart, periodEnd);
-    totalDepreciation += entry.depreciationAmount;
+    totalDepreciation = new Decimal(totalDepreciation).plus(new Decimal(entry.depreciationAmount)).toDecimalPlaces(2).toNumber();
     detailsInput.push({
       runId: '', // set after run created
       fixedAssetId: asset.id,
@@ -336,7 +336,7 @@ export async function getDepreciationSummary(
 
   for (const d of detailRows) {
     const asset = assetMap.get(d.fixedAssetId);
-    totalDepreciation += Number(d.depreciationAmount);
+    totalDepreciation = new Decimal(totalDepreciation).plus(new Decimal(d.depreciationAmount)).toDecimalPlaces(2).toNumber();
     byAsset.push({
       fixedAssetId: d.fixedAssetId,
       assetNumber: asset?.assetNumber ?? d.fixedAssetId,

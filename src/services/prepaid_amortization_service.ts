@@ -183,8 +183,13 @@ export async function proposeAmortizationEntries(
     if (remaining.lte(0)) continue;
 
     const monthly = total.dividedBy(sched.monthsCount).toDecimalPlaces(2);
-    // Last month: sweep remainder to avoid rounding residual
-    const amount = Decimal.min(monthly, remaining).toDecimalPlaces(2).toNumber();
+    // Determine if this is the final amortization period
+    const amortizedAfterThis = alreadyAmortized.plus(monthly);
+    const isFinalPeriod = amortizedAfterThis.gte(total) || remaining.lte(monthly);
+    // Final month: sweep remainder (absorb rounding residual so total is exact)
+    const amount = isFinalPeriod
+      ? remaining.toDecimalPlaces(2).toNumber()
+      : Decimal.min(monthly, remaining).toDecimalPlaces(2).toNumber();
     if (amount <= 0) continue;
 
     // Create draft JE: debit expense, credit prepaid
