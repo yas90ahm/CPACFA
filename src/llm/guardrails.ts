@@ -81,14 +81,19 @@ const ALLOWED_KEYS = new Set([
   }
   if (typeof obj === 'object') {
     for (const [k, v] of Object.entries(obj)) {
-      const key = k.toLowerCase();
+      const key = k.toLowerCase().replace(/[_-]/g, ''); // normalize: account_code → accountcode, pob-123 → pob123
       // Explicitly known amount keys — always flag any value type
       if (AMOUNT_KEYS.has(key) && (typeof v === 'number' || (typeof v === 'string' && /^\d[\d,]*\.?\d*$/.test(v.trim())))) {
         return true;
       }
-      // Any key with a numeric value (not in ALLOWED_KEYS) — this catches pob-xxx: 50000, custom allocations, etc.
+      // Any key with a numeric value (not in ALLOWED_KEYS) — catches pob-xxx: 50000, custom allocations, etc.
       if (!ALLOWED_KEYS.has(key) && typeof v === 'number' && isFinite(v)) {
         return true;
+      }
+      // Numeric strings under non-ALLOWED_KEYS that look like amounts (>= 10)
+      if (!ALLOWED_KEYS.has(key) && typeof v === 'string' && /^\d[\d,]*\.?\d*$/.test(v.trim())) {
+        const num = parseFloat(v.replace(/,/g, ''));
+        if (!isNaN(num) && num >= 10) return true;
       }
       // Recurse into nested objects
       if (typeof v === 'object' && v !== null) {
