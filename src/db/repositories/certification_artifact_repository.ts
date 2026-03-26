@@ -122,6 +122,52 @@ export async function getArtifactById(
   };
 }
 
+/**
+ * Get the most recent certified period's retained earnings from the ledger snapshot.
+ * Returns null if no prior certified period exists (first close).
+ */
+export async function getPriorPeriodRetainedEarnings(
+  client: Queryable,
+  tenantId: string,
+  currentPeriodLabel: string
+): Promise<number | null> {
+  // Find the most recent certification artifact with a period_label before the current one
+  const r = await client.query<{ artifact_json: unknown }>(
+    `SELECT ca.artifact_json
+     FROM certification_artifacts ca
+     WHERE ca.tenant_id = $1 AND ca.period_label < $2
+     ORDER BY ca.period_label DESC LIMIT 1`,
+    [tenantId, currentPeriodLabel]
+  );
+  if (r.rows.length === 0) return null;
+
+  // Extract snapshot ID from the artifact, then look up the snapshot's TB
+  const artifact = r.rows[0].artifact_json as CertificationArtifactV1;
+  const snapshotId = artifact?.snapshot?.snapshotId;
+  if (!snapshotId) return null;
+
+  const snap = await client.query<{ snapshot_payload_json: unknown }>(
+    `SELECT snapshot_payload_json FROM ledger_snapshots WHERE id = $1 AND tenant_id = $2`,
+    [snapshotId, tenantId]
+  );
+  if (snap.rows.length === 0) return null;
+
+  const payload = snap.rows[0].snapshot_payload_json as { trialBalance?: { entries?: Array<{ accountName: string; debit: number; credit: number; accountType?: string }> } };
+  const entries = payload?.trialBalance?.entries;
+  if (!entries) return null;
+
+  // Find retained earnings in the TB: equity accounts matching "retained earnings"
+  const reEntries = entries.filter((e) => /retained earnings/i.test(e.accountName));
+  if (reEntries.length === 0) return null;
+
+  // RE is a credit-normal account: balance = credit - debit
+  let total = 0;
+  for (const e of reEntries) {
+    total += (e.credit ?? 0) - (e.debit ?? 0);
+  }
+  return Math.round(total * 100) / 100;
+}
+
 export async function existsForCloseSession(
   client: Queryable,
   tenantId: string,

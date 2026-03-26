@@ -373,11 +373,20 @@ export async function certifyCloseSession(
       );
     }
 
+    // Fetch prior period retained earnings for RE continuity check (non-critical if lookup fails)
+    let priorRetainedEarnings: number | null = null;
+    try {
+      priorRetainedEarnings = await certArtifactRepo.getPriorPeriodRetainedEarnings(pool, input.tenantId, periodLabel);
+    } catch (priorREErr) {
+      console.warn('[CERTIFY] Prior period RE lookup failed (non-fatal):', (priorREErr as Error).message);
+    }
+
     const validationChecks = runCrossStatementValidationForCertification(
       statements.balanceSheet,
       statements.profitAndLoss,
       statements.cashFlow ?? null,
-      statements.equityChanges ?? null
+      statements.equityChanges ?? null,
+      { priorRetainedEarnings }
     );
     const hardFailures = validationChecks.filter((c) => c.check_type === 'hard' && !c.passes);
     if (hardFailures.length > 0) {
@@ -387,23 +396,27 @@ export async function certifyCloseSession(
 
     let generalLedger: LedgerSnapshotPayload['generalLedger'];
     if (hasGL) {
-      const glLines = await glRepository.getGLForPeriod(pool, input.tenantId, periodLabel);
-      const entries = glRepository.groupLinesByEntry(glLines);
-      generalLedger = entries.map((entry) => ({
-        entry_id: entry.entry_id,
-        entry_date:
-          typeof entry.entry_date === 'string'
-            ? entry.entry_date
-            : (entry.entry_date as Date).toISOString().slice(0, 10),
-        description: entry.description,
-        lines: entry.lines.map((line) => ({
-          line_number: line.line_number,
-          account_code: line.account_code,
-          debit: Number(line.debit ?? 0),
-          credit: Number(line.credit ?? 0),
-          description: line.description,
-        })),
-      }));
+      try {
+        const glLines = await glRepository.getGLForPeriod(pool, input.tenantId, periodLabel);
+        const entries = glRepository.groupLinesByEntry(glLines);
+        generalLedger = entries.map((entry) => ({
+          entry_id: entry.entry_id,
+          entry_date:
+            typeof entry.entry_date === 'string'
+              ? entry.entry_date
+              : (entry.entry_date as Date).toISOString().slice(0, 10),
+          description: entry.description,
+          lines: entry.lines.map((line) => ({
+            line_number: line.line_number,
+            account_code: line.account_code,
+            debit: Number(line.debit ?? 0),
+            credit: Number(line.credit ?? 0),
+            description: line.description,
+          })),
+        }));
+      } catch (glErr) {
+        console.warn('[CERTIFY] GL lines fetch failed (non-fatal), snapshot will exclude GL:', (glErr as Error).message);
+      }
     }
 
     let evidenceManifest: EvidenceManifest | undefined;
@@ -472,8 +485,9 @@ export async function certifyCloseSession(
         await client.query('SAVEPOINT ai_metadata');
         aiMetadata = await gatherAiMetadata(client, input.tenantId, input.closeSessionId);
         await client.query('RELEASE SAVEPOINT ai_metadata');
-      } catch (_) {
+      } catch (aiMetaErr) {
         await client.query('ROLLBACK TO SAVEPOINT ai_metadata').catch(() => {});
+        console.warn('[CERTIFY] AI metadata gather failed (non-fatal):', (aiMetaErr as Error).message);
       }
       // Capture gate snapshot at certification moment
       let gateSnapshot;
@@ -488,8 +502,8 @@ export async function certifyCloseSession(
           })),
           checkedAt: certifiedAt,
         };
-      } catch {
-        // Non-fatal: gate snapshot capture failed
+      } catch (gateErr) {
+        console.warn('[CERTIFY] Gate snapshot capture failed (non-fatal):', (gateErr as Error).message);
       }
 
       const { artifact, artifactHash, signatureB64, publicKeyB64, alg } = buildCertificationArtifact({
@@ -1057,6 +1071,51 @@ export async function advanceSession(
           }
         } catch (reconErr) {
           console.warn('[advance] recon intelligence failed (non-fatal):', (reconErr as Error).message);
+        }
+
+        // Prior-period retained earnings continuity check (G1)
+        try {
+          const periodLabel = (currentSession.periodEnd ?? '').slice(0, 7);
+          const priorRE = await certArtifactRepo.getPriorPeriodRetainedEarnings(
+            client as unknown as Pool,
+            input.tenantId,
+            periodLabel
+          );
+          if (priorRE !== null) {
+            // Prior certified period exists — check opening RE matches
+            const { getTrialBalanceForCertification } = await import('./adjusted_trial_balance_service.js');
+            try {
+              const { trialBalance } = await getTrialBalanceForCertification(
+                client as unknown as Pool,
+                input.tenantId,
+                periodLabel,
+                input.closeSessionId
+              );
+              const reEntries = trialBalance.filter((e) => /retained earnings/i.test(e.accountName ?? ''));
+              if (reEntries.length > 0) {
+                const openingRE = sumRound2(reEntries.map((e) => (e.credit ?? 0) - (e.debit ?? 0)));
+                const diff = Math.abs(openingRE - priorRE);
+                if (diff > 0.01) {
+                  const { createIssueForSession } = await import('./issue_service.js');
+                  await createIssueForSession(client as unknown as Pool, {
+                    tenantId: input.tenantId,
+                    closeSessionId: input.closeSessionId,
+                    entityId: currentSession.entityId,
+                    title: `Retained earnings continuity break — opening RE ($${openingRE.toFixed(2)}) does not match prior period closing RE ($${priorRE.toFixed(2)})`,
+                    description: `Prior certified period closing retained earnings was $${priorRE.toFixed(2)} but the current period opening retained earnings is $${openingRE.toFixed(2)}. Variance: $${diff.toFixed(2)}. Investigate and correct before proceeding.`,
+                    severity: 'high',
+                    category: 'data_quality',
+                    createdBy: input.certifiedBy ?? 'system',
+                  });
+                  console.warn(`[advance] RE continuity break: prior=$${priorRE.toFixed(2)}, opening=$${openingRE.toFixed(2)}`);
+                }
+              }
+            } catch {
+              // TB not yet available at session start — skip check
+            }
+          }
+        } catch (reCheckErr) {
+          console.warn('[advance] RE continuity check failed (non-fatal):', (reCheckErr as Error).message);
         }
 
       }

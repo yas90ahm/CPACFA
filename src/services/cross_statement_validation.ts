@@ -20,6 +20,11 @@ function getCashFromBalanceSheet(bs: BalanceSheet): number {
   return sumRound2(bs.assets.filter((a) => /cash|bank/i.test(a.label ?? '')).map((a) => a.amount));
 }
 
+export interface CrossStatementTieOptions {
+  /** Prior period certified retained earnings (null = first close, RE assumed $0). */
+  priorRetainedEarnings?: number | null;
+}
+
 /**
  * Run cross-statement tie checks at certification.
  * Returns ValidationCheck[]; caller blocks certification if any hard check fails.
@@ -28,10 +33,12 @@ export function runCrossStatementValidationForCertification(
   bs: BalanceSheet,
   pl: ProfitAndLoss,
   cf: CashFlowStatement | null,
-  equity: EquityChangesStatement | null
+  equity: EquityChangesStatement | null,
+  opts?: CrossStatementTieOptions
 ): ValidationCheck[] {
   const checks: ValidationCheck[] = [];
   const d = (n: number) => decimalFrom(n).toDecimalPlaces(2);
+  const TOLERANCE = decimalFrom('0.01');
 
   // Require all four statements
   if (!cf) {
@@ -121,6 +128,55 @@ export function runCrossStatementValidationForCertification(
         ? null
         : `RE tie failed: opening equity ${equity.openingEquity} + changes ${changesSum.toFixed(2)} + OCI ${ociSum.toFixed(2)} = ${expectedClosing.toFixed(2)} ≠ closing equity ${equity.closingEquity}`,
     });
+  }
+
+  // 6. Net income tie: IS net income → SCF operating section start (ASC 230 indirect method)
+  if (cf && cf.operating.length > 0) {
+    const isNI = d(pl.netIncome);
+    const scfNILine = cf.operating.find((line) => /net income/i.test(line.label));
+    if (scfNILine) {
+      const scfNI = d(scfNILine.amount);
+      const variance = isNI.minus(scfNI).abs();
+      const passes = variance.lte(TOLERANCE);
+      checks.push({
+        check_name: 'net_income_is_to_scf_tie',
+        check_type: 'hard',
+        passes,
+        message: passes
+          ? null
+          : `Net income tie failed: IS shows $${isNI.toFixed(2)}, SCF operating start shows $${scfNI.toFixed(2)}, variance $${variance.toFixed(2)}`,
+      });
+    }
+  }
+
+  // 7. Retained earnings continuity: BS RE = prior period closing RE + NI − dividends
+  if (opts && opts.priorRetainedEarnings !== undefined) {
+    const priorRE = d(opts.priorRetainedEarnings ?? 0);
+    const currentNI = d(pl.netIncome);
+    // Find dividends declared in equity changes (if available)
+    const dividends = equity
+      ? d(sumRound2(
+          equity.changes
+            .filter((c) => /dividend/i.test(c.label))
+            .map((c) => c.amount)
+        ))
+      : decimalFrom(0);
+    // Find current BS retained earnings from equity section
+    const bsRELine = bs.equity.find((e) => /retained earnings/i.test(e.label ?? ''));
+    if (bsRELine) {
+      const bsRE = d(bsRELine.amount);
+      const expected = priorRE.plus(currentNI).minus(dividends).toDecimalPlaces(2);
+      const variance = bsRE.minus(expected).abs();
+      const passes = variance.lte(TOLERANCE);
+      checks.push({
+        check_name: 'retained_earnings_continuity',
+        check_type: 'hard',
+        passes,
+        message: passes
+          ? null
+          : `Retained earnings continuity failed: prior RE $${priorRE.toFixed(2)} + NI $${currentNI.toFixed(2)} − dividends $${dividends.toFixed(2)} = expected $${expected.toFixed(2)}, BS shows $${bsRE.toFixed(2)}, variance $${variance.toFixed(2)}`,
+      });
+    }
   }
 
   return checks;

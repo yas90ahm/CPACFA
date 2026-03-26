@@ -43,7 +43,8 @@ export function buildCashFlowStatement(
   cfClassificationMap?: CfClassificationMap
 ): CashFlowStatement {
   const endingCash = getNetAmount(trialBalance.entries, /cash|bank/i);
-  const beginningCash = priorTrialBalance ? getNetAmount(priorTrialBalance.entries, /cash|bank/i) : undefined;
+  // First close: no prior period → beginning cash is $0 (GAAP: company starts with zero cash)
+  const beginningCash = priorTrialBalance ? getNetAmount(priorTrialBalance.entries, /cash|bank/i) : 0;
   const netIncome = profitAndLoss.netIncome ?? 0;
 
   // --- Explicit cf_classification overrides ---
