@@ -3,6 +3,18 @@
  * Trial Balance ingestion → Balance Sheet + P&L with Plan-Execute-Verify and codification traceability.
  * Phase 1: DB (Postgres when DATABASE_URL set), auth (JWT), optionalAuth middleware sets req.tenantId.
  *
+ * SERVICE INVENTORY — updated 2026-03-26
+ * Active services: 169 (src/services/)
+ * Quarantined services: 11 (src/_quarantine/services/)
+ *   - slm_client_service: SLM strategy deferred post-funding
+ *   - task_assignment_service: handled by reconciliation_resolution_service + hitl_orchestrator
+ *   - xbrl_embedding_service: MVP uses trigram search
+ *   - ai_account_analyzer_service, cpa_decision_handler, filing_calendar_service,
+ *     gaap_reconciliation_service, gl_quality_report_service, google_oauth,
+ *     tax_return_service, tax_strategy_service
+ * Unwired (known, intentional): notesPolicies (utility), cpa_bridge_manifest (manifest), planExecuteVerify (agent)
+ * Last audit: 2026-03-26 by Claude Code (4 parallel agents, 171 services audited)
+ *
  * Deployment modes:
  *   1. Single process (default): API + job worker together.
  *      $ npm start

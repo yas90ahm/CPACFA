@@ -1,3 +1,6 @@
+// QUARANTINED: Task assignment handled by reconciliation_resolution_service and hitl_orchestrator.
+// Consolidate into a unified workflow if needed post-v1.
+
 /**
  * Task Assignment Service — assigns close tasks to team members with deadlines.
  * Tasks can depend on other tasks and are linked to gates.

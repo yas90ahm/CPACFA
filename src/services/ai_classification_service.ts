@@ -19,9 +19,8 @@ import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import { appendEntry } from '../db/repositories/audit_ledger_repository.js';
 import { insertCoaMappingRule, getNextRuleVersion } from '../db/repositories/coa_mapping_rules_repository.js';
 import { executeCascade, CascadeTriggerType } from './cascade_engine.js';
-import {
-  type SlmError,
-} from './slm_client_service.js';
+// SlmError type — kept inline after slm_client_service quarantined
+type SlmError = { account_name?: string; error?: string; code?: string; message?: string };
 import { checkMappingCompleteness } from './mapping_completeness_gate.js';
 import { runClassifier, type RunClassifierResult } from '../ai/ai_orchestrator.js';
 import { searchXBRL } from './xbrl_search_service.js';

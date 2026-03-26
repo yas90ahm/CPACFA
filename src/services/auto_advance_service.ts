@@ -113,7 +113,7 @@ export async function checkAndNotifyReadiness(
     const { notify } = await import('./notification_service.js');
     await notify({
       tenantId,
-      eventType: 'blocking_issue_created', // Reuse existing type — most prominent notification
+      eventType: 'ready_to_advance',
       title: notificationTitle,
       body: notificationBody,
       data: {

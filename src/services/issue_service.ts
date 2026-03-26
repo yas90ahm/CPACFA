@@ -54,6 +54,22 @@ export async function createIssue(pool: Pool, input: CreateCloseIssueInput): Pro
     status: 'detected',
   });
   await repo.appendIssueHistory(pool, issue.issueId, 'detected', 'detected', 'system', 'Issue created');
+
+  // Notify on critical/blocking issues
+  const sev = (input.severity ?? '').toLowerCase();
+  if (sev === 'critical' || sev === 'blocking') {
+    try {
+      const { notify } = await import('./notification_service.js');
+      await notify({
+        tenantId: input.tenantId,
+        eventType: 'blocking_issue_detected',
+        title: 'Action required',
+        body: `${input.title} — close is blocked until this is resolved`,
+        data: { issueId, sessionId: input.periodId, severity: sev },
+      });
+    } catch { /* non-fatal */ }
+  }
+
   return issue;
 }
 

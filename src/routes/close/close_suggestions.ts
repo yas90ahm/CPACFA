@@ -22,7 +22,7 @@ import {
   rejectCoaSuggestion,
   rejectCfSuggestion,
 } from '../../services/ai_classification_service.js';
-import { checkHealth } from '../../services/slm_client_service.js';
+// SLM quarantined — health endpoint returns static unavailable status
 
 const router = Router();
 
@@ -274,12 +274,8 @@ router.post('/suggestions/:suggestionId/reject', async (req: Request, res: Respo
  */
 router.get('/suggestions/health', async (_req: Request, res: Response) => {
   try {
-    const health = await checkHealth();
-    if (!health) {
-      res.json({ available: false, error: 'SLM service unreachable' });
-      return;
-    }
-    res.json({ available: true, ...health });
+    // SLM quarantined — classification handled by ai_classification_service + autonomous_mapping_service
+    res.json({ available: false, status: 'SLM strategy deferred — classification uses XBRL RAG + Claude directly' });
   } catch (e) {
     send500(res, e, 'SLM health check failed');
   }

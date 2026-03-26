@@ -1023,6 +1023,17 @@ export async function advanceSession(
         } catch (reconErr) {
           console.warn('[advance] recon intelligence failed (non-fatal):', (reconErr as Error).message);
         }
+
+        // Auto-propose accounting modules — each wrapped in its own try/catch
+        await autoProposModules(
+          client as unknown as Pool,
+          input.tenantId,
+          input.closeSessionId,
+          currentSession.entityId,
+          currentSession.periodStart ?? '',
+          currentSession.periodEnd ?? '',
+          input.certifiedBy ?? 'system'
+        );
       }
       return currentSession;
     });
@@ -1039,6 +1050,27 @@ export async function advanceSession(
           data: { statusBefore: session.status, statusAfter: current.status },
           timestamp: new Date().toISOString(),
         });
+      } catch { /* non-fatal */ }
+
+      // Notify on state transitions
+      try {
+        const { notify } = await import('./notification_service.js');
+        const statusMap: Record<string, { eventType: string; title: string; body: string }> = {
+          in_progress: { eventType: 'close_started', title: 'Close period opened', body: 'Close period opened — work can begin' },
+          under_review: { eventType: 'close_under_review', title: 'Close submitted for review', body: 'Close submitted for review — awaiting CFO approval' },
+          certified: { eventType: 'close_certified', title: 'Period certified', body: 'Period certified — statements are signed and locked' },
+          locked: { eventType: 'close_locked', title: 'Period locked', body: 'Period permanently locked — no further changes allowed' },
+        };
+        const notif = statusMap[current.status];
+        if (notif) {
+          await notify({
+            tenantId: input.tenantId,
+            eventType: notif.eventType as import('./notification_service.js').NotificationEventType,
+            title: notif.title,
+            body: notif.body,
+            data: { sessionId: input.closeSessionId, statusBefore: session.status, statusAfter: current.status },
+          });
+        }
       } catch { /* non-fatal */ }
     }
 
@@ -1064,5 +1096,145 @@ export async function advanceSession(
       };
     }
     throw err;
+  }
+}
+
+/**
+ * Auto-propose all 13 accounting modules on session IN_PROGRESS.
+ * Each module is independently try/caught — one failure never blocks others.
+ * JE-producing modules create drafts via journal_entry_service.createDraftJE().
+ * Report-only modules (impairment, segments) just compute their data.
+ */
+async function autoProposModules(
+  pool: Pool,
+  tenantId: string,
+  closeSessionId: string,
+  entityId: string,
+  periodStart: string,
+  periodEnd: string,
+  createdBy: string
+): Promise<void> {
+  const periodLabel = periodEnd.length >= 7 ? periodEnd.slice(0, 7) : '';
+  const modules: Array<{ name: string; fn: () => Promise<unknown> }> = [
+    {
+      name: 'prepaids',
+      fn: async () => {
+        const { proposeAmortizationEntries } = await import('./prepaid_amortization_service.js');
+        return proposeAmortizationEntries(pool, tenantId, closeSessionId, periodLabel, createdBy);
+      },
+    },
+    {
+      name: 'fixed_assets',
+      fn: async () => {
+        const { runDepreciation } = await import('./fixed_asset_service.js');
+        return runDepreciation(tenantId, pool, periodLabel, periodStart, periodEnd);
+      },
+    },
+    {
+      name: 'payroll_accrual',
+      fn: async () => {
+        const { proposePayrollAccrualAJE } = await import('./payroll_accrual_service.js');
+        return proposePayrollAccrualAJE(pool, tenantId, entityId, closeSessionId, periodEnd);
+      },
+    },
+    {
+      name: 'debt_accrual',
+      fn: async () => {
+        const { proposeInterestAccruals } = await import('./debt_accrual_service.js');
+        return proposeInterestAccruals(pool, tenantId, entityId, closeSessionId, periodStart, periodEnd);
+      },
+    },
+    {
+      name: 'deferred_tax',
+      fn: async () => {
+        const { calculateDeferredTax } = await import('./deferred_tax_service.js');
+        return calculateDeferredTax(tenantId, pool, periodLabel, 0.21); // default US corporate rate
+      },
+    },
+    {
+      name: 'leases',
+      fn: async () => {
+        const { proposePeriodEntries } = await import('./lease_accounting_service.js');
+        return proposePeriodEntries(pool, tenantId, entityId, closeSessionId, periodStart, periodEnd);
+      },
+    },
+    {
+      name: 'inventory_reserve',
+      fn: async () => {
+        // Requires inventory aging snapshot — skip if none uploaded
+        const { getReserveConfig } = await import('./inventory_reserve_service.js');
+        const config = await getReserveConfig(pool, tenantId, entityId);
+        if (!config) return null; // No inventory config — skip
+        const { computeReserve } = await import('./inventory_reserve_service.js');
+        return computeReserve(pool, tenantId, entityId, closeSessionId, 'latest');
+      },
+    },
+    {
+      name: 'stock_compensation',
+      fn: async () => {
+        const { computeExpenseForPeriod } = await import('./stock_compensation_service.js');
+        return computeExpenseForPeriod(pool, tenantId, periodLabel);
+      },
+    },
+    {
+      name: 'impairment',
+      fn: async () => {
+        const { getImpairmentSummary } = await import('./impairment_service.js');
+        return getImpairmentSummary(pool, tenantId, periodLabel);
+      },
+    },
+    {
+      name: 'ap_aging',
+      fn: async () => {
+        const { proposeCutoffAJEs } = await import('./ap_aging_service.js');
+        return proposeCutoffAJEs(pool, tenantId, closeSessionId, createdBy, '2000');
+      },
+    },
+    {
+      name: 'ar_aging',
+      fn: async () => {
+        // AR CECL requires a snapshot and current allowance — skip if not configured
+        const { getSnapshots } = await import('./ar_aging_service.js');
+        const snapshots = await getSnapshots(pool, tenantId, closeSessionId);
+        if (snapshots.length === 0) return null; // No AR data uploaded yet
+        const { computeCECLAllowance } = await import('./ar_aging_service.js');
+        return computeCECLAllowance(pool, tenantId, snapshots[0].id, closeSessionId, 0);
+      },
+    },
+    {
+      name: 'segments',
+      fn: async () => {
+        const { checkReportabilityThresholds } = await import('./segment_service.js');
+        return checkReportabilityThresholds(pool, tenantId, periodLabel);
+      },
+    },
+  ];
+
+  let proposed = 0;
+  let skipped = 0;
+  for (const mod of modules) {
+    try {
+      await mod.fn();
+      proposed++;
+    } catch (e) {
+      skipped++;
+      console.warn(`[autoProposModules] ${mod.name} failed (non-fatal):`, e instanceof Error ? e.message : String(e));
+    }
+  }
+  console.log(`[autoProposModules] ${proposed} modules proposed, ${skipped} skipped`);
+
+  // Emit cascade so readiness gates refresh
+  try {
+    const { executeCascade, CascadeTriggerType } = await import('./cascade_engine.js');
+    await executeCascade(pool, tenantId, {
+      type: CascadeTriggerType.AJE_POSTED,
+      period_id: closeSessionId,
+      entity_id: entityId,
+      triggered_by: 'autoProposModules',
+      affected_accounts: [],
+      details: { proposed, skipped },
+    });
+  } catch {
+    // non-fatal
   }
 }

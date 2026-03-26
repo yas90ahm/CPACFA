@@ -16,7 +16,16 @@ import { createHmac } from 'crypto';
 export type NotificationEventType =
   | 'company_certified'
   | 'company_overdue'
-  | 'blocking_issue_created';
+  | 'blocking_issue_created'
+  | 'gate_failed'
+  | 'recon_out_of_tolerance'
+  | 'close_started'
+  | 'close_under_review'
+  | 'close_certified'
+  | 'close_locked'
+  | 'approval_required'
+  | 'blocking_issue_detected'
+  | 'ready_to_advance';
 
 export interface NotificationPayload {
   tenantId: string;
@@ -181,8 +190,13 @@ export async function notify(payload: NotificationPayload): Promise<void> {
   try {
     const recipients = await getPortfolioRecipients(payload.tenantId);
 
-    // Also include preparer for blocking_issue_created
-    if (payload.eventType === 'blocking_issue_created') {
+    // Include preparer/controller for close pipeline events
+    const closeEvents: NotificationEventType[] = [
+      'blocking_issue_created', 'gate_failed', 'recon_out_of_tolerance',
+      'close_started', 'close_under_review', 'close_certified', 'close_locked',
+      'blocking_issue_detected', 'ready_to_advance', 'approval_required',
+    ];
+    if (closeEvents.includes(payload.eventType)) {
       const preparer = await getSessionPreparer(payload.tenantId);
       if (preparer && !recipients.some((r) => r.userId === preparer.userId)) {
         recipients.push(preparer);

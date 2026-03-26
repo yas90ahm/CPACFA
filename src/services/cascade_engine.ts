@@ -250,6 +250,20 @@ export async function executeCascade(
           });
         }
       }
+      // Notify: reconciliations reverted due to GL balance change
+      try {
+        const { notify } = await import('./notification_service.js');
+        const accountNames = reverted
+          .map((id) => recons.find((x) => x.reconId === id)?.accountName ?? id)
+          .slice(0, 3);
+        await notify({
+          tenantId,
+          eventType: 'recon_out_of_tolerance',
+          title: 'Reconciliation needs attention',
+          body: `${reverted.length} reconciliation${reverted.length === 1 ? '' : 's'} reopened — GL balance changed (${accountNames.join(', ')})`,
+          data: { sessionId: trigger.period_id, revertedCount: reverted.length, accounts: accountNames },
+        });
+      } catch { /* non-fatal */ }
     }
     timings['step2_refresh_gl_balances'] = Date.now() - t0;
   }
@@ -307,6 +321,20 @@ export async function executeCascade(
   result.issues_auto_verified = issueResult.issues_auto_verified;
   result.issues_created = issueResult.new_issues_created;
   result.issues_reopened = [];
+
+  // Notify on new gate failures (hard blockers found after cascade)
+  if (readiness.hardBlockers.length > 0 && depth === 0) {
+    try {
+      const { notify } = await import('./notification_service.js');
+      await notify({
+        tenantId,
+        eventType: 'gate_failed',
+        title: 'Close blocked',
+        body: `${readiness.hardBlockers.length} gate${readiness.hardBlockers.length === 1 ? '' : 's'} failing — ${readiness.hardBlockers[0]}`,
+        data: { sessionId: trigger.period_id, blockers: readiness.hardBlockers.slice(0, 5) },
+      });
+    } catch { /* non-fatal */ }
+  }
 
   result.duration_ms = Date.now() - startTime;
 

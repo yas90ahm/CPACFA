@@ -29,7 +29,7 @@ export async function createRequest(
   resourceType: ApprovalResourceType,
   resourceId: string
 ): Promise<ApprovalRequest> {
-  return createApprovalRequestAndFirstEvent(
+  const request = await createApprovalRequestAndFirstEvent(
     pool,
     tenantId,
     {
@@ -47,6 +47,20 @@ export async function createRequest(
       at: new Date().toISOString(),
     }
   );
+
+  // Notify approver of pending request
+  try {
+    const { notify } = await import('./notification_service.js');
+    await notify({
+      tenantId,
+      eventType: 'approval_required',
+      title: 'Approval needed',
+      body: `${resourceType} ${resourceId} is waiting for your approval`,
+      data: { resourceType, resourceId, requestId: request.id },
+    });
+  } catch { /* non-fatal */ }
+
+  return request;
 }
 
 export async function getRequest(

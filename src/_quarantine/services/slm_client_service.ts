@@ -1,3 +1,6 @@
+// QUARANTINED: SLM strategy deferred post-funding. Reactivate when Python SLM is deployed.
+// Classification now handled by ai_classification_service.ts (curated patterns + XBRL + Claude RAG).
+
 /**
  * SLM Client Service — typed HTTP client for the SLM Python microservice.
  *
