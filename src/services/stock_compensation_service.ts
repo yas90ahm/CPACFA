@@ -5,7 +5,7 @@
 import type { Pool } from 'pg';
 import * as repo from '../db/repositories/stock_compensation_repository.js';
 import type { StockGrantRow, StockValuationRow, StockExpenseRow } from '../db/repositories/stock_compensation_repository.js';
-import { round2 } from '../utils/decimal.js';
+import { round2, plus } from '../utils/decimal.js';
 
 export type { StockGrantRow, StockValuationRow, StockExpenseRow };
 
@@ -89,10 +89,10 @@ export async function getCompensationSummary(
   const byGrantType: Record<string, number> = {};
 
   for (const expense of expenses) {
-    totalExpense += Number(expense.expenseAmount);
+    totalExpense = plus(totalExpense, round2(expense.expenseAmount));
     const grant = grantMap.get(expense.grantId);
     const grantType = grant?.grantType ?? 'unknown';
-    byGrantType[grantType] = (byGrantType[grantType] ?? 0) + Number(expense.expenseAmount);
+    byGrantType[grantType] = plus(byGrantType[grantType] ?? 0, round2(expense.expenseAmount));
   }
 
   return {

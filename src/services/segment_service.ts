@@ -5,7 +5,7 @@
 import type { Pool } from 'pg';
 import * as repo from '../db/repositories/segment_repository.js';
 import type { OperatingSegmentRow, SegmentFinancialsRow, SegmentReconciliationRow } from '../db/repositories/segment_repository.js';
-import { round2 } from '../utils/decimal.js';
+import { round2, plus, from as dec } from '../utils/decimal.js';
 
 export type { OperatingSegmentRow, SegmentFinancialsRow, SegmentReconciliationRow };
 
@@ -62,11 +62,11 @@ export async function checkReportabilityThresholds(
   let totalAssets = 0;
 
   for (const f of financials) {
-    totalRevenue += Number(f.revenue ?? 0);
-    const pl = Number(f.profitLoss ?? 0);
-    if (pl >= 0) totalProfit += pl;
-    else totalLoss += Math.abs(pl);
-    totalAssets += Number(f.assets ?? 0);
+    totalRevenue = plus(totalRevenue, round2(f.revenue ?? 0));
+    const pl = round2(f.profitLoss ?? 0);
+    if (pl >= 0) totalProfit = plus(totalProfit, pl);
+    else totalLoss = plus(totalLoss, Math.abs(pl));
+    totalAssets = plus(totalAssets, round2(f.assets ?? 0));
   }
 
   const profitLossBenchmark = Math.max(totalProfit, totalLoss);
@@ -79,9 +79,9 @@ export async function checkReportabilityThresholds(
     const segPL = Number(fin?.profitLoss ?? 0);
     const segAssets = Number(fin?.assets ?? 0);
 
-    const revenuePercent = totalRevenue > 0 ? round2((segRevenue / totalRevenue) * 100) : 0;
-    const profitLossPercent = profitLossBenchmark > 0 ? round2((Math.abs(segPL) / profitLossBenchmark) * 100) : 0;
-    const assetsPercent = totalAssets > 0 ? round2((segAssets / totalAssets) * 100) : 0;
+    const revenuePercent = totalRevenue > 0 ? dec(segRevenue).div(totalRevenue).times(100).toDecimalPlaces(2).toNumber() : 0;
+    const profitLossPercent = profitLossBenchmark > 0 ? dec(Math.abs(segPL)).div(profitLossBenchmark).times(100).toDecimalPlaces(2).toNumber() : 0;
+    const assetsPercent = totalAssets > 0 ? dec(segAssets).div(totalAssets).times(100).toDecimalPlaces(2).toNumber() : 0;
 
     const thresholdsMet: string[] = [];
     if (revenuePercent >= 10) thresholdsMet.push('revenue');
@@ -89,7 +89,7 @@ export async function checkReportabilityThresholds(
     if (assetsPercent >= 10) thresholdsMet.push('assets');
 
     const isReportable = thresholdsMet.length > 0;
-    if (isReportable) reportableRevenue += Number(segRevenue);
+    if (isReportable) reportableRevenue = plus(reportableRevenue, segRevenue);
 
     results.push({
       segmentId: seg.id,

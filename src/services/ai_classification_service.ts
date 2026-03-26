@@ -24,7 +24,8 @@ type SlmError = { account_name?: string; error?: string; code?: string; message?
 import { checkMappingCompleteness } from './mapping_completeness_gate.js';
 import { runClassifier, type RunClassifierResult } from '../ai/ai_orchestrator.js';
 import { searchXBRL } from './xbrl_search_service.js';
-import { listFsTaxonomyLines } from '../db/repositories/fs_taxonomy_repository.js';
+import { listFsTaxonomyLines, getFsTaxonomyLineById } from '../db/repositories/fs_taxonomy_repository.js';
+import { detectSuspects, type MappingSuspect } from './mapping_validation_agent.js';
 
 // ---------- Prompt sanitization (H7 fix) ----------
 
@@ -727,15 +728,61 @@ Respond with JSON only. One object per account. Shape:
     });
   }
 
-  // Auto-accept high-confidence suggestions if enabled
+  // Auto-accept high-confidence suggestions if enabled — with validation agent check
   try {
     const { getEntitySettings } = await import('./entity_settings_service.js');
     const settings = await getEntitySettings(pool, tenantId, entityId);
     if (settings.mappingAutoAcceptEnabled && coaSuggestions.length > 0) {
       const threshold = settings.mappingConfidenceThreshold;
+
+      // Build MappedAccount objects for detectSuspects — query TB for net balances
+      let tbBalances: Map<string, { netBalance: number; accountType: string }> | undefined;
+      try {
+        const { rows: tbRows } = await pool.query<{ account_name: string; account_type: string; debit: string; credit: string }>(
+          `SELECT account_name, COALESCE(account_type, '') AS account_type,
+                  COALESCE(debit, 0)::text AS debit, COALESCE(credit, 0)::text AS credit
+           FROM period_trial_balance WHERE tenant_id = $1 AND close_session_id = $2`,
+          [tenantId, closeSessionId]
+        );
+        tbBalances = new Map();
+        for (const row of tbRows) {
+          tbBalances.set(row.account_name.toLowerCase(), {
+            netBalance: parseFloat(row.debit) - parseFloat(row.credit),
+            accountType: row.account_type,
+          });
+        }
+      } catch { /* TB lookup failed — will still validate via taxonomy normal_balance */ }
+
       for (const suggestion of coaSuggestions) {
         if (suggestion.confidence >= threshold && suggestion.status === 'pending') {
           try {
+            // Validate fsLineId exists in taxonomy
+            const taxLine = await getFsTaxonomyLineById(pool, suggestion.suggestedFsLineId);
+            if (!taxLine) {
+              console.warn(`[AUTO-ACCEPT] Skipping: fsLineId '${suggestion.suggestedFsLineId}' not found in taxonomy`);
+              continue;
+            }
+
+            // Run detectSuspects if we have TB data
+            if (tbBalances) {
+              const tbEntry = tbBalances.get(suggestion.accountName.toLowerCase());
+              if (tbEntry) {
+                const suspects: MappingSuspect[] = detectSuspects([{
+                  accountCode: suggestion.accountCode ?? '',
+                  accountName: suggestion.accountName,
+                  accountType: tbEntry.accountType,
+                  fsLineId: suggestion.suggestedFsLineId,
+                  fsLineName: suggestion.suggestedFsLineLabel ?? '',
+                  fsLineStatement: taxLine.statement,
+                  netBalance: tbEntry.netBalance,
+                }]);
+                if (suspects.length > 0) {
+                  console.warn(`[AUTO-ACCEPT] Routing to human review — suspects detected for '${suggestion.accountName}':`, suspects.map((s) => s.mismatchType));
+                  continue; // Skip auto-accept — requires human review
+                }
+              }
+            }
+
             await acceptCoaSuggestion(pool, tenantId, suggestion.id, 'auto_accept');
             await pool.query(
               `UPDATE ai_coa_suggestions SET auto_accepted = TRUE, auto_accepted_at = NOW() WHERE id = $1 AND tenant_id = $2`,
@@ -809,6 +856,12 @@ export async function acceptCoaSuggestion(
 
   const fsLineId = overrideFsLineId || suggestion.suggested_fs_line_id;
   const eventType = overrideFsLineId ? 'ai_mapping_suggestion_edited' : 'ai_mapping_suggestion_accepted';
+
+  // Validate fsLineId exists in taxonomy
+  const taxonomyLine = await getFsTaxonomyLineById(pool, fsLineId);
+  if (!taxonomyLine) {
+    throw new Error(`fsLineId '${fsLineId}' does not exist in fs_taxonomy_lines`);
+  }
 
   // Mark accepted
   await pool.query(

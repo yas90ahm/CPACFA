@@ -218,6 +218,11 @@ router.put('/cross-tenant-learning', async (req: Request, res: Response) => {
 
 /** POST /api/settings/demo-reset — Wipe all period data for the tenant (preserves users, COA, templates). */
 router.post('/demo-reset', async (req: Request, res: Response) => {
+  if (process.env.NODE_ENV === 'production') {
+    res.status(403).json({ error: 'Demo reset is not available in production environments' });
+    return;
+  }
+
   try {
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
@@ -225,6 +230,20 @@ router.post('/demo-reset', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Tenant context required' });
       return;
     }
+
+    const authReq = req as AuthRequest;
+    const userId = authReq.userId ?? 'unknown';
+
+    // Audit log BEFORE any destructive action — persists even if reset fails
+    try {
+      await recordMaterialEvent(pool, {
+        tenantId,
+        periodLabel: 'n/a',
+        eventType: 'close_session_transition',
+        deterministicFlagSnapshot: { action: 'demo_reset_initiated', initiatedBy: userId, timestamp: new Date().toISOString() },
+        createdBy: userId,
+      });
+    } catch { /* audit ledger may not exist yet — proceed with reset */ }
 
     const tables = [
       'audit_ledger', 'close_audit_trail', 'certification_artifacts', 'ledger_snapshots',
@@ -244,37 +263,55 @@ router.post('/demo-reset', async (req: Request, res: Response) => {
       'close_sessions',
     ];
 
-    // Disable protective triggers
-    const protectedTables = ['audit_ledger', 'journal_entries', 'evidence_records', 'tenant_close_issue_history'];
-    for (const t of protectedTables) {
-      try { await pool.query(`ALTER TABLE ${t} DISABLE TRIGGER USER`); } catch { /* table may not exist */ }
+    // Named triggers to disable — only the specific ones that block DELETE during reset
+    const namedTriggers: Array<{ table: string; trigger: string }> = [
+      { table: 'audit_ledger', trigger: 'audit_ledger_no_delete' },
+      { table: 'audit_ledger', trigger: 'audit_ledger_no_update' },
+      { table: 'audit_ledger', trigger: 'audit_ledger_enforce_chain' },
+      { table: 'journal_entries', trigger: 'je_immutable_after_post' },
+      { table: 'journal_entries', trigger: 'je_no_delete_after_post' },
+      { table: 'journal_entries', trigger: 'je_balance_check_before_post' },
+      { table: 'evidence_records', trigger: 'prevent_evidence_record_delete_retention' },
+      { table: 'general_ledger', trigger: 'general_ledger_immutable_after_certification_update' },
+      { table: 'general_ledger', trigger: 'general_ledger_immutable_after_certification_delete' },
+      { table: 'certification_artifacts', trigger: 'certification_artifacts_immutable_update' },
+      { table: 'certification_artifacts', trigger: 'certification_artifacts_immutable_delete' },
+      { table: 'ledger_snapshots', trigger: 'ledger_snapshots_no_update' },
+      { table: 'ledger_snapshots', trigger: 'ledger_snapshots_no_delete' },
+    ];
+
+    // Disable named triggers, perform reset, re-enable in finally block
+    try {
+      for (const { table, trigger } of namedTriggers) {
+        try { await pool.query(`ALTER TABLE ${table} DISABLE TRIGGER ${trigger}`); } catch { /* trigger/table may not exist */ }
+      }
+
+      const deleted: Record<string, number> = {};
+      for (const table of tables) {
+        try {
+          const r = await pool.query(`DELETE FROM ${table} WHERE tenant_id = $1`, [tenantId]);
+          if (r.rowCount && r.rowCount > 0) deleted[table] = r.rowCount;
+        } catch { /* skip tables that don't exist or have FK issues */ }
+      }
+
+      // Count preserved
+      const usersResult = await pool.query('SELECT COUNT(*)::int AS cnt FROM users WHERE tenant_id = $1', [tenantId]);
+      const coaResult = await pool.query('SELECT COUNT(*)::int AS cnt FROM tenant_chart_of_accounts WHERE tenant_id = $1', [tenantId]);
+
+      res.json({
+        success: true,
+        deleted,
+        preserved: {
+          users: usersResult.rows[0]?.cnt ?? 0,
+          coaAccounts: coaResult.rows[0]?.cnt ?? 0,
+        },
+      });
+    } finally {
+      // Re-enable named triggers — always fires, even on crash
+      for (const { table, trigger } of namedTriggers) {
+        try { await pool.query(`ALTER TABLE ${table} ENABLE TRIGGER ${trigger}`); } catch { /* ignore */ }
+      }
     }
-
-    const deleted: Record<string, number> = {};
-    for (const table of tables) {
-      try {
-        const r = await pool.query(`DELETE FROM ${table} WHERE tenant_id = $1`, [tenantId]);
-        if (r.rowCount && r.rowCount > 0) deleted[table] = r.rowCount;
-      } catch { /* skip tables that don't exist or have FK issues */ }
-    }
-
-    // Re-enable triggers
-    for (const t of protectedTables) {
-      try { await pool.query(`ALTER TABLE ${t} ENABLE TRIGGER USER`); } catch { /* ignore */ }
-    }
-
-    // Count preserved
-    const usersResult = await pool.query('SELECT COUNT(*)::int AS cnt FROM users WHERE tenant_id = $1', [tenantId]);
-    const coaResult = await pool.query('SELECT COUNT(*)::int AS cnt FROM tenant_chart_of_accounts WHERE tenant_id = $1', [tenantId]);
-
-    res.json({
-      success: true,
-      deleted,
-      preserved: {
-        users: usersResult.rows[0]?.cnt ?? 0,
-        coaAccounts: coaResult.rows[0]?.cnt ?? 0,
-      },
-    });
   } catch (e) {
     send500(res, e, 'Demo reset failed');
   }

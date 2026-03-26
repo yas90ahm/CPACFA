@@ -97,8 +97,9 @@ const mockAdapters: Record<AccountingProvider, IAccountingAdapter> = {
 const realAdapterCache = new Map<string, IAccountingAdapter>();
 
 /**
- * Get adapter for provider. Uses real implementation when available
- * (QuickBooks, Xero, NetSuite), falls back to mock otherwise.
+ * Get adapter for provider. Uses real implementation when available.
+ * In production: throws if real adapter unavailable (no silent mock fallback).
+ * In dev/test: mock allowed only if ALLOW_MOCK_ERP=true.
  */
 function getAdapter(provider: AccountingProvider, pool?: Pool, tenantId?: string): IAccountingAdapter {
   if (pool && tenantId) {
@@ -109,7 +110,6 @@ function getAdapter(provider: AccountingProvider, pool?: Pool, tenantId?: string
     // Lazy-load real adapters to avoid circular imports
     try {
       if (provider === 'quickbooks') {
-        // Dynamic import would be ideal but we use sync factory here
         const { QuickBooksAdapter } = require('../adapters/quickbooks_adapter.js');
         const adapter = new QuickBooksAdapter(pool, tenantId);
         realAdapterCache.set(cacheKey, adapter);
@@ -127,10 +127,26 @@ function getAdapter(provider: AccountingProvider, pool?: Pool, tenantId?: string
         realAdapterCache.set(cacheKey, adapter);
         return adapter;
       }
-    } catch {
-      // Real adapter not available — fall back to mock
+    } catch (adapterErr) {
+      // Real adapter not available — only fall back to mock if explicitly allowed
+      if (process.env.ALLOW_MOCK_ERP !== 'true') {
+        throw new Error(
+          `ERP sync failed: ${provider} adapter unavailable (${(adapterErr as Error).message}). ` +
+          `Verify credentials and connectivity before syncing. Set ALLOW_MOCK_ERP=true for local development only.`
+        );
+      }
+      console.warn(`[ERP] ${provider} adapter failed, using MOCK (ALLOW_MOCK_ERP=true):`, (adapterErr as Error).message);
     }
   }
+
+  // Mock fallback — only if explicitly enabled and not production
+  if (process.env.ALLOW_MOCK_ERP !== 'true') {
+    throw new Error(
+      `ERP sync failed: ${provider} adapter unavailable (no pool/tenant context). ` +
+      `Do not proceed with mock data. Set ALLOW_MOCK_ERP=true for local development only.`
+    );
+  }
+  console.warn(`[ERP] Using MockAccountingAdapter for ${provider} — data is NOT real`);
   return mockAdapters[provider];
 }
 

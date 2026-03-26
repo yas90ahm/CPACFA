@@ -7,7 +7,7 @@
  */
 
 import ExcelJS from 'exceljs';
-import { round2 } from '../utils/decimal.js';
+import { round2, plus, minus } from '../utils/decimal.js';
 
 export interface TrialBalanceExportRow {
   accountCode: string;
@@ -112,8 +112,8 @@ export async function exportTrialBalance(
       round2(row.credit),
       net,
     ]);
-    totalDebit += row.debit;
-    totalCredit += row.credit;
+    totalDebit = plus(totalDebit, row.debit);
+    totalCredit = plus(totalCredit, row.credit);
   }
 
   dataRows.push([]);
@@ -123,7 +123,7 @@ export async function exportTrialBalance(
     '',
     round2(totalDebit),
     round2(totalCredit),
-    round2(totalDebit - totalCredit),
+    minus(totalDebit, totalCredit),
   ]);
 
   const allRows = [...headerRows, ...dataRows];

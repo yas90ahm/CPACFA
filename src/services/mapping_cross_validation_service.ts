@@ -14,6 +14,7 @@
  */
 
 import type { Pool } from 'pg';
+import { from as dec, sumRound2, minus, plus, round2 } from '../utils/decimal.js';
 
 export type CrossValidationSeverity = 'critical' | 'warning' | 'info';
 
@@ -53,47 +54,47 @@ export function runMappingCrossValidation(
 ): CrossValidationResult {
   const issues: CrossValidationIssue[] = [];
 
-  // Aggregate by statement
+  // Aggregate by statement — all accumulation via Decimal.js to prevent float drift
   let bsDebit = 0, bsCredit = 0;
   let plDebit = 0, plCredit = 0;
-  let totalRevenue = 0; // credit-normal
-  let totalExpense = 0; // debit-normal
-  let totalAssets = 0;  // debit-normal
-  let totalLiabilities = 0; // credit-normal
-  let totalEquity = 0; // credit-normal
+  let totalRevenue = 0;
+  let totalExpense = 0;
+  let totalAssets = 0;
+  let totalLiabilities = 0;
+  let totalEquity = 0;
   let unmappedCount = 0;
 
   for (const e of mappedEntries) {
-    const net = e.debit - e.credit;
+    const net = minus(e.debit, e.credit);
     const stmt = (e.fsLineStatement ?? '').toUpperCase();
 
     if (stmt === 'BS') {
-      bsDebit += e.debit;
-      bsCredit += e.credit;
-      if (e.fsLineId.startsWith('fs_asset')) totalAssets += net;
-      else if (e.fsLineId.startsWith('fs_liability')) totalLiabilities += net; // Will be negative (credit-normal)
-      else if (e.fsLineId.startsWith('fs_equity')) totalEquity += net;
+      bsDebit = plus(bsDebit, e.debit);
+      bsCredit = plus(bsCredit, e.credit);
+      if (e.fsLineId.startsWith('fs_asset')) totalAssets = plus(totalAssets, net);
+      else if (e.fsLineId.startsWith('fs_liability')) totalLiabilities = plus(totalLiabilities, net);
+      else if (e.fsLineId.startsWith('fs_equity')) totalEquity = plus(totalEquity, net);
     } else if (stmt === 'PL') {
-      plDebit += e.debit;
-      plCredit += e.credit;
+      plDebit = plus(plDebit, e.debit);
+      plCredit = plus(plCredit, e.credit);
       if (e.fsLineId.startsWith('fs_revenue') || e.fsLineId.startsWith('fs_interest_income') || e.fsLineId.startsWith('fs_other_income') || e.fsLineId.startsWith('fs_other_gain')) {
-        totalRevenue += (e.credit - e.debit); // Revenue = credit-normal
+        totalRevenue = plus(totalRevenue, minus(e.credit, e.debit));
       } else {
-        totalExpense += (e.debit - e.credit); // Expense = debit-normal
+        totalExpense = plus(totalExpense, minus(e.debit, e.credit));
       }
     } else {
       unmappedCount++;
     }
   }
 
-  const netIncome = totalRevenue - totalExpense;
-  const bsImbalance = Math.abs(bsDebit - bsCredit);
-  const totalLedger = mappedEntries.reduce((s, e) => s + e.debit, 0);
+  const netIncome = minus(totalRevenue, totalExpense);
+  const bsImbalance = round2(dec(bsDebit).minus(bsCredit).abs().toNumber());
+  const totalLedger = sumRound2(mappedEntries.map((e) => e.debit));
 
   // Check 1: Balance sheet equation (A = L + E + Net Income)
   // BS should balance after including net income in retained earnings
   if (bsImbalance > 1 && totalLedger > 0) {
-    const bsImbalancePct = (bsImbalance / totalLedger) * 100;
+    const bsImbalancePct = dec(bsImbalance).div(totalLedger || 1).times(100).toDecimalPlaces(4).toNumber();
     if (bsImbalancePct > 0.01) {
       issues.push({
         check: 'bs_equation',

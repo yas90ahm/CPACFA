@@ -14,9 +14,11 @@ import auditAuditorRouter from './audit_auditor.js';
 import auditForensicsRouter from './audit_forensics.js';
 import auditProfessionalReviewRouter from './audit_professional_review.js';
 import pbcIndexRouter from './pbc_index.js';
+import auditJeTraceRouter from './audit_je_trace.js';
 
 const router = Router();
 router.use(pbcIndexRouter);
+router.use(auditJeTraceRouter);
 router.use(auditBinderRouter);
 router.use(auditReconciliationRouter);
 router.use(auditGaapPolicyRouter);

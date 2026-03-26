@@ -188,6 +188,9 @@ export function applyModeDefaults(): ModeConfig {
     process.env.AI_MOCK = 'false';
     process.env.AI_MOCK_CLASSIFIER = 'false';
     process.env.AI_MOCK_ADVISOR = 'false';
+    if (process.env.ALLOW_MOCK_ERP === 'true') {
+      throw new Error(`[FATAL] MODE=${mode}: ALLOW_MOCK_ERP must not be true in ${mode}. Mock ERP data would corrupt financial statements.`);
+    }
 
     if (mode === 'demo') {
       console.warn('\n╔══════════════════════════════════════════════════════════════╗');

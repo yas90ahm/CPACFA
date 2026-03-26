@@ -215,8 +215,13 @@ export async function generatePaymentSchedule(
   const results: PaymentScheduleRow[] = [];
 
   for (let period = 1; period <= termMonths; period++) {
-    const paymentDate = new Date(commDate);
-    paymentDate.setMonth(paymentDate.getMonth() + period);
+    // Add months with end-of-month clamping to avoid JS Date overflow
+    // (e.g., Jan 31 + 1 month → Feb 28, not Mar 3)
+    const targetYear = commDate.getFullYear() + Math.floor((commDate.getMonth() + period) / 12);
+    const targetMonth = (commDate.getMonth() + period) % 12;
+    const maxDay = new Date(targetYear, targetMonth + 1, 0).getDate(); // last day of target month
+    const clampedDay = Math.min(commDate.getDate(), maxDay);
+    const paymentDate = new Date(targetYear, targetMonth, clampedDay);
     const paymentDateStr = paymentDate.toISOString().slice(0, 10);
 
     let interest: Decimal;
