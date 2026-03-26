@@ -347,6 +347,7 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 206, file: '206_lease_accounting.sql' },
   { version: 207, file: '207_ai_revenue_suggestions.sql' },
   { version: 208, file: '208_prepaid_last_month_fix.sql' },
+  { version: 209, file: '209_gl_immutable_after_certification.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 
