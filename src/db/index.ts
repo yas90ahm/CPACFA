@@ -345,6 +345,7 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 204, file: '204_payroll_accrual.sql' },
   { version: 205, file: '205_inventory_reserve.sql' },
   { version: 206, file: '206_lease_accounting.sql' },
+  { version: 207, file: '207_ai_revenue_suggestions.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 

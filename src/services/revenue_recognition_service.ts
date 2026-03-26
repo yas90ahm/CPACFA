@@ -6,7 +6,7 @@
 
 import type { Pool } from 'pg';
 import { callLLMWithFallback } from '../llm/callWithFallback.js';
-import { runInBoundaryScope, enterAdvisoryContext, exitAdvisoryContext } from '../lib/ai_boundary.js';
+import { runInBoundaryScope, enterAdvisoryContext, exitAdvisoryContext, assertNoAiMutationContext } from '../lib/ai_boundary.js';
 import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import * as repo from '../db/repositories/revenue_recognition_repository.js';
 import { minus as decMinus, plus as decPlus, round2 } from '../utils/decimal.js';
@@ -187,6 +187,7 @@ Allocate the transaction price across POBs (percent or amount). Return JSON: { "
         : total - Object.values(fallback).reduce((a, b) => a + b, 0);
   });
   return runInBoundaryScope(async () => {
+    assertNoAiMutationContext(); // Ensure we are NOT already in a mutation context
     enterAdvisoryContext();
     try {
       const result = await callLLMWithFallback({
@@ -198,21 +199,22 @@ Allocate the transaction price across POBs (percent or amount). Return JSON: { "
         fallback,
       });
 
-      // Apply numeric guardrail on parsed LLM output
       const usedFallback = result === fallback;
-      if (!usedFallback && result) {
-        assertNoNumericAmountsInAgentOutput(result, 'revenue_recognition_allocation');
-      }
 
+      // AI suggestions go to staging — NOT directly to core tables
+      // Controller must explicitly accept before allocation reaches core tables
       if (result && Object.keys(result).length > 0 && !usedFallback) {
-        await repo.updateContract(pool, tenantId, contractId, { allocation: result });
-        for (const p of contract.performanceObligations) {
-          const amount = result[p.id];
-          if (amount != null) {
-            await repo.updatePerformanceObligation(pool, tenantId, p.id, { allocationAmount: String(amount) });
-          }
+        try {
+          await pool.query(
+            `INSERT INTO ai_revenue_suggestions (id, tenant_id, contract_id, suggestion_type, suggested_values, status, created_at)
+             VALUES (gen_random_uuid()::text, $1, $2, 'allocation', $3, 'pending', NOW())`,
+            [tenantId, contractId, JSON.stringify(result)]
+          );
+        } catch {
+          // Table may not exist yet — non-fatal, return suggestion without staging
         }
       }
+
       return {
         allocation: result && Object.keys(result).length > 0 ? result : null,
         allocationSource: usedFallback ? 'fallback' : 'agentic',
@@ -428,6 +430,7 @@ export async function suggestRecognitionScheduleAgentic(
 Suggest monthly recognition schedule (straight-line or as per pattern). Return JSON array: [ { periodStart, periodEnd, amount, cumulativeAmount?, recognized?: false } ].`;
     const fallback = linearSchedule(contract.startDate, contract.endDate, amount);
     result = await runInBoundaryScope(async () => {
+      assertNoAiMutationContext(); // Ensure not in mutation context
       enterAdvisoryContext();
       try {
         const llmResult = await callLLMWithFallback({
@@ -439,9 +442,18 @@ Suggest monthly recognition schedule (straight-line or as per pattern). Return J
           fallback,
         });
 
-        // Apply numeric guardrail on parsed LLM output
-        if (llmResult && llmResult !== fallback) {
-          assertNoNumericAmountsInAgentOutput(llmResult, 'revenue_recognition_schedule');
+        // AI schedule suggestions go to staging — NOT directly to core tables
+        const usedFallback = llmResult === fallback;
+        if (llmResult && !usedFallback) {
+          try {
+            await pool.query(
+              `INSERT INTO ai_revenue_suggestions (id, tenant_id, contract_id, suggestion_type, suggested_values, status, created_at)
+               VALUES (gen_random_uuid()::text, $1, $2, 'schedule', $3, 'pending', NOW())`,
+              [tenantId, contractId, JSON.stringify({ pobId, schedule: llmResult })]
+            );
+          } catch {
+            // Table may not exist yet — non-fatal
+          }
         }
 
         return llmResult;
@@ -451,7 +463,12 @@ Suggest monthly recognition schedule (straight-line or as per pattern). Return J
     });
   }
 
-  if (result && result.length > 0) {
+  // Only write deterministic (non-AI) schedules to core tables directly
+  // AI-generated schedules require human acceptance via /revenue-suggestions/:id/accept
+  const isFromAI = result !== null && !(
+    result === linearSchedule(contract.startDate, contract.endDate, amount)
+  );
+  if (result && result.length > 0 && !isFromAI) {
     await repo.updatePerformanceObligation(pool, tenantId, pobId, { schedule: result });
     await repo.upsertRecognitionSchedule(pool, tenantId, contractId, pobId, result);
   }

@@ -68,22 +68,31 @@ const ALLOWED_KEYS = new Set([
   'overallmaterialitypercent', 'performancematerialitypercent',
 ]);function hasNumericAmount(obj: unknown, path: string): boolean {
   if (obj === null || obj === undefined) return false;
-  if (typeof obj === 'number') return true;
+  // Any bare number at any depth is a violation (AI should not produce financial numbers)
+  if (typeof obj === 'number' && isFinite(obj)) return true;
+  // Numeric strings that look like amounts
+  if (typeof obj === 'string' && /^\d[\d,]*\.?\d*$/.test(obj.trim()) && obj.trim().length > 0) {
+    // Only flag if it looks like a real amount (not a single digit like "1" which could be a count)
+    const num = parseFloat(obj.replace(/,/g, ''));
+    if (!isNaN(num) && (AMOUNT_KEYS.has(path.split('.').pop()?.toLowerCase() ?? '') || num >= 10)) return true;
+  }
   if (Array.isArray(obj)) {
     return obj.some((item, i) => hasNumericAmount(item, `${path}[${i}]`));
   }
   if (typeof obj === 'object') {
     for (const [k, v] of Object.entries(obj)) {
       const key = k.toLowerCase();
-      if (AMOUNT_KEYS.has(key) && typeof v === 'number') {
+      // Explicitly known amount keys — always flag any value type
+      if (AMOUNT_KEYS.has(key) && (typeof v === 'number' || (typeof v === 'string' && /^\d[\d,]*\.?\d*$/.test(v.trim())))) {
         return true;
       }
-      // M8 fix: Also catch AMOUNT_KEYS with string values that look numeric (e.g. "debit": "1234.56")
-      if (AMOUNT_KEYS.has(key) && typeof v === 'string' && /^\d[\d,]*\.?\d*$/.test(v.trim())) {
+      // Any key with a numeric value (not in ALLOWED_KEYS) — this catches pob-xxx: 50000, custom allocations, etc.
+      if (!ALLOWED_KEYS.has(key) && typeof v === 'number' && isFinite(v)) {
         return true;
       }
-      if (!ALLOWED_KEYS.has(key) && typeof v === 'object' && hasNumericAmount(v, `${path}.${k}`)) {
-        return true;
+      // Recurse into nested objects
+      if (typeof v === 'object' && v !== null) {
+        if (hasNumericAmount(v, `${path}.${k}`)) return true;
       }
     }
   }
