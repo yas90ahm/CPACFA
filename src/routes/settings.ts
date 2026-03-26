@@ -70,6 +70,7 @@ router.put('/general', async (req: Request, res: Response) => {
       varianceMaterialityDollar?: string | number;
       varianceMaterialityPercent?: string | number;
       functionalCurrency?: string;
+      allowSameUserCertify?: boolean;
     };
     const settings = await entitySettingsService.upsertEntitySettings(
       pool,
@@ -84,6 +85,7 @@ router.put('/general', async (req: Request, res: Response) => {
         varianceMaterialityDollar: body.varianceMaterialityDollar,
         varianceMaterialityPercent: body.varianceMaterialityPercent,
         functionalCurrency: body.functionalCurrency,
+        allowSameUserCertify: body.allowSameUserCertify,
       }
     );
     await recordMaterialEvent(pool, {

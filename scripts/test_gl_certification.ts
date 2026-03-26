@@ -461,12 +461,15 @@ async function completeAllReconciliations(): Promise<boolean> {
     if (recon.status === 'completed' || recon.status === 'approved') continue;
 
     // Set supporting balance = GL balance (makes variance zero)
-    const balance = recon.glBalance ?? 0;
-    await makeRequest(
+    const balance = recon.glBalance ?? '0';
+    const sbRes = await makeRequest(
       'POST',
       `/api/close/sessions/${closeSessionId}/reconciliations/${recon.reconId}/supporting-balance`,
-      { amount: balance, source: 'integration-test' }
+      { amount: String(balance), source: 'manual_entry' }
     );
+    if (sbRes.status !== 200) {
+      console.log(`   ⚠️  Could not set supporting balance for ${recon.accountCode}: ${sbRes.status} ${JSON.stringify(sbRes.data).slice(0, 120)}`);
+    }
 
     // Upload evidence (multipart)
     const form = new FormData();
@@ -550,11 +553,51 @@ async function mapAllAccounts(): Promise<boolean> {
   return true;
 }
 
+async function skipAllTemplates(): Promise<boolean> {
+  // List proposed templates and skip them all
+  const listRes = await makeRequest('GET', `/api/close/sessions/${closeSessionId}/templates`);
+  const templates = (listRes.data as { templates?: Array<{ id: string; periodStatus?: string }> })?.templates ?? [];
+  const pending = templates.filter(t => t.periodStatus === 'pending' || t.periodStatus === 'proposed');
+  if (pending.length === 0) {
+    console.log('   No pending templates to skip');
+    return true;
+  }
+  for (const tmpl of pending) {
+    await makeRequest('POST', `/api/close/templates/${tmpl.id}/skip`, {
+      closeSessionId,
+      reason: 'Integration test — not applicable to test GL data',
+    });
+  }
+  console.log(`   Skipped ${pending.length} template(s)`);
+  return true;
+}
+
+async function explainAllVariances(): Promise<boolean> {
+  const listRes = await makeRequest('GET', `/api/close/sessions/${closeSessionId}/variances`);
+  const variances = (listRes.data as { variances?: Array<{ id: string; isMaterial?: boolean; explanationStatus?: string }> })?.variances ?? [];
+  const unexplained = variances.filter(v => v.isMaterial && v.explanationStatus !== 'explained' && v.explanationStatus !== 'approved');
+  if (unexplained.length === 0) {
+    console.log('   No material variances to explain');
+    return true;
+  }
+  for (const v of unexplained) {
+    await makeRequest('POST', `/api/close/variances/${v.id}/explain`, {
+      explanation: 'Integration test: variance within expected range for test period',
+      source: 'integration_test',
+    });
+  }
+  console.log(`   Explained ${unexplained.length} variance(s)`);
+  return true;
+}
+
 async function testAdvanceToLocked(): Promise<boolean> {
   console.log('\n=== STEP 6: Advance through state machine (open → in_progress → under_review) ===');
   try {
     // The state machine requires stepping through: open → in_progress → under_review
     // Then certify and lock are separate endpoints.
+
+    // Enable same-user certification for integration test (single test user, SoD bypassed)
+    await makeRequest('PUT', `/api/settings/general?entityId=${TEST_ENTITY_ID}`, { entityId: TEST_ENTITY_ID, allowSameUserCertify: true });
 
     // Step 6a: open → in_progress
     let res = await makeRequest('POST', `/api/close/sessions/${closeSessionId}/advance`);
@@ -584,6 +627,14 @@ async function testAdvanceToLocked(): Promise<boolean> {
     const gen2 = res.data as { id?: string };
     console.log(`   6e re-generate statements: ${res.status} ${gen2.id ? 'OK' : JSON.stringify(gen2).slice(0, 100)}`);
 
+    // Step 6e2: Skip all AJE templates (readiness gate requires templates resolved)
+    console.log('   6e2 resolving AJE templates...');
+    await skipAllTemplates();
+
+    // Step 6e3: Explain all material variances (readiness gate requires variance explanations)
+    console.log('   6e3 explaining variances...');
+    await explainAllVariances();
+
     // Step 6f: Resolve all open issues, then attempt advance (loop up to 3 times
     // because cascades can create new issues after resolution)
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -598,10 +649,28 @@ async function testAdvanceToLocked(): Promise<boolean> {
 
       if (res.status === 422 && Array.isArray(d.blockers) && d.blockers.length > 0) {
         const msgs = (d.blockers as Array<{ message?: string }>).map(b => b.message ?? '').join('; ');
-        console.log(`   ⚠️  Blockers: ${msgs.slice(0, 400)}`);
+        console.log(`   ⚠️  Blockers: ${msgs.slice(0, 600)}`);
         // If only issues remain, loop; otherwise break
         if (!msgs.includes('issue(s) open')) break;
+      } else if (res.status === 200 && d.statusAfter === 'in_progress') {
+        // Session still in_progress — advance may have been a no-op or readiness blocking silently
+        console.log(`   ⚠️  Still in_progress after advance. Full response: ${JSON.stringify(res.data).slice(0, 400)}`);
+        // Check readiness directly
+        const readinessRes = await makeRequest('GET', `/api/close/sessions/${closeSessionId}/readiness?format=gates`);
+        const rd = readinessRes.data as { canAdvance?: boolean; hardBlockers?: string[]; gates?: Array<{id: string; passing: boolean; detail: string}> };
+        if (rd.gates) {
+          const failing = rd.gates.filter(g => !g.passing);
+          if (failing.length > 0) {
+            console.log(`   ⚠️  Failing gates: ${failing.map(g => `${g.id}: ${g.detail}`).join('; ')}`);
+          } else {
+            console.log(`   ✅ All gates pass. canAdvance: ${rd.canAdvance}`);
+          }
+        }
+        if (rd.hardBlockers && rd.hardBlockers.length > 0) {
+          console.log(`   ⚠️  Hard blockers: ${rd.hardBlockers.join('; ')}`);
+        }
       } else {
+        console.log(`   ⚠️  Unexpected response: ${res.status} ${JSON.stringify(res.data).slice(0, 300)}`);
         break;
       }
     }
@@ -638,7 +707,7 @@ async function testCertify(): Promise<boolean> {
     const res = await makeRequest(
       'POST',
       `/api/close/sessions/${closeSessionId}/certify`,
-      { certifiedBy: 'integration-test@example.com', periodLabel: TEST_PERIOD }
+      { periodLabel: TEST_PERIOD }
     );
     const d = res.data as {
       certifiedSnapshotId?: string;

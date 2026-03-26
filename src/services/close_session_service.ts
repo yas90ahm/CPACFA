@@ -1024,19 +1024,26 @@ export async function advanceSession(
           console.warn('[advance] recon intelligence failed (non-fatal):', (reconErr as Error).message);
         }
 
-        // Auto-propose accounting modules — each wrapped in its own try/catch
-        await autoProposModules(
-          client as unknown as Pool,
-          input.tenantId,
-          input.closeSessionId,
-          currentSession.entityId,
-          currentSession.periodStart ?? '',
-          currentSession.periodEnd ?? '',
-          input.certifiedBy ?? 'system'
-        );
       }
       return currentSession;
     });
+
+    // Auto-propose accounting modules AFTER transaction commits (non-fatal failures must not roll back status change)
+    if (current.status === 'in_progress' && session.status === 'open') {
+      try {
+        await autoProposModules(
+          pool,
+          input.tenantId,
+          input.closeSessionId,
+          current.entityId,
+          current.periodStart ?? '',
+          current.periodEnd ?? '',
+          input.certifiedBy ?? 'system'
+        );
+      } catch (modErr) {
+        console.warn('[advance] autoProposModules failed (non-fatal):', (modErr as Error).message);
+      }
+    }
 
     // Emit real-time event for session advancement
     if (current.status !== session.status) {
@@ -1165,8 +1172,8 @@ async function autoProposModules(
         const { getReserveConfig } = await import('./inventory_reserve_service.js');
         const config = await getReserveConfig(pool, tenantId, entityId);
         if (!config) return null; // No inventory config — skip
-        const { computeReserve } = await import('./inventory_reserve_service.js');
-        return computeReserve(pool, tenantId, entityId, closeSessionId, 'latest');
+        // Skip — computeReserve requires a real snapshot UUID, not available at session init
+        return null;
       },
     },
     {
