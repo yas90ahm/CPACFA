@@ -65,7 +65,7 @@ export default function LoginPage() {
       {/* Right Panel -- Form */}
       <div
         className="w-full lg:w-[45%] flex items-center justify-center px-8 lg:px-16 shrink-0"
-        style={{ backgroundColor: 'var(--bg-base)' }}
+        style={{ backgroundColor: 'var(--bg-surface)' }}
       >
         <div className="w-full max-w-[360px] animate-fade-in">
           <h2 className="text-2xl font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -118,20 +118,20 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* Advanced: Tenant ID */}
+            {/* Advanced: Enterprise Tenant ID */}
             <button
               type="button"
               onClick={() => setShowAdvanced(!showAdvanced)}
               className="flex items-center gap-1 text-xs font-medium"
               style={{ color: 'var(--text-tertiary)', background: 'none', border: 'none', padding: 0 }}
             >
-              Advanced
+              Enterprise login
               <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', showAdvanced && 'rotate-180')} />
             </button>
             {showAdvanced && (
               <div>
                 <label htmlFor="login-tenant" className="block text-[13px] font-medium mb-1.5" style={{ color: 'var(--text-primary)' }}>
-                  Tenant ID <span style={{ color: 'var(--text-tertiary)' }}>(optional)</span>
+                  Organization ID <span style={{ color: 'var(--text-tertiary)' }}>(provided by your admin)</span>
                 </label>
                 <input
                   id="login-tenant"

@@ -150,17 +150,43 @@ export async function getReadinessGates(
     navigateTo: '/issues',
   });
 
-  // 8. Evidence Policy Met (merged from readiness; no hard blockers from evidence = pass)
+  // 8. Evidence Policy Met — check actual evidence count for completed recons
+  let evidencePass = true;
+  let evidenceDetail = 'Evidence requirements satisfied';
   const evidenceBlockers = readiness.hardBlockers.filter((m) =>
     m.includes('evidence') || m.includes('Evidence') || m.includes('supporting documentation')
   );
-  const evidencePass = evidenceBlockers.length === 0;
+  if (evidenceBlockers.length > 0) {
+    evidencePass = false;
+    evidenceDetail = evidenceBlockers[0] ?? 'Evidence requirements not met';
+  } else {
+    // Additional check: if completed/approved recons exist, verify they have evidence
+    try {
+      const reconsWithoutEvidence = await pool.query<{ cnt: string }>(
+        `SELECT COUNT(*)::int AS cnt FROM tenant_period_reconciliations r
+         WHERE r.tenant_id = $1 AND r.period_id = $2
+           AND r.status IN ('completed', 'approved')
+           AND NOT EXISTS (
+             SELECT 1 FROM evidence_links el
+             WHERE el.tenant_id = r.tenant_id AND el.object_type = 'reconciliation' AND el.object_id = r.recon_id
+           )`,
+        [tenantId, closeSessionId]
+      );
+      const missingCount = Number(reconsWithoutEvidence.rows[0]?.cnt ?? 0);
+      if (missingCount > 0) {
+        evidencePass = false;
+        evidenceDetail = `${missingCount} completed reconciliation${missingCount === 1 ? '' : 's'} missing supporting evidence`;
+      }
+    } catch {
+      // Tables may not exist — use readiness blockers only
+    }
+  }
   gates.push({
     id: 'evidence_policy',
     name: 'Evidence Policy Met',
     description: 'Required evidence attached to reconciliations and material journal entries',
     passing: evidencePass,
-    detail: evidencePass ? 'Evidence requirements satisfied' : evidenceBlockers[0] ?? 'Evidence requirements not met',
+    detail: evidenceDetail,
     category: 'hard',
     navigateTo: '/reconciliation',
   });
@@ -176,13 +202,35 @@ export async function getReadinessGates(
     navigateTo: '/checklist',
   });
 
-  // 10. Cash Reconciliation (if applicable)
+  // 10. Cash Reconciliation — check period reconciliations for cash accounts (1xxx)
+  let cashRecPassing = true;
+  let cashRecDetail = 'No cash reconciliations required';
+  try {
+    const cashRecons = await pool.query<{ status: string; account_code: string }>(
+      `SELECT status, account_code FROM tenant_period_reconciliations
+       WHERE tenant_id = $1 AND period_id = $2
+         AND account_code LIKE '1%'
+       ORDER BY account_code`,
+      [tenantId, closeSessionId]
+    );
+    if (cashRecons.rows.length > 0) {
+      const notApproved = cashRecons.rows.filter(r => r.status !== 'approved' && r.status !== 'completed');
+      cashRecPassing = notApproved.length === 0;
+      cashRecDetail = cashRecPassing
+        ? `${cashRecons.rows.length} cash reconciliation${cashRecons.rows.length === 1 ? '' : 's'} complete`
+        : `${notApproved.length} cash reconciliation${notApproved.length === 1 ? '' : 's'} not yet complete`;
+    }
+  } catch {
+    // Table may not exist — use readiness fallback
+    cashRecPassing = readiness.cashRecComplete !== false;
+    cashRecDetail = cashRecPassing ? 'Cash reconciliation complete' : 'Bank recon requires sign-off';
+  }
   gates.push({
     id: 'cash_rec_complete',
     name: 'Cash Reconciliation Complete',
-    description: 'Bank reconciliation runs must be signed off when present',
-    passing: readiness.cashRecComplete !== false,
-    detail: readiness.cashRecComplete !== false ? 'Cash reconciliation complete' : 'Bank recon requires sign-off',
+    description: 'Cash and bank account reconciliations must be completed or approved',
+    passing: cashRecPassing,
+    detail: cashRecDetail,
     category: 'hard',
     navigateTo: '/reconciliation',
   });

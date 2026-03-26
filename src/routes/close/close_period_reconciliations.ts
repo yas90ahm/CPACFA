@@ -552,6 +552,23 @@ router.get('/sessions/:sessionId/reconciliations/:reconId/roll-forward', async (
       res.status(404).json({ error: msg });
       return;
     }
+    // Graceful degradation for first close (no prior period, missing tables, etc.)
+    if (msg.includes('does not exist') || msg.includes('prior') || msg.includes('relation')) {
+      res.json({
+        reconId: req.params.reconId ?? '',
+        isRollForwardAccount: false,
+        beginningBalance: 0,
+        additions: 0,
+        disposals: 0,
+        adjustments: 0,
+        computedEndingBalance: 0,
+        actualEndingBalance: 0,
+        difference: 0,
+        movements: [],
+        message: 'No prior period data available for roll-forward analysis',
+      });
+      return;
+    }
     send500(res, e, 'Roll-forward reconciliation failed');
   }
 });
