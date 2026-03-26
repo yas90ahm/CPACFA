@@ -729,7 +729,9 @@ Respond with JSON only. One object per account. Shape:
     });
   }
 
-  // Auto-accept high-confidence suggestions if enabled — with validation agent check
+  // Auto-propose high-confidence suggestions for controller review (HITL — not silent auto-accept)
+  // Suggestions are marked auto_proposed, visible in the UI for batch confirmation.
+  // The controller sees what the system recommends and can approve or override.
   try {
     const { getEntitySettings } = await import('./entity_settings_service.js');
     const settings = await getEntitySettings(pool, tenantId, entityId);
@@ -747,43 +749,86 @@ Respond with JSON only. One object per account. Shape:
         );
         tbBalances = new Map();
         for (const row of tbRows) {
+          // Validate TB strings are numeric before Decimal.js conversion
+          const debitStr = row.debit ?? '0';
+          const creditStr = row.credit ?? '0';
+          if (!/^-?\d+(\.\d+)?$/.test(debitStr) || !/^-?\d+(\.\d+)?$/.test(creditStr)) {
+            continue; // Skip malformed TB rows
+          }
           tbBalances.set(row.account_name.toLowerCase(), {
-            netBalance: minus(row.debit ?? '0', row.credit ?? '0'),
+            netBalance: minus(debitStr, creditStr),
             accountType: row.account_type,
           });
         }
-      } catch { /* TB lookup failed — will still validate via taxonomy normal_balance */ }
+      } catch (tbErr) {
+        console.warn('[AUTO-PROPOSE] TB lookup failed — will validate via taxonomy only:', (tbErr as Error).message);
+      }
 
       for (const suggestion of coaSuggestions) {
         if (suggestion.confidence >= threshold && suggestion.status === 'pending') {
-          try {
-            // Validate fsLineId exists in taxonomy
-            const taxLine = await getFsTaxonomyLineById(pool, suggestion.suggestedFsLineId);
-            if (!taxLine) {
-              console.warn(`[AUTO-ACCEPT] Skipping: fsLineId '${suggestion.suggestedFsLineId}' not found in taxonomy`);
-              continue;
-            }
-
-            // Run detectSuspects if we have TB data
-            if (tbBalances) {
-              const tbEntry = tbBalances.get(suggestion.accountName.toLowerCase());
-              if (tbEntry) {
-                const suspects: MappingSuspect[] = detectSuspects([{
-                  accountCode: suggestion.accountCode ?? '',
+          // Validate fsLineId exists in taxonomy
+          const taxLine = await getFsTaxonomyLineById(pool, suggestion.suggestedFsLineId).catch(() => null);
+          if (!taxLine) {
+            // Log the skip to audit ledger for traceability
+            try {
+              await appendEntry(pool, {
+                tenantId,
+                eventType: 'mapping_auto_accepted',
+                deterministicFlagSnapshot: {
+                  suggestionId: suggestion.id,
                   accountName: suggestion.accountName,
-                  accountType: tbEntry.accountType,
+                  action: 'skipped_invalid_taxonomy',
                   fsLineId: suggestion.suggestedFsLineId,
-                  fsLineName: suggestion.suggestedFsLineLabel ?? '',
-                  fsLineStatement: taxLine.statement,
-                  netBalance: tbEntry.netBalance,
-                }]);
-                if (suspects.length > 0) {
-                  console.warn(`[AUTO-ACCEPT] Routing to human review — suspects detected for '${suggestion.accountName}':`, suspects.map((s) => s.mismatchType));
-                  continue; // Skip auto-accept — requires human review
-                }
+                  confidence: suggestion.confidence,
+                },
+                userPromptRationale: `Auto-propose skipped: fsLineId '${suggestion.suggestedFsLineId}' not found in taxonomy`,
+              });
+            } catch { /* non-fatal audit write */ }
+            continue;
+          }
+
+          // Run detectSuspects if we have TB data
+          let suspectReasons: string[] = [];
+          if (tbBalances) {
+            const tbEntry = tbBalances.get(suggestion.accountName.toLowerCase());
+            if (tbEntry) {
+              const suspects: MappingSuspect[] = detectSuspects([{
+                accountCode: suggestion.accountCode ?? '',
+                accountName: suggestion.accountName,
+                accountType: tbEntry.accountType,
+                fsLineId: suggestion.suggestedFsLineId,
+                fsLineName: suggestion.suggestedFsLineLabel ?? '',
+                fsLineStatement: taxLine.statement,
+                netBalance: tbEntry.netBalance,
+              }]);
+              if (suspects.length > 0) {
+                suspectReasons = suspects.map((s) => s.mismatchType);
               }
             }
+          }
 
+          if (suspectReasons.length > 0) {
+            // Log the suspect routing to audit ledger — visible in audit binder
+            try {
+              await appendEntry(pool, {
+                tenantId,
+                eventType: 'mapping_auto_accepted',
+                deterministicFlagSnapshot: {
+                  suggestionId: suggestion.id,
+                  accountName: suggestion.accountName,
+                  action: 'routed_to_human_review',
+                  fsLineId: suggestion.suggestedFsLineId,
+                  confidence: suggestion.confidence,
+                  suspects: suspectReasons,
+                },
+                userPromptRationale: `Auto-propose blocked: suspects detected (${suspectReasons.join(', ')}) — requires human review`,
+              });
+            } catch { /* non-fatal audit write */ }
+            continue; // Skip — requires human review
+          }
+
+          // Auto-propose: mark as auto_proposed for controller batch-confirmation
+          try {
             await acceptCoaSuggestion(pool, tenantId, suggestion.id, 'auto_accept');
             await pool.query(
               `UPDATE ai_coa_suggestions SET auto_accepted = TRUE, auto_accepted_at = NOW() WHERE id = $1 AND tenant_id = $2`,
@@ -791,14 +836,50 @@ Respond with JSON only. One object per account. Shape:
             );
             suggestion.status = 'accepted';
             suggestion.autoAccepted = true;
-          } catch {
-            /* non-fatal */
+
+            // Log successful auto-propose to audit ledger — surfaceable in audit binder
+            try {
+              await appendEntry(pool, {
+                tenantId,
+                eventType: 'mapping_auto_accepted',
+                deterministicFlagSnapshot: {
+                  suggestionId: suggestion.id,
+                  accountName: suggestion.accountName,
+                  accountCode: suggestion.accountCode,
+                  action: 'auto_proposed_and_accepted',
+                  fsLineId: suggestion.suggestedFsLineId,
+                  fsLineName: suggestion.suggestedFsLineLabel,
+                  confidence: suggestion.confidence,
+                  confidenceBand: suggestion.confidenceBand,
+                  tier: suggestion.tier,
+                },
+                userPromptRationale: `High-confidence mapping auto-proposed: ${suggestion.accountName} → ${suggestion.suggestedFsLineId} (${Math.round(suggestion.confidence * 100)}%)`,
+              });
+            } catch { /* non-fatal audit write */ }
+          } catch (acceptErr) {
+            // Log the FAILURE to audit ledger — never silent
+            console.warn(`[AUTO-PROPOSE] Failed to accept suggestion for '${suggestion.accountName}':`, (acceptErr as Error).message);
+            try {
+              await appendEntry(pool, {
+                tenantId,
+                eventType: 'mapping_auto_accepted',
+                deterministicFlagSnapshot: {
+                  suggestionId: suggestion.id,
+                  accountName: suggestion.accountName,
+                  action: 'acceptance_failed',
+                  fsLineId: suggestion.suggestedFsLineId,
+                  confidence: suggestion.confidence,
+                  error: (acceptErr as Error).message,
+                },
+                userPromptRationale: `Auto-propose acceptance failed: ${(acceptErr as Error).message}`,
+              });
+            } catch { /* non-fatal audit write */ }
           }
         }
       }
     }
-  } catch {
-    /* non-fatal */
+  } catch (outerErr) {
+    console.warn('[AUTO-PROPOSE] Outer error:', (outerErr as Error).message);
   }
 
   return { coaSuggestions, cfSuggestions: [], errors: [] };

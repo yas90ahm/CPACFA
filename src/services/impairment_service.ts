@@ -5,7 +5,7 @@
 import type { Pool } from 'pg';
 import * as repo from '../db/repositories/impairment_repository.js';
 import type { CGURow, GoodwillAllocationRow, ImpairmentTestRow } from '../db/repositories/impairment_repository.js';
-import { round2, plus } from '../utils/decimal.js';
+import { round2, plus, from as dec, minus } from '../utils/decimal.js';
 
 export type { CGURow, GoodwillAllocationRow, ImpairmentTestRow };
 
@@ -40,7 +40,7 @@ export async function evaluateImpairment(
   const test = await repo.getImpairmentTest(pool, tenantId, testId);
   if (!test) throw new Error('Impairment test not found');
 
-  const impairmentLoss = String(round2(Math.max(0, Number(test.carryingAmount) - Number(test.recoverableAmount))));
+  const impairmentLoss = String(round2(Math.max(0, minus(String(test.carryingAmount), String(test.recoverableAmount)))));
 
   // Update the test with computed loss by creating a new record (append-only pattern)
   // Since the repo doesn't have update, we return the test with computed loss
@@ -63,7 +63,7 @@ export async function getImpairmentSummary(
   const byCGUMap = new Map<string, { cguName: string; totalLoss: number; testCount: number }>();
 
   for (const test of tests) {
-    const loss = Number(test.impairmentLoss ?? 0) || Math.max(0, Number(test.carryingAmount) - Number(test.recoverableAmount));
+    const loss = round2(test.impairmentLoss ?? 0) || Math.max(0, minus(String(test.carryingAmount), String(test.recoverableAmount)));
     totalImpairmentLoss = plus(totalImpairmentLoss, loss);
 
     const cguId = test.cguId ?? 'unassigned';

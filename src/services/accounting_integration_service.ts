@@ -136,6 +136,7 @@ function getAdapter(provider: AccountingProvider, pool?: Pool, tenantId?: string
         );
       }
       console.warn(`[ERP] ${provider} adapter failed, using MOCK (ALLOW_MOCK_ERP=true):`, (adapterErr as Error).message);
+      console.error(`[ERP][CRITICAL] MOCK DATA ACTIVE for ${provider} — financial data is NOT real. This must never happen in production.`);
     }
   }
 
@@ -146,7 +147,7 @@ function getAdapter(provider: AccountingProvider, pool?: Pool, tenantId?: string
       `Do not proceed with mock data. Set ALLOW_MOCK_ERP=true for local development only.`
     );
   }
-  console.warn(`[ERP] Using MockAccountingAdapter for ${provider} — data is NOT real`);
+  console.error(`[ERP][CRITICAL] Using MockAccountingAdapter for ${provider} — financial data is NOT real. ALLOW_MOCK_ERP is set.`);
   return mockAdapters[provider];
 }
 

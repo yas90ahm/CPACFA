@@ -136,9 +136,10 @@ export async function upsertEntitySettings(
   const autoLockDays = input.autoLockDays ?? 0;
   const varianceMaterialityDollar = input.varianceMaterialityDollar != null ? String(input.varianceMaterialityDollar) : '10000.00';
   const varianceMaterialityPercent = input.varianceMaterialityPercent != null ? String(input.varianceMaterialityPercent) : '10.0';
-  // M6 fix: Clamp mappingConfidenceThreshold to [0.5, 1.0] to prevent dangerously low auto-accept thresholds
+  // Clamp mappingConfidenceThreshold to [0.80, 1.0] — auto-propose requires high confidence.
+  // Below 80% is too risky for automated mapping decisions; controller must map manually.
   const rawThreshold = input.mappingConfidenceThreshold ?? 0.95;
-  const mappingConfidenceThreshold = Math.min(1.0, Math.max(0.5, rawThreshold));
+  const mappingConfidenceThreshold = Math.min(1.0, Math.max(0.80, rawThreshold));
   const mappingAutoAcceptEnabled = input.mappingAutoAcceptEnabled ?? false;
   const autoApplyAfterNPeriods = input.autoApplyAfterNPeriods ?? 3;
   const templateAutoApplyEnabled = input.templateAutoApplyEnabled ?? false;

@@ -1262,11 +1262,21 @@ async function autoProposModules(
     {
       name: 'inventory_reserve',
       fn: async () => {
-        // Requires inventory aging snapshot — skip if none uploaded
+        // Requires inventory aging snapshot — create informational issue if skipped
         const { getReserveConfig } = await import('./inventory_reserve_service.js');
         const config = await getReserveConfig(pool, tenantId, entityId);
-        if (!config) return null; // No inventory config — skip
-        // Skip — computeReserve requires a real snapshot UUID, not available at session init
+        if (!config) {
+          try {
+            const { createIssueForSession } = await import('./issue_service.js');
+            await createIssueForSession(pool, {
+              tenantId, closeSessionId, entityId,
+              title: 'Inventory reserve module skipped — no configuration uploaded',
+              description: 'The inventory reserve (obsolescence) module was not proposed because no inventory aging configuration exists. If this entity holds inventory, upload the inventory aging data and re-run. If inventory is not applicable, resolve this issue as N/A.',
+              severity: 'medium', category: 'data_quality',
+            });
+          } catch { /* non-fatal */ }
+          return null;
+        }
         return null;
       },
     },
@@ -1294,10 +1304,21 @@ async function autoProposModules(
     {
       name: 'ar_aging',
       fn: async () => {
-        // AR CECL requires a snapshot and current allowance — skip if not configured
+        // AR CECL requires a snapshot — create informational issue if skipped
         const { getSnapshots } = await import('./ar_aging_service.js');
         const snapshots = await getSnapshots(pool, tenantId, closeSessionId);
-        if (snapshots.length === 0) return null; // No AR data uploaded yet
+        if (snapshots.length === 0) {
+          try {
+            const { createIssueForSession } = await import('./issue_service.js');
+            await createIssueForSession(pool, {
+              tenantId, closeSessionId, entityId,
+              title: 'AR aging / CECL module skipped — no AR snapshots uploaded',
+              description: 'The AR aging (CECL allowance) module was not proposed because no AR aging snapshots exist. If this entity has accounts receivable, upload the AR aging data and re-run. If AR is not applicable, resolve this issue as N/A.',
+              severity: 'medium', category: 'data_quality',
+            });
+          } catch { /* non-fatal */ }
+          return null;
+        }
         const { computeCECLAllowance } = await import('./ar_aging_service.js');
         return computeCECLAllowance(pool, tenantId, snapshots[0].id, closeSessionId, 0);
       },
