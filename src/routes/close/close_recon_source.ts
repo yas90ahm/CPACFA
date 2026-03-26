@@ -63,7 +63,20 @@ router.post(
         userId
       );
 
-      res.status(201).json({ sourceData: result });
+      // Auto-match after successful upload (best-effort, non-blocking)
+      let matchSummary: { exactMatches: number; fuzzyMatches: number; unmatched: number } | null = null;
+      try {
+        const matches = await autoMatchEntries(pool, tenantId, reconId, sessionId);
+        matchSummary = {
+          exactMatches: matches.filter((m) => m.confidence >= 0.95).length,
+          fuzzyMatches: matches.filter((m) => m.confidence >= 0.5 && m.confidence < 0.95).length,
+          unmatched: (result.entries?.length ?? 0) - matches.length,
+        };
+      } catch (matchErr) {
+        console.warn('[source-upload] Auto-match after upload failed (non-fatal):', matchErr instanceof Error ? matchErr.message : String(matchErr));
+      }
+
+      res.status(201).json({ sourceData: result, matchSummary });
     } catch (e) {
       if (e instanceof ReconSourceError) {
         const status = e.code === 'PARSE_ERROR' ? 400 : e.code === 'NOT_FOUND' ? 404 : 422;

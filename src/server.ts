@@ -62,6 +62,7 @@ import glRouter from './routes/gl/index.js';
 import dataQualityRouter from './routes/data_quality.js';
 import approvalsRouter from './routes/approvals.js';
 import accountingIntegrationRouter from './routes/accounting_integration.js';
+import bankConnectionsRouter from './routes/bank_connections.js';
 import onboardingRouter from './routes/onboarding.js';
 import tenantsRouter from './routes/tenants.js';
 import portfolioRouter from './routes/portfolio.js';
@@ -248,6 +249,9 @@ app.use('/api/approvals', approvalsRouter);
 
 // API: Accounting integration — QuickBooks, Xero, NetSuite (sync TB, push JE, pull transactions)
 app.use('/api/accounting-integration', accountingIntegrationRouter);
+
+// API: Bank connections — Plaid/MX/Yodlee for live bank balance pre-fill
+app.use('/api/bank-connections', bankConnectionsRouter);
 
 // API: Onboarding — Guided setup, CoA import, first close wizard
 app.use('/api/onboarding', onboardingRouter);

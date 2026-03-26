@@ -127,10 +127,22 @@ export async function runReconIntelligence(
     let resolvedItems = 0;
     const suggestedItems: PreFillResult['suggestedItems'] = [];
 
-    // Priority 1: Bank API (future — check if connection exists)
-    // TODO: Implement when Plaid adapter is built
-    // const bankBalance = await fetchBankBalance(pool, tenantId, recon.accountCode, closeSessionId);
-    // if (bankBalance) { ... fromBankApi++; }
+    // Priority 1: Bank API (live bank balance if connection configured)
+    try {
+      const { fetchBankBalance } = await import('./bank_connection_service.js');
+      const session = await import('../db/repositories/close_session_repository.js').then(m => m.getCloseSessionById(pool, tenantId, closeSessionId));
+      const asOfDate = session?.periodEnd ?? new Date().toISOString().slice(0, 10);
+      const bankBalance = await fetchBankBalance(pool, tenantId, recon.accountCode, asOfDate);
+      if (bankBalance) {
+        suggestedBalance = String(bankBalance.balance);
+        source = 'bank_api';
+        confidence = 'high';
+        sourceDetail = `Live balance from ${bankBalance.institution ?? 'bank'} as of ${bankBalance.asOfDate ?? asOfDate}`;
+        fromBankApi++;
+      }
+    } catch {
+      // Bank connection unavailable — fall through to PDF/prior period
+    }
 
     // Priority 2: PDF extraction (if evidence uploaded for this recon)
     if (!suggestedBalance && reconIdsWithEvidence.has(recon.reconId)) {

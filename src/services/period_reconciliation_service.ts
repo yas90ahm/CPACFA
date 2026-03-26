@@ -168,6 +168,20 @@ export async function initializeReconciliations(
     }
   }
 
+  // Auto-run intelligence pre-fill after initialization (best-effort, non-blocking)
+  if (allRecons.length > 0) {
+    try {
+      const { runReconIntelligence, applyPreFills } = await import('./recon_intelligence_service.js');
+      const intelligence = await runReconIntelligence(pool, tenantId, periodId, entityId);
+      if (intelligence.preFills.length > 0) {
+        await applyPreFills(pool, tenantId, intelligence.preFills);
+      }
+    } catch (e) {
+      // Intelligence pre-fill failure must not block initialization
+      console.warn('[initializeReconciliations] Intelligence pre-fill failed (non-fatal):', e instanceof Error ? e.message : String(e));
+    }
+  }
+
   // Return all recons (idempotent — second call returns existing)
   return allRecons;
 }
