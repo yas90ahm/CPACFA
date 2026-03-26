@@ -137,6 +137,38 @@ export async function searchXBRL(
     });
   }
 
+  // Method 2: Embedding-based semantic search (when embeddings are available)
+  try {
+    const { searchByEmbedding } = await import('./xbrl_embedding_service.js');
+    const embeddingResults = await searchByEmbedding(pool, trimmed, {
+      statement: options?.statement,
+      limit: limit * 2,
+    });
+    for (const er of embeddingResults) {
+      const existing = resultMap.get(er.id);
+      if (existing) {
+        // Boost: element found by BOTH trigram and embedding — higher confidence
+        existing.similarity = Math.min(1.0, existing.similarity + er.similarity * 0.3);
+        existing.matchMethod = 'both';
+      } else if (er.similarity > 0.3) {
+        // Element found only by embedding — semantic match that trigram missed
+        resultMap.set(er.id, {
+          id: er.id,
+          elementName: '',
+          label: er.label,
+          documentation: null,
+          balanceType: '',
+          periodType: '',
+          statement: er.statement,
+          similarity: er.similarity * 0.8, // discount slightly vs trigram-confirmed matches
+          matchMethod: 'embedding',
+        });
+      }
+    }
+  } catch {
+    // Embedding search unavailable — trigram-only results
+  }
+
   // Sort by similarity descending, return top N
   const sorted = Array.from(resultMap.values())
     .sort((a, b) => b.similarity - a.similarity)

@@ -98,6 +98,16 @@ async function seedXbrlTaxonomy(): Promise<void> {
   console.log(`  Abstract: ${abstractRes.rows[0].cnt}`);
   console.log(`  Deprecated: ${deprecatedRes.rows[0].cnt}`);
   console.log('\n[seed_xbrl] Seed complete.');
+
+  // Compute embeddings for semantic search (if embedding provider is configured)
+  try {
+    const { computeXbrlEmbeddings } = await import('../services/xbrl_embedding_service.js');
+    console.log('\n[seed_xbrl] Computing embeddings for semantic search...');
+    const embeddingCount = await computeXbrlEmbeddings(pool);
+    console.log(`[seed_xbrl] Embeddings computed: ${embeddingCount}`);
+  } catch (err) {
+    console.warn('[seed_xbrl] Embedding computation skipped:', err instanceof Error ? err.message : String(err));
+  }
 }
 
 const isMain = process.argv[1]?.includes('seed_xbrl_taxonomy');
