@@ -140,14 +140,14 @@ function parseAllocation(
     const out: Record<string, number> = {};
     let sum = 0;
     for (const p of pobs) {
-      const v = Number(o[p.id]) ?? 0;
+      const v = round2(o[p.id] ?? 0);
       out[p.id] = v;
-      sum += v;
+      sum = decPlus(sum, v);
     }
-    if (Math.abs(sum - total) > 0.02) {
-      const diff = total - sum;
+    if (Math.abs(decMinus(sum, total)) > 0.02) {
+      const diff = decMinus(total, sum);
       const first = pobs[0];
-      if (first) out[first.id] = (out[first.id] ?? 0) + diff;
+      if (first) out[first.id] = decPlus(out[first.id] ?? 0, diff);
     }
     return out;
   } catch {

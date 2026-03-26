@@ -18,6 +18,7 @@
 
 import type { Pool } from 'pg';
 import type { PeriodReconciliation, ReconItem } from '../types/period_reconciliation.js';
+import { minus } from '../utils/decimal.js';
 
 export type BalanceSource =
   | 'bank_api'
@@ -181,7 +182,7 @@ export async function runReconIntelligence(
       // (Simple heuristic: if GL balance changed in the direction that would resolve the item)
       const prior = priorByAccount.get(recon.accountCode);
       if (prior && prior.glBalance != null) {
-        const glDelta = Number(recon.glBalance) - Number(prior.glBalance);
+        const glDelta = minus(String(recon.glBalance ?? 0), String(prior.glBalance ?? 0));
         for (const item of unresolvedPrior) {
           const itemAmount = Number(item.amount);
           // If the GL moved in a way that covers this item, suggest resolution

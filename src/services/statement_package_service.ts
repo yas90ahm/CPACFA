@@ -561,7 +561,7 @@ export function computeDiff(prevLines: StatementLine[], nextLines: StatementLine
     const prev = prevByKey.get(key);
     if (!prev) {
       added.push({ fsLineId: key, amount: Number(next.amount), statement: next.statement, metadata: next.metadata });
-    } else if (Math.abs(Number(prev.amount) - Number(next.amount)) > 0.001) {
+    } else if (decimalFrom(prev.amount).minus(decimalFrom(next.amount)).abs().greaterThan(0.001)) {
       changed.push({
         fsLineId: key,
         prevAmount: Number(prev.amount),

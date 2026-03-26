@@ -12,7 +12,7 @@ import * as peRepo from '../db/repositories/pe_hierarchy_repository.js';
 import * as rulesRepo from '../db/repositories/coa_mapping_rules_repository.js';
 import { getAdjustedTrialBalance } from './adjusted_trial_balance_service.js';
 import { getSession } from './close_session_service.js';
-import { sumRound2, round2, minus } from '../utils/decimal.js';
+import { sumRound2, round2, minus, plus } from '../utils/decimal.js';
 
 /**
  * Generate PE-format statements for a close session.
@@ -159,7 +159,7 @@ function buildTree(
     if (node.children && node.children.length > 0) {
       const childTotal = sumRound2(node.children.map((c) => rollUp(c)));
       // Parent amount = own direct amount + children
-      node.amount = round2(node.amount + childTotal);
+      node.amount = plus(node.amount, childTotal);
     }
     return node.amount;
   }

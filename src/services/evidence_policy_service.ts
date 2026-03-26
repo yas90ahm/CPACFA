@@ -8,7 +8,7 @@
 import type { Pool } from 'pg';
 import { getEvidencePolicy } from '../db/repositories/evidence_policy_repository.js';
 import * as jeRepo from '../db/repositories/journal_entry_repository.js';
-import { sumRound2 } from '../utils/decimal.js';
+import { sumRound2, from as dec } from '../utils/decimal.js';
 import {
   listAssertionTypesByJournalEntryForSession,
   listEvidenceForObject,
@@ -118,7 +118,7 @@ export async function checkEvidencePolicyForCertification(
   if (reconRequiredTypes && reconRequiredTypes.length > 0) {
     for (const recon of recons) {
       if (recon.status !== 'completed' && recon.status !== 'approved') continue;
-      const glBalance = recon.glBalance != null ? Math.abs(Number(recon.glBalance)) : 0;
+      const glBalance = recon.glBalance != null ? dec(String(recon.glBalance)).abs().toDecimalPlaces(2).toNumber() : 0;
       if (glBalance < thresholdNum) continue;
 
       const reconEvidence = await listEvidenceForObject(pool, tenantId, 'reconciliation', recon.reconId);

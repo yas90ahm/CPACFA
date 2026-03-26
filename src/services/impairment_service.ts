@@ -5,7 +5,7 @@
 import type { Pool } from 'pg';
 import * as repo from '../db/repositories/impairment_repository.js';
 import type { CGURow, GoodwillAllocationRow, ImpairmentTestRow } from '../db/repositories/impairment_repository.js';
-import { round2 } from '../utils/decimal.js';
+import { round2, plus } from '../utils/decimal.js';
 
 export type { CGURow, GoodwillAllocationRow, ImpairmentTestRow };
 
@@ -64,12 +64,12 @@ export async function getImpairmentSummary(
 
   for (const test of tests) {
     const loss = Number(test.impairmentLoss ?? 0) || Math.max(0, Number(test.carryingAmount) - Number(test.recoverableAmount));
-    totalImpairmentLoss += loss;
+    totalImpairmentLoss = plus(totalImpairmentLoss, loss);
 
     const cguId = test.cguId ?? 'unassigned';
     const existing = byCGUMap.get(cguId);
     if (existing) {
-      existing.totalLoss += loss;
+      existing.totalLoss = plus(existing.totalLoss, loss);
       existing.testCount += 1;
     } else {
       const cgu = cguMap.get(cguId);

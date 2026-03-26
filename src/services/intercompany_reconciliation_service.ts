@@ -4,6 +4,7 @@
  */
 
 import type { Pool } from 'pg';
+import { plus, minus } from '../utils/decimal.js';
 import type {
   IntercompanyPair,
   IntercompanyReconciliationResult,
@@ -30,8 +31,8 @@ function netBalance(
   const key = accountName.trim().toLowerCase();
   for (const line of lines) {
     if (line.accountName.trim().toLowerCase() !== key) continue;
-    if (line.side === 'debit') net += line.amount;
-    else net -= line.amount;
+    if (line.side === 'debit') net = plus(net, line.amount);
+    else net = minus(net, line.amount);
   }
   return net;
 }

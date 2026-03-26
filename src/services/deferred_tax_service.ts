@@ -13,7 +13,7 @@
 import type { Pool } from 'pg';
 import * as repo from '../db/repositories/deferred_tax_repository.js';
 import type { DeferredTaxItemRow, ValuationAllowanceRow, RateChangeRow } from '../db/repositories/deferred_tax_repository.js';
-import { round2 } from '../utils/decimal.js';
+import { round2, plus, minus, from as dec } from '../utils/decimal.js';
 
 // Re-export types
 export type { DeferredTaxItemRow, ValuationAllowanceRow, RateChangeRow };
@@ -97,10 +97,10 @@ export function computeDeferredTaxesStateless(
   const details: DeferredTaxRollforward['details'] = [];
 
   for (const td of temporaryDifferences) {
-    const diff = td.difference ?? td.bookBasis - td.taxBasis;
-    const deferredAmount = round2(diff * taxRate);
+    const diff = td.difference ?? minus(td.bookBasis, td.taxBasis);
+    const deferredAmount = round2(dec(diff).times(taxRate).toNumber());
     if (td.isDeductibleTemp) {
-      dtaFromPeriod += deferredAmount;
+      dtaFromPeriod = plus(dtaFromPeriod, deferredAmount);
       details.push({
         description: td.description,
         difference: diff,
@@ -109,7 +109,7 @@ export function computeDeferredTaxesStateless(
         reversalPeriod: td.reversalPeriod,
       });
     } else {
-      dtlFromPeriod += deferredAmount;
+      dtlFromPeriod = plus(dtlFromPeriod, deferredAmount);
       details.push({
         description: td.description,
         difference: diff,
@@ -120,8 +120,8 @@ export function computeDeferredTaxesStateless(
     }
   }
 
-  const endingDta = beginningDta + dtaFromPeriod;
-  const endingDtl = beginningDtl + dtlFromPeriod;
+  const endingDta = plus(beginningDta, dtaFromPeriod);
+  const endingDtl = plus(beginningDtl, dtlFromPeriod);
   const netDta = endingDta - endingDtl;
 
   return {
@@ -179,13 +179,13 @@ export async function calculateDeferredTax(
       // Positive temp diff (book > tax) = deductible = DTA (e.g., accrued expenses)
       // Negative temp diff (book < tax) = taxable = DTL (e.g., accelerated depreciation)
       if (tempDiff > 0) {
-        deferredTaxAssetGross += deferredTax;
+        deferredTaxAssetGross = plus(deferredTaxAssetGross, deferredTax);
       } else {
-        deferredTaxLiabilityGross += deferredTax;
+        deferredTaxLiabilityGross = plus(deferredTaxLiabilityGross, deferredTax);
       }
     } else if (item.itemType === 'nol_carryforward' || item.itemType === 'tax_credit') {
       // NOL and tax credits are assets
-      deferredTaxAssetGross += Number(item.deferredTaxAsset ?? 0);
+      deferredTaxAssetGross = plus(deferredTaxAssetGross, round2(item.deferredTaxAsset ?? 0));
     }
   }
   

@@ -12,6 +12,7 @@
  * - Decimal place errors
  */
 
+import { sumRound2 } from '../utils/decimal.js';
 import type {
   DetectedPattern,
   ImbalancedEntry,
@@ -94,7 +95,7 @@ function detectSingleLine(entry: ImbalancedEntry): DetectedPattern | null {
  * Pattern 2: Small imbalance (<10% of entry total - likely data entry typo)
  */
 function detectSmallTypo(entry: ImbalancedEntry): DetectedPattern | null {
-  const entryTotal = entry.lines.reduce((sum, l) => sum + (l.debit ?? 0) + (l.credit ?? 0), 0);
+  const entryTotal = sumRound2(entry.lines.map((l) => (l.debit ?? 0) + (l.credit ?? 0)));
   if (entryTotal < 0.01) return null;
 
   const absImbalance = Math.abs(entry.imbalance);

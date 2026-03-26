@@ -52,9 +52,9 @@ export function translateToReportingCurrency(
       rateType,
     });
 
-    totalTranslated += translated;
+    totalTranslated = plus(totalTranslated, translated);
     if (line.balanceType === 'equity') {
-      equityTranslation += translated;
+      equityTranslation = plus(equityTranslation, translated);
     }
   }
 
@@ -109,11 +109,11 @@ export function remeasureToFunctionalCurrency(
       rateType,
     });
 
-    totalTranslated += translated;
+    totalTranslated = plus(totalTranslated, translated);
   }
 
   // Remeasurement gain/loss: simplified as (sum of translated) vs local total at closing
-  const localTotal = lines.reduce((s, l) => s + l.amount, 0);
+  const localTotal = sumRound2(lines.map((l) => l.amount));
   const localRate = closing[lines[0]?.currency ?? functionalCurrency] ?? 1;
   const remeasurementGainLoss = round2(minus(totalTranslated, from(localTotal).times(localRate).toNumber()));
 
@@ -148,7 +148,7 @@ export function computeUnrealizedFxGainLoss(
     const currentFunctional = from(pos.amount).times(rate).toDecimalPlaces(2).toNumber();
     const key = pos.accountCode ?? String(i);
     const priorFunctional = prior[key] ?? currentFunctional;
-    totalUnrealized += from(currentFunctional).minus(priorFunctional).toNumber();
+    totalUnrealized = plus(totalUnrealized, from(currentFunctional).minus(priorFunctional).toDecimalPlaces(2).toNumber());
   });
 
   return round2(totalUnrealized);
