@@ -17,6 +17,8 @@ export interface VarianceCompletenessResult {
   explained: number;
   approved: number;
   unexplained: VarianceRecord[];
+  /** Count of AI-drafted explanations not yet reviewed by a human. */
+  unreviewedAi?: number;
 }
 
 /** Compute variances and store (DB generates change_amount and change_percentage). */
@@ -232,11 +234,16 @@ export async function checkVarianceCompleteness(
   const unexplained = material.filter(
     (v) => !v.explanation || v.explanation.trim().length === 0
   );
+  // AI-drafted explanations require explicit human review attestation
+  const unreviewedAi = explained.filter(
+    (v) => v.explanationSource === 'ai_draft' && !v.humanReviewedBy
+  );
   return {
-    passes: unexplained.length === 0,
+    passes: unexplained.length === 0 && unreviewedAi.length === 0,
     totalMaterial: material.length,
     explained: explained.length,
     approved: approved.length,
     unexplained,
+    unreviewedAi: unreviewedAi.length,
   };
 }

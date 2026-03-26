@@ -124,9 +124,11 @@ export async function getReadinessGates(
   const variancePassing = statementsExist ? varianceResult.passes : false;
   const varianceDetail = !statementsExist
     ? 'Generate statements first'
-    : varianceResult.passes
-      ? `${varianceResult.totalMaterial} material variance(s) explained`
-      : `${varianceResult.unexplained.length} material variance(s) need explanation`;
+    : varianceResult.unexplained.length > 0
+      ? `${varianceResult.unexplained.length} material variance(s) need explanation`
+      : (varianceResult.unreviewedAi ?? 0) > 0
+        ? `${varianceResult.unreviewedAi} AI-drafted explanation(s) need human review — open each and click Approve`
+        : `${varianceResult.totalMaterial} material variance(s) explained`;
   gates.push({
     id: 'variances_explained',
     name: 'Material Variances Explained',

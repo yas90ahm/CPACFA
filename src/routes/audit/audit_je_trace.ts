@@ -34,44 +34,12 @@ router.get('/journal-entries/:id/full-trace', async (req: Request, res: Response
     // 2. Fetch lines with amount_provenance
     const lines = await jeRepo.listJournalEntryLines(pool, jeId);
 
-    // 3. Fetch AI context from ai_call_log — correlate by tenant + timestamp proximity
-    let aiContext = null;
-    try {
-      const { rows: aiRows } = await pool.query(
-        `SELECT id, pillar, prompt_version, model,
-                LEFT(request_json::text, 500) AS request_summary,
-                LEFT(response_json::text, 500) AS response_summary,
-                input_tokens, output_tokens, estimated_cost_usd, created_at
-         FROM ai_call_log
-         WHERE tenant_id = $1
-           AND created_at BETWEEN ($2::timestamptz - interval '5 seconds') AND ($2::timestamptz + interval '5 seconds')
-         ORDER BY ABS(EXTRACT(EPOCH FROM (created_at - $2::timestamptz)))
-         LIMIT 1`,
-        [tenantId, je.createdAt]
-      );
-      if (aiRows.length > 0) {
-        const row = aiRows[0];
-        aiContext = {
-          id: row.id,
-          model: row.model,
-          promptVersion: row.prompt_version,
-          pillar: row.pillar,
-          requestSummary: row.request_summary,
-          responseSummary: row.response_summary,
-          inputTokens: row.input_tokens,
-          outputTokens: row.output_tokens,
-          estimatedCostUsd: row.estimated_cost_usd,
-          createdAt: row.created_at,
-        };
-      }
-    } catch { /* ai_call_log may not exist */ }
-
-    // 4. Fetch decision records for this JE
-    let decisionRecord = null;
+    // 3. Fetch decision records for this JE (fetch first — may contain aiCallLogId for deterministic lookup)
+    let decisionRecord: { id: string; decisionType: string; confidenceScore: number | null; engineVersion: unknown; inputSnapshot: unknown; outputSnapshot: unknown; promptSnapshot: unknown; aiCallLogId: string | null; createdAt: unknown } | null = null;
     try {
       const { rows: drRows } = await pool.query(
         `SELECT id, decision_type, confidence_score, engine_version,
-                input_snapshot, output_snapshot, prompt_snapshot, created_at
+                input_snapshot, output_snapshot, prompt_snapshot, ai_call_log_id, created_at
          FROM decision_records
          WHERE tenant_id = $1
            AND (subject_ref->>'jeId' = $2 OR subject_ref->>'journalEntryId' = $2
@@ -89,10 +57,55 @@ router.get('/journal-entries/:id/full-trace', async (req: Request, res: Response
           inputSnapshot: row.input_snapshot,
           outputSnapshot: row.output_snapshot,
           promptSnapshot: row.prompt_snapshot,
+          aiCallLogId: row.ai_call_log_id ?? null,
           createdAt: row.created_at,
         };
       }
     } catch { /* decision_records may not exist */ }
+
+    // 4. Fetch AI context — prefer deterministic FK, fall back to timestamp proximity for legacy records
+    let aiContext = null;
+    try {
+      const aiCallLogId = decisionRecord?.aiCallLogId;
+      const aiQuery = aiCallLogId
+        ? {
+            sql: `SELECT id, pillar, prompt_version, model,
+                    LEFT(request_json::text, 500) AS request_summary,
+                    LEFT(response_json::text, 500) AS response_summary,
+                    input_tokens, output_tokens, estimated_cost_usd, created_at
+                  FROM ai_call_log WHERE id = $1`,
+            params: [aiCallLogId],
+          }
+        : {
+            sql: `SELECT id, pillar, prompt_version, model,
+                    LEFT(request_json::text, 500) AS request_summary,
+                    LEFT(response_json::text, 500) AS response_summary,
+                    input_tokens, output_tokens, estimated_cost_usd, created_at
+                  FROM ai_call_log
+                  WHERE tenant_id = $1
+                    AND created_at BETWEEN ($2::timestamptz - interval '5 seconds') AND ($2::timestamptz + interval '5 seconds')
+                  ORDER BY ABS(EXTRACT(EPOCH FROM (created_at - $2::timestamptz)))
+                  LIMIT 1`,
+            params: [tenantId, je.createdAt],
+          };
+      const { rows: aiRows } = await pool.query(aiQuery.sql, aiQuery.params);
+      if (aiRows.length > 0) {
+        const row = aiRows[0];
+        aiContext = {
+          id: row.id,
+          model: row.model,
+          promptVersion: row.prompt_version,
+          pillar: row.pillar,
+          requestSummary: row.request_summary,
+          responseSummary: row.response_summary,
+          inputTokens: row.input_tokens,
+          outputTokens: row.output_tokens,
+          estimatedCostUsd: row.estimated_cost_usd,
+          createdAt: row.created_at,
+          correlationMethod: aiCallLogId ? 'deterministic_fk' : 'timestamp_proximity',
+        };
+      }
+    } catch { /* ai_call_log may not exist */ }
 
     // 5. Fetch audit chain events for this JE's lifecycle
     let auditChain: { events: unknown[]; chainIntegrity: string } = { events: [], chainIntegrity: 'unknown' };

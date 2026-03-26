@@ -22,6 +22,8 @@ export interface DecisionRecord {
   rationaleText: string | null;
   engineVersion: string | null;
   promptSnapshot: string | null;
+  /** FK to ai_call_log for deterministic audit trail reconstruction. */
+  aiCallLogId: string | null;
   createdAt: string;
 }
 
@@ -37,4 +39,6 @@ export interface CreateDecisionRecordInput {
   rationaleText?: string | null;
   engineVersion?: string | null;
   promptSnapshot?: string | null;
+  /** FK to ai_call_log — required for AI-originated decisions when promptSnapshot is absent. */
+  aiCallLogId?: string | null;
 }

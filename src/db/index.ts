@@ -349,6 +349,8 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 208, file: '208_prepaid_last_month_fix.sql' },
   { version: 209, file: '209_gl_immutable_after_certification.sql' },
   { version: 210, file: '210_ai_call_log_immutability.sql' },
+  { version: 211, file: '211_variance_human_review_marker.sql' },
+  { version: 212, file: '212_decision_record_ai_call_log_fk.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 

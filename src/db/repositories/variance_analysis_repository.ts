@@ -24,6 +24,8 @@ interface VarianceRow {
   explanation_source: string | null;
   approved_at: string | null;
   approved_by: string | null;
+  human_reviewed_by: string | null;
+  human_reviewed_at: string | null;
   variance_type: string | null;
   full_year_impact: string | null;
   created_at: string;
@@ -32,7 +34,7 @@ interface VarianceRow {
 const SELECT_COLS = `id, tenant_id, close_session_id, period_label, fs_line_id, statement, label,
     current_amount, prior_amount, change_amount, change_percentage, material_threshold_pct,
     explanation, ai_draft_explanation, explanation_source, approved_at, approved_by,
-    variance_type, full_year_impact, created_at`;
+    human_reviewed_by, human_reviewed_at, variance_type, full_year_impact, created_at`;
 
 function rowToVariance(row: VarianceRow): VarianceRecord {
   const changeAmt = row.change_amount;
@@ -62,6 +64,8 @@ function rowToVariance(row: VarianceRow): VarianceRecord {
     explanationSource: (row.explanation_source as VarianceRecord['explanationSource']) ?? undefined,
     approvedAt: row.approved_at ?? undefined,
     approvedBy: row.approved_by ?? undefined,
+    humanReviewedBy: row.human_reviewed_by ?? undefined,
+    humanReviewedAt: row.human_reviewed_at ?? undefined,
     varianceType: row.variance_type ?? undefined,
     fullYearImpact: row.full_year_impact ?? undefined,
     createdAt: row.created_at,
@@ -177,7 +181,10 @@ export async function approveVariance(
 ): Promise<VarianceRecord | null> {
   const now = new Date().toISOString();
   await pool.query(
-    `UPDATE tenant_variance_analysis SET approved_at = $1, approved_by = $2 WHERE id = $3 AND tenant_id = $4`,
+    `UPDATE tenant_variance_analysis
+     SET approved_at = $1, approved_by = $2,
+         human_reviewed_by = $2, human_reviewed_at = $1
+     WHERE id = $3 AND tenant_id = $4`,
     [now, approvedBy, id, tenantId]
   );
   const r = await pool.query<VarianceRow>(

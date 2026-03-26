@@ -17,6 +17,7 @@ export function hashInputSnapshot(input: Record<string, unknown>): string {
 
 /**
  * Create a decision record (append-only). Call after classification, COA mapping, JE suggestion, etc.
+ * AI-originated decisions must include either promptSnapshot or aiCallLogId for audit reconstruction.
  */
 export async function createDecisionRecord(
   pool: Pool,
@@ -37,6 +38,7 @@ export async function createDecisionRecord(
     rationaleText: input.rationaleText ?? null,
     engineVersion: input.engineVersion ?? null,
     promptSnapshot: input.promptSnapshot ?? null,
+    aiCallLogId: input.aiCallLogId ?? null,
   });
 }
 

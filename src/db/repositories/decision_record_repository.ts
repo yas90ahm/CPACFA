@@ -19,6 +19,7 @@ interface DecisionRecordRow {
   rationale_text: string | null;
   engine_version: string | null;
   prompt_snapshot: string | null;
+  ai_call_log_id: string | null;
   created_at: string;
 }
 
@@ -36,12 +37,13 @@ function rowToRecord(row: DecisionRecordRow): DecisionRecord {
     rationaleText: row.rationale_text ?? null,
     engineVersion: row.engine_version ?? null,
     promptSnapshot: row.prompt_snapshot ?? null,
+    aiCallLogId: row.ai_call_log_id ?? null,
     createdAt: row.created_at,
   };
 }
 
 const SELECT_COLS = `id, close_session_id, tenant_id, decision_type, subject_ref, input_hash, input_snapshot,
-  output_snapshot, confidence_score, rationale_text, engine_version, prompt_snapshot, created_at`;
+  output_snapshot, confidence_score, rationale_text, engine_version, prompt_snapshot, ai_call_log_id, created_at`;
 
 export async function insertDecisionRecord(
   pool: Pool,
@@ -58,13 +60,14 @@ export async function insertDecisionRecord(
     rationaleText?: string | null;
     engineVersion?: string | null;
     promptSnapshot?: string | null;
+    aiCallLogId?: string | null;
   }
 ): Promise<DecisionRecord> {
   await pool.query(
     `INSERT INTO decision_records (
       id, close_session_id, tenant_id, decision_type, subject_ref, input_hash, input_snapshot,
-      output_snapshot, confidence_score, rationale_text, engine_version, prompt_snapshot
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      output_snapshot, confidence_score, rationale_text, engine_version, prompt_snapshot, ai_call_log_id
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
     [
       id,
       input.closeSessionId ?? null,
@@ -78,6 +81,7 @@ export async function insertDecisionRecord(
       input.rationaleText ?? null,
       input.engineVersion ?? null,
       input.promptSnapshot ?? null,
+      input.aiCallLogId ?? null,
     ]
   );
   const r = await pool.query<DecisionRecordRow>(

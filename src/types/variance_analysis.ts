@@ -23,6 +23,9 @@ export interface VarianceRecord {
   explanationSource?: 'manual' | 'ai_draft' | 'ai_edited';
   approvedAt?: string;
   approvedBy?: string;
+  /** User who explicitly attested they reviewed an AI-drafted explanation. */
+  humanReviewedBy?: string;
+  humanReviewedAt?: string;
   /** Classification of the variance (e.g. 'volume', 'price', 'timing', 'one-time', 'structural'). */
   varianceType?: string;
   /** Projected full-year impact = monthly variance x remaining months. */
