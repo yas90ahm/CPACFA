@@ -1140,10 +1140,50 @@ export async function uploadGLForPeriod(
     }));
 
     // Post-translation rounding auto-adjust ($0.01 tolerance)
+    // Capture before state for audit trail
+    const linesBeforeRounding = lines.map((l) => ({
+      entry_id: l.entry_id,
+      line_number: l.line_number,
+      account_code: l.account_code,
+      debit: l.debit,
+      credit: l.credit,
+    }));
     const roundingResult = autoAdjustTranslationRounding(lines);
     lines = roundingResult.lines;
     if (roundingResult.warnings.length > 0) {
       console.log(`[GL_UPLOAD] Translation rounding: ${roundingResult.warnings.join('; ')}`);
+      // Audit log: capture all line-level changes for observability
+      try {
+        const { appendEntry } = await import('../db/repositories/audit_ledger_repository.js');
+        const adjustedLines = roundingResult.lines
+          .map((l, i) => {
+            const before = linesBeforeRounding[i];
+            if (!before || (String(before.debit) === String(l.debit) && String(before.credit) === String(l.credit))) return null;
+            return {
+              entry_id: l.entry_id,
+              line_number: l.line_number,
+              account_code: l.account_code,
+              before: { debit: before.debit, credit: before.credit },
+              after: { debit: l.debit, credit: l.credit },
+            };
+          })
+          .filter(Boolean);
+        await appendEntry(pool, {
+          tenantId,
+          periodLabel,
+          eventType: 'fx_rounding_adjustment',
+          deterministicFlagSnapshot: {
+            adjustmentCount: adjustedLines.length,
+            warnings: roundingResult.warnings,
+          },
+          beforeState: { lines: adjustedLines.map((a) => a && { ...a, value: a.before }) },
+          afterState: { lines: adjustedLines.map((a) => a && { ...a, value: a.after }) },
+          userPromptRationale: `FX translation rounding applied: ${adjustedLines.length} line(s) adjusted by up to $0.01`,
+          createdBy: uploadedBy ?? 'system',
+        });
+      } catch {
+        // Audit log failure must not block GL upload
+      }
     }
 
     perfMetrics.group_ms = Date.now() - groupStart;

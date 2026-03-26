@@ -40,7 +40,8 @@ export type AuditLedgerEventType =
   | 'recon_supporting_balance_set'
   | 'subsequent_event_created'
   | 'subsequent_event_disposition_set'
-  | 'subsequent_events_confirmed_none';
+  | 'subsequent_events_confirmed_none'
+  | 'fx_rounding_adjustment';
 
 /** Payload for appending one ledger entry (append-only). */
 export interface AuditLedgerEntryInput {
