@@ -66,7 +66,7 @@ export function TopBar(p: TopBarProps) {
   return (
     <header className="fixed top-0 left-0 right-0 h-14 z-40 flex items-center justify-between px-5 bg-surface border-b border-border shadow-sm print:hidden">
       <div className="flex items-center gap-6">
-        <span className="font-serif text-xl tracking-[0.15em] uppercase" style={{ color: 'var(--interactive-primary)' }}>Sabit</span>
+        <span className="font-sans text-lg font-medium tracking-[0.12em] uppercase" style={{ color: 'var(--text-primary)' }}>Sabit</span>
         {isPortfolio ? (
           <span className="text-base font-medium text-primary">Portfolio Dashboard</span>
         ) : (

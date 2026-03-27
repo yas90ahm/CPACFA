@@ -29,16 +29,17 @@ interface WorkflowStep {
   detail: string;
 }
 
+/* Ledger Palette: forest=human confirmed, ink-blue=Sabit acted, ledger-400=locked/muted */
 const STATUS_STYLES: Record<StepStatus, { ring: string; bg: string; icon: string; text: string }> = {
-  complete: { ring: 'ring-emerald-500/30', bg: 'bg-emerald-500/10', icon: 'text-emerald-400', text: 'text-emerald-400' },
-  in_progress: { ring: 'ring-[#7C5CFC]/30', bg: 'bg-[#7C5CFC]/10', icon: 'text-[#7C5CFC]', text: 'text-[#7C5CFC]' },
-  locked: { ring: 'ring-[#262C48]', bg: 'bg-[#0d1017]', icon: 'text-gray-700', text: 'text-gray-600' },
+  complete: { ring: 'ring-forest/30', bg: 'bg-forest-bg', icon: 'text-forest', text: 'text-forest' },
+  in_progress: { ring: 'ring-ink-blue/30', bg: 'bg-ink-blue-bg', icon: 'text-ink-blue', text: 'text-ink-blue' },
+  locked: { ring: 'ring-ledger-200', bg: 'bg-ledger-100', icon: 'text-ledger-400', text: 'text-ledger-400' },
 };
 
 function StatusIcon({ status }: { status: StepStatus }) {
-  if (status === 'complete') return <CheckCircle2 className="w-5 h-5 text-emerald-400" />;
-  if (status === 'in_progress') return <Loader2 className="w-5 h-5 text-[#7C5CFC] animate-spin" />;
-  return <Lock className="w-4 h-4 text-gray-700" />;
+  if (status === 'complete') return <CheckCircle2 className="w-5 h-5 text-forest" />;
+  if (status === 'in_progress') return <Loader2 className="w-5 h-5 text-ink-blue animate-spin" />;
+  return <Lock className="w-4 h-4 text-ledger-400" />;
 }
 
 export function VerifiedCloseWorkflow({ sessionId }: { sessionId: string }) {
@@ -118,31 +119,31 @@ export function VerifiedCloseWorkflow({ sessionId }: { sessionId: string }) {
   if (isOpen) return null;
 
   return (
-    <div className="bg-[#141829] border border-[#262C48] rounded-xl p-5 mb-6">
+    <div className="bg-ledger-100 border border-ledger-200 rounded-xl p-5 mb-6">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-[#7C5CFC]/10 flex items-center justify-center">
-            <Shield className="w-4 h-4 text-[#7C5CFC]" />
+          <div className="w-8 h-8 rounded-lg bg-ink-blue-bg flex items-center justify-center">
+            <Shield className="w-4 h-4 text-ink-blue" />
           </div>
           <div>
-            <h2 className="text-xs font-semibold text-white uppercase tracking-wider">The Verified Close</h2>
-            <p className="text-xs text-gray-600">4-step cryptographically verified close pipeline</p>
+            <h2 className="text-xs font-medium text-ledger-900 uppercase tracking-wider">The Verified Close</h2>
+            <p className="text-xs text-ledger-400">4-step cryptographically verified close pipeline</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <div className="h-1.5 w-24 bg-[#0d1017] rounded-full overflow-hidden">
+          <div className="h-1.5 w-24 bg-ledger-200 rounded-full overflow-hidden">
             <div
               className="h-full rounded-full transition-all duration-700"
-              style={{ width: `${progressPct}%`, background: progressPct === 100 ? '#34D399' : '#7C5CFC' }}
+              style={{ width: `${progressPct}%`, background: progressPct === 100 ? 'var(--color-human-confirmed)' : 'var(--color-sabit-acted)' }}
             />
           </div>
-          <span className="text-xs text-gray-500 tabular-nums">{completedCount}/{steps.length}</span>
+          <span className="text-xs text-ledger-400 tabular-nums">{completedCount}/{steps.length}</span>
         </div>
       </div>
 
       <div className="relative flex items-start justify-between">
         {/* Connecting line */}
-        <div className="absolute top-6 left-12 right-12 h-px bg-[#262C48]" />
+        <div className="absolute top-6 left-12 right-12 h-px bg-ledger-200" />
 
         {steps.map((step, i) => {
           const styles = STATUS_STYLES[step.status];
@@ -151,24 +152,24 @@ export function VerifiedCloseWorkflow({ sessionId }: { sessionId: string }) {
             <div key={step.id} className="flex flex-col items-center relative z-10" style={{ width: '25%' }}>
               <div className={cn('w-12 h-12 rounded-xl flex items-center justify-center ring-2 transition-all', styles.ring, styles.bg)}>
                 {step.status === 'complete' ? (
-                  <CheckCircle2 className="w-6 h-6 text-emerald-400" />
+                  <CheckCircle2 className="w-6 h-6 text-forest" />
                 ) : step.status === 'in_progress' ? (
                   <div className="relative">
-                    <StepIcon className="w-5 h-5 text-[#7C5CFC]" />
-                    <div className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-[#7C5CFC] animate-pulse" />
+                    <StepIcon className="w-5 h-5 text-ink-blue" />
+                    <div className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-ink-blue animate-pulse" />
                   </div>
                 ) : (
                   <StepIcon className={cn('w-5 h-5', styles.icon)} />
                 )}
               </div>
-              <p className={cn('text-[11px] font-semibold mt-2 text-center', styles.text)}>{step.label}</p>
-              <p className={cn('text-xs text-center', step.status === 'locked' ? 'text-gray-700' : 'text-gray-500')}>{step.subtitle}</p>
-              <p className={cn('text-xs mt-1 text-center max-w-[120px]', step.status === 'locked' ? 'text-gray-700' : 'text-gray-500')}>{step.detail}</p>
+              <p className={cn('text-[11px] font-medium mt-2 text-center', styles.text)}>{step.label}</p>
+              <p className={cn('text-xs text-center', step.status === 'locked' ? 'text-ledger-400' : 'text-ledger-600')}>{step.subtitle}</p>
+              <p className={cn('text-xs mt-1 text-center max-w-[120px]', step.status === 'locked' ? 'text-ledger-400' : 'text-ledger-600')}>{step.detail}</p>
 
               {/* Arrow between steps */}
               {i < steps.length - 1 && (
                 <div className="absolute top-5 -right-2 z-20">
-                  <ArrowRight className={cn('w-3 h-3', step.status === 'complete' ? 'text-emerald-500/50' : 'text-[#262C48]')} />
+                  <ArrowRight className={cn('w-3 h-3', step.status === 'complete' ? 'text-forest/50' : 'text-ledger-200')} />
                 </div>
               )}
             </div>

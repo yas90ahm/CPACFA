@@ -18,6 +18,7 @@ import { isReadOnly, canCertify, canLockPeriod, canSubmitForReview, isSidebarIte
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary';
 import { QuickNavigator } from '@/components/shared/QuickNavigator';
 import { TrialBalanceProvider, useTrialBalanceContext } from './context/trial-balance-context';
+import ProgressRail from '@/components/shared/ProgressRail';
 
 const SIDEBAR_COLLAPSED_KEY = 'sabit-sidebar-collapsed';
 
@@ -212,6 +213,29 @@ function CloseSessionInner({ children }: { children: React.ReactNode }) {
           paddingTop,
         }}
       >
+        {/* Progress Rail — persistent context bar (Design System Principle 5) */}
+        {session && readiness && (
+          <ProgressRail
+            gatesPassing={readiness.gatesPassing ?? 0}
+            gatesTotal={readiness.gatesTotal ?? 11}
+            currentModule={(() => {
+              const seg = pathname?.split('/').pop();
+              const names: Record<string, string> = {
+                dashboard: 'Dashboard', 'trial-balance': 'Upload & Map', mapping: 'Map Accounts',
+                reconciliation: 'Reconciliation', adjustments: 'Adjustments', statements: 'Statements',
+                variance: 'Variance Analysis', review: 'Review & Certify', prepaids: 'ASC 340 Prepaids',
+                'fixed-assets': 'ASC 360 Fixed Assets', leases: 'ASC 842 Leases',
+                'deferred-tax': 'ASC 740 Deferred Tax', 'ar-aging': 'ASC 326 AR Aging',
+                'ap-aging': 'AP Aging', 'audit-trail': 'Audit Trail', 'audit-binder': 'Audit Binder',
+              };
+              return names[seg ?? ''] ?? seg ?? '';
+            })()}
+            jesProposed={journalEntries.length}
+            blockingIssues={issues.filter((i: { severity?: string; status?: string }) => i.severity === 'high' && i.status !== 'resolved' && i.status !== 'verified' && i.status !== 'waived').length}
+            status={session.state}
+            nextState={session.state === 'IN_PROGRESS' ? 'Under Review' : session.state === 'UNDER_REVIEW' ? 'Certified' : undefined}
+          />
+        )}
         <div className="px-8 py-6 max-w-[1400px] animate-fade-in">{children}</div>
       </main>
       <IssuePanel

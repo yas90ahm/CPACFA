@@ -293,7 +293,7 @@ export default function StatementsPage() {
             style={{
               borderRadius: 'var(--radius-md)',
               backgroundColor: 'var(--status-warning)',
-              color: '#ffffff',
+              color: 'var(--text-inverse)',
             }}
           >
             {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
@@ -413,7 +413,7 @@ export default function StatementsPage() {
                 !hasStatements || isStale
                   ? {
                       backgroundColor: 'var(--interactive-primary)',
-                      color: '#ffffff',
+                      color: 'var(--text-inverse)',
                       boxShadow: 'var(--shadow-md)',
                     }
                   : {
@@ -454,7 +454,7 @@ export default function StatementsPage() {
               periodView === pv
                 ? {
                     backgroundColor: 'var(--interactive-primary)',
-                    color: '#ffffff',
+                    color: 'var(--text-inverse)',
                   }
                 : {
                     border: '1px solid var(--border-default)',

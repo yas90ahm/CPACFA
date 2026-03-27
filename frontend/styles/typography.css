@@ -1,81 +1,91 @@
 /*
- * SABIT TYPOGRAPHY SYSTEM
- * Font declarations, type scale, and financial number classes.
+ * SABIT TYPOGRAPHY SYSTEM — Ledger Palette
+ * Binding source: Sabit_design_system.md (March 2026)
  *
- * Fonts: Inter (primary), JetBrains Mono (mono), Source Serif 4 (attestation)
- * Source: SABIT_VISUAL_DESIGN_SPEC.md
+ * Two weights only: 400 (regular) and 500 (medium). Never 600, 700, or bold.
+ * Serif appears exactly once — the entity name on the Certificate of Close.
+ * Monospace for all financial data (account codes, hashes, amounts).
  */
 
-/* === FONT STACKS (set via CSS custom properties in tokens.css via layout.tsx next/font) === */
+/* === FONT STACKS === */
 :root {
   --font-primary: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', Consolas, monospace;
   --font-serif: 'DM Serif Display', 'Georgia', 'Times New Roman', serif;
 }
 
-/* Headings use DM Serif Display for authoritative, published feel */
-h1, h2, h3 {
-  font-family: var(--font-serif);
+/* Sans-serif for all UI text — serif is reserved for Certificate of Close only */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-primary);
   color: var(--text-primary);
+  font-weight: 500;
 }
 
-/* === TYPE SCALE CLASSES === */
+/* === TYPE SCALE — Design System Spec === */
 
-.type-display {
-  font-size: 1.875rem;
-  font-weight: 600;
+/* Certificate title: 22px, 500, serif — ONLY on Certificate of Close */
+.type-cert-title {
+  font-family: var(--font-serif);
+  font-size: 1.375rem;
+  font-weight: 500;
   line-height: 1.2;
-  letter-spacing: -0.02em;
 }
 
-.type-h1 {
-  font-size: 1.5rem;
-  font-weight: 600;
-  line-height: 1.25;
-  letter-spacing: -0.015em;
-}
-
-.type-h2 {
-  font-size: 1.25rem;
-  font-weight: 600;
+/* Page title: 18px, 500, sans */
+.type-display {
+  font-size: 1.125rem;
+  font-weight: 500;
   line-height: 1.3;
   letter-spacing: -0.01em;
 }
 
+/* Same as display for backward compat */
+.type-h1 {
+  font-size: 1.125rem;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+/* Section header: 15px, 500, sans */
+.type-h2 {
+  font-size: 0.9375rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
 .type-h3 {
-  font-size: 1rem;
-  font-weight: 600;
-  line-height: 1.375;
-  letter-spacing: -0.005em;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.4;
 }
 
 .type-h4 {
-  font-size: 0.875rem;
-  font-weight: 600;
+  font-size: 0.8125rem;
+  font-weight: 500;
   line-height: 1.4;
-  letter-spacing: 0em;
 }
 
+/* Body / table rows: 13px, 400, sans */
 .type-body {
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   font-weight: 400;
-  line-height: 1.5;
-  letter-spacing: 0em;
+  line-height: 1.65;
 }
 
 .type-body-strong {
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   font-weight: 500;
-  line-height: 1.5;
-  letter-spacing: 0em;
+  line-height: 1.65;
 }
 
 /* === TABLE TYPOGRAPHY === */
 
+/* Labels / badges: 11px, 500, sans, uppercase, 0.06em tracking */
 .type-table-header {
   font-size: 0.6875rem;
-  font-weight: 600;
-  line-height: 1.3;
+  font-weight: 500;
+  line-height: 1.4;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-secondary);
@@ -84,32 +94,35 @@ h1, h2, h3 {
 .type-table-cell {
   font-size: 0.8125rem;
   font-weight: 400;
-  line-height: 1.385;
-  letter-spacing: 0em;
+  line-height: 1.4;
 }
 
+/* Financial numbers: monospace, tabular-nums */
 .type-table-number {
+  font-family: var(--font-mono);
   font-size: 0.8125rem;
   font-weight: 400;
-  line-height: 1.385;
+  line-height: 1.4;
   letter-spacing: 0.01em;
   font-variant-numeric: tabular-nums lining-nums;
   text-align: right;
 }
 
 .type-table-subtotal {
+  font-family: var(--font-mono);
   font-size: 0.8125rem;
-  font-weight: 600;
-  line-height: 1.385;
+  font-weight: 500;
+  line-height: 1.4;
   letter-spacing: 0.01em;
   font-variant-numeric: tabular-nums lining-nums;
   text-align: right;
 }
 
 .type-table-total {
+  font-family: var(--font-mono);
   font-size: 0.875rem;
-  font-weight: 700;
-  line-height: 1.385;
+  font-weight: 500;
+  line-height: 1.4;
   letter-spacing: 0.01em;
   font-variant-numeric: tabular-nums lining-nums;
   text-align: right;
@@ -126,35 +139,36 @@ h1, h2, h3 {
 
 .type-caption-strong {
   font-size: 0.75rem;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.4;
   letter-spacing: 0.01em;
 }
 
+/* Labels / badges: 11px, 500, uppercase, 0.06em tracking */
 .type-badge {
   font-size: 0.6875rem;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.0;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 /* === SPECIAL === */
 
+/* Technical data: 11px, 400, mono — hashes, artifact IDs, account codes */
 .type-mono {
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   font-weight: 400;
   line-height: 1.5;
-  letter-spacing: 0em;
 }
 
+/* Serif attestation — ONLY on Certificate of Close entity name */
 .type-attestation {
   font-family: var(--font-serif);
-  font-size: 0.9375rem;
+  font-size: 1.375rem;
   font-weight: 400;
-  line-height: 1.65;
-  letter-spacing: 0em;
+  line-height: 1.2;
 }
 
 /* === FINANCIAL NUMBER UTILITIES === */
@@ -169,7 +183,7 @@ h1, h2, h3 {
 
 .text-number-total {
   color: var(--text-number-total);
-  font-weight: 700;
+  font-weight: 500;
 }
 
 /* Financial statement indentation levels */
@@ -178,7 +192,7 @@ h1, h2, h3 {
 .indent-2 { padding-left: 48px; }
 .indent-3 { padding-left: 72px; }
 
-/* Accounting underlines */
+/* Accounting underlines (single and double rule) */
 .border-total-single {
   border-top: 1px solid var(--border-total-single);
 }

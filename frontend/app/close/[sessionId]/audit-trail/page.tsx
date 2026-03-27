@@ -28,6 +28,7 @@ import {
   User,
   FileDown,
 } from 'lucide-react';
+import AuditEventNarrative from '@/components/shared/AuditEventNarrative';
 import { Breadcrumb } from '@/components/shared/Breadcrumb';
 
 // Event type labels and icons — colors are now CSS variable values for inline styles
@@ -173,26 +174,19 @@ function EventCard({ event, isExpanded, onToggle }: EventCardProps) {
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-4 mb-1">
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span
-                    className="text-sm font-medium"
-                    style={{ color: 'var(--text-secondary)' }}
-                  >
-                    {config.label}
-                  </span>
-                  <span
-                    className="text-xs font-mono"
-                    style={{ color: 'var(--text-tertiary)' }}
-                  >
-                    {formatTimestamp(event.timestamp)}
-                  </span>
-                </div>
-                <div
-                  className="text-sm font-medium mb-1"
-                  style={{ color: 'var(--text-primary)' }}
-                >
-                  {event.description}
-                </div>
+                {/* Human-readable narrative (Design System Principle 3) */}
+                <AuditEventNarrative
+                  event={{
+                    id: event.id,
+                    eventType: event.eventType,
+                    createdBy: event.userId,
+                    createdByName: event.userName,
+                    createdAt: event.timestamp,
+                    deterministicFlagSnapshot: (event.metadata ?? {}) as Record<string, unknown>,
+                    beforeState: event.beforeState as Record<string, unknown> | undefined,
+                    afterState: event.afterState as Record<string, unknown> | undefined,
+                  }}
+                />
                 <div className="flex items-center gap-4 text-xs" style={{ color: 'var(--text-tertiary)' }}>
                   <span className="flex items-center gap-1">
                     <User className="w-3 h-3" />
@@ -533,7 +527,7 @@ export default function AuditTrailPage() {
               className="text-sm font-medium"
               style={{ color: 'var(--status-success)' }}
             >
-              Chain Integrity: Verified ✓ ({hashChainStatus.totalEvents} events)
+              Chain integrity verified ✓ — {hashChainStatus.totalEvents} records, no tampering detected
             </span>
           </>
         ) : (

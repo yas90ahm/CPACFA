@@ -1,95 +1,111 @@
 /*
- * SABIT DESIGN TOKENS
- * Complete CSS custom property system for light and dark themes.
- * Light theme is the default. Dark theme is applied via [data-theme="dark"].
+ * SABIT DESIGN TOKENS — Ledger Palette
+ * Binding source: Sabit_design_system.md (March 2026)
  *
- * Source: SABIT_VISUAL_DESIGN_SPEC.md
+ * Rule 4: No #FFFFFF anywhere. Lightest surface is ledger-50 (#F5F0E8).
+ * Rule 1: Gold (#B8860B) only for certified/verified states.
+ * Rule 2: Ink blue (#3B6EA5) = Sabit acted. Forest (#2D6A4F) = human confirmed.
+ * Rule 3: Dark surface (#2C2416) only on Certificate of Close.
  */
 
 :root {
-  /* === BACKGROUNDS === */
-  --bg-base: #F9F8F6;
-  --bg-surface: #FFFFFF;
-  --bg-surface-raised: #FFFFFF;
-  --bg-surface-sunken: #F3F1ED;
-  --bg-overlay: rgba(10, 10, 8, 0.52);
-  --bg-nav: #FFFFFF;
-  --bg-nav-hover: #F5F3F0;
-  --bg-nav-active: #EDF1F7;
-  --bg-header: #FFFFFF;
-  --bg-table-row-alt: #FCFBF9;
-  --bg-table-row-hover: #F5F3F0;
-  --bg-table-row-selected: #EDF1F7;
-  --bg-ai: #F5F0FF;
-  --bg-certified: #F0F7F1;
-  --bg-certification-ceremony: #FAFBFC;
+  /* === BACKGROUNDS — Ledger Palette === */
+  --bg-base:            #F5F0E8; /* ledger-50: the paper */
+  --bg-surface:         #EDE6D6; /* ledger-100: card/surface */
+  --bg-surface-raised:  #E6DEC9; /* between 100 and 200 */
+  --bg-surface-sunken:  #F2ECE0; /* slightly darker than base */
+  --bg-overlay:         rgba(44, 36, 22, 0.52); /* ledger-900 with opacity */
+  --bg-nav:             #EDE6D6; /* ledger-100 */
+  --bg-nav-hover:       #E6DEC9;
+  --bg-nav-active:      #E0EAF5; /* ink-blue-bg for active nav */
+  --bg-header:          #EDE6D6; /* ledger-100 */
+  --bg-table-row-alt:   #F2ECE0;
+  --bg-table-row-hover: #E6DEC9;
+  --bg-table-row-selected: #E0EAF5; /* ink-blue-bg */
+  --bg-ai:              #E0EAF5; /* ink-blue-bg — Sabit acted */
+  --bg-certified:       #F5EDD0; /* gold-bg */
+  --bg-certification-ceremony: #2C2416; /* ledger-900 — the vault */
 
-  /* === TEXT === */
-  --text-primary: #1A1A1A;
-  --text-secondary: #5C5752;
-  --text-tertiary: #9C9590;
-  --text-inverse: #FFFFFF;
-  --text-inverse-secondary: rgba(255,255,255,0.72);
-  --text-link: #1B3A5C;
-  --text-link-hover: #142D47;
-  --text-number: #1A1A1A;
-  --text-number-negative: #DC2626;
-  --text-number-total: #111111;
-  --text-ai-label: #6B21A8;
+  /* === TEXT — Ledger Palette === */
+  --text-primary:           #2C2416; /* ledger-900: the ink */
+  --text-secondary:         #5C4F3A; /* ledger-600 */
+  --text-tertiary:          #8B7A5E; /* ledger-400 */
+  --text-inverse:           #F5F0E8; /* ledger-50 on dark backgrounds */
+  --text-inverse-secondary: rgba(245, 240, 232, 0.72);
+  --text-link:              #3B6EA5; /* ink-blue */
+  --text-link-hover:        #2D5A8A;
+  --text-number:            #2C2416; /* ledger-900 */
+  --text-number-negative:   #C44B2B; /* rust */
+  --text-number-total:      #2C2416; /* ledger-900 */
+  --text-ai-label:          #3B6EA5; /* ink-blue — Sabit acted */
 
-  /* === BORDERS === */
-  --border-default: #E8E4DE;
-  --border-strong: #C8C2B8;
-  --border-subtle: #F0EDE8;
-  --border-focus: #1B3A5C;
-  --border-ai: #C4B5DC;
-  --border-table-header: #DDD9D2;
-  --border-total-single: #1A1A1A;
-  --border-total-double: #1A1A1A;
+  /* === BORDERS — Ledger Palette === */
+  --border-default:     #DDD5C2; /* ledger-200 */
+  --border-strong:      #C8BEA8;
+  --border-subtle:      #E6DEC9;
+  --border-focus:       #3B6EA5; /* ink-blue for focus rings */
+  --border-ai:          #3B6EA5; /* ink-blue */
+  --border-table-header: #DDD5C2; /* ledger-200 */
+  --border-total-single: #2C2416; /* ledger-900 */
+  --border-total-double: #2C2416; /* ledger-900 */
 
   /* === INTERACTIVE === */
-  --interactive-primary: #1B3A5C;
-  --interactive-primary-hover: #142D47;
-  --interactive-primary-pressed: #0F2236;
-  --interactive-secondary: #FFFFFF;
-  --interactive-secondary-hover: #F5F3F0;
-  --interactive-ghost: transparent;
-  --interactive-ghost-hover: #F5F3F0;
-  --interactive-destructive: #DC2626;
-  --interactive-destructive-hover: #B91C1C;
+  --interactive-primary:         #3B6EA5; /* ink-blue: system actions */
+  --interactive-primary-hover:   #2D5A8A;
+  --interactive-primary-pressed: #1F4670;
+  --interactive-secondary:       #EDE6D6; /* ledger-100, NOT white */
+  --interactive-secondary-hover: #E6DEC9;
+  --interactive-ghost:           transparent;
+  --interactive-ghost-hover:     #E6DEC9;
+  --interactive-destructive:     #C44B2B; /* rust */
+  --interactive-destructive-hover: #A83D24;
 
-  /* === STATUS === */
-  --status-success: #16A34A;
-  --status-success-bg: #DCFCE7;
-  --status-success-border: #BBF7D0;
-  --status-warning: #D97706;
-  --status-warning-bg: #FEF3C7;
-  --status-warning-border: #FDE68A;
-  --status-error: #DC2626;
-  --status-error-bg: #FEE2E2;
-  --status-error-border: #FECACA;
-  --status-info: #1B3A5C;
-  --status-info-bg: #EDF1F7;
-  --status-info-border: #C3D4E9;
-  --status-neutral: #6B7280;
-  --status-neutral-bg: #F3F4F6;
+  /* === STATUS — Semantic Accents === */
+  --status-success:        #2D6A4F; /* forest: human confirmed / gate passing */
+  --status-success-bg:     #E0EDE8; /* forest-bg */
+  --status-success-border: #2D6A4F;
+  --status-warning:        #8B6914; /* amber: needs review */
+  --status-warning-bg:     #F0E8D0; /* amber-bg */
+  --status-warning-border: #8B6914;
+  --status-error:          #C44B2B; /* rust: blocking / gate failed */
+  --status-error-bg:       #F5E4DE; /* rust-bg */
+  --status-error-border:   #C44B2B;
+  --status-info:           #3B6EA5; /* ink-blue: system action */
+  --status-info-bg:        #E0EAF5; /* ink-blue-bg */
+  --status-info-border:    #3B6EA5;
+  --status-neutral:        #8B7A5E; /* ledger-400 */
+  --status-neutral-bg:     #F2ECE0;
 
-  /* === AI === */
-  --ai-primary: #7C3AED;
-  --ai-primary-muted: #A78BFA;
-  --ai-bg: #F5F0FF;
-  --ai-border: #DDD6FE;
-  --ai-badge-bg: #EDE9FE;
-  --ai-badge-text: #5B21B6;
+  /* === AI / SYSTEM — Ink Blue (Sabit acted) === */
+  --ai-primary:      #3B6EA5; /* ink-blue */
+  --ai-primary-muted: #6B92BA;
+  --ai-bg:           #E0EAF5; /* ink-blue-bg */
+  --ai-border:       #3B6EA5;
+  --ai-badge-bg:     #E0EAF5; /* ink-blue-bg */
+  --ai-badge-text:   #3B6EA5; /* ink-blue */
 
-  /* === CERTIFICATION === */
-  --cert-primary: #14532D;
-  --cert-secondary: #166534;
-  --cert-gold: #A16207;
+  /* === CERTIFICATION — Gold (cryptographically sealed) === */
+  --cert-primary:    #2D6A4F; /* forest for cert UI elements */
+  --cert-secondary:  #2D6A4F;
+  --cert-gold:       #B8860B; /* THE gold — certified/verified ONLY */
   --cert-gold-light: #D4A017;
-  --cert-bg: #F7FBF8;
-  --cert-border: #86EFAC;
-  --cert-lock-icon: #14532D;
+  --cert-bg:         #F5EDD0; /* gold-bg */
+  --cert-border:     #B8860B;
+  --cert-lock-icon:  #B8860B; /* gold */
+
+  /* === AGENCY MODEL COLORS (direct access) === */
+  --color-sabit-acted:      #3B6EA5; /* ink-blue — system autonomous */
+  --color-human-confirmed:  #2D6A4F; /* forest — human reviewed */
+  --color-needs-review:     #8B6914; /* amber — needs attention */
+  --color-blocking:         #C44B2B; /* rust — must act */
+  --color-certified:        #B8860B; /* gold — cryptographically sealed */
+
+  /* Background tints for badges */
+  --color-sabit-acted-bg:     #E0EAF5;
+  --color-human-confirmed-bg: #E0EDE8;
+  --color-needs-review-bg:    #F0E8D0;
+  --color-blocking-bg:        #F5E4DE;
+  --color-certified-bg:       #F5EDD0;
 
   /* === SPACING (4px grid) === */
   --space-1: 4px;
@@ -104,16 +120,17 @@
   --space-16: 64px;
 
   /* === RADII === */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-2xl: 16px;
 
   /* === SHADOWS === */
-  --shadow-sm: 0 1px 3px 0 rgba(0,0,0,0.04), 0 1px 2px -1px rgba(0,0,0,0.04);
-  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05);
-  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.04);
-  --shadow-xl: 0 24px 48px -12px rgba(0,0,0,0.25);
+  --shadow-sm: 0 1px 3px 0 rgba(44,36,22,0.04), 0 1px 2px -1px rgba(44,36,22,0.04);
+  --shadow-md: 0 4px 6px -1px rgba(44,36,22,0.07), 0 2px 4px -2px rgba(44,36,22,0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(44,36,22,0.08), 0 4px 6px -4px rgba(44,36,22,0.04);
+  --shadow-xl: 0 24px 48px -12px rgba(44,36,22,0.18);
 
   /* === TRANSITIONS === */
   --transition-fast: 150ms ease;
@@ -129,81 +146,93 @@
   --z-toast: 500;
 }
 
-/* === DARK THEME === */
+/* === DARK THEME — Ledger Palette Dark === */
 [data-theme="dark"] {
-  --bg-base: #121417;
-  --bg-surface: #1A1D23;
-  --bg-surface-raised: #22262E;
-  --bg-surface-sunken: #0D0F12;
-  --bg-overlay: rgba(0, 0, 0, 0.65);
-  --bg-nav: #0D0F12;
-  --bg-nav-hover: #1A1D23;
-  --bg-nav-active: #22262E;
-  --bg-header: #1A1D23;
-  --bg-table-row-alt: #1E2128;
-  --bg-table-row-hover: #262A33;
-  --bg-table-row-selected: #1A2536;
-  --bg-ai: #1C1726;
-  --bg-certified: #0F2418;
-  --bg-certification-ceremony: #14171B;
+  --bg-base:            #1A1610;
+  --bg-surface:         #242018;
+  --bg-surface-raised:  #2E2820;
+  --bg-surface-sunken:  #141110;
+  --bg-overlay:         rgba(0, 0, 0, 0.65);
+  --bg-nav:             #141110;
+  --bg-nav-hover:       #242018;
+  --bg-nav-active:      #1A2838;
+  --bg-header:          #242018;
+  --bg-table-row-alt:   #1E1A14;
+  --bg-table-row-hover: #2E2820;
+  --bg-table-row-selected: #1A2838;
+  --bg-ai:              #1A2838;
+  --bg-certified:       #2A2410;
+  --bg-certification-ceremony: #2C2416;
 
-  --text-primary: #E8E6E3;
-  --text-secondary: #9CA3AF;
-  --text-tertiary: #6B7280;
-  --text-inverse: #1A1A1A;
-  --text-inverse-secondary: #5C5C5C;
-  --text-link: #60A5FA;
-  --text-link-hover: #93C5FD;
-  --text-number: #E8E6E3;
-  --text-number-negative: #FCA5A5;
-  --text-number-total: #F3F2F0;
-  --text-ai-label: #C4B5FC;
+  --text-primary:           #F5F0E8;
+  --text-secondary:         #C8BEA8;
+  --text-tertiary:          #8B7A5E;
+  --text-inverse:           #2C2416;
+  --text-inverse-secondary: rgba(44,36,22,0.72);
+  --text-link:              #6B92BA;
+  --text-link-hover:        #8AABCC;
+  --text-number:            #F5F0E8;
+  --text-number-negative:   #E07060;
+  --text-number-total:      #F5F0E8;
+  --text-ai-label:          #6B92BA;
 
-  --border-default: #2E3340;
-  --border-strong: #3D4451;
-  --border-subtle: #252930;
-  --border-focus: #60A5FA;
-  --border-ai: #4C3A6B;
-  --border-table-header: #3D4451;
+  --border-default: #3A3228;
+  --border-strong:  #4A4038;
+  --border-subtle:  #2E2820;
+  --border-focus:   #6B92BA;
+  --border-ai:      #6B92BA;
+  --border-table-header: #3A3228;
 
-  --interactive-primary: #3B82F6;
-  --interactive-primary-hover: #60A5FA;
-  --interactive-primary-pressed: #2563EB;
-  --interactive-secondary: #1A1D23;
-  --interactive-secondary-hover: #1A2536;
-  --interactive-ghost-hover: #22262E;
-  --interactive-destructive: #EF4444;
-  --interactive-destructive-hover: #F87171;
+  --interactive-primary:         #6B92BA;
+  --interactive-primary-hover:   #8AABCC;
+  --interactive-primary-pressed: #5078A0;
+  --interactive-secondary:       #242018;
+  --interactive-secondary-hover: #2E2820;
+  --interactive-ghost-hover:     #2E2820;
+  --interactive-destructive:     #E07060;
+  --interactive-destructive-hover: #C44B2B;
 
-  --status-success: #4ADE80;
-  --status-success-bg: #0F2418;
-  --status-success-border: #166534;
-  --status-warning: #FBBF24;
-  --status-warning-bg: #1C1708;
-  --status-warning-border: #854D0E;
-  --status-error: #F87171;
-  --status-error-bg: #1F0D0D;
-  --status-error-border: #991B1B;
-  --status-info: #60A5FA;
-  --status-info-bg: #0C1929;
-  --status-info-border: #1E40AF;
-  --status-neutral: #9CA3AF;
-  --status-neutral-bg: #1E2128;
+  --status-success:        #4A9070;
+  --status-success-bg:     #1A2E24;
+  --status-success-border: #2D6A4F;
+  --status-warning:        #B8960B;
+  --status-warning-bg:     #2A2410;
+  --status-warning-border: #8B6914;
+  --status-error:          #E07060;
+  --status-error-bg:       #2E1A18;
+  --status-error-border:   #C44B2B;
+  --status-info:           #6B92BA;
+  --status-info-bg:        #1A2838;
+  --status-info-border:    #3B6EA5;
+  --status-neutral:        #8B7A5E;
+  --status-neutral-bg:     #2E2820;
 
-  --ai-primary: #A78BFA;
-  --ai-primary-muted: #7C3AED;
-  --ai-bg: #1C1726;
-  --ai-border: #4C3A6B;
-  --ai-badge-bg: #2E1F5E;
-  --ai-badge-text: #C4B5FC;
+  --ai-primary:      #6B92BA;
+  --ai-primary-muted: #3B6EA5;
+  --ai-bg:           #1A2838;
+  --ai-border:       #3B6EA5;
+  --ai-badge-bg:     #1A2838;
+  --ai-badge-text:   #6B92BA;
 
-  --cert-primary: #4ADE80;
-  --cert-secondary: #22C55E;
-  --cert-gold: #FBBF24;
-  --cert-gold-light: #F59E0B;
-  --cert-bg: #0F2418;
-  --cert-border: #166534;
-  --cert-lock-icon: #4ADE80;
+  --cert-primary:    #4A9070;
+  --cert-secondary:  #2D6A4F;
+  --cert-gold:       #D4A017;
+  --cert-gold-light: #B8860B;
+  --cert-bg:         #2A2410;
+  --cert-border:     #B8860B;
+  --cert-lock-icon:  #D4A017;
+
+  --color-sabit-acted:      #6B92BA;
+  --color-human-confirmed:  #4A9070;
+  --color-needs-review:     #B8960B;
+  --color-blocking:         #E07060;
+  --color-certified:        #D4A017;
+
+  --color-sabit-acted-bg:     #1A2838;
+  --color-human-confirmed-bg: #1A2E24;
+  --color-needs-review-bg:    #2A2410;
+  --color-blocking-bg:        #2E1A18;
+  --color-certified-bg:       #2A2410;
 
   --shadow-sm: 0 1px 3px 0 rgba(0,0,0,0.3), 0 1px 2px -1px rgba(0,0,0,0.3);
   --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.4), 0 2px 4px -2px rgba(0,0,0,0.3);

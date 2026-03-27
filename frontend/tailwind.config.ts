@@ -1,5 +1,12 @@
 import type { Config } from 'tailwindcss';
 
+/**
+ * Sabit Tailwind Configuration — Ledger Palette
+ * Binding source: Sabit_design_system.md
+ *
+ * Rule 4: No #FFFFFF. All colors via CSS custom properties or Ledger palette hex.
+ * Agency model: ink-blue = Sabit acted, forest = human confirmed.
+ */
 const config: Config = {
   darkMode: 'class',
   content: [
@@ -16,7 +23,28 @@ const config: Config = {
         serif: ['var(--font-serif)', 'DM Serif Display', 'Georgia', 'serif'],
       },
       colors: {
-        /* Map existing Tailwind color names to CSS custom properties */
+        /* Ledger palette — base surfaces */
+        ledger: {
+          50:  '#F5F0E8',
+          100: '#EDE6D6',
+          200: '#DDD5C2',
+          400: '#8B7A5E',
+          600: '#5C4F3A',
+          900: '#2C2416',
+        },
+        /* Semantic accent colors */
+        gold:         '#B8860B',
+        'gold-bg':    '#F5EDD0',
+        forest:       '#2D6A4F',
+        'forest-bg':  '#E0EDE8',
+        amber:        '#8B6914',
+        'amber-bg':   '#F0E8D0',
+        rust:         '#C44B2B',
+        'rust-bg':    '#F5E4DE',
+        'ink-blue':   '#3B6EA5',
+        'ink-blue-bg': '#E0EAF5',
+
+        /* Map to CSS custom properties for existing components */
         primary: 'var(--bg-base)',
         background: 'var(--bg-base)',
         surface: 'var(--bg-surface)',
@@ -33,7 +61,7 @@ const config: Config = {
         accent: {
           DEFAULT: 'var(--interactive-primary)',
           dim: 'color-mix(in srgb, var(--interactive-primary) 10%, transparent)',
-          contrast: '#ffffff',
+          contrast: '#F5F0E8', /* ledger-50, NOT white */
           hover: 'var(--interactive-primary-hover)',
         },
         certified: {
@@ -50,7 +78,12 @@ const config: Config = {
           blue: 'var(--status-info)',
           'blue-dim': 'var(--status-info-bg)',
         },
+        /* AI is ink-blue (Sabit acted), not purple */
         ai: {
+          DEFAULT: 'var(--ai-primary)',
+          dim: 'var(--ai-bg)',
+          border: 'var(--ai-border)',
+          /* Legacy aliases */
           purple: 'var(--ai-primary)',
           'purple-dim': 'var(--ai-bg)',
           'purple-border': 'var(--ai-border)',
@@ -59,6 +92,10 @@ const config: Config = {
           DEFAULT: 'var(--ai-primary)',
           dim: 'var(--ai-bg)',
         },
+      },
+      backgroundColor: {
+        page: '#F5F0E8',
+        surface: '#EDE6D6',
       },
       textColor: {
         primary: 'var(--text-primary)',
