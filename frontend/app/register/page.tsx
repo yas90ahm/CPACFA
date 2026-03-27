@@ -59,7 +59,7 @@ export default function RegisterPage() {
         className="hidden lg:flex w-[55%] flex-col justify-center px-20 shrink-0"
         style={{ backgroundColor: 'var(--interactive-primary)' }}
       >
-        <h1 className="font-serif text-[2.5rem] tracking-[0.12em] uppercase leading-none text-white">
+        <h1 className="font-sans text-[2rem] tracking-[0.12em] uppercase font-medium leading-none text-white">
           SABIT
         </h1>
 

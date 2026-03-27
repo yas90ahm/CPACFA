@@ -637,7 +637,7 @@ export default function ReviewPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="fixed inset-0 bg-black/50" onClick={() => setShowBlockingGates(false)} />
           <div className="relative bg-surface border border-border rounded-card shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-serif text-lg text-primary mb-2">Cannot Submit for Review</h3>
+            <h3 className="font-sans text-lg text-primary mb-2">Cannot Submit for Review</h3>
             <p className="text-text-secondary text-sm mb-4">
               The following gates must pass before submitting:
             </p>

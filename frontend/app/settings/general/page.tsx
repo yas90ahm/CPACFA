@@ -293,7 +293,7 @@ function DemoResetSection() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="fixed inset-0 bg-black/50" onClick={() => { setShowConfirm(false); setConfirmInput(''); }} />
           <div className="relative bg-surface border border-border rounded-card shadow-xl max-w-sm w-full p-6" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-serif text-lg text-primary mb-2">Reset All Close Data</h3>
+            <h3 className="font-sans text-lg text-primary mb-2">Reset All Close Data</h3>
             <p className="text-text-secondary text-sm mb-4">
               This will permanently delete all close data. Type <strong className="font-mono">RESET</strong> to confirm.
             </p>

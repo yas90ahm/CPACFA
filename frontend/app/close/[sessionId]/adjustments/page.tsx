@@ -586,7 +586,7 @@ export default function AdjustmentsPage() {
       {allEntries.length === 0 && templates.length === 0 && (
         <div className="rounded-[var(--radius-lg)] bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[var(--shadow-sm)] p-8 text-center">
           <PenLine className="w-10 h-10 mx-auto mb-4" style={{ color: 'var(--text-tertiary)' }} />
-          <h3 className="font-serif text-lg mb-2" style={{ color: 'var(--text-primary)' }}>Set up recurring templates to automate your close</h3>
+          <h3 className="font-sans text-lg mb-2" style={{ color: 'var(--text-primary)' }}>Set up recurring templates to automate your close</h3>
           <p className="text-sm max-w-md mx-auto mb-6" style={{ color: 'var(--text-secondary)' }}>
             Sabit proposes these entries automatically every close period: depreciation from your fixed assets schedule,
             payroll accrual based on unpaid days, prepaid amortization from your schedules, and interest accrual from debt schedules.

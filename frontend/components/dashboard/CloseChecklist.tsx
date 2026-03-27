@@ -465,7 +465,7 @@ export function CloseChecklist(props: CloseChecklistProps) {
       {/* Header */}
       <div className="px-5 pt-5 pb-3">
         <h3
-          className="text-base font-serif font-semibold"
+          className="text-base font-sans font-semibold"
           style={{ color: 'var(--text-primary)' }}
         >
           Close Checklist

@@ -126,7 +126,7 @@ export function ConfirmDialog({
             id="confirm-dialog-title"
             className={cn(
               'text-lg font-semibold',
-              severity === 'ceremony' && 'font-serif'
+              severity === 'ceremony' && 'font-sans'
             )}
             style={{
               color: severity === 'critical'
@@ -134,7 +134,7 @@ export function ConfirmDialog({
                 : severity === 'ceremony'
                   ? 'var(--cert-primary)'
                   : 'var(--text-primary)',
-              fontFamily: severity === 'ceremony' ? 'var(--font-serif)' : undefined,
+              fontFamily: undefined,
             }}
           >
             {title}
@@ -157,7 +157,7 @@ export function ConfirmDialog({
             <p
               className="text-sm italic"
               style={{
-                fontFamily: 'var(--font-serif)',
+                fontFamily: undefined,
                 color: 'var(--text-secondary)',
                 lineHeight: 1.65,
               }}

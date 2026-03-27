@@ -547,7 +547,7 @@ export default function StatementsPage() {
           tbCtx.unmappedCount > 0 && tbCtx.rows.length > 0 ? (
             <div className="py-12 px-8 text-center">
               <FileText className="w-10 h-10 mx-auto mb-4" style={{ color: 'var(--text-tertiary)' }} />
-              <h3 className="font-serif text-lg mb-2" style={{ color: 'var(--text-primary)' }}>Statements cannot be generated yet</h3>
+              <h3 className="font-sans text-lg mb-2" style={{ color: 'var(--text-primary)' }}>Statements cannot be generated yet</h3>
               <p className="text-sm max-w-md mx-auto mb-4" style={{ color: 'var(--text-secondary)' }}>
                 Account mapping is required before generating financial statements. Your accounts must be mapped to
                 financial statement line items so Sabit knows where to place each balance.

@@ -2,6 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Ledger Palette overrides (Sabit_design_system.md):
+ * - text-white maps to ledger-50 (#F5F0E8), not #FFFFFF
+ * - font-semibold and font-bold map to font-medium (500) — max weight is 500
+ */
+@layer utilities {
+  .text-white { color: var(--text-inverse) !important; }
+  .bg-white { background-color: var(--bg-surface) !important; }
+  .font-bold { font-weight: 500 !important; }
+  .font-semibold { font-weight: 500 !important; }
+}
+
 @layer base {
   * {
     border-color: var(--border-default);

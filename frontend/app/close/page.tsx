@@ -142,7 +142,7 @@ export default function ClosePage() {
               <div className="mx-auto mb-6 w-16 h-16 rounded-full flex items-center justify-center bg-[var(--status-info-bg)]">
                 <Briefcase className="w-8 h-8 text-[var(--interactive-primary)]" />
               </div>
-              <h2 className="font-serif text-xl mb-2 text-[var(--text-primary)]">Start your first month-end close</h2>
+              <h2 className="font-sans text-xl mb-2 text-[var(--text-primary)]">Start your first month-end close</h2>
               <p className="text-sm mb-6 max-w-lg mx-auto text-[var(--text-secondary)]">
                 Upload your general ledger, let Sabit classify your accounts, reconcile balances, post adjustments,
                 and generate certified financial statements. Your first close takes about 2 hours — subsequent closes take 20 minutes.

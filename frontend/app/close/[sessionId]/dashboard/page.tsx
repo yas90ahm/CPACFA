@@ -131,7 +131,7 @@ export default function CloseDashboardPage() {
       <div className="rounded-[var(--radius-lg)] bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[var(--shadow-sm)] p-6">
         <div className="flex items-center justify-between flex-wrap gap-4">
           <div>
-            <h1 className="font-serif text-2xl" style={{ color: 'var(--text-primary)' }}>
+            <h1 className="font-sans text-2xl" style={{ color: 'var(--text-primary)' }}>
               {d.session.periodLabel ?? ''} Close
             </h1>
             <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
@@ -162,7 +162,7 @@ export default function CloseDashboardPage() {
         {/* Close Checklist */}
         <div className="col-span-12 lg:col-span-8">
           <div className="rounded-[var(--radius-lg)] bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[var(--shadow-sm)] p-6">
-            <h2 className="font-serif text-lg mb-4" style={{ color: 'var(--text-primary)' }}>
+            <h2 className="font-sans text-lg mb-4" style={{ color: 'var(--text-primary)' }}>
               Close Checklist
             </h2>
             <CloseChecklist
