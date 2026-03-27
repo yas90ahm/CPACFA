@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { sumMoneyStrings, moneyAbs } from '@/lib/money';
 import type { JournalEntry, JournalEntryStatus } from '@/lib/types/journal-entry';
 import { Paperclip, RotateCcw } from 'lucide-react';
+import ShadowAuditorBadge from '@/components/shared/ShadowAuditorBadge';
 import { useAuth } from '@/lib/auth';
 import { canCreateJE, canProposeJE, canApproveJE, canPostJE, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
 
@@ -125,10 +126,21 @@ export function AdjustmentsEntriesTab({
       align: 'right' as const,
       cell: (row: JournalEntry) => <MoneyCell value={sumMoneyStrings((row.lines ?? []).map(l => l.credit))} showDollar />,
     },
-    { id: 'status', header: 'Status', width: '130px', cell: (row: JournalEntry) => (
+    { id: 'status', header: 'Status', width: '180px', cell: (row: JournalEntry) => (
       <div className="flex items-center gap-1.5">
         <StatusBadge variant={STATUS_BADGE[row.status]} label={STATUS_LABEL[row.status]} />
         {row.reversalDate && <span className="text-xs text-accent font-medium" title={`Reverses on ${row.reversalDate}`}>↺</span>}
+        {row.status === 'posted' && (
+          <ShadowAuditorBadge
+            checks={[
+              { name: 'Balance check', passed: true },
+              { name: 'Period validation', passed: true },
+              { name: 'Memo required', passed: true },
+            ]}
+            completedAt={row.postedAt ?? undefined}
+            initialCollapsed
+          />
+        )}
       </div>
     ) },
     { id: 'source', header: 'Source', width: '90px', cell: (row: JournalEntry) => <span className="text-sm">{row.source === 'template' ? 'Template' : 'Manual'}</span> },

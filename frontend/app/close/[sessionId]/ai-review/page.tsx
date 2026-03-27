@@ -266,8 +266,8 @@ export default function AIReviewQueuePage() {
             <Brain className="w-5 h-5" style={{ color: 'var(--ai-primary)' }} />
           </div>
           <div>
-            <h1 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>AI Review Queue</h1>
-            <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>Review and approve AI-generated proposals</p>
+            <h1 className="text-lg font-medium" style={{ color: 'var(--text-primary)' }}>AI Activity</h1>
+            <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>Everything Sabit did autonomously this close — all items requiring human confirmation</p>
           </div>
         </div>
       </div>

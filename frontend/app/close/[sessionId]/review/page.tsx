@@ -16,6 +16,7 @@ import { useBoardPackage } from '@/lib/queries/cumulative';
 import { apiFetch } from '@/lib/api';
 import { CertificationChecklist } from './CertificationChecklist';
 import { CertificationRecord } from './CertificationRecord';
+import CertificationCeremony from '@/components/shared/CertificationCeremony';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { MoneyCell } from '@/components/shared/MoneyCell';
 import { cn } from '@/lib/utils';
@@ -150,6 +151,7 @@ export default function ReviewPage() {
 
   const [showSubmitDialog, setShowSubmitDialog] = useState(false);
   const [showCertifyDialog, setShowCertifyDialog] = useState(false);
+  const [showCeremony, setShowCeremony] = useState(false);
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [showLockDialog, setShowLockDialog] = useState(false);
   const [showReopenDialog, setShowReopenDialog] = useState(false);
@@ -264,6 +266,8 @@ export default function ReviewPage() {
     certifyMutation.mutate({ confirmation: 'CERTIFY' }, {
       onSuccess: () => {
         setCertifyStep('complete');
+        // Show the certification ceremony after a short delay
+        setTimeout(() => setShowCeremony(true), 500);
       },
       onError: (err) => {
         setCertifyStep('error');
@@ -1118,6 +1122,31 @@ export default function ReviewPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Certification Ceremony — the dark vault screen (Design System Rule 3) */}
+      {showCeremony && certification && session && (
+        <CertificationCeremony
+          entityName={session.entityName ?? ''}
+          periodLabel={session.periodLabel ?? ''}
+          certifiedBy={certification.certifiedBy ?? ''}
+          certifiedAt={certification.certifiedAt ?? new Date().toISOString()}
+          artifactHash={certification.snapshotHash ?? ''}
+          signatureB64={certification.signature ?? ''}
+          publicKeyB64={certification.publicKey ?? ''}
+          alg={'Ed25519'}
+          snapshotHash={certification.snapshotHash}
+          gatesPassing={readiness?.gatesPassing}
+          gatesTotal={readiness?.gatesTotal}
+          onDownload={() => {
+            // Download audit binder PDF
+            window.open(`/api/close/sessions/${sessionId}/audit-binder?format=pdf`, '_blank');
+          }}
+          onVerify={() => {
+            window.open('/verify', '_blank');
+          }}
+          onAcknowledge={() => setShowCeremony(false)}
+        />
       )}
     </div>
   );
