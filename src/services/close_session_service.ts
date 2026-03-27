@@ -1228,7 +1228,7 @@ async function autoProposModules(
       name: 'fixed_assets',
       fn: async () => {
         const { runDepreciation } = await import('./fixed_asset_service.js');
-        return runDepreciation(tenantId, pool, periodLabel, periodStart, periodEnd);
+        return runDepreciation(tenantId, pool, periodLabel, periodStart, periodEnd, closeSessionId, createdBy);
       },
     },
     {
@@ -1248,8 +1248,8 @@ async function autoProposModules(
     {
       name: 'deferred_tax',
       fn: async () => {
-        const { calculateDeferredTax } = await import('./deferred_tax_service.js');
-        return calculateDeferredTax(tenantId, pool, periodLabel, 0.21); // default US corporate rate
+        const { proposeDeferredTaxJE } = await import('./deferred_tax_service.js');
+        return proposeDeferredTaxJE(pool, tenantId, closeSessionId, periodLabel, 0.21, createdBy);
       },
     },
     {
@@ -1284,7 +1284,7 @@ async function autoProposModules(
       name: 'stock_compensation',
       fn: async () => {
         const { computeExpenseForPeriod } = await import('./stock_compensation_service.js');
-        return computeExpenseForPeriod(pool, tenantId, periodLabel);
+        return computeExpenseForPeriod(pool, tenantId, periodLabel, closeSessionId, createdBy);
       },
     },
     {

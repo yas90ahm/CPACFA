@@ -6,6 +6,7 @@ import type { Pool } from 'pg';
 import * as repo from '../db/repositories/stock_compensation_repository.js';
 import type { StockGrantRow, StockValuationRow, StockExpenseRow } from '../db/repositories/stock_compensation_repository.js';
 import { round2, plus } from '../utils/decimal.js';
+import { createDraftJE } from './journal_entry_service.js';
 
 export type { StockGrantRow, StockValuationRow, StockExpenseRow };
 
@@ -32,10 +33,13 @@ export interface CompensationSummary {
 export async function computeExpenseForPeriod(
   pool: Pool,
   tenantId: string,
-  periodLabel: string
+  periodLabel: string,
+  closeSessionId?: string,
+  createdBy?: string
 ): Promise<StockExpenseRow[]> {
   const grants = await repo.listGrants(pool, tenantId, { status: 'active' });
   const results: StockExpenseRow[] = [];
+  let totalPeriodExpense = 0;
 
   for (const grant of grants) {
     const fairValue = Number(grant.fairValuePerShare ?? 0);
@@ -44,21 +48,25 @@ export async function computeExpenseForPeriod(
 
     if (totalShares <= 0 || fairValue <= 0) continue;
 
-    // Determine vesting fraction for this period
+    // Determine vesting fraction for this period (ASC 718: expense = FV × vesting fraction)
     const vestedEntries = schedule.filter((e) => e.vested);
     const sharesVestedSoFar = vestedEntries.reduce((sum, e) => sum + e.shares, 0);
     const vestingFraction = Number(totalShares) > 0 ? sharesVestedSoFar / Number(totalShares) : 0;
 
-    // Total expense = fairValue * sharesGranted; period expense = total * vestingFraction / periods
-    const totalGrantExpense = fairValue * totalShares;
-    const periodCount = Math.max(1, schedule.length);
-    const periodExpense = round2(totalGrantExpense / periodCount);
+    // Period expense = total grant FV × (cumulative vesting fraction − prior cumulative fraction)
+    const totalGrantExpense = round2(fairValue * totalShares);
+    const targetCumulative = round2(totalGrantExpense * vestingFraction);
 
-    // Cumulative = all expense recorded + this period
+    // Cumulative expense already recorded for this grant
     const priorExpenses = await repo.listExpenses(pool, tenantId, periodLabel);
     const priorForGrant = priorExpenses.filter((e) => e.grantId === grant.id);
-    const priorCumulative = priorForGrant.reduce((sum, e) => sum + Number(e.cumulativeExpense), 0);
-    const cumulativeExpense = round2(priorCumulative + periodExpense);
+    const priorCumulative = priorForGrant.reduce((sum, e) => plus(sum, round2(e.cumulativeExpense)), 0);
+    const periodExpense = round2(Math.max(0, targetCumulative - priorCumulative));
+
+    if (periodExpense <= 0) continue;
+
+    const cumulativeExpense = plus(priorCumulative, periodExpense);
+    totalPeriodExpense = plus(totalPeriodExpense, periodExpense);
 
     const expense = await repo.recordExpense(pool, tenantId, {
       grantId: grant.id,
@@ -68,6 +76,35 @@ export async function computeExpenseForPeriod(
       sharesVested: sharesVestedSoFar,
     });
     results.push(expense);
+  }
+
+  // Create draft JE: DR Stock Compensation Expense, CR APIC
+  if (closeSessionId && totalPeriodExpense > 0) {
+    const compExpAccount = '6300'; // Stock compensation expense
+    const apicAccount = '3200'; // Additional paid-in capital
+    await createDraftJE(pool, {
+      closeSessionId,
+      tenantId,
+      memo: `Stock compensation expense — ${periodLabel} — ${grants.length} grant(s) — $${totalPeriodExpense.toFixed(2)}`,
+      source: 'accrual',
+      createdBy: createdBy ?? 'module:stock_comp',
+      lines: [
+        {
+          accountRef: compExpAccount,
+          debit: totalPeriodExpense,
+          credit: 0,
+          description: `Stock compensation expense (${grants.length} grants)`,
+          amountProvenance: { kind: 'engine_calculation' as const, ruleId: `stock_comp_${periodLabel}`, ruleVersion: '1', inputs: { periodLabel, grantCount: grants.length } },
+        },
+        {
+          accountRef: apicAccount,
+          debit: 0,
+          credit: totalPeriodExpense,
+          description: `APIC — stock compensation`,
+          amountProvenance: { kind: 'engine_calculation' as const, ruleId: `stock_comp_${periodLabel}`, ruleVersion: '1', inputs: { periodLabel, grantCount: grants.length } },
+        },
+      ],
+    });
   }
 
   return results;

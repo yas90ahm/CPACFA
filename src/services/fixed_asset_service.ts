@@ -1,13 +1,6 @@
 /**
- * STATUS: UNWIRED — This service compiles but is not imported by any active route.
- * It exists as potential future functionality.
- * Last verified: 2026-02-25
- * To activate: Create a route file that imports this service and register it in server.ts
- */
-
-/**
  * Fixed asset service — CRUD, depreciation run (straight-line, declining balance), summary.
- * Pure schedule functions (depreciationScheduleSl, depreciationScheduleDdb) ported from backend/accounting_engine.py for API parity.
+ * Wired into autoProposModules() — proposes depreciation JEs each period.
  */
 
 import type { Pool } from 'pg';
@@ -16,6 +9,7 @@ import type { FixedAssetRow, DepreciationMethod, DepreciationRunRow, Depreciatio
 import Decimal from 'decimal.js';
 import { minus as decMinus, round2 } from '../utils/decimal.js';
 import { NotImplementedError } from '../errors.js';
+import { createDraftJE } from './journal_entry_service.js';
 
 export type { FixedAssetRow, DepreciationRunRow, DepreciationRunDetailRow, DepreciationMethod };
 
@@ -283,8 +277,10 @@ export async function runDepreciation(
   pool: Pool,
   periodLabel: string,
   periodStart: string,
-  periodEnd: string
-): Promise<{ run: DepreciationRunRow; details: DepreciationRunDetailRow[] }> {
+  periodEnd: string,
+  closeSessionId?: string,
+  createdBy?: string
+): Promise<{ run: DepreciationRunRow; details: DepreciationRunDetailRow[]; jeId?: string }> {
   const assets = await repo.listActiveFixedAssets(pool, tenantId);
   const detailsInput: Omit<repo.DepreciationRunDetailRow, 'id' | 'createdAt'>[] = [];
   let totalDepreciation = 0;
@@ -293,7 +289,7 @@ export async function runDepreciation(
     const entry = buildDepreciationEntriesForAsset(asset, periodStart, periodEnd);
     totalDepreciation = new Decimal(totalDepreciation).plus(new Decimal(entry.depreciationAmount)).toDecimalPlaces(2).toNumber();
     detailsInput.push({
-      runId: '', // set after run created
+      runId: '',
       fixedAssetId: asset.id,
       periodStart: entry.periodStart,
       periodEnd: entry.periodEnd,
@@ -305,7 +301,39 @@ export async function runDepreciation(
   const run = await repo.createDepreciationRun(pool, tenantId, periodLabel, totalDepreciation);
   const withRunId = detailsInput.map((d) => ({ ...d, runId: run.id }));
   const details = await repo.createDepreciationRunDetails(pool, withRunId);
-  return { run, details };
+
+  // Create draft JE: DR Depreciation Expense, CR Accumulated Depreciation
+  let jeId: string | undefined;
+  if (closeSessionId && totalDepreciation > 0) {
+    const depExpAccount = '6100'; // default depreciation expense
+    const accumDepAccount = '1910'; // default accumulated depreciation
+    const je = await createDraftJE(pool, {
+      closeSessionId,
+      tenantId,
+      memo: `Depreciation — ${periodLabel} — ${assets.length} asset(s) — total $${totalDepreciation.toFixed(2)}`,
+      source: 'accrual',
+      createdBy: createdBy ?? 'module:fixed_assets',
+      lines: [
+        {
+          accountRef: depExpAccount,
+          debit: totalDepreciation,
+          credit: 0,
+          description: `Period depreciation expense (${assets.length} assets)`,
+          amountProvenance: { kind: 'engine_calculation' as const, ruleId: run.id, ruleVersion: '1', inputs: { periodLabel, assetCount: assets.length } },
+        },
+        {
+          accountRef: accumDepAccount,
+          debit: 0,
+          credit: totalDepreciation,
+          description: `Accumulated depreciation (${assets.length} assets)`,
+          amountProvenance: { kind: 'engine_calculation' as const, ruleId: run.id, ruleVersion: '1', inputs: { periodLabel, assetCount: assets.length } },
+        },
+      ],
+    });
+    jeId = je.id;
+  }
+
+  return { run, details, jeId };
 }
 
 export interface DepreciationSummary {

@@ -14,6 +14,7 @@ import type { Pool } from 'pg';
 import * as repo from '../db/repositories/deferred_tax_repository.js';
 import type { DeferredTaxItemRow, ValuationAllowanceRow, RateChangeRow } from '../db/repositories/deferred_tax_repository.js';
 import { round2, plus, minus, from as dec } from '../utils/decimal.js';
+import { createDraftJE } from './journal_entry_service.js';
 
 // Re-export types
 export type { DeferredTaxItemRow, ValuationAllowanceRow, RateChangeRow };
@@ -208,6 +209,52 @@ export async function calculateDeferredTax(
     deferredTaxLiabilityNet: round2(deferredTaxLiabilityNet),
     netDeferredTaxAsset: round2(netDeferredTaxAsset),
   };
+}
+
+/**
+ * Propose deferred tax provision JE.
+ * DR/CR DTA and DTL based on period changes.
+ */
+export async function proposeDeferredTaxJE(
+  pool: Pool,
+  tenantId: string,
+  closeSessionId: string,
+  periodLabel: string,
+  taxRate: number,
+  createdBy: string
+): Promise<{ jeId: string } | null> {
+  const result = await calculateDeferredTax(tenantId, pool, periodLabel, taxRate);
+  const netAmount = round2(result.netDeferredTaxAsset);
+  if (Math.abs(netAmount) < 0.01) return null;
+
+  const dtaAccount = '1800'; // Deferred Tax Asset
+  const dtlAccount = '2900'; // Deferred Tax Liability
+  const taxExpAccount = '8100'; // Deferred Tax Expense
+  const taxBenAccount = '8100'; // Deferred Tax Benefit (same account, opposite direction)
+
+  const lines: Array<{ accountRef: string; debit: number; credit: number; description: string; amountProvenance: { kind: 'engine_calculation'; ruleId: string; ruleVersion: string; inputs?: Record<string, unknown> } }> = [];
+  const absNet = Math.abs(netAmount);
+  const provenance = { kind: 'engine_calculation' as const, ruleId: `deferred_tax_${periodLabel}`, ruleVersion: '1', inputs: { taxRate, periodLabel, tempDiffCount: result.temporaryDifferences.length } };
+
+  if (netAmount > 0) {
+    // Net DTA position: DR DTA, CR Tax Benefit
+    lines.push({ accountRef: dtaAccount, debit: absNet, credit: 0, description: `Deferred tax asset — net temporary differences`, amountProvenance: provenance });
+    lines.push({ accountRef: taxBenAccount, debit: 0, credit: absNet, description: `Deferred tax benefit`, amountProvenance: provenance });
+  } else {
+    // Net DTL position: DR Tax Expense, CR DTL
+    lines.push({ accountRef: taxExpAccount, debit: absNet, credit: 0, description: `Deferred tax expense`, amountProvenance: provenance });
+    lines.push({ accountRef: dtlAccount, debit: 0, credit: absNet, description: `Deferred tax liability — net temporary differences`, amountProvenance: provenance });
+  }
+
+  const je = await createDraftJE(pool, {
+    closeSessionId,
+    tenantId,
+    memo: `Deferred tax provision — ${periodLabel} — ${result.temporaryDifferences.length} temp diff(s) — net $${netAmount.toFixed(2)}`,
+    source: 'accrual',
+    createdBy,
+    lines,
+  });
+  return { jeId: je.id };
 }
 
 // ============================================================================
