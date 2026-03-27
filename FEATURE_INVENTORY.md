@@ -1,572 +1,284 @@
-# Definitive Feature Inventory — Sabit
+# Sabit Feature Inventory — Complete Workflow Reference
 
-> Source-code-only audit. Last updated after full build session.
-> Backend `tsc`: clean (zero errors). Frontend `next build`: clean (zero errors).
-
-## Codebase Scale
-
-| Component | Count |
-|-----------|-------|
-| Frontend pages | 52 |
-| React Query hook files | 45 |
-| Backend services | 171 |
-| Route files | 106 |
-| Database migrations | 189 |
-| Frontend components | 69 |
-| Repository files | 73 |
-| Test files | 1,077 |
+**Date:** 2026-03-27
+**Purpose:** UI/UX designer reference — every feature, every workflow, every persona
+**Source:** Line-by-line audit of 212 migrations, 121 services, 150+ API endpoints, 47 pages, 76 components
 
 ---
 
-## 1. GL Ingestion
+## Table of Contents
 
-| Feature | Built | Wired E2E | Evidence |
-|---------|-------|-----------|----------|
-| CSV upload/parsing | Yes | Yes | `gl_upload_service.ts`, `routes/gl/ingest.ts` |
-| XLSX upload/parsing (ExcelJS) | Yes | Yes | `gl_upload_service.ts` — ExcelJS, zero CVEs |
-| Trial balance derivation | Yes | Yes | `gl_to_tb_aggregation_service.ts` |
-| GL anomaly detection (7 types) | Yes | Yes | `gl_anomaly_detection_service.ts` — surfaced via gl-health page |
-| GL health analysis (A-F scoring) | Yes | Yes | `gl_health_analysis_service.ts`, `frontend/gl-health/page.tsx` |
-| GL quality / account intelligence (11 flags) | Yes | Yes | `account_intelligence_service.ts`, `frontend/gl-quality/page.tsx` |
-| GL quality gate (tb_balanced) | Yes | Yes | `session_readiness_gates_service.ts` |
-| Replace GL (atomic + cascade) | Yes | Yes | Dashboard GL replace flow with confirmation modal |
-| GL investigation (deterministic) | Yes | Yes | `gl_investigation_service.ts`, InvestigationPanel component |
-
----
-
-## 2. Account Mapping (5-Layer AI Pipeline)
-
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| Layer 1: Prior period rules | Yes | Yes |
-| Layer 2: XBRL trigram search (17,943 elements) | Yes | Yes |
-| Layer 2: AI RAG classification | Yes | Yes |
-| Layer 3: Agentic balance validation + ASC citations | Yes | Yes |
-| Layer 4: Cross-validation (8 checks) | Yes | Yes |
-| Layer 5: Entity learning | Yes | Yes |
-| Layer 5: Cross-tenant anonymized patterns (opt-in) | Yes | Yes |
-| Auto-accept at configurable threshold (0.80) | Yes | Yes |
-| Frontend: confidence bars + color coding | Yes | Yes |
-| Frontend: accept/reject/override actions | Yes | Yes |
-| Frontend: auto-classify on page load | Yes | Yes |
-| Frontend: sticky progress header (X of Y mapped, %) | Yes | Yes |
-| Frontend: "Accept All High Confidence (>90%)" bulk action | Yes | Yes |
-| Mapping completeness gate | Yes | Yes |
-| Manual override via taxonomy dropdown | Yes | Yes |
-| XBRL direct search API | Yes | Yes |
+1. [Architecture Overview](#1-architecture-overview)
+2. [Personas & Access](#2-personas--access)
+3. [The Close Pipeline (7 Steps)](#3-the-close-pipeline)
+4. [13 Accounting Modules](#4-accounting-modules)
+5. [Governance & Audit](#5-governance--audit)
+6. [Portfolio & Multi-Entity](#6-portfolio--multi-entity)
+7. [Settings & Configuration](#7-settings--configuration)
+8. [AI System & HITL Architecture](#8-ai-system--hitl-architecture)
+9. [Certification & Cryptographic Signing](#9-certification--cryptographic-signing)
+10. [Complete Persona Journeys](#10-complete-persona-journeys)
+11. [Database Schema Summary](#11-database-schema-summary)
+12. [Frontend Page Map](#12-frontend-page-map)
+13. [Component Library](#13-component-library)
 
 ---
 
-## 3. Reconciliation
+## 1. Architecture Overview
 
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| Auto-generation from COA (balance sheet accounts) | Yes | Yes |
-| GL balance auto-population from adjusted TB | Yes | Yes |
-| Supporting balance entry | Yes | Yes |
-| DB GENERATED ALWAYS variance | Yes | Yes |
-| DB GENERATED ALWAYS unexplained_variance | Yes | Yes |
-| DB GENERATED ALWAYS is_within_tolerance | Yes | Yes |
-| Reconciling items with sign (6 types) | Yes | Yes |
-| Evidence mandatory before completion | Yes | Yes |
-| Segregation of duties (approver ≠ preparer) | Yes | Yes |
-| Tolerance configuration per account | Yes | Yes |
-| Recon completeness gate | Yes | Yes |
-| Cash reconciliation specific gate | Yes | Yes |
-| Prior period carry-forward of unresolved items | Yes | Yes |
-| Subledger source ingestion + auto-match | Yes | Yes |
-| Roll-forward recon (fixed assets, debt, equity) | Yes | Yes |
-| Recon intelligence (prior period + PDF extraction) | Yes | Yes |
-| Frontend: category status board (Cash/AR/AP/FA/Other) | Yes | Yes |
-| Frontend: batch supporting balance entry | Yes | Yes |
-| Frontend: reconciliation detail page | Yes | Yes |
+**What Sabit is:** A financial close automation engine for PE-backed mid-market companies ($100M-$1B revenue). It takes a company's general ledger and produces four certified financial statements (Balance Sheet, Income Statement, Cash Flow, Statement of Stockholders' Equity) through a gated pipeline with cryptographic certification.
+
+**Stack:** Node.js + Express + TypeScript + PostgreSQL (backend). Next.js 14 + React 18 + Tailwind (frontend). All money uses Decimal.js. PostgreSQL uses NUMERIC(20,2). Hash-chained append-only audit ledger. Ed25519 cryptographic signing.
+
+**Core principle:** Sabit acts first. The controller confirms, adjusts, or overrides. Every input field arrives pre-filled or justified empty.
 
 ---
 
-## 4. Bank Reconciliation
+## 2. Personas & Access
 
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| Bank CSV parser (auto-detect 9 column types) | Yes | Yes |
-| Bank OFX/QFX parser (XML tag extraction) | Yes | Yes |
-| Bank BAI2 parser (record types 01-99) | Yes | Yes |
-| Bank PDF extraction (6 banks + generic) | Yes | Yes |
-| Transaction matching: 1:1 | Yes | Yes |
-| Transaction matching: N:1 | Yes | Yes |
-| Transaction matching: 1:N | Yes | Yes |
-| Confidence scoring (50% amount / 25% date / 25% Levenshtein) | Yes | Yes |
-| Auto-match rules (regex, amount range, counterparty, type) | Yes | Yes |
-| Confirm/reject match workflow | Yes | Yes |
-| Clearing accounts (outstanding checks, deposits in transit) | Yes | Yes |
-| Frontend: bank reconciliation page (3-panel layout) | Yes | Yes |
-| Frontend: in sidebar under Workpapers | Yes | Yes |
-| Plaid adapter (real HTTP calls) | Yes | Partial — no Link onboarding |
+| Persona | Role | Landing Page | Can Do | Cannot Do |
+|---------|------|-------------|--------|-----------|
+| **Controller** | Does the close work | `/close` | Upload GL, map accounts, create/propose JEs, complete recons, explain variances, generate statements, submit for review | Approve own JEs, certify, lock |
+| **Reviewer / CFO** | Reviews and certifies | `/close/:id/review` | Approve/reject JEs, approve recons, approve variances, certify (Ed25519), lock, reopen | Create JEs they then approve (SoD) |
+| **Operating Partner** | PE fund oversight | `/portfolio` | View all entities, close status, financials, alerts, board packages | Modify any close data (read-only) |
+| **Auditor** | External verification | `/verify` | Verify artifacts, access binder, view trail, download workpapers | Modify any data (read-only) |
+| **Admin** | System configuration | `/settings` | Create entities, invite users, assign roles, configure policies, manage integrations | N/A |
 
 ---
 
-## 5. Journal Entries
+## 3. The Close Pipeline
 
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| Full lifecycle: draft → proposed → approved → posted → exported | Yes | Yes |
-| Rejection with comments back to draft | Yes | Yes |
-| Balance validation via Decimal.js (exact equality) | Yes | Yes |
-| Mandatory memo enforcement (service + DB trigger) | Yes | Yes |
-| Segregation of duties (hardcoded in production) | Yes | Yes |
-| Shadow auditor: deterministic pre-post checks | Yes | Yes |
-| Shadow auditor: AI compliance pass (fail-open) | Yes | Yes |
-| Materiality-gated evidence requirement | Yes | Yes |
-| Recurring AJE templates (propose/apply/skip) | Yes | Yes |
-| Auto-apply templates on session open | Yes | Yes |
-| Template skip with documented reason | Yes | Yes |
-| Reversal entries with bidirectional linking | Yes | Yes |
-| JE immutability DB triggers (posted + exported) | Yes | Yes |
-| Closing entries (revenue/expense to RE) | Yes | Yes |
-| Input sanitization (NaN/Infinity/sub-penny/overflow) | Yes | Yes |
-| Frontend: approval queue tab (grouped, inline approve/reject) | Yes | Yes |
-| 20 API endpoints | Yes | Yes |
+State machine: **OPEN -> IN_PROGRESS -> UNDER_REVIEW -> CERTIFIED -> SUBSEQUENT_EVENTS_REVIEW -> LOCKED**
 
----
+11 hard gates. All must pass before advancing.
 
-## 6. Accounting Modules (7 NEW)
+### Step 1: Upload & Map Trial Balance
 
-### 6a. Prepaid Amortization Schedule
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| Schedule CRUD (GENERATED monthly_amount, remaining_balance) | Yes | Yes |
-| Auto-propose monthly amortization AJEs | Yes | Yes |
-| Frontend page + sidebar | Yes | Yes |
+**What happens:** Controller uploads GL as CSV. System parses, validates, derives trial balance. GL health analysis detects duplicates, reversed entries, orphaned accounts.
 
-### 6b. AR Aging + CECL Allowance (ASC 326)
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| CSV aging import with auto-bucketing (current/31-60/61-90/91-120/120+) | Yes | Yes |
-| CECL expected credit loss computation (configurable rates per bucket) | Yes | Yes |
-| Auto-propose bad debt expense AJE | Yes | Yes |
-| Frontend page + sidebar | Yes | Yes |
+**Page:** `/close/[sessionId]/trial-balance`
+**Data:** Account table (code, name, type, debit, credit), TB totals, balance status
+**Actions:** Upload CSV, preview columns, map headers, ingest, filter, drill to GL
+**Gate:** `tb_balanced` — debits = credits
 
-### 6c. AP Aging + Cutoff Analysis
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| CSV aging import with auto-bucketing + past-due detection | Yes | Yes |
-| Cutoff analysis (invoices received after period end) | Yes | Yes |
-| Auto-propose cutoff accrual AJEs | Yes | Yes |
-| Cutoff disposition workflow (accrue/exclude/already recorded) | Yes | Yes |
-| Frontend page + sidebar | Yes | Yes |
+### Step 2: Map Accounts
 
-### 6d. Debt Interest Accrual
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| Debt schedule registry (fixed/variable rate) | Yes | Yes |
-| Actual/365 day-count interest computation (Decimal.js) | Yes | Yes |
-| Auto-propose interest accrual AJEs | Yes | Yes |
-| Frontend page + sidebar | Yes | Yes |
+**What happens:** 6-layer AI pipeline classifies GL accounts to FS line items. Layer 0: 148 curated patterns (98% confidence). Layers 1-4: XBRL trigram, FS name match, Claude direct, RAG batch. Layer 5: Auto-propose with detectSuspects validation. Controller accepts, rejects, or manually maps.
 
-### 6e. Payroll Accrual
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| Config-based accrual (days × daily cost) | Yes | Yes |
-| Separate lines for wages, payroll tax, benefits | Yes | Yes |
-| CSV payroll register import (ADP/Paychex/Gusto formats) | Yes | Yes |
-| Auto-propose payroll accrual AJEs | Yes | Yes |
-| Frontend page + sidebar | Yes | Yes |
+**Page:** `/close/[sessionId]/mapping`
+**Data:** Account rows with AI suggestion, confidence bar (>=80% forest, 60-79% amber, <60% rust), taxonomy picker
+**Header stat:** "Sabit classified 78 of 79 accounts automatically - 1 needs your review"
+**Actions:** Accept/reject AI suggestions, manually select FS line, auto-classify, bulk actions
+**Gate:** `all_accounts_mapped`
 
-### 6f. Inventory Obsolescence Reserve (ASC 330)
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| CSV inventory aging import with last-movement-date bucketing | Yes | Yes |
-| Aging-based reserve (configurable rates: current/91-180/181-365/365+) | Yes | Yes |
-| Auto-propose write-down AJE | Yes | Yes |
-| Frontend page + sidebar | Yes | Yes |
+### Step 3: Reconciliation
 
-### 6g. ASC 842 Lease Accounting
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| Operating and finance lease classification | Yes | Yes |
-| Present value computation (Decimal.js pow(), never Math.pow) | Yes | Yes |
-| Full payment schedule generation | Yes | Yes |
-| Finance leases: 2 JEs per period (interest + ROU amortization) | Yes | Yes |
-| Operating leases: 1 JE per period (straight-line expense) | Yes | Yes |
-| Lease modification remeasurement | Yes | Yes |
-| ASC 842 disclosure (maturity, WARL, WADR, expense breakdown) | Yes | Yes |
-| Frontend page (4 sections) + sidebar | Yes | Yes |
+**What happens:** System initializes recons for all required BS accounts. Controller enters supporting balance, adds reconciling items. Variance computed automatically (DB GENERATED). Reviewer approves (SoD: preparer != approver).
+
+**Pages:** `/close/[sessionId]/reconciliation` (list), `/[reconId]` (detail)
+**Data:** Account, GL balance, supporting balance, variance, tolerance, reconciling items, status, evidence
+**Actions:** Enter supporting balance, add items, upload evidence, complete, approve
+**Gate:** `recons_complete`
+
+### Step 4: Adjustments (Journal Entries)
+
+**What happens:** System auto-proposes from 13 modules. Recurring templates proposed. Manual entries created. JE lifecycle: draft -> proposed -> approved -> posted. Balance validated (Decimal.js exact match + DB trigger). SoD enforced. Shadow auditor pre-checks. Posted = immutable.
+
+**Page:** `/close/[sessionId]/adjustments`
+**Tabs:** Entries | Templates
+**Data:** JE table (number, memo, accounts, amount, status, source), template list
+**Actions:** Create JE, propose, approve, reject, post, upload evidence, apply/skip templates
+**Gate:** `material_jes_approved`
+
+### Step 5: Generate Statements
+
+**What happens:** 4 GAAP statements from adjusted TB. Integrity gate: A = L + E. 9 cross-statement tie checks. Discontinued operations separated.
+
+**Page:** `/close/[sessionId]/statements`
+**Tabs:** Income Statement | Balance Sheet | Cash Flow | Equity | EBITDA Bridge | Validation
+**Data:** GAAP-formatted tables with prior period comparison, accounting underlines
+**Actions:** Generate, toggle adjusted/unadjusted, export PDF/Excel
+**Gate:** `statements_current`
+
+### Step 6: Variance Analysis
+
+**What happens:** Period-over-period variances computed (DB GENERATED). Material (>5%) must be explained. AI drafts explanations. AI-drafted require human review attestation.
+
+**Page:** `/close/[sessionId]/variance`
+**Data:** FS lines with current/prior, change $, change %, materiality flag, explanation status
+**Actions:** View AI draft, edit, approve
+**Gate:** `variances_explained` (includes unreviewedAi check)
+
+### Step 7: Review & Certify
+
+**What happens:** CFO reviews. All 11 gates must pass. 9 cross-statement checks. Ed25519 signature. Certification ceremony (dark vault screen).
+
+**Page:** `/close/[sessionId]/review`
+**Data:** Gate summary, financials, team, evidence manifest, certification record
+**Actions:** Review gates, certify, lock
+**Gate:** All 11 passing + cross-statement + integrity
 
 ---
 
-## 7. Existing Specialized Modules
+## 4. Accounting Modules
 
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| Fixed asset depreciation (ASC 360/IAS 16) | Yes | Yes |
-| Deferred tax provision (ASC 740/IAS 12) | Yes | Yes |
-| Stock compensation (ASC 718/IFRS 2) | Yes | Yes |
-| Impairment testing (ASC 350/IAS 36) | Yes | Yes |
-| Segment reporting (ASC 280/IFRS 8) | Yes | Yes |
-| Revenue recognition (ASC 606/IFRS 15) | Yes | Yes |
-| FX translation (ASC 830/IAS 21) | Yes | Yes |
-| Intercompany reconciliation | Yes | Yes |
-| Consolidation (elimination rules, formula DSL) | Yes | Yes |
-| EBITDA bridge | Yes | Yes |
-| Budget upload + budget-to-actual variance | Yes | Yes |
-
----
-
-## 8. Statement Generation
-
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| Adjusted TB computation (unadjusted + posted AJEs) | Yes | Yes |
-| Balance Sheet | Yes | Yes |
-| Income Statement | Yes | Yes |
-| Cash Flow Statement — indirect method (ASC 230) | Yes | Yes |
-| Statement of Stockholders' Equity | Yes | Yes |
-| Notes & accounting policies | Yes | Yes |
-| Multi-standard (US GAAP, IFRS, ASPE, FRS 102) | Yes | Yes |
-| A=L+E enforcement ($0.01 kill switch) | Yes | Yes |
-| Net income tie (IS → Equity) | Yes | Yes |
-| Cash tie (CF → BS) | Yes | Yes |
-| Retained earnings tie | Yes | Yes |
-| Stale flag when mutations occur after generation | Yes | Yes |
-| Versioning + diff history | Yes | Yes |
-| Cumulative statements (QTD/YTD) | Yes | Yes |
-| Comparative statements (multi-period) | Yes | Yes |
-| Statement drilldown (line → accounts → GL entries) | Yes | Yes |
-| Print styles (proper margins, page breaks, no UI chrome) | Yes | Yes |
-| Frontend display with tabs + period toggle | Yes | Yes |
+| # | Module | ASC | What It Computes | JE Pattern | Page |
+|---|--------|-----|-----------------|------------|------|
+| 1 | Prepaids | 340 | Monthly amortization, final sweep | Dr Expense, Cr Prepaid | `/prepaids` |
+| 2 | Fixed Assets | 360 | SL/DDB depreciation | Dr Depreciation, Cr Accum Dep | `/fixed-assets` |
+| 3 | Payroll | - | Daily rate x days accrued | Dr Payroll Exp, Cr Accrued Payroll | `/payroll-accrual` |
+| 4 | Debt | - | Principal x rate/365 x days | Dr Interest Exp, Cr Accrued Interest | `/debt-accrual` |
+| 5 | Deferred Tax | 740 | Temp diff x tax rate | Dr/Cr DTA/DTL | `/deferred-tax` |
+| 6 | Leases | 842 | PV, interest/principal split | Dr Interest+Amort, Cr Liability | `/leases` |
+| 7 | Inventory | 330 | Aging bucket x reserve rate | Dr Reserve Exp, Cr Inventory Reserve | `/inventory-reserve` |
+| 8 | Stock Comp | 718 | FV x shares / vesting periods | Dr Comp Exp, Cr APIC | `/stock-compensation` |
+| 9 | Impairment | 350 | max(0, carrying - recoverable) | Dr Impairment Loss, Cr Asset | `/impairment` |
+| 10 | AP Aging | 405 | Cutoff analysis | Dr Expense, Cr AP | `/ap-aging` |
+| 11 | AR/CECL | 326 | Bucket x loss rate | Dr Bad Debt, Cr Allowance | `/ar-aging` |
+| 12 | Segments | 280 | 10% reportability tests | Report only | `/segments` |
+| 13 | Revenue | 606 | Allocation + schedule | Dr AR, Cr Revenue | (integrated) |
 
 ---
 
-## 9. Variance Analysis
+## 5. Governance & Audit
 
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| Period-over-period change (DB GENERATED columns) | Yes | Yes |
-| Materiality threshold configuration | Yes | Yes |
-| AI-drafted explanation (human approval required) | Yes | Yes |
-| Controller review and approval of explanations | Yes | Yes |
-| Variance classification (Timing/Permanent/Volume/Price/Mix/Other) | Yes | Yes |
-| Unexplained variance blocking certification | Yes | Yes |
-| Cumulative variance (QTD/YTD vs prior year) | Yes | Yes |
-| GL investigation + conversational analysis | Yes | Yes |
-| Frontend: progress bar, inline editing, AI draft badge | Yes | Yes |
-
----
-
-## 10. Certification and Audit
-
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| Ed25519 signing (real crypto.sign/verify) | Yes | Yes |
-| Canonical JSON artifact construction | Yes | Yes |
-| Ledger snapshot creation (immutable, hashed) | Yes | Yes |
-| SHA-256 hash versions (v1, v2) | Yes | Yes |
-| Evidence manifest in certification snapshot | Yes | Yes |
-| Hash-chained audit ledger (append-only, DB triggers) | Yes | Yes |
-| Chain enforcement trigger on INSERT (FOR UPDATE serialization) | Yes | Yes |
-| Chain verification API endpoint | Yes | Yes |
-| Public verification endpoint (no auth required) | Yes | Yes |
-| DB enforcement verification (checks trigger existence) | Yes | Yes |
-| Evidence manifest verification | Yes | Yes |
-| Snapshot hash verification | Yes | Yes |
-| Readiness re-check at certification moment (not cached) | Yes | Yes |
-| Subsequent events review (ASC 855) | Yes | Yes |
-| 7-year evidence retention (DB triggers) | Yes | Yes |
-| Post-certification lock (terminal, immutable) | Yes | Yes |
-| Reopen flow (CFO authorization, documented reason) | Yes | Yes |
-| Frontend: progressive CERTIFY button, green glow, mono hash display | Yes | Yes |
+| Feature | Page | What |
+|---------|------|------|
+| Audit Trail | `/audit-trail` | Hash-chained, 39 event types, human-readable narratives |
+| Audit Binder | `/audit-binder` | PDF/CSV export: statements, JEs, evidence, IRAC justifications |
+| Controls | `/controls` | COSO assertions with evidence links |
+| Issues | `/discrepancies` | detected -> assigned -> resolved -> verified (blocking prevents cert) |
+| Checklist | `/checklist` | GAAP disclosure tracking by standard |
+| Board Package | `/board-package` | Executive summary: metrics, variances, validation |
+| GL Health | `/gl-health` | Anomaly detection, quality grade |
+| GL Quality | `/gl-quality` | Detailed analysis, flagged accounts |
+| AI Review | `/ai-review` | All AI suggestions in one place |
+| Analytics | `/analytics` | KPIs, trends, benchmarks |
 
 ---
 
-## 11. Close Pipeline and State Machine
+## 6. Portfolio & Multi-Entity
 
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| 6-state machine (OPEN → IN_PROGRESS → UNDER_REVIEW → CERTIFIED → SUBSEQUENT_EVENTS_REVIEW → LOCKED) | Yes | Yes |
-| 11 hard gates blocking advancement | Yes | Yes |
-| Auto-advance engine (re-evaluates on recon/JE/statement events) | Yes | Yes |
-| Event-driven gate re-evaluation (GATE_CHECK_REQUESTED from 3 points) | Yes | Yes |
-| Cascade engine (9 trigger types, max depth 3, <2s target) | Yes | Yes |
-| Auto-lock after 30 days (configurable) | Yes | Yes |
-| Close calendar with due dates | Yes | Yes |
-| Predictive close timeline (weighted average, confidence intervals) | Yes | Yes |
-| Task assignment (8 types, dependencies, auto-generation) | Yes | Yes |
-| Job worker (polling, FOR UPDATE SKIP LOCKED, backoff, dead-letter) | Yes | Yes |
-| Standalone worker process (`npm run worker`) | Yes | Yes |
-| WebSocket (Socket.IO + optional Redis adapter) | Yes | Yes |
-| Frontend: pipeline stepper (sequential enforcement) | Yes | Yes |
-| Frontend: timeline bar (day count, est. completion, on track/at risk) | Yes | Yes |
-| Frontend: attention panel (computed from close state, not just issues) | Yes | Yes |
-| Frontend: gate status card | Yes | Yes |
-| Frontend: dashboard with role-based routing | Yes | Yes |
+| Feature | Page | What |
+|---------|------|------|
+| Portfolio Dashboard | `/portfolio` | All entities: status, revenue, margin, gates, alerts |
+| Entity Detail | `/portfolio/[entityId]` | Single entity: close history, financials, team |
+| Consolidated | `/portfolio/consolidated` | Combined statements across entities |
+| FX Translation | `/fx-translation` | ASC 830: current-rate + temporal method, CTA |
+| Consolidation | `/consolidation` | Elimination rules, NCI computation |
 
 ---
 
-## 12. ERP Integrations
+## 7. Settings & Configuration
 
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| QuickBooks adapter (real API calls to intuit.com/v3) | Yes | Yes |
-| Xero adapter (real API calls to api.xero.com) | Yes | Yes |
-| NetSuite adapter (real SuiteQL + REST) | Yes | Yes |
-| OAuth callbacks wired to Express (QB/Xero/NetSuite) | Yes | Yes |
-| AES-256-GCM token encryption (random salt, production guard) | Yes | Yes |
-| HMAC-signed OAuth state (CSRF protection, constant-time verify) | Yes | Yes |
-| Smart adapter loading (real first, mock fallback) | Yes | Yes |
-| Push close to ERP (post adjustments back) | Yes | Yes |
-| Frontend: integrations page with Connect/Sync Now/Disconnect | Yes | Yes |
-| COA templates (QuickBooks, Xero, NetSuite JSON files) | Yes | Yes |
-| Python MCP ERP server (7 tools, permission guard) | Yes | Yes |
-| Scheduled sync | No | — — DB table exists, no cron |
+| Page | Configures |
+|------|-----------|
+| General | Entity name, fiscal YE, currency, materiality, accounting standard |
+| Team | Users, roles, invitations |
+| Taxonomy | FS line items, XBRL mapping |
+| Reconciliation | Required accounts, tolerances, evidence |
+| Evidence Policy | File types, materiality thresholds |
+| Templates | Recurring AJE templates |
+| Integrations | ERP (QB/Xero/NS), bank (Plaid) |
 
 ---
 
-## 13. AI Architecture
+## 8. AI System & HITL Architecture
 
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| Classifier pillar (account type + FS placement) | Yes | Yes |
-| Shadow Auditor pillar (pre-post compliance) | Yes | Yes |
-| Justifier pillar (IRAC memo with ASC citations) | Yes | Yes |
-| Advisor pillar (adjusting entry proposals) | Yes | Yes |
-| Guardrail: assertNoNumericAmountsInAgentOutput (13 call sites) | Yes | Yes |
-| Guardrail: string-encoded amount detection (JSON + regex) | Yes | Yes |
-| AsyncLocalStorage AI boundary (assertNoAiMutationContext) | Yes | Yes |
-| AI writes to ai_* tables only | Yes | Yes |
-| Zod schema validation on all 4 pillar outputs | Yes | Yes |
-| AI call logging (every call to ai_call_log) | Yes | Yes |
-| Prompt injection sanitization (sanitizeForPrompt) | Yes | Yes |
-| Multi-provider (Claude primary, OpenAI + Mistral fallback) | Yes | Yes |
-| pgvector RAG (semantic search, 3-tier knowledge base) | Yes | Yes |
-| BM25 hybrid search | Yes | Yes |
-| XBRL 17,943 elements seeded | Yes | Yes |
-| Fail-open on AI unavailability (all 4 pillars) | Yes | Yes |
+**What AI does:** Classifies accounts (6-layer), drafts variance explanations, suggests revenue allocation, generates IRAC justifications, proposes recon matches.
+
+**What AI NEVER does:** Computes dollar amounts, writes to core tables, posts JEs, certifies.
+
+**4 enforcement mechanisms:** Numeric guardrail, mutation context (AsyncLocalStorage), bridge gate, staging tables.
+
+**Auto-propose (not auto-accept):** System recommends with detectSuspects validation. Every decision logged to audit ledger. Controller sees and confirms.
+
+**Audit trail:** Every LLM call in ai_call_log (immutable). Decision records with FK to ai_call_log. Full-trace API reconstructs any decision.
 
 ---
 
-## 14. Knowledge Base and Semantic Memory
+## 9. Certification & Cryptographic Signing
 
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| 3-tier knowledge base (Global/Firm/Session) | Yes | Yes |
-| Tier 1: GAAP/IFRS standards (immutable) | Yes | Yes |
-| Tier 2: Firm policies + CoA + treatments | Yes | Yes |
-| Tier 3: Session-scoped documents | Yes | Yes |
-| Hybrid search (vector + keyword) | Yes | Yes |
-| Citation tracking | Yes | Yes |
-| Vector store API (query/seed/stats) | Yes | Yes |
-| Financial memory API (search, CRUD per tier) | Yes | Yes |
-| Semantic memory (vendor, transaction, policy) | Yes | Yes |
-| Memory API (correction, justification, decision, query) | Yes | Yes |
+1. All 11 gates pass
+2. 9 cross-statement ties validated
+3. Integrity gate: debits = credits AND A = L + E
+4. Ledger snapshot created (immutable)
+5. Evidence manifest built (SHA-256 hashes)
+6. Audit chain verified
+7. AI metadata gathered
+8. Ed25519 signature over SHA-256 artifact hash
+9. Certification ceremony (dark vault screen, gold, serif entity name)
+10. Post-cert: Subsequent events review (ASC 855) -> LOCKED (terminal)
 
 ---
 
-## 15. Multi-Tenancy and Security
+## 10. Complete Persona Journeys
 
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| Per-tenant connection pools (BYOD) | Yes | Yes |
-| LRU pool eviction (max 50) | Yes | Yes |
-| Row-Level Security on 17 tables | Yes | Yes |
-| AI role separation (ai_writer, opt-in) | Yes | Yes |
-| 6 roles (admin, controller, reviewer, operating_partner, auditor, fund_controller) | Yes | Yes |
-| JWT 4h + HS256 (algorithm pinned) | Yes | Yes |
-| HttpOnly Secure cookies (SameSite=Lax) + Bearer fallback | Yes | Yes |
-| bcrypt password hashing (10 rounds) | Yes | Yes |
-| Rate limiting (3 tiers: global/login/register) | Yes | Yes |
-| Helmet security headers | Yes | Yes |
-| CORS configuration | Yes | Yes |
-| Parameterized queries (zero string interpolation) | Yes | Yes |
-| Tenant BYOD management API (create, config, test) | Yes | Yes |
-| Production startup guards (JWT_SECRET, OAUTH_ENCRYPTION_KEY) | Yes | Yes |
-| Session write guard (blocks certified/locked mutations) | Yes | Yes |
-| ERP adapter input validation (date, account code) | Yes | Yes |
+### Controller (Full Close)
+1. Login -> `/close` -> Create session
+2. Upload GL -> `/trial-balance` -> 52 accounts balanced
+3. Map -> `/mapping` -> "51 of 52 auto-classified, 1 needs review"
+4. Reconcile -> `/reconciliation` -> 15 accounts, enter balances, upload evidence
+5. Adjust -> `/adjustments` -> 8 auto-proposed AJEs + 2 manual
+6. Statements -> `/statements` -> 4 statements, integrity passes
+7. Variances -> `/variance` -> 3 material, explain/approve
+8. Submit -> advance to UNDER_REVIEW -> CFO notified
 
----
+### CFO (Review & Certify)
+1. Login -> notification: "Ready for review"
+2. `/review` -> all 11 gates passing
+3. Review statements, approve variances
+4. Certify -> Ed25519 -> Ceremony screen
+5. Download certificate, lock period
 
-## 16. HITL, Approvals, and Issue Management
+### Operating Partner
+1. Login -> `/portfolio` -> 12 entities
+2. 3 closed, 2 in progress, 1 needs attention
+3. Drill to attention item, review close dashboard
+4. Download board package when certified
 
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| HITL escalation (threshold-based, staging area) | Yes | Yes |
-| HITL approval webhooks | Yes | Yes |
-| Approval workflows (multi-step) | Yes | Yes |
-| Issue tracking + auto-detection | Yes | Yes |
-| Issue auto-resolution (cascade) | Yes | Yes |
-| Decision records (append-only) | Yes | Yes |
-| Frontend: AI review page | Yes | Yes |
-| Frontend: discrepancies (unified view) | Yes | Yes |
+### Auditor
+1. Receive artifact -> `/verify` -> signature valid, hash intact
+2. Access audit binder -> download workpapers
+3. Review trail -> "847 records, no tampering"
+4. Check controls -> COSO assertions with evidence
 
----
-
-## 17. Professional Review and Compliance
-
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| 5-protocol professional review | Yes | Yes |
-| Going concern assessment | Yes | Yes |
-| Disclosure checklist (US GAAP/IFRS/ASPE/FRS 102) | Yes | Yes |
-| GAAP policy consistency tracking | Yes | Yes |
-| Pre-certification board-ready check | Yes | Yes |
-| Materiality settings (configurable) | Yes | Yes |
-| Triage (risk score, top risk drivers) | Yes | Yes |
+### Admin
+1. `/settings/general` -> create entity, set materiality
+2. `/settings/team` -> invite controller + CFO
+3. `/settings/integrations` -> connect NetSuite
+4. `/settings/templates` -> create monthly depreciation template
 
 ---
 
-## 18. Evidence and Audit Binder
+## 11. Database Schema Summary
 
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| Evidence storage (Local Disk or S3, SHA-256 hash) | Yes | Yes |
-| Evidence manifest for certification | Yes | Yes |
-| Evidence policy (hard_block/warn_only/off) | Yes | Yes |
-| 7-year evidence retention (DB triggers) | Yes | Yes |
-| Audit binder (PDF/CSV export) | Yes | Yes |
-| PBC (Provided by Client) management | Yes | Yes |
-| Auditor portal with token verification | Yes | Yes |
-| Frontend: audit binder page | Yes | Yes |
-| Frontend: audit trail page (hash chain display) | Yes | Yes |
+- **212 migrations**, ~95 tables, 3 schemas (core, ai, audit)
+- **8 immutability triggers** (audit_ledger, ledger_snapshots, JEs, cert artifacts, GL, ai_call_log, issue history)
+- **6 GENERATED columns** (recon variance, change_amount/%, prepaid monthly/remaining)
+- **1 DB kill switch** (migration 131: balance trigger on JE post)
+- **1 exclusion constraint** (no overlapping close sessions)
 
 ---
 
-## 19. Justification and RAG
+## 12. Frontend Page Map
 
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| IRAC justification generation | Yes | Yes |
-| RAG-based justification chat (FASB/IFRS) | Yes | Yes |
-| Audit defense summary + PDF export | Yes | Yes |
-
----
-
-## 20. Onboarding
-
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| Onboarding state machine (7 steps) | Yes | Yes |
-| Entity info setup | Yes | Yes |
-| COA import | Yes | Yes |
-| AI mapping suggestions (agentic) | Yes | Yes |
-| First close guide (agentic) | Yes | Yes |
-| Frontend: onboarding wizard | Yes | Yes |
+- **47 pages** across 10 flows
+- **76 components** in shared library
+- **50+ React Query hooks** for API data
+- **Design system:** Ledger Palette (no #FFFFFF, weights 400/500 only, serif on cert only)
 
 ---
 
-## 21. Notifications and Webhooks
+## 13. Component Library
 
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| In-app notifications (polling, read/unread) | Yes | Yes |
-| Close-specific notifications (gate changes, task assignments) | Yes | Yes |
-| Webhook notifications (HMAC-signed) | Yes | Yes |
-| Frontend: notification bell in TopBar | Yes | Yes |
-
----
-
-## 22. Protocol Bridge and Mutation Control
-
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| Single entrypoint for financial mutations | Yes | Yes |
-| Zod-validated JSON commands | Yes | Yes |
-| Period lock enforcement | Yes | Yes |
-| Balance check on every JE mutation | Yes | Yes |
-| AI boundary check (assertNoAiMutationContext) | Yes | Yes |
+**Layout:** TopBar, Sidebar, StateMachineBanner, ProgressRail, QuickNavigator, IssuePanel
+**Data:** DataTable, FinancialTable, MoneyCell, StatusBadge, MetricCard, HashDisplay
+**Forms:** Button, MoneyInput, SearchableSelect, FileUploadZone, FilterBar
+**AI:** AISuggestionCard, ProvenanceLabel, SmartCloseAssistant
+**Audit:** AuditEventNarrative, IntegrityRibbon, ShadowAuditorBadge, CertificationCeremony
+**Status:** GateIndicator, PipelineStepper, ProgressRing, ProgressRail
 
 ---
 
-## 23. Export and Reporting
-
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| PDF export (professional layout, watermarks) | Yes | Yes |
-| Excel export (ExcelJS, TB/statements/recons/variance) | Yes | Yes |
-| Export gate (blocks draft without disclaimers) | Yes | Yes |
-| Board package generation (monthly/QTD/YTD) | Yes | Yes |
-| Report pack templates | Yes | Yes |
-| Frontend: board package page | Yes | Yes |
-
----
-
-## 24. Portfolio and PE Features
-
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| Cross-entity portfolio dashboard | Yes | Yes |
-| Portfolio summary metrics | Yes | Yes |
-| Portfolio alerts (overdue, failing gates) | Yes | Yes |
-| PE reporting (custom hierarchy rollup) | Yes | Yes |
-| Entity close history | Yes | Yes |
-| Audit analytics (JE metrics, AI rates, velocity) | Yes | Yes |
-| Fund controller role (restricted view) | Yes | Yes |
-| Operating partner role (read-only) | Yes | Yes |
-| Frontend: analytics page | Yes | Yes |
-| Frontend: portfolio consolidated | Yes | Yes |
-
----
-
-## 25. Frontend Architecture and UX
-
-| Feature | Built | Wired E2E |
-|---------|-------|-----------|
-| 52 pages | Yes | Yes |
-| 45 React Query hook files (~200 hooks) | Yes | Yes |
-| 69 components | Yes | Yes |
-| Money values: string transport, zero frontend arithmetic | Yes | Yes |
-| Dark/light theme toggle | Yes | Yes |
-| 6-role permission system (20+ capabilities) | Yes | Yes |
-| Shared component library (Button, Card, PageHeader, Toast, MetricCard, ExportToolbar, ProgressRing) | Yes | Yes |
-| Socket.IO client (useSessionSocket, wired to dashboard) | Yes | Yes |
-| Consistent status badges (22 variants, normalized input) | Yes | Yes |
-| Directive empty states (loading, prerequisite, first-time) | Yes | Yes |
-| Sidebar: 4 groups, 7 items visible by default | Yes | Yes |
-| Sidebar: actionable badge counts (not totals) | Yes | Yes |
-| Dashboard: attention panel (computed from close state) | Yes | Yes |
-| Dashboard: close timeline (day count, est. completion, on track/at risk) | Yes | Yes |
-| Reconciliation: category status board | Yes | Yes |
-| Mapping: sticky progress header + bulk accept | Yes | Yes |
-| Adjustments: approval queue tab (SoD enforced) | Yes | Yes |
-| Print styles for financial statements | Yes | Yes |
-
----
-
-## 26. Testing
-
-| Suite | Count |
-|-------|-------|
-| E2E test groups | 21 (309 scenarios) |
-| Adapter tests | 44 (Xero, NetSuite, OAuth) |
-| BAI2 parser tests | ~20 |
-| Unit tests | ~30 (Zod schemas, security) |
-| Smoke tests | ~7 (integrity gate, CFA lineage) |
-| Integration tests | 2 (schema verification, QB ingest) |
-| **Total** | **~412** |
-
----
-
-## Summary
-
-### COMPLETE — Built and Wired E2E: 195+ features
-
-Across 26 sections covering: GL ingestion, 5-layer AI mapping, reconciliation with status board, bank reconciliation with matching engine, journal entries with approval queue, 7 new accounting modules (prepaid/AR aging/AP aging/debt accrual/payroll/inventory reserve/ASC 842 leases), 11 existing specialized modules, 4-statement generation with multi-standard support, variance analysis with AI drafting, Ed25519 certification with hash-chained audit, 6-state pipeline with 11 gates and auto-advance, real ERP adapters (QB/Xero/NetSuite), 5-layer AI boundary, 3-tier knowledge base, RLS on 17 tables, HttpOnly cookies, HITL escalation, approval workflows, professional review, evidence system with 7-year retention, onboarding wizard, notifications, portfolio/PE features, and a polished 52-page frontend.
-
-### PARTIAL: 2 features
-
-| Feature | Gap |
-|---------|-----|
-| Plaid adapter | Real HTTP calls work; no Plaid Link onboarding flow |
-| Scheduled ERP sync | DB table exists; no cron/scheduler (manual Sync Now works) |
-
-### NOT BUILT: 2 features
-
-| Feature | Status |
-|---------|--------|
-| EPS computation | Not needed for private PE portfolio companies |
-| Statutory/regulatory filing | Jurisdiction-specific, out of scope |
-
----
-
-## Verdict
-
-Sabit is a complete autonomous financial close engine. A controller can do their entire month-end close — from GL ingestion through ERP sync, account mapping, reconciliation (including bank rec with statement parsing and transaction matching), adjusting entries (including prepaids, debt accrual, payroll accrual, lease accounting, AR/AP aging, and inventory reserve), financial statement generation (4 statements, multi-standard, QTD/YTD), variance analysis, and cryptographic certification — without leaving the application.
-
-The two remaining gaps (Plaid Link and scheduled ERP sync) are convenience features, not capability gaps. Every close workflow step is enforced by the 11-gate pipeline, every dollar uses Decimal.js, every mutation is audit-logged, and every certification is Ed25519-signed.
+*This document is the single source of truth for UI/UX design decisions. Every workflow described here is backed by executable code verified at commit `8494e2c`.*
