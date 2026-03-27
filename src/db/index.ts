@@ -351,6 +351,7 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 210, file: '210_ai_call_log_immutability.sql' },
   { version: 211, file: '211_variance_human_review_marker.sql' },
   { version: 212, file: '212_decision_record_ai_call_log_fk.sql' },
+  { version: 213, file: '213_module_proposals.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 

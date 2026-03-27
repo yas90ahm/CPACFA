@@ -9,6 +9,7 @@ import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 import { AdjustmentsTemplatesTab } from './AdjustmentsTemplatesTab';
 import { AdjustmentsEntriesTab } from './AdjustmentsEntriesTab';
+import { ModuleReviewTab } from './ModuleReviewTab';
 import { JournalEntryForm } from './JournalEntryForm';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { MoneyCell } from '@/components/shared/MoneyCell';
@@ -196,7 +197,7 @@ export default function AdjustmentsPage() {
   const searchParams = useSearchParams();
   const sessionId = params.sessionId as string;
   const rawTab = searchParams.get('tab');
-  const tab = rawTab === 'templates' ? 'templates' : rawTab === 'approval' ? 'approval' : 'entries';
+  const tab = rawTab === 'templates' ? 'templates' : rawTab === 'approval' ? 'approval' : rawTab === 'entries' ? 'entries' : 'modules';
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const { toast, show: showToast } = useToast();
@@ -382,7 +383,7 @@ export default function AdjustmentsPage() {
   }, [approvableEntries]);
 
   const setTab = useCallback(
-    (t: 'entries' | 'templates' | 'approval') => {
+    (t: 'modules' | 'entries' | 'templates' | 'approval') => {
       const url = new URL(window.location.href);
       url.searchParams.set('tab', t);
       window.history.replaceState({}, '', url.pathname + url.search);
@@ -647,6 +648,17 @@ export default function AdjustmentsPage() {
       >
         <button
           type="button"
+          onClick={() => setTab('modules')}
+          className="px-4 py-2 text-sm font-medium border-b-2 -mb-px"
+          style={{
+            borderColor: tab === 'modules' ? 'var(--interactive-primary)' : 'transparent',
+            color: tab === 'modules' ? 'var(--interactive-primary)' : 'var(--text-secondary)',
+          }}
+        >
+          Module Review
+        </button>
+        <button
+          type="button"
           onClick={() => setTab('entries')}
           className="px-4 py-2 text-sm font-medium border-b-2 -mb-px"
           style={{
@@ -654,7 +666,7 @@ export default function AdjustmentsPage() {
             color: tab === 'entries' ? 'var(--interactive-primary)' : 'var(--text-secondary)',
           }}
         >
-          Journal Entries
+          Manual Entries
         </button>
         <button
           type="button"
@@ -690,6 +702,10 @@ export default function AdjustmentsPage() {
           )}
         </button>
       </div>
+
+      {tab === 'modules' && (
+        <ModuleReviewTab sessionId={sessionId} />
+      )}
 
       {tab === 'templates' && (
         <AdjustmentsTemplatesTab

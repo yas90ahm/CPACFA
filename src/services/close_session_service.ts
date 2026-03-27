@@ -1336,11 +1336,37 @@ async function autoProposModules(
   let skipped = 0;
   for (const mod of modules) {
     try {
-      await mod.fn();
+      const result = await mod.fn();
       proposed++;
+
+      // Store module proposal with computation inputs for HITL review
+      try {
+        const inputs = extractComputationInputs(mod.name, result);
+        const flags = detectDataQualityFlags(mod.name, inputs);
+        await pool.query(
+          `INSERT INTO tenant_module_proposals (tenant_id, close_session_id, module_name, standard, status, computation_inputs, data_quality_flags)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (tenant_id, close_session_id, module_name)
+           DO UPDATE SET computation_inputs = $6, data_quality_flags = $7, status = $5`,
+          [tenantId, closeSessionId, mod.name, getModuleStandard(mod.name),
+           result === null ? 'not_applicable' : 'needs_review',
+           JSON.stringify(inputs), JSON.stringify(flags)]
+        );
+      } catch { /* non-fatal: proposal storage failed */ }
     } catch (e) {
       skipped++;
       console.warn(`[autoProposModules] ${mod.name} failed (non-fatal):`, e instanceof Error ? e.message : String(e));
+      // Store failed proposal so controller sees it
+      try {
+        await pool.query(
+          `INSERT INTO tenant_module_proposals (tenant_id, close_session_id, module_name, standard, status, skip_reason)
+           VALUES ($1, $2, $3, $4, 'failed', $5)
+           ON CONFLICT (tenant_id, close_session_id, module_name)
+           DO UPDATE SET status = 'failed', skip_reason = $5`,
+          [tenantId, closeSessionId, mod.name, getModuleStandard(mod.name),
+           e instanceof Error ? e.message : String(e)]
+        );
+      } catch { /* non-fatal */ }
     }
   }
   console.log(`[autoProposModules] ${proposed} modules proposed, ${skipped} skipped`);
@@ -1359,4 +1385,73 @@ async function autoProposModules(
   } catch {
     // non-fatal
   }
+}
+
+/** Map module name to ASC standard reference */
+function getModuleStandard(name: string): string {
+  const map: Record<string, string> = {
+    prepaids: 'ASC 340', fixed_assets: 'ASC 360', payroll_accrual: 'Payroll',
+    debt_accrual: 'Debt', deferred_tax: 'ASC 740', leases: 'ASC 842',
+    inventory_reserve: 'ASC 330', stock_compensation: 'ASC 718',
+    impairment: 'ASC 350', ap_aging: 'ASC 405', ar_aging: 'ASC 326',
+    segments: 'ASC 280', revenue: 'ASC 606',
+  };
+  return map[name] ?? '';
+}
+
+/** Extract computation inputs from module result for controller transparency */
+function extractComputationInputs(moduleName: string, result: unknown): Record<string, unknown> {
+  if (result == null) return { note: 'Module returned no data — may not be applicable for this entity' };
+  if (typeof result !== 'object') return { rawResult: String(result) };
+  const r = result as Record<string, unknown>;
+
+  // Module-specific input extraction
+  switch (moduleName) {
+    case 'fixed_assets':
+      return {
+        assetCount: (r.details as unknown[])?.length ?? 0,
+        totalDepreciation: r.run ? (r.run as Record<string, unknown>).totalDepreciation : 0,
+        method: 'Straight-line or double-declining (per asset configuration)',
+      };
+    case 'deferred_tax':
+      return { jeId: r.jeId, note: 'Deferred tax provision based on temporary differences × enacted rate' };
+    case 'stock_compensation':
+      return { grantCount: Array.isArray(result) ? (result as unknown[]).length : 0, note: 'Period expense = FV × cumulative vesting fraction − prior recognized' };
+    case 'leases':
+      return { entryCount: Array.isArray(result) ? (result as unknown[]).length : 0, note: 'Finance: interest + ROU amortization. Operating: straight-line expense.' };
+    case 'segments':
+      return { ...(r.segments ? { segmentCount: (r.segments as unknown[]).length } : {}), aggregateTestPassed: r.aggregateTestPassed };
+    case 'impairment':
+      return { totalLoss: r.totalImpairmentLoss, cguCount: r.byCGU ? Object.keys(r.byCGU as Record<string, unknown>).length : 0 };
+    default:
+      return { resultKeys: Object.keys(r) };
+  }
+}
+
+/** Detect data quality flags for suspicious inputs */
+function detectDataQualityFlags(moduleName: string, inputs: Record<string, unknown>): Array<{ message: string; field: string; severity: 'warning' | 'info' }> {
+  const flags: Array<{ message: string; field: string; severity: 'warning' | 'info' }> = [];
+
+  switch (moduleName) {
+    case 'fixed_assets':
+      if ((inputs.assetCount as number) === 0)
+        flags.push({ message: 'No active fixed assets found — verify asset register is complete', field: 'assetCount', severity: 'info' });
+      break;
+    case 'inventory_reserve':
+      flags.push({ message: 'NRV testing not performed — CPA should verify net realizable value for significant SKUs', field: 'methodology', severity: 'warning' });
+      break;
+    case 'deferred_tax':
+      if (!inputs.jeId)
+        flags.push({ message: 'No deferred tax JE created — verify temporary differences are recorded', field: 'jeId', severity: 'warning' });
+      break;
+    case 'ar_aging':
+      flags.push({ message: 'CECL uses aging-based loss rates only — CPA should verify forward-looking adjustments', field: 'methodology', severity: 'warning' });
+      break;
+    case 'stock_compensation':
+      if ((inputs.grantCount as number) === 0)
+        flags.push({ message: 'No active stock grants found — verify equity compensation plan is recorded', field: 'grantCount', severity: 'info' });
+      break;
+  }
+
+  return flags;
 }

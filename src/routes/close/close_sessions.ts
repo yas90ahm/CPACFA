@@ -352,6 +352,77 @@ router.get('/sessions/:id/trial-balance', async (req: Request, res: Response) =>
   }
 });
 
+/** GET /api/close/sessions/:id/module-proposals — list module proposals with computation inputs and data quality flags */
+router.get('/sessions/:id/module-proposals', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) { res.status(400).json({ error: 'Tenant context required' }); return; }
+    const sessionId = req.params.id ?? '';
+    const { rows } = await pool.query(
+      `SELECT id, module_name, standard, status, je_id, computation_inputs, data_quality_flags, skip_reason, created_at, reviewed_by, reviewed_at
+       FROM tenant_module_proposals WHERE tenant_id = $1 AND close_session_id = $2 ORDER BY created_at`,
+      [tenantId, sessionId]
+    );
+    const proposals = rows.map((r: Record<string, unknown>) => ({
+      id: r.id,
+      moduleName: r.module_name,
+      standard: r.standard,
+      status: r.status,
+      jeId: r.je_id,
+      computationInputs: r.computation_inputs,
+      dataQualityFlags: r.data_quality_flags,
+      skipReason: r.skip_reason,
+      createdAt: r.created_at,
+      reviewedBy: r.reviewed_by,
+      reviewedAt: r.reviewed_at,
+    }));
+    const needsReview = proposals.filter((p) => p.status === 'needs_review').length;
+    const total = proposals.length;
+    res.json({ proposals, summary: { total, needsReview, reviewed: total - needsReview } });
+  } catch (e) {
+    send500(res, e, 'Get module proposals failed');
+  }
+});
+
+/** POST /api/close/sessions/:id/module-proposals/:proposalId/approve — approve a module proposal */
+router.post('/sessions/:id/module-proposals/:proposalId/approve', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) { res.status(400).json({ error: 'Tenant context required' }); return; }
+    const { proposalId } = req.params;
+    const userId = (req as unknown as { userId?: string }).userId ?? 'unknown';
+    await pool.query(
+      `UPDATE tenant_module_proposals SET status = 'approved', reviewed_by = $1, reviewed_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+      [userId, proposalId, tenantId]
+    );
+    res.json({ success: true });
+  } catch (e) {
+    send500(res, e, 'Approve module proposal failed');
+  }
+});
+
+/** POST /api/close/sessions/:id/module-proposals/:proposalId/skip — skip a module proposal with reason */
+router.post('/sessions/:id/module-proposals/:proposalId/skip', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) { res.status(400).json({ error: 'Tenant context required' }); return; }
+    const { proposalId } = req.params;
+    const userId = (req as unknown as { userId?: string }).userId ?? 'unknown';
+    const reason = String(req.body?.reason ?? '').trim();
+    if (reason.length < 10) { res.status(400).json({ error: 'Skip reason must be at least 10 characters' }); return; }
+    await pool.query(
+      `UPDATE tenant_module_proposals SET status = 'skipped', reviewed_by = $1, reviewed_at = NOW(), skip_reason = $2 WHERE id = $3 AND tenant_id = $4`,
+      [userId, reason, proposalId, tenantId]
+    );
+    res.json({ success: true });
+  } catch (e) {
+    send500(res, e, 'Skip module proposal failed');
+  }
+});
+
 /** GET /api/close/sessions/:id/issues — session-scoped issues (alias for GET /api/close/issues?closeSessionId=X) */
 router.get('/sessions/:id/issues', async (req: Request, res: Response) => {
   try {
