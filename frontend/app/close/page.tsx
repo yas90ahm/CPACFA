@@ -14,7 +14,8 @@ import {
   Eye,
   CircleDot,
 } from 'lucide-react';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -171,7 +172,26 @@ function ErrorBanner({ message }: { message: string }) {
 
 export default function CloseSessionsPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<FilterTab>('ALL');
+  const [showNewModal, setShowNewModal] = useState(false);
+  const [newPeriodStart, setNewPeriodStart] = useState('');
+  const [newPeriodEnd, setNewPeriodEnd] = useState('');
+  const [createError, setCreateError] = useState('');
+
+  const createMutation = useMutation({
+    mutationFn: (body: { periodStart: string; periodEnd: string }) =>
+      apiFetch<{ id: string }>('/api/close/sessions', {
+        method: 'POST',
+        body: { ...body, entityId: 'default' },
+      }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['close-sessions'] });
+      setShowNewModal(false);
+      router.push(`/close/${data.id}/dashboard`);
+    },
+    onError: (err: Error) => setCreateError(err.message),
+  });
 
   const sessionsQuery = useQuery({
     queryKey: ['close-sessions'],
@@ -226,9 +246,7 @@ export default function CloseSessionsPage() {
           <button
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90"
             style={{ backgroundColor: '#B8860B' }}
-            onClick={() => {
-              /* TODO: open new session modal */
-            }}
+            onClick={() => setShowNewModal(true)}
           >
             <Plus size={16} />
             New Close
@@ -351,6 +369,67 @@ export default function CloseSessionsPage() {
           </div>
         )}
       </div>
+
+      {/* New Close Session Modal */}
+      {showNewModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-6 w-full max-w-md mx-4 shadow-xl">
+            <h3 className="text-lg font-medium text-[#2C2416] mb-4">Create New Close Session</h3>
+            {createError && (
+              <div className="mb-4 px-3 py-2 rounded bg-[#F5E4DE] border border-[#C44B2B] text-[#C44B2B] text-sm">
+                {createError}
+              </div>
+            )}
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-[#5C4F3A] uppercase tracking-wider mb-1">
+                  Period Start
+                </label>
+                <input
+                  type="date"
+                  value={newPeriodStart}
+                  onChange={(e) => setNewPeriodStart(e.target.value)}
+                  className="w-full px-3 py-2 rounded-md border border-[#DDD5C2] bg-[#F5F0E8] text-[#2C2416] text-sm focus:outline-none focus:border-[#B8860B]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#5C4F3A] uppercase tracking-wider mb-1">
+                  Period End
+                </label>
+                <input
+                  type="date"
+                  value={newPeriodEnd}
+                  onChange={(e) => setNewPeriodEnd(e.target.value)}
+                  className="w-full px-3 py-2 rounded-md border border-[#DDD5C2] bg-[#F5F0E8] text-[#2C2416] text-sm focus:outline-none focus:border-[#B8860B]"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => { setShowNewModal(false); setCreateError(''); }}
+                className="px-4 py-2 text-sm font-medium text-[#5C4F3A] border border-[#DDD5C2] rounded-lg hover:bg-[#F5F0E8] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (!newPeriodStart || !newPeriodEnd) {
+                    setCreateError('Both dates are required');
+                    return;
+                  }
+                  setCreateError('');
+                  createMutation.mutate({ periodStart: newPeriodStart, periodEnd: newPeriodEnd });
+                }}
+                disabled={createMutation.isPending}
+                className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors disabled:opacity-50"
+                style={{ backgroundColor: '#B8860B' }}
+              >
+                {createMutation.isPending ? 'Creating...' : 'Create Close Session'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
