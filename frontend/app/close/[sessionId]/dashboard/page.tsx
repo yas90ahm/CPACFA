@@ -457,14 +457,25 @@ function buildAttentionItems(
   return items.slice(0, 8); // Cap at 8 items
 }
 
-function AttentionList({ items }: { items: AttentionItem[] }) {
+function AttentionList({ items, sessionState }: { items: AttentionItem[]; sessionState?: string }) {
   if (items.length === 0) {
+    const state = (sessionState ?? '').toUpperCase();
+    const isOpen = state === 'OPEN' || state === '';
     return (
       <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-6">
         <h3 className="text-sm font-medium text-[#2C2416] mb-4">Items Needing Attention</h3>
-        <div className="flex items-center gap-2 text-sm text-[#2D6A4F]">
-          <CheckCircle2 size={16} />
-          All items resolved. Ready to advance.
+        <div className={`flex items-center gap-2 text-sm ${isOpen ? 'text-[#8B7A5E]' : 'text-[#2D6A4F]'}`}>
+          {isOpen ? (
+            <>
+              <AlertCircle size={16} />
+              Upload a trial balance to begin your close.
+            </>
+          ) : (
+            <>
+              <CheckCircle2 size={16} />
+              All items resolved. Ready to advance.
+            </>
+          )}
         </div>
       </div>
     );
@@ -841,7 +852,12 @@ export default function CloseDashboardPage() {
                   title="Reconciliation"
                   passing={reconGate?.passing ?? false}
                   detail={reconGate?.detail}
-                  metric={`${completedRecons}/${recons.length}`}
+                  metric={(() => {
+                    const reconDetail = reconGate?.detail ?? '';
+                    const reconMatch = reconDetail.match(/(\d+)\s*\/\s*(\d+)/);
+                    if (reconMatch) return `${reconMatch[1]}/${reconMatch[2]}`;
+                    return `${completedRecons}/${recons.length || reconDetail || 0}`;
+                  })()}
                   metricLabel="Reconciliations complete"
                 />
                 <GateCard
@@ -857,7 +873,7 @@ export default function CloseDashboardPage() {
               {/* Two-column: TB Summary + Attention */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <TrialBalanceSummary rows={tbRows} />
-                <AttentionList items={attentionItems} />
+                <AttentionList items={attentionItems} sessionState={session?.state} />
               </div>
 
               {/* Continue Close */}
