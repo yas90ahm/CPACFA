@@ -195,7 +195,24 @@ export default function CloseSessionsPage() {
 
   const sessionsQuery = useQuery({
     queryKey: ['close-sessions'],
-    queryFn: () => apiFetch<SessionsResponse>('/api/close/sessions'),
+    queryFn: async () => {
+      const raw = await apiFetch<{ sessions: Record<string, unknown>[] }>('/api/close/sessions');
+      return {
+        sessions: (raw.sessions ?? []).map((s) => ({
+          id: String(s.id ?? ''),
+          state: String(s.status ?? s.state ?? 'OPEN').toUpperCase().replace(/-/g, '_'),
+          periodLabel: String(s.periodLabel ?? `${s.periodStart ?? ''} to ${s.periodEnd ?? ''}`),
+          entityName: String(s.entityName ?? s.entityId ?? 'Unknown Entity'),
+          gatesPassing: Number(s.gatesPassing ?? 0),
+          gatesTotal: Number(s.gatesTotal ?? 11),
+          certifiedBy: s.certifiedBy ? String(s.certifiedBy) : undefined,
+          updatedAt: String(s.updatedAt ?? s.createdAt ?? ''),
+          startedAt: s.startedAt ? String(s.startedAt) : undefined,
+          createdAt: String(s.createdAt ?? ''),
+          closeDayTarget: s.closeDayTarget ? Number(s.closeDayTarget) : undefined,
+        })) as CloseSession[],
+      };
+    },
   });
 
   const sessions = sessionsQuery.data?.sessions ?? [];
