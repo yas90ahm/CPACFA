@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import {
@@ -138,6 +138,15 @@ function fmtPercent(n?: number): string {
 
 export default function SettingsPage() {
   const [activeNav, setActiveNav] = useState('erp');
+  const [showInviteForm, setShowInviteForm] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteName, setInviteName] = useState('');
+  const [inviteRole, setInviteRole] = useState('senior_accountant');
+  const [inviteError, setInviteError] = useState('');
+  const [inviteSuccess, setInviteSuccess] = useState('');
+  const [editingThreshold, setEditingThreshold] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const queryClient = useQueryClient();
 
   /* --- Data fetching --- */
 
@@ -162,6 +171,37 @@ export default function SettingsPage() {
   });
 
   const team = teamData?.members ?? (Array.isArray(teamData) ? (teamData as unknown as TeamMember[]) : []);
+
+  const inviteMutation = useMutation({
+    mutationFn: () =>
+      apiFetch('/api/settings/team/invite', {
+        method: 'POST',
+        body: { email: inviteEmail, name: inviteName, role: inviteRole },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings-team'] });
+      setInviteEmail('');
+      setInviteName('');
+      setInviteRole('senior_accountant');
+      setInviteError('');
+      setShowInviteForm(false);
+      setInviteSuccess('Invitation sent successfully');
+      setTimeout(() => setInviteSuccess(''), 4000);
+    },
+    onError: (err: Error) => {
+      setInviteError(err.message || 'Failed to send invitation');
+    },
+  });
+
+  const materialityMutation = useMutation({
+    mutationFn: (payload: Record<string, number>) =>
+      apiFetch('/api/config/materiality', { method: 'PUT', body: payload }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['materiality-config'] });
+      setEditingThreshold(null);
+      setEditValue('');
+    },
+  });
 
   /* --- Derived ERP list (always show 3 providers) --- */
 
@@ -257,7 +297,13 @@ export default function SettingsPage() {
                       </p>
                     </div>
                   ) : (
-                    <button className="mt-3 text-xs font-medium text-[#F5F0E8] bg-[#2C2416] px-4 py-1.5 rounded-md hover:bg-[#2C2416]/90 transition-colors">
+                    <button
+                      onClick={() => {
+                        const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+                        window.open(`${baseUrl}/api/integrations/oauth/start/${erp.provider}`, '_blank');
+                      }}
+                      className="mt-3 text-xs font-medium text-[#F5F0E8] bg-[#2C2416] px-4 py-1.5 rounded-md hover:bg-[#2C2416]/90 transition-colors"
+                    >
                       Connect
                     </button>
                   )}
@@ -325,20 +371,28 @@ export default function SettingsPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {[
                 {
+                  key: 'varianceThreshold',
                   label: 'Variance Materiality',
                   value: fmtPercent(materiality?.varianceThreshold ?? 5),
+                  raw: materiality?.varianceThreshold ?? 5,
                 },
                 {
+                  key: 'dollarThreshold',
                   label: 'Dollar Threshold',
                   value: fmtDollar(materiality?.dollarThreshold ?? 100000),
+                  raw: materiality?.dollarThreshold ?? 100000,
                 },
                 {
+                  key: 'jeApprovalThreshold',
                   label: 'JE Approval Threshold',
                   value: fmtDollar(materiality?.jeApprovalThreshold ?? 50000),
+                  raw: materiality?.jeApprovalThreshold ?? 50000,
                 },
                 {
+                  key: 'reconTolerance',
                   label: 'Recon Tolerance',
                   value: fmtDollar(materiality?.reconTolerance ?? 100),
+                  raw: materiality?.reconTolerance ?? 100,
                 },
               ].map((item) => (
                 <div
@@ -346,11 +400,54 @@ export default function SettingsPage() {
                   className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-4"
                 >
                   <p className="text-xs text-[#8B7A5E] mb-1">{item.label}</p>
-                  <p className="text-xl font-medium text-[#2C2416] font-mono">{item.value}</p>
-                  <button className="mt-2 flex items-center gap-1 text-xs text-[#8B7A5E] hover:text-[#2C2416] transition-colors">
-                    <Pencil size={12} />
-                    Edit
-                  </button>
+                  {editingThreshold === item.key ? (
+                    <div className="mt-1">
+                      <input
+                        type="number"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        className="w-full px-2 py-1 text-sm font-mono border border-[#DDD5C2] rounded bg-[#F5F0E8] text-[#2C2416] focus:outline-none focus:border-[#B8860B]"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') {
+                            setEditingThreshold(null);
+                            setEditValue('');
+                          }
+                        }}
+                      />
+                      <div className="flex items-center gap-2 mt-2">
+                        <button
+                          onClick={() => {
+                            const num = Number(editValue);
+                            if (!isNaN(num)) {
+                              materialityMutation.mutate({ [item.key]: num });
+                            }
+                          }}
+                          disabled={materialityMutation.isPending}
+                          className="text-xs font-medium text-[#F5F0E8] bg-[#2D6A4F] px-3 py-1 rounded hover:bg-[#2D6A4F]/90 transition-colors disabled:opacity-50"
+                        >
+                          {materialityMutation.isPending ? 'Saving...' : 'Save'}
+                        </button>
+                        <button
+                          onClick={() => { setEditingThreshold(null); setEditValue(''); }}
+                          className="text-xs text-[#8B7A5E] hover:text-[#2C2416] transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-xl font-medium text-[#2C2416] font-mono">{item.value}</p>
+                      <button
+                        onClick={() => { setEditingThreshold(item.key); setEditValue(String(item.raw)); }}
+                        className="mt-2 flex items-center gap-1 text-xs text-[#8B7A5E] hover:text-[#2C2416] transition-colors"
+                      >
+                        <Pencil size={12} />
+                        Edit
+                      </button>
+                    </>
+                  )}
                 </div>
               ))}
             </div>
@@ -362,7 +459,10 @@ export default function SettingsPage() {
               <h2 className="text-sm font-medium text-[#8B7A5E] uppercase tracking-wider">
                 Team Management
               </h2>
-              <button className="inline-flex items-center gap-1.5 text-xs font-medium text-[#F5F0E8] bg-[#2D6A4F] px-4 py-1.5 rounded-md hover:bg-[#2D6A4F]/90 transition-colors">
+              <button
+                onClick={() => { setShowInviteForm(!showInviteForm); setInviteError(''); }}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-[#F5F0E8] bg-[#2D6A4F] px-4 py-1.5 rounded-md hover:bg-[#2D6A4F]/90 transition-colors"
+              >
                 <Plus size={14} />
                 Invite User
               </button>
@@ -422,6 +522,70 @@ export default function SettingsPage() {
                 </tbody>
               </table>
             </div>
+
+            {inviteSuccess && (
+              <div className="mt-3 flex items-center gap-2 text-sm text-[#2D6A4F] bg-[#E0EDE8] border border-[#2D6A4F]/20 rounded-md px-4 py-2.5">
+                <CheckCircle2 size={14} />
+                {inviteSuccess}
+              </div>
+            )}
+
+            {showInviteForm && (
+              <div className="mt-4 bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-5">
+                <h3 className="text-sm font-medium text-[#2C2416] mb-4">Invite New User</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-xs text-[#8B7A5E] mb-1">Name</label>
+                    <input
+                      type="text"
+                      value={inviteName}
+                      onChange={(e) => setInviteName(e.target.value)}
+                      placeholder="Full name"
+                      className="w-full bg-[#F5F0E8] border border-[#DDD5C2] rounded-md px-3 py-2 text-sm text-[#2C2416] placeholder-[#8B7A5E]/60 focus:outline-none focus:border-[#B8860B]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-[#8B7A5E] mb-1">Email</label>
+                    <input
+                      type="email"
+                      value={inviteEmail}
+                      onChange={(e) => setInviteEmail(e.target.value)}
+                      placeholder="email@company.com"
+                      className="w-full bg-[#F5F0E8] border border-[#DDD5C2] rounded-md px-3 py-2 text-sm text-[#2C2416] placeholder-[#8B7A5E]/60 focus:outline-none focus:border-[#B8860B]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-[#8B7A5E] mb-1">Role</label>
+                    <select
+                      value={inviteRole}
+                      onChange={(e) => setInviteRole(e.target.value)}
+                      className="w-full bg-[#F5F0E8] border border-[#DDD5C2] rounded-md px-3 py-2 text-sm text-[#2C2416] focus:outline-none focus:border-[#B8860B]"
+                    >
+                      <option value="controller">Controller</option>
+                      <option value="senior_accountant">Senior Accountant</option>
+                      <option value="cfo">CFO</option>
+                      <option value="reviewer">Reviewer</option>
+                    </select>
+                  </div>
+                  <div className="flex items-end">
+                    <button
+                      onClick={() => inviteMutation.mutate()}
+                      disabled={!inviteEmail || inviteMutation.isPending}
+                      className="w-full inline-flex items-center justify-center gap-1.5 text-xs font-medium text-[#F5F0E8] bg-[#2D6A4F] px-4 py-2 rounded-md hover:bg-[#2D6A4F]/90 transition-colors disabled:opacity-50"
+                    >
+                      {inviteMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                      Send Invite
+                    </button>
+                  </div>
+                </div>
+                {inviteError && (
+                  <div className="mt-3 flex items-center gap-2 text-xs text-[#C44B2B]">
+                    <AlertTriangle size={12} />
+                    {inviteError}
+                  </div>
+                )}
+              </div>
+            )}
           </section>
 
           {/* ============ AUDIT NOTICE ============ */}

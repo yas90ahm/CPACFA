@@ -1,7 +1,8 @@
 'use client';
 
+import { useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import {
   FileText,
@@ -127,6 +128,61 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function EvidenceUploadPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  const handleFileUpload = useCallback(async (file: File, reconId?: string, jeId?: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (reconId) formData.append('reconId', reconId);
+    if (jeId) formData.append('jeId', jeId);
+
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+    const token = localStorage.getItem('cpa_auth_token');
+    const endpoint = reconId
+      ? `${baseUrl}/api/close/sessions/${sessionId}/reconciliations/${reconId}/evidence`
+      : `${baseUrl}/api/close/sessions/${sessionId}/evidence`;
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: 'include',
+      body: formData,
+    });
+    if (res.ok) {
+      queryClient.invalidateQueries({ queryKey: ['evidence-zones', sessionId] });
+    }
+  }, [sessionId, queryClient]);
+
+  const handleDrop = useCallback(async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+    setUploading(true);
+    try {
+      for (const file of files) {
+        await handleFileUpload(file);
+      }
+    } finally {
+      setUploading(false);
+    }
+  }, [handleFileUpload]);
+
+  const handleFileInputChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+    setUploading(true);
+    try {
+      for (const file of files) {
+        await handleFileUpload(file);
+      }
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }, [handleFileUpload]);
 
   const sessionQuery = useQuery({
     queryKey: ['session', sessionId],
@@ -219,6 +275,48 @@ export default function EvidenceUploadPage() {
         <p className="text-sm text-[#8B7A5E] mt-1">
           Upload and verify supporting evidence for reconciliations and journal entries.
         </p>
+      </div>
+
+      {/* Upload Dropzone */}
+      <div className="px-8 mb-8">
+        <div
+          className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+            isDragOver
+              ? 'border-[#B8860B] bg-[#F5EDD0]'
+              : 'border-[#DDD5C2] bg-[#EDE6D6] hover:border-[#B8860B]/50'
+          }`}
+          onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+          onDragLeave={() => setIsDragOver(false)}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInputRef.current?.click(); } }}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleFileInputChange}
+          />
+          {uploading ? (
+            <div className="flex flex-col items-center gap-2">
+              <Loader2 size={24} className="animate-spin text-[#B8860B]" />
+              <p className="text-sm text-[#8B7A5E]">Uploading...</p>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-2">
+              <Upload size={24} className="text-[#8B7A5E]" />
+              <p className="text-sm text-[#2C2416] font-medium">
+                {isDragOver ? 'Drop files here' : 'Drag & drop files or click to browse'}
+              </p>
+              <p className="text-xs text-[#8B7A5E]">
+                Upload supporting evidence for reconciliations and journal entries
+              </p>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Stat Cards */}

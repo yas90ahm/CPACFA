@@ -61,9 +61,57 @@ const TABS: { key: StatementType; label: string }[] = [
 /*  Main Page                                                          */
 /* ------------------------------------------------------------------ */
 
+async function downloadBlob(url: string, filename: string) {
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+  const token = localStorage.getItem('cpa_auth_token');
+  const res = await fetch(`${baseUrl}${url}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: 'include',
+  });
+  if (!res.ok) return;
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+}
+
 export default function StatementsPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [activeTab, setActiveTab] = useState<StatementType>('balance_sheet');
+
+  const handleExportPdf = async () => {
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+    const token = localStorage.getItem('cpa_auth_token');
+    const res = await fetch(`${baseUrl}/api/export/pdf`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      credentials: 'include',
+      body: JSON.stringify({ closeSessionId: sessionId, mode: 'draft' }),
+    });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `statements-${sessionId}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportExcel = () => {
+    downloadBlob(
+      `/api/close/sessions/${sessionId}/export/statements.xlsx`,
+      `statements-${sessionId}.xlsx`
+    );
+  };
+
+  const handleExportXbrl = () => {
+    alert('XBRL export coming soon');
+  };
 
   const sessionQuery = useQuery({
     queryKey: ['session', sessionId],
@@ -290,15 +338,24 @@ export default function StatementsPage() {
 
       {/* Export Buttons */}
       <div className="px-8 pb-8 flex items-center gap-4">
-        <button className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#B8860B] text-sm font-medium text-[#2C2416] hover:bg-[#A07608] transition-colors">
+        <button
+          onClick={handleExportPdf}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#B8860B] text-sm font-medium text-[#2C2416] hover:bg-[#A07608] transition-colors"
+        >
           <Download size={16} />
           Export PDF
         </button>
-        <button className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#EDE6D6] border border-[#DDD5C2] text-sm font-medium text-[#2C2416] hover:border-[#B8860B] transition-colors">
+        <button
+          onClick={handleExportExcel}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#EDE6D6] border border-[#DDD5C2] text-sm font-medium text-[#2C2416] hover:border-[#B8860B] transition-colors"
+        >
           <FileSpreadsheet size={16} />
           Export Excel
         </button>
-        <button className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#EDE6D6] border border-[#DDD5C2] text-sm font-medium text-[#2C2416] hover:border-[#B8860B] transition-colors">
+        <button
+          onClick={handleExportXbrl}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#EDE6D6] border border-[#DDD5C2] text-sm font-medium text-[#2C2416] hover:border-[#B8860B] transition-colors"
+        >
           <Code size={16} />
           Export XBRL
         </button>

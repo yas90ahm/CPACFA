@@ -84,7 +84,7 @@ const NAV_ITEMS = [
   { label: 'Portfolio', icon: Briefcase, href: () => '/portfolio' },
   { label: 'Audit Trail', icon: ScrollText, href: (sid: string) => `/close/${sid}/audit-trail` },
   { label: 'GL Quality', icon: BarChart3, href: (sid: string) => `/close/${sid}/gl-quality` },
-  { label: 'Analytics', icon: Activity, href: () => '/close' },
+  { label: 'Modules', icon: Activity, href: (sid: string) => `/close/${sid}/modules` },
   { label: 'Settings', icon: Settings, href: () => '/settings/general' },
 ];
 

@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
@@ -82,7 +82,7 @@ const NAV_ITEMS = [
   { label: 'Portfolio', icon: Briefcase, href: () => '/portfolio' },
   { label: 'Audit Trail', icon: ScrollText, href: (sid: string) => `/close/${sid}/audit-trail` },
   { label: 'GL Quality', icon: BarChart3, href: (sid: string) => `/close/${sid}/gl-quality` },
-  { label: 'Analytics', icon: Activity, href: () => '/close' },
+  { label: 'Modules', icon: Activity, href: (sid: string) => `/close/${sid}/modules` },
   { label: 'Settings', icon: Settings, href: () => '/settings/general' },
 ];
 
@@ -248,9 +248,49 @@ function sectionIcon(key: string) {
 /*  Main Page                                                          */
 /* ------------------------------------------------------------------ */
 
+async function downloadBlob(url: string, filename: string, method: string = 'GET', body?: Record<string, unknown>) {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const opts: RequestInit = {
+    method,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  };
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000'}${url}`, opts);
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+}
+
 export default function AuditBinderPage() {
   const params = useParams();
   const sessionId = params.sessionId as string;
+  const [downloading, setDownloading] = useState<string | null>(null);
+
+  const handleDownload = useCallback(async (type: 'binder' | 'pdf' | 'csv') => {
+    setDownloading(type);
+    try {
+      if (type === 'binder') {
+        await downloadBlob(`/api/audit/binder?closeSessionId=${sessionId}`, `audit-binder-${sessionId}.zip`);
+      } else if (type === 'pdf') {
+        await downloadBlob(`/api/export/pdf`, `audit-binder-${sessionId}.pdf`, 'POST', { closeSessionId: sessionId });
+      } else {
+        await downloadBlob(`/api/export/csv`, `audit-binder-${sessionId}.csv`, 'POST', { closeSessionId: sessionId });
+      }
+    } catch (err) {
+      console.error('Download failed:', err);
+    } finally {
+      setDownloading(null);
+    }
+  }, [sessionId]);
 
   /* --- Readiness gates --- */
   const readinessQuery = useQuery({
@@ -413,16 +453,28 @@ export default function AuditBinderPage() {
 
               {/* Export Buttons */}
               <div className="flex items-center gap-4 pt-2">
-                <button className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#B8860B] text-sm font-medium text-[#2C2416] hover:bg-[#A07608] transition-colors">
-                  <Download size={16} />
+                <button
+                  onClick={() => handleDownload('binder')}
+                  disabled={downloading === 'binder'}
+                  className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#B8860B] text-sm font-medium text-[#2C2416] hover:bg-[#A07608] transition-colors disabled:opacity-50"
+                >
+                  {downloading === 'binder' ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
                   Download Complete Binder
                 </button>
-                <button className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#EDE6D6] border border-[#DDD5C2] text-sm font-medium text-[#2C2416] hover:border-[#B8860B] transition-colors">
-                  <FileText size={16} />
+                <button
+                  onClick={() => handleDownload('pdf')}
+                  disabled={downloading === 'pdf'}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#EDE6D6] border border-[#DDD5C2] text-sm font-medium text-[#2C2416] hover:border-[#B8860B] transition-colors disabled:opacity-50"
+                >
+                  {downloading === 'pdf' ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
                   Export as PDF
                 </button>
-                <button className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#EDE6D6] border border-[#DDD5C2] text-sm font-medium text-[#2C2416] hover:border-[#B8860B] transition-colors">
-                  <FileSpreadsheet size={16} />
+                <button
+                  onClick={() => handleDownload('csv')}
+                  disabled={downloading === 'csv'}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#EDE6D6] border border-[#DDD5C2] text-sm font-medium text-[#2C2416] hover:border-[#B8860B] transition-colors disabled:opacity-50"
+                >
+                  {downloading === 'csv' ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
                   Export as CSV
                 </button>
               </div>

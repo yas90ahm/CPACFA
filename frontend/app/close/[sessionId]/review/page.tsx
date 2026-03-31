@@ -1,8 +1,9 @@
 'use client';
 
-import { useParams } from 'next/navigation';
+import { useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { fmtMoney } from '@/lib/money';
 import {
@@ -232,9 +233,27 @@ function ErrorState({ message }: { message: string }) {
 /*  Main Page                                                          */
 /* ------------------------------------------------------------------ */
 
+async function downloadBlob(url: string, filename: string) {
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+  const token = localStorage.getItem('cpa_auth_token');
+  const res = await fetch(`${baseUrl}${url}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: 'include',
+  });
+  if (!res.ok) return;
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+}
+
 export default function CertificationCeremonyPage() {
   const params = useParams();
+  const router = useRouter();
+  const queryClient = useQueryClient();
   const sessionId = params.sessionId as string;
+  const [lockSuccess, setLockSuccess] = useState(false);
 
   const sessionQuery = useQuery({
     queryKey: ['close-session', sessionId],
@@ -290,6 +309,28 @@ export default function CertificationCeremonyPage() {
   const gatesPassing = readinessQuery.data?.gatesPassing ?? gates.filter((g) => g.passing).length;
   const artifact = artifactQuery.data;
   const statements = statementsQuery.data ?? [];
+
+  const lockMutation = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/close/sessions/${sessionId}/lock`, {
+        method: 'POST',
+        body: {},
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['close-session', sessionId] });
+      setLockSuccess(true);
+    },
+  });
+
+  const handleLockPeriod = () => {
+    if (
+      window.confirm(
+        'This action is PERMANENT and cannot be undone. Lock this period?'
+      )
+    ) {
+      lockMutation.mutate();
+    }
+  };
 
   const isLoading = sessionQuery.isLoading || readinessQuery.isLoading;
   const error = sessionQuery.error || readinessQuery.error;
@@ -463,28 +504,54 @@ export default function CertificationCeremonyPage() {
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
           <button
             type="button"
+            onClick={() =>
+              downloadBlob(
+                `/api/audit/binder?closeSessionId=${sessionId}`,
+                `audit-binder-${sessionId}.pdf`
+              )
+            }
             className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#B8860B] text-[#1A1510] font-medium text-sm hover:bg-[#D4A017] transition-colors"
           >
             <Download size={16} />
             Download Audit Binder
           </button>
 
-          <Link
-            href={`/close/${sessionId}/lock`}
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#C44B2B] text-white font-medium text-sm hover:bg-[#D4553A] transition-colors"
+          <button
+            type="button"
+            onClick={handleLockPeriod}
+            disabled={lockMutation.isPending || lockSuccess}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#C44B2B] text-white font-medium text-sm hover:bg-[#D4553A] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Lock size={16} />
-            Lock Period (Final)
-          </Link>
+            {lockMutation.isPending
+              ? 'Locking...'
+              : lockSuccess
+              ? 'Period Locked'
+              : 'Lock Period (Final)'}
+          </button>
 
-          <Link
-            href={`/verify?session=${sessionId}`}
+          <button
+            type="button"
+            onClick={() => router.push('/verify?session=' + sessionId)}
             className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#2A231A] border border-[#3B2F1E] text-[#C4B89A] font-medium text-sm hover:border-[#B8860B]/40 hover:text-[#E8DCC8] transition-colors"
           >
             <ExternalLink size={16} />
             Verify Externally
-          </Link>
+          </button>
         </div>
+
+        {lockMutation.isError && (
+          <div className="mt-4 flex items-center justify-center gap-2 text-sm text-[#C44B2B]">
+            <AlertCircle size={16} />
+            {(lockMutation.error as Error)?.message ?? 'Failed to lock period'}
+          </div>
+        )}
+        {lockSuccess && (
+          <div className="mt-4 flex items-center justify-center gap-2 text-sm text-[#2D6A4F]">
+            <CheckCircle2 size={16} />
+            Period has been permanently locked.
+          </div>
+        )}
 
         {/* Footer note */}
         {isCertified && (

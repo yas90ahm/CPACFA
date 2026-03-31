@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import {
   Check,
@@ -85,6 +85,9 @@ function avatarInitials(name: string): string {
 export default function OnboardingPage() {
   const [currentStep, setCurrentStep] = useState(2); // 0-indexed, step 3 = index 2
   const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteError, setInviteError] = useState('');
+  const [inviteSuccess, setInviteSuccess] = useState(false);
+  const queryClient = useQueryClient();
 
   /* Local form state for thresholds */
   const [varianceThreshold, setVarianceThreshold] = useState('5');
@@ -107,6 +110,24 @@ export default function OnboardingPage() {
   });
 
   const team = teamData?.members ?? (Array.isArray(teamData) ? (teamData as unknown as TeamMember[]) : []);
+
+  const inviteMutation = useMutation({
+    mutationFn: () =>
+      apiFetch('/api/settings/team/invite', {
+        method: 'POST',
+        body: { email: inviteEmail, name: '', role: 'senior_accountant' },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['onboarding-team'] });
+      setInviteEmail('');
+      setInviteError('');
+      setInviteSuccess(true);
+      setTimeout(() => setInviteSuccess(false), 3000);
+    },
+    onError: (err: Error) => {
+      setInviteError(err.message || 'Failed to send invitation');
+    },
+  });
 
   /* Step state helpers */
   const stepStatus = (i: number): 'done' | 'active' | 'pending' => {
@@ -315,10 +336,17 @@ export default function OnboardingPage() {
                       className="w-full bg-[#F5F0E8] border border-[#DDD5C2] rounded-md pl-8 pr-3 py-1.5 text-xs text-[#2C2416] placeholder-[#8B7A5E]/60 focus:outline-none focus:border-[#B8860B]"
                     />
                   </div>
-                  <button className="text-xs font-medium text-[#F5F0E8] bg-[#2D6A4F] px-3 py-1.5 rounded-md hover:bg-[#2D6A4F]/90 transition-colors shrink-0">
-                    Invite
+                  <button
+                    onClick={() => { setInviteError(''); inviteMutation.mutate(); }}
+                    disabled={!inviteEmail || inviteMutation.isPending}
+                    className="text-xs font-medium text-[#F5F0E8] bg-[#2D6A4F] px-3 py-1.5 rounded-md hover:bg-[#2D6A4F]/90 transition-colors shrink-0 disabled:opacity-50"
+                  >
+                    {inviteMutation.isPending ? 'Sending...' : inviteSuccess ? 'Sent!' : 'Invite'}
                   </button>
                 </div>
+                {inviteError && (
+                  <p className="text-[10px] text-[#C44B2B] mt-1.5">{inviteError}</p>
+                )}
               </div>
             </div>
           </div>

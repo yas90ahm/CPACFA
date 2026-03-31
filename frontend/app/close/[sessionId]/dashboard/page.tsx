@@ -111,8 +111,8 @@ const NAV_ITEMS = [
   { label: 'Close Sessions', icon: FolderClosed, href: () => '/close' },
   { label: 'Portfolio', icon: Briefcase, href: () => '/portfolio' },
   { label: 'Audit Trail', icon: ScrollText, href: (sid: string) => `/close/${sid}/audit-trail` },
-  { label: 'GL Quality', icon: BarChart3, href: () => '/close' },
-  { label: 'Analytics', icon: Activity, href: () => '/close' },
+  { label: 'GL Quality', icon: BarChart3, href: (sid: string) => `/close/${sid}/gl-quality` },
+  { label: 'Modules', icon: Activity, href: (sid: string) => `/close/${sid}/modules` },
   { label: 'Settings', icon: Settings, href: () => '/settings/general' },
 ];
 
@@ -494,6 +494,39 @@ function AttentionList({ items }: { items: AttentionItem[] }) {
 /*  Quick Actions                                                      */
 /* ------------------------------------------------------------------ */
 
+/* Gate-ID → route mapping for "Continue Close" navigation */
+const GATE_ROUTE_MAP: Record<string, string> = {
+  tb_balanced: 'trial-balance',
+  all_accounts_mapped: 'mapping',
+  recons_complete: 'reconciliation',
+  templates_resolved: 'adjustments',
+  statements_current: 'statements',
+  variances_explained: 'variance',
+  material_jes_approved: 'adjustments',
+  no_blocking_issues: 'dashboard',
+  evidence_policy: 'evidence',
+  checklist_complete: 'pipeline',
+  cash_rec_complete: 'reconciliation',
+};
+
+function ContinueCloseButton({ sessionId, gates }: { sessionId: string; gates: Gate[] }) {
+  const firstFailing = gates.find((g) => !g.passing);
+  const route = firstFailing
+    ? GATE_ROUTE_MAP[firstFailing.id] ?? 'dashboard'
+    : 'review';
+  const label = firstFailing ? firstFailing.label : 'Review & Certify';
+
+  return (
+    <Link
+      href={`/close/${sessionId}/${route}`}
+      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#B8860B] text-sm font-medium text-[#2C2416] hover:bg-[#A07608] transition-colors"
+    >
+      {label}
+      <ChevronRight size={16} />
+    </Link>
+  );
+}
+
 function QuickActions({ sessionId, pendingJes, aiDrafts }: { sessionId: string; pendingJes: number; aiDrafts: number }) {
   const actions = [
     {
@@ -826,6 +859,14 @@ export default function CloseDashboardPage() {
                 <TrialBalanceSummary rows={tbRows} />
                 <AttentionList items={attentionItems} />
               </div>
+
+              {/* Continue Close */}
+              {gates.length > 0 && (
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-medium text-[#2C2416]">Continue Close</h2>
+                  <ContinueCloseButton sessionId={sessionId} gates={gates} />
+                </div>
+              )}
 
               {/* Quick Actions */}
               <div>

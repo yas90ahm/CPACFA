@@ -89,8 +89,8 @@ const NAV_ITEMS = [
   { label: 'Close Sessions', icon: FolderClosed, href: () => '/close' },
   { label: 'Portfolio', icon: Briefcase, href: () => '/portfolio' },
   { label: 'Audit Trail', icon: ScrollText, href: (sid: string) => `/close/${sid}/audit-trail` },
-  { label: 'GL Quality', icon: BarChart3, href: () => '/close' },
-  { label: 'Analytics', icon: Activity, href: () => '/close' },
+  { label: 'GL Quality', icon: BarChart3, href: (sid: string) => `/close/${sid}/gl-quality` },
+  { label: 'Modules', icon: Activity, href: (sid: string) => `/close/${sid}/modules` },
   { label: 'Settings', icon: Settings, href: () => '/settings/general' },
 ];
 

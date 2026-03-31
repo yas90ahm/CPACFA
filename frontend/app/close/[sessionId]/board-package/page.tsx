@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { fmtMoney, isMoneyNegative } from '@/lib/money';
@@ -199,8 +199,24 @@ function EbitdaBridge({ items }: { items: BridgeItem[] }) {
 /*  Main Page                                                          */
 /* ------------------------------------------------------------------ */
 
+async function downloadBlob(url: string, filename: string) {
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+  const token = localStorage.getItem('cpa_auth_token');
+  const res = await fetch(`${baseUrl}${url}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: 'include',
+  });
+  if (!res.ok) return;
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+}
+
 export default function BoardPackagePage() {
   const params = useParams();
+  const router = useRouter();
   const sessionId = params.sessionId as string;
 
   const sessionQuery = useQuery({
@@ -565,22 +581,54 @@ export default function BoardPackagePage() {
             Export Options
           </h2>
           <div className="grid grid-cols-4 gap-4">
-            <button className="flex flex-col items-center gap-3 p-5 rounded-lg bg-[#B8860B] text-[#2C2416] hover:bg-[#A07608] transition-colors">
+            <button
+              onClick={async () => {
+                const sessionState = (sessionQuery.data as any)?.state;
+                const mode = sessionState === 'CERTIFIED' || sessionState === 'LOCKED' ? 'certified' : 'draft';
+                const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+                const token = localStorage.getItem('cpa_auth_token');
+                const res = await fetch(`${baseUrl}/api/export/pdf`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                  },
+                  credentials: 'include',
+                  body: JSON.stringify({ closeSessionId: sessionId, mode }),
+                });
+                if (!res.ok) return;
+                const blob = await res.blob();
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `board-package-${sessionId}.pdf`;
+                a.click();
+              }}
+              className="flex flex-col items-center gap-3 p-5 rounded-lg bg-[#B8860B] text-[#2C2416] hover:bg-[#A07608] transition-colors"
+            >
               <FileText size={24} />
               <div className="text-sm font-medium">Full Board PDF</div>
               <div className="text-xs opacity-80">Complete package</div>
             </button>
-            <button className="flex flex-col items-center gap-3 p-5 rounded-lg bg-[#EDE6D6] border border-[#DDD5C2] text-[#2C2416] hover:border-[#B8860B] transition-colors">
+            <button
+              onClick={() => downloadBlob(`/api/close/sessions/${sessionId}/excel-export`, `financials-${sessionId}.xlsx`)}
+              className="flex flex-col items-center gap-3 p-5 rounded-lg bg-[#EDE6D6] border border-[#DDD5C2] text-[#2C2416] hover:border-[#B8860B] transition-colors"
+            >
               <FileSpreadsheet size={24} className="text-[#8B7A5E]" />
               <div className="text-sm font-medium">Excel Export</div>
               <div className="text-xs text-[#8B7A5E]">Raw financials</div>
             </button>
-            <button className="flex flex-col items-center gap-3 p-5 rounded-lg bg-[#EDE6D6] border border-[#DDD5C2] text-[#2C2416] hover:border-[#B8860B] transition-colors">
+            <button
+              onClick={() => downloadBlob(`/api/audit/binder?closeSessionId=${sessionId}`, `audit-binder-${sessionId}.pdf`)}
+              className="flex flex-col items-center gap-3 p-5 rounded-lg bg-[#EDE6D6] border border-[#DDD5C2] text-[#2C2416] hover:border-[#B8860B] transition-colors"
+            >
               <Archive size={24} className="text-[#8B7A5E]" />
               <div className="text-sm font-medium">Audit Binder</div>
               <div className="text-xs text-[#8B7A5E]">Evidence + workpapers</div>
             </button>
-            <button className="flex flex-col items-center gap-3 p-5 rounded-lg bg-[#2C2416] text-[#F5F0E8] hover:bg-[#3B2E1E] transition-colors">
+            <button
+              onClick={() => router.push('/verify?session=' + sessionId)}
+              className="flex flex-col items-center gap-3 p-5 rounded-lg bg-[#2C2416] text-[#F5F0E8] hover:bg-[#3B2E1E] transition-colors"
+            >
               <ExternalLink size={24} className="text-[#B8860B]" />
               <div className="text-sm font-medium">Verify Externally</div>
               <div className="text-xs text-[#8B7A5E]">Ed25519 signature</div>

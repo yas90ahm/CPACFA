@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
@@ -82,8 +82,8 @@ const NAV_ITEMS = [
   { label: 'Close Sessions', icon: FolderClosed, href: () => '/close' },
   { label: 'Portfolio', icon: Briefcase, href: () => '/portfolio' },
   { label: 'Audit Trail', icon: ScrollText, href: (sid: string) => `/close/${sid}/audit-trail` },
-  { label: 'GL Quality', icon: BarChart3, href: () => '/close' },
-  { label: 'Analytics', icon: Activity, href: () => '/close' },
+  { label: 'GL Quality', icon: BarChart3, href: (sid: string) => `/close/${sid}/gl-quality` },
+  { label: 'Modules', icon: Activity, href: (sid: string) => `/close/${sid}/modules` },
   { label: 'Settings', icon: Settings, href: () => '/settings/general' },
 ];
 
@@ -398,7 +398,11 @@ function PageSkeleton() {
 export default function AuditTrailPage() {
   const params = useParams();
   const sessionId = params.sessionId as string;
-  const [limit, setLimit] = useState(50);
+  const PAGE_SIZE = 50;
+  const [allEvents, setAllEvents] = useState<AuditEvent[]>([]);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   /* --- Data fetching --- */
 
@@ -414,32 +418,51 @@ export default function AuditTrailPage() {
     enabled: !!sessionId,
   });
 
-  const eventsQuery = useQuery({
-    queryKey: ['audit-events', sessionId, limit],
-    queryFn: async () => {
+  const fetchEvents = useCallback(async (currentOffset: number): Promise<AuditEvent[]> => {
+    try {
+      const data = await apiFetch<AuditEvent[] | { events?: AuditEvent[]; auditEvents?: AuditEvent[] }>(
+        `/api/close/sessions/${sessionId}/audit-events`,
+        { params: { limit: String(PAGE_SIZE), offset: String(currentOffset) } }
+      );
+      if (Array.isArray(data)) return data;
+      return data.events ?? data.auditEvents ?? [];
+    } catch {
       try {
-        const data = await apiFetch<AuditEvent[] | { events?: AuditEvent[]; auditEvents?: AuditEvent[] }>(
-          `/api/close/sessions/${sessionId}/audit-events`,
-          { params: { limit: String(limit) } }
+        const data = await apiFetch<AuditEvent[] | { events?: AuditEvent[] }>(
+          '/api/verification/audit-chain',
+          { params: { sessionId } }
         );
         if (Array.isArray(data)) return data;
-        return data.events ?? data.auditEvents ?? [];
+        return data.events ?? [];
       } catch {
-        // Fallback to verification endpoint
-        try {
-          const data = await apiFetch<AuditEvent[] | { events?: AuditEvent[] }>(
-            '/api/verification/audit-chain',
-            { params: { sessionId } }
-          );
-          if (Array.isArray(data)) return data;
-          return data.events ?? [];
-        } catch {
-          return [];
-        }
+        return [];
       }
+    }
+  }, [sessionId]);
+
+  const eventsQuery = useQuery({
+    queryKey: ['audit-events', sessionId],
+    queryFn: async () => {
+      const batch = await fetchEvents(0);
+      setAllEvents(batch);
+      setOffset(batch.length);
+      setHasMore(batch.length >= PAGE_SIZE);
+      return batch;
     },
     enabled: !!sessionId,
   });
+
+  const handleLoadMore = useCallback(async () => {
+    setLoadingMore(true);
+    try {
+      const batch = await fetchEvents(offset);
+      setAllEvents((prev) => [...prev, ...batch]);
+      setOffset((prev) => prev + batch.length);
+      if (batch.length < PAGE_SIZE) setHasMore(false);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [offset, fetchEvents]);
 
   const chainQuery = useQuery({
     queryKey: ['chain-verification', sessionId],
@@ -460,7 +483,7 @@ export default function AuditTrailPage() {
   /* --- Derived state --- */
 
   const session = sessionQuery.data;
-  const events = eventsQuery.data ?? [];
+  const events = allEvents.length > 0 ? allEvents : (eventsQuery.data ?? []);
   const chain = chainQuery.data;
 
   const totalEvents = chain?.totalEvents ?? events.length;
@@ -653,13 +676,14 @@ export default function AuditTrailPage() {
               )}
 
               {/* Load more */}
-              {events.length >= limit && (
+              {hasMore && events.length > 0 && (
                 <div className="flex justify-center">
                   <button
-                    onClick={() => setLimit((l) => l + 50)}
-                    className="px-4 py-2 text-xs font-medium rounded border border-[#DDD5C2] text-[#5C4F3A] hover:bg-[#EDE6D6] transition-colors"
+                    onClick={handleLoadMore}
+                    disabled={loadingMore}
+                    className="px-4 py-2 text-xs font-medium rounded border border-[#DDD5C2] text-[#5C4F3A] hover:bg-[#EDE6D6] transition-colors disabled:opacity-50"
                   >
-                    Load more events
+                    {loadingMore ? 'Loading...' : 'Load more events'}
                   </button>
                 </div>
               )}
