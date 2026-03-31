@@ -188,8 +188,8 @@ router.put('/cross-tenant-learning', async (req: Request, res: Response) => {
       return;
     }
     const role = (req as AuthRequest).role;
-    if (role !== 'admin') {
-      res.status(403).json({ error: 'Only admin can change cross-tenant learning settings' });
+    if (role !== 'system_admin') {
+      res.status(403).json({ error: 'Only system admin can change cross-tenant learning settings' });
       return;
     }
     const { enabled } = req.body as { enabled?: boolean };

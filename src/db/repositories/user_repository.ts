@@ -54,7 +54,7 @@ export async function createUser(
   tenantId: string,
   email: string,
   passwordHash: string,
-  role: string = 'accountant',
+  role: string = 'controller',
   name?: string
 ): Promise<UserRow> {
   const id = `user-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;

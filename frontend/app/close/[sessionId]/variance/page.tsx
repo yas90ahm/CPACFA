@@ -1,772 +1,768 @@
 'use client';
 
+import { useState } from 'react';
 import { useParams } from 'next/navigation';
-import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useCloseSession } from '@/lib/queries/close-session';
-import { useVariances, useClassifyVariance } from '@/lib/queries/variance';
-import type { VarianceClassification } from '@/lib/queries/variance';
-import { useCumulativeVariances } from '@/lib/queries/cumulative';
-import { useAuth } from '@/lib/auth';
-import { AISuggestionCard } from '@/components/shared/AISuggestionCard';
-import { AISuggestionBadge } from '@/components/shared/AISuggestionBadge';
-import { MoneyCell } from '@/components/shared/MoneyCell';
-import { fmtMoney } from '@/lib/money';
+import Link from 'next/link';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
-import { cn } from '@/lib/utils';
-import type { VarianceRecord } from '@/lib/types/variance';
-import { InvestigationPanel } from '@/components/investigation/InvestigationPanel';
-import { Check, X, ChevronDown, ChevronRight, Search, Loader2, Zap, Calendar, TrendingUp, FileDown } from 'lucide-react';
-import { EmptyState } from '@/components/shared/EmptyState';
-import { ContinueToNextStep } from '@/components/shared/ContinueToNextStep';
-import { canExplainVariance, canApproveVariance, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
+import { fmtMoney } from '@/lib/money';
+import {
+  LayoutDashboard,
+  FolderClosed,
+  Briefcase,
+  ScrollText,
+  BarChart3,
+  Activity,
+  Settings,
+  ChevronRight,
+  AlertTriangle,
+  CheckCircle2,
+  Sparkles,
+  Pencil,
+  FileText,
+  Loader2,
+  TrendingUp,
+  TrendingDown,
+} from 'lucide-react';
 
-type VariancePeriodView = 'current' | 'QTD' | 'YTD';
-type VarianceComparisonType = 'prior_year_same_period' | 'sequential' | 'budget';
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
 
-const STATEMENT_LABELS: Record<string, string> = {
-  income_statement: 'IS',
-  balance_sheet: 'BS',
-  cash_flow: 'CF',
-  equity: 'EQ',
-};
-
-function changeColor(
-  statementType: string,
-  lineItemName: string,
-  changeAmount: string,
-  changePercent: string
-): 'favorable' | 'unfavorable' | 'neutral' {
-  const num = parseFloat(changeAmount || '0');
-  const pct = parseFloat(changePercent || '0');
-  if (isNaN(num) || isNaN(pct) || (num === 0 && pct === 0)) return 'neutral';
-  const isRevenue = /revenue|income|sales/i.test(lineItemName) && statementType === 'income_statement';
-  const isExpense = /cogs|expense|cost/i.test(lineItemName) && statementType === 'income_statement';
-  if (isRevenue) return num > 0 ? 'favorable' : 'unfavorable';
-  if (isExpense) return num > 0 ? 'unfavorable' : 'favorable';
-  return 'neutral';
+interface Gate {
+  id: string;
+  label: string;
+  passing: boolean;
+  detail?: string;
 }
 
-function colorStyle(color: 'favorable' | 'unfavorable' | 'neutral'): React.CSSProperties {
-  if (color === 'favorable') return { color: 'var(--status-success)' };
-  if (color === 'unfavorable') return { color: 'var(--status-error)' };
-  return { color: 'var(--text-secondary)' };
+interface ReadinessResponse {
+  gates: Gate[];
+  gatesPassing: number;
+  gatesTotal: number;
+  canAdvance: boolean;
 }
 
-export default function VariancePage() {
-  const params = useParams();
-  const sessionId = params.sessionId as string;
-  const { data: session } = useCloseSession(sessionId);
-  const { data: variances = [] } = useVariances(sessionId);
+interface SessionResponse {
+  id: string;
+  state: string;
+  periodLabel: string;
+  entityName: string;
+  startedAt: string;
+  createdAt: string;
+}
 
-  const [materialOnly, setMaterialOnly] = useState(true);
-  const [unexplainedOnly, setUnexplainedOnly] = useState(false);
-  const [statementFilter, setStatementFilter] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState<'changeAbs' | 'lineItem' | 'statement'>('changeAbs');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const { user } = useAuth();
-  const role = user?.role ?? 'controller';
-  const readOnly = isRoleReadOnly(role);
-  const canExplain = canExplainVariance(role);
-  const canApprove = canApproveVariance(role);
-  const queryClient = useQueryClient();
-  const [localExplanations, setLocalExplanations] = useState<Record<string, string>>({});
-  const [localDismissedAi, setLocalDismissedAi] = useState<Record<string, boolean>>({});
-  const [explanationSources, setExplanationSources] = useState<Record<string, 'manual' | 'ai_draft' | 'ai_edited'>>({});
-  const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
-  const [approvingIds, setApprovingIds] = useState<Set<string>>(new Set());
-  const [investigatingVariance, setInvestigatingVariance] = useState<VarianceRecord | null>(null);
-  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  const [draftingAll, setDraftingAll] = useState(false);
-  const [localClassifications, setLocalClassifications] = useState<Record<string, string>>({});
-  const classifyMutation = useClassifyVariance(sessionId);
-  const [variancePeriodView, setVariancePeriodView] = useState<VariancePeriodView>('current');
-  const [comparisonType, setComparisonType] = useState<VarianceComparisonType>('prior_year_same_period');
-  const { data: cumulativeVarData } = useCumulativeVariances(
-    variancePeriodView !== 'current' ? sessionId : null,
-    variancePeriodView !== 'current' ? variancePeriodView : null,
-    comparisonType
-  );
+interface Variance {
+  id: string;
+  lineItemName: string;
+  isMaterial: boolean;
+  priorAmount?: string;
+  currentAmount?: string;
+  changeAmount?: string;
+  changePercent?: number;
+  explanationStatus: string;
+  explanation?: string;
+  explainedBy?: string;
+  explainedAt?: string;
+  materialityThreshold?: number;
+}
 
-  // ─── Auto-save draft explanations ──────────────────────────────────────────
-  const [draftSavedStatus, setDraftSavedStatus] = useState<Record<string, 'saving' | 'saved' | null>>({});
-  const prevLocalExplanationsRef = useRef<Record<string, string>>({});
+interface AIDraft {
+  explanation: string;
+  confidence?: number;
+  citations?: string[];
+  ascReferences?: string[];
+}
 
-  useEffect(() => {
-    // Only auto-save entries that changed since the last render
-    const changedEntries = Object.entries(localExplanations).filter(
-      ([id, text]) => prevLocalExplanationsRef.current[id] !== text
-    );
-    if (changedEntries.length === 0) return;
+type FilterTab = 'all' | 'material' | 'unexplained' | 'explained';
 
-    const timer = setTimeout(async () => {
-      for (const [varianceId, text] of changedEntries) {
-        if (text.trim().length >= 20) {
-          setDraftSavedStatus(prev => ({ ...prev, [varianceId]: 'saving' }));
-          try {
-            await apiFetch(`/api/close/variances/${varianceId}/draft`, {
-              method: 'PUT',
-              body: { explanation: text },
-            });
-            setDraftSavedStatus(prev => ({ ...prev, [varianceId]: 'saved' }));
-            setTimeout(() => setDraftSavedStatus(prev => ({ ...prev, [varianceId]: null })), 2000);
-          } catch {
-            setDraftSavedStatus(prev => ({ ...prev, [varianceId]: null }));
-          }
-        }
-      }
-      prevLocalExplanationsRef.current = { ...localExplanations };
-    }, 2000);
+/* ------------------------------------------------------------------ */
+/*  Nav                                                                */
+/* ------------------------------------------------------------------ */
 
-    return () => clearTimeout(timer);
-  }, [localExplanations]);
+const NAV_ITEMS = [
+  { label: 'Dashboard', icon: LayoutDashboard, href: (sid: string) => `/close/${sid}/dashboard` },
+  { label: 'Close Sessions', icon: FolderClosed, href: () => '/close' },
+  { label: 'Portfolio', icon: Briefcase, href: () => '/portfolio' },
+  { label: 'Audit Trail', icon: ScrollText, href: (sid: string) => `/close/${sid}/audit-trail` },
+  { label: 'GL Quality', icon: BarChart3, href: () => '/close' },
+  { label: 'Analytics', icon: Activity, href: () => '/close' },
+  { label: 'Settings', icon: Settings, href: () => '/settings/general' },
+];
 
-  const filtered = useMemo(() => {
-    let list = [...variances];
-    if (materialOnly) list = list.filter((v) => v.isMaterial);
-    if (unexplainedOnly) list = list.filter((v) => v.isMaterial && v.explanationStatus === 'pending');
-    if (statementFilter) list = list.filter((v) => v.statementType === statementFilter);
-    const mult = sortBy === 'changeAbs' ? -1 : 1;
-    list.sort((a, b) => {
-      if (sortBy === 'changeAbs') {
-        return mult * (Math.abs(parseFloat(a.changeAmount)) - Math.abs(parseFloat(b.changeAmount)));
-      }
-      if (sortBy === 'lineItem') return mult * (a.lineItemName.localeCompare(b.lineItemName));
-      return mult * (a.statementType.localeCompare(b.statementType));
-    });
-    return list;
-  }, [variances, materialOnly, unexplainedOnly, statementFilter, sortBy]);
+/* ------------------------------------------------------------------ */
+/*  Sidebar                                                            */
+/* ------------------------------------------------------------------ */
 
-  const stats = useMemo(() => {
-    const total = variances.length;
-    const material = variances.filter((v) => v.isMaterial).length;
-    const explained = variances.filter((v) => v.isMaterial && (v.explanationStatus === 'explained' || v.explanationStatus === 'approved')).length;
-    const unexplained = variances.filter((v) => v.isMaterial && v.explanationStatus === 'pending').length;
-    const approved = variances.filter((v) => v.isMaterial && v.explanationStatus === 'approved').length;
-    return { total, material, explained, unexplained, approved };
-  }, [variances]);
-
-  const toggleExpanded = useCallback((id: string) => {
-    setExpandedId((prev) => (prev === id ? null : id));
-  }, []);
-
-  const handleUseDraft = useCallback((id: string, draft: string) => {
-    setLocalExplanations((prev) => ({ ...prev, [id]: draft }));
-    setExplanationSources((prev) => ({ ...prev, [id]: 'ai_draft' }));
-  }, []);
-
-  const handleDismissDraft = useCallback((id: string) => {
-    setLocalDismissedAi((prev) => ({ ...prev, [id]: true }));
-  }, []);
-
-  const handleSaveExplanation = useCallback(async (id: string, text: string) => {
-    if (text.trim().length < 20) return;
-    setSavingIds((prev) => new Set(prev).add(id));
-    // Determine source: if user started from AI draft and edited, it's ai_edited
-    const baseSource = explanationSources[id] ?? 'manual';
-    const source = baseSource === 'ai_draft' ? 'ai_draft' : baseSource === 'ai_edited' ? 'ai_edited' : 'manual';
-    try {
-      await apiFetch(`/api/close/variances/${id}/explain`, {
-        method: 'POST',
-        body: { explanation: text.trim(), explanation_source: source },
-      });
-      queryClient.invalidateQueries({ queryKey: ['variances', sessionId] });
-      queryClient.invalidateQueries({ queryKey: ['readiness', sessionId] });
-      setToast({ type: 'success', message: 'Explanation saved.' });
-      setTimeout(() => setToast(null), 3000);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to save explanation';
-      setToast({ type: 'error', message: msg });
-      setTimeout(() => setToast(null), 5000);
-    } finally {
-      setSavingIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
-    }
-  }, [sessionId, queryClient, explanationSources]);
-
-  const handleApprove = useCallback(async (id: string) => {
-    setApprovingIds((prev) => new Set(prev).add(id));
-    try {
-      await apiFetch(`/api/close/variances/${id}/approve`, {
-        method: 'POST',
-        body: {},
-      });
-      queryClient.invalidateQueries({ queryKey: ['variances', sessionId] });
-      queryClient.invalidateQueries({ queryKey: ['readiness', sessionId] });
-      setToast({ type: 'success', message: 'Explanation approved.' });
-      setTimeout(() => setToast(null), 3000);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to approve explanation';
-      setToast({ type: 'error', message: msg });
-      setTimeout(() => setToast(null), 5000);
-    } finally {
-      setApprovingIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
-    }
-  }, [sessionId, queryClient]);
-
-  const materialUnexplained = useMemo(
-    () => variances.filter((v) => v.isMaterial && v.explanationStatus === 'pending'),
-    [variances]
-  );
-
-  const handleDraftAll = useCallback(async () => {
-    setDraftingAll(true);
-    let drafted = 0;
-    try {
-      for (const v of materialUnexplained) {
-        // Use cached AI draft if available, otherwise fetch from API
-        let draft = v.aiDraftExplanation;
-        if (!draft) {
-          try {
-            const result = await apiFetch<{ draftExplanation: string | null }>(`/api/close/variances/${v.id}/ai-draft`);
-            draft = result.draftExplanation;
-          } catch {
-            // Skip on error
-          }
-        }
-        if (draft) {
-          setLocalExplanations((prev) => ({ ...prev, [v.id]: draft! }));
-          setExplanationSources((prev) => ({ ...prev, [v.id]: 'ai_draft' }));
-          drafted++;
-        }
-      }
-      setToast({ type: 'success', message: `Drafted ${drafted} explanation${drafted !== 1 ? 's' : ''}. Review and save each one.` });
-      setTimeout(() => setToast(null), 5000);
-      // Expand the first unexplained variance for review
-      if (materialUnexplained.length > 0) setExpandedId(materialUnexplained[0].id);
-    } catch {
-      setToast({ type: 'error', message: 'Failed to draft explanations.' });
-      setTimeout(() => setToast(null), 5000);
-    } finally {
-      setDraftingAll(false);
-    }
-  }, [materialUnexplained, apiFetch]);
-
-  const handleClassify = useCallback((varianceId: string, classification: string) => {
-    setLocalClassifications((prev) => ({ ...prev, [varianceId]: classification }));
-    classifyMutation.mutate({ varianceId, classification: classification as VarianceClassification });
-  }, [classifyMutation]);
-
-  const CLASSIFICATION_OPTIONS: VarianceClassification[] = ['Timing', 'Permanent', 'Volume', 'Price', 'Mix', 'Other'];
-
-  const entityName = session?.entityName ?? 'Entity';
-  const periodLabel = session?.periodLabel ?? 'Period';
-
+function Sidebar({ sessionId }: { sessionId: string }) {
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-display text-[var(--text-primary)]">
-            Variance Analysis
-          </h1>
-          <p className="text-sm mt-0.5 text-[var(--text-secondary)]">
-            {periodLabel} vs Prior Period
-          </p>
-        </div>
+    <aside className="fixed top-0 left-0 h-screen w-[260px] bg-[#2C2416] flex flex-col z-50">
+      <div className="px-6 pt-6 pb-4">
+        <div className="text-[#B8860B] text-xl font-medium tracking-wide">SABIT</div>
+        <div className="text-[#8B7A5E] text-xs mt-0.5">Financial Close Engine</div>
+      </div>
+      <nav className="flex-1 px-3 mt-2 space-y-0.5 overflow-y-auto">
+        {NAV_ITEMS.map((item) => {
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.label}
+              href={item.href(sessionId)}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium text-[#8B7A5E] hover:text-[#B8860B] hover:bg-[#3B1F0A]/50 transition-colors"
+            >
+              <Icon size={18} />
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
+      <div className="px-4 py-4 border-t border-[#3B1F0A]">
         <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={async () => {
-              const token = typeof window !== 'undefined' ? localStorage.getItem('cpa_auth_token') : null;
-              const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-              const res = await fetch(`${API_URL}/api/close/sessions/${sessionId}/export/variances.xlsx`, {
-                headers: token ? { Authorization: `Bearer ${token}` } : {},
-              });
-              if (!res.ok) return;
-              const blob = await res.blob();
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = `variances-${sessionId}.xlsx`;
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
-              URL.revokeObjectURL(url);
-            }}
-            className="px-3 py-1.5 rounded-full text-sm transition-colors border border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-table-row-hover)]"
-          >
-            <FileDown className="w-4 h-4 inline mr-1" />
-            Export Excel
-          </button>
-        {canExplain && materialUnexplained.length > 0 && (
-          <button
-            type="button"
-            onClick={handleDraftAll}
-            disabled={draftingAll}
-            className="px-4 py-2 text-sm font-medium disabled:opacity-50 flex items-center gap-2 bg-[var(--interactive-primary)] text-white rounded-[var(--radius-md)] transition-colors hover:bg-[var(--interactive-primary-hover)]"
-          >
-            {draftingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-            {draftingAll ? 'Drafting...' : `Draft All Explanations (${materialUnexplained.length})`}
-          </button>
-        )}
+          <div className="w-8 h-8 rounded-full bg-[#3B1F0A] flex items-center justify-center text-[#B8860B] text-xs font-medium">
+            YA
+          </div>
+          <div>
+            <div className="text-sm text-[#B8860B] font-medium">Yasir A.</div>
+            <div className="text-xs text-[#8B7A5E]">Controller</div>
+          </div>
         </div>
       </div>
+    </aside>
+  );
+}
 
-      {/* Period View Toggle */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2">
-          <Calendar className="w-4 h-4 text-[var(--text-secondary)]" />
-          <span className="text-sm text-[var(--text-secondary)]">Period:</span>
-          {(['current', 'QTD', 'YTD'] as const).map((pv) => (
-            <button
-              key={pv}
-              type="button"
-              onClick={() => setVariancePeriodView(pv)}
-              className={cn(
-                'px-3 py-1 text-sm rounded-[var(--radius-md)] transition-all duration-200',
-                variancePeriodView === pv
-                  ? 'bg-[var(--interactive-primary)] text-white'
-                  : 'border border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--interactive-primary)] hover:text-[var(--interactive-primary)]'
-              )}
-            >
-              {pv === 'current' ? 'Current Period' : pv === 'QTD' ? 'Quarter-to-Date' : 'Year-to-Date'}
-            </button>
-          ))}
-        </div>
-        {variancePeriodView !== 'current' && (
+/* ------------------------------------------------------------------ */
+/*  Progress Rail                                                      */
+/* ------------------------------------------------------------------ */
+
+function ProgressRail({
+  gates,
+  gatesTotal,
+  sessionState,
+  unexplainedCount,
+}: {
+  gates: Gate[];
+  gatesTotal: number;
+  sessionState: string;
+  unexplainedCount: number;
+}) {
+  const activeGateIndex = gates.findIndex((g) => !g.passing);
+  const activeGateNum = activeGateIndex >= 0 ? activeGateIndex + 1 : gatesTotal;
+
+  return (
+    <div className="bg-[#2C2416] px-6 py-3 flex items-center justify-between">
+      <div className="flex items-center gap-4 text-sm">
+        <span className="text-[#B8860B] font-medium">
+          Gate {activeGateNum} of {gatesTotal}
+        </span>
+        <span className="text-[#EDE6D6]">Variance Analysis</span>
+        {unexplainedCount > 0 && (
+          <span className="text-[#8B6914]">
+            {unexplainedCount} unexplained
+          </span>
+        )}
+        <span className="px-2 py-0.5 rounded text-xs font-medium bg-[#3B1F0A] text-[#B8860B]">
+          {unexplainedCount > 0 ? 'NEEDS ATTENTION' : sessionState.replace(/_/g, ' ')}
+        </span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        {gates.map((gate, i) => {
+          let bg = '#5C4F3A';
+          if (gate.passing) bg = '#2D6A4F';
+          else if (i === activeGateIndex) bg = '#B8860B';
+          return (
+            <div
+              key={gate.id}
+              className="w-2.5 h-2.5 rounded-full transition-colors"
+              style={{ backgroundColor: bg }}
+              title={`${gate.label}: ${gate.passing ? 'Passing' : 'Pending'}`}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Stat Card                                                          */
+/* ------------------------------------------------------------------ */
+
+function StatCard({
+  label,
+  count,
+  color,
+  bgColor,
+}: {
+  label: string;
+  count: number;
+  color: string;
+  bgColor: string;
+}) {
+  return (
+    <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-4">
+      <div className="text-xs text-[#8B7A5E] font-medium uppercase tracking-wider mb-2">{label}</div>
+      <div className="text-2xl font-medium font-mono" style={{ color }}>
+        {count}
+      </div>
+      <div
+        className="mt-2 h-1 rounded-full"
+        style={{ backgroundColor: bgColor, opacity: count > 0 ? 1 : 0.3 }}
+      />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Filter Tabs                                                        */
+/* ------------------------------------------------------------------ */
+
+function FilterTabs({
+  active,
+  onChange,
+  counts,
+}: {
+  active: FilterTab;
+  onChange: (tab: FilterTab) => void;
+  counts: Record<FilterTab, number>;
+}) {
+  const tabs: { key: FilterTab; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'material', label: 'Material' },
+    { key: 'unexplained', label: 'Unexplained' },
+    { key: 'explained', label: 'Explained' },
+  ];
+
+  return (
+    <div className="flex items-center gap-1 bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-1">
+      {tabs.map((tab) => (
+        <button
+          key={tab.key}
+          onClick={() => onChange(tab.key)}
+          className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+            active === tab.key
+              ? 'bg-[#2C2416] text-[#EDE6D6]'
+              : 'text-[#8B7A5E] hover:text-[#2C2416]'
+          }`}
+        >
+          {tab.label} ({counts[tab.key]})
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Variance Card                                                      */
+/* ------------------------------------------------------------------ */
+
+function VarianceCard({
+  variance,
+  sessionId,
+  onExplained,
+}: {
+  variance: Variance;
+  sessionId: string;
+  onExplained: () => void;
+}) {
+  const [showDraft, setShowDraft] = useState(false);
+  const [customExplanation, setCustomExplanation] = useState('');
+  const [mode, setMode] = useState<'view' | 'edit' | 'custom'>('view');
+
+  const isExplained = variance.explanationStatus === 'explained';
+  const hasDraft =
+    variance.explanationStatus === 'ai_drafted' || variance.explanationStatus === 'draft_ready';
+
+  const draftQuery = useQuery({
+    queryKey: ['ai-draft', sessionId, variance.id],
+    queryFn: () =>
+      apiFetch<AIDraft>(`/api/close/sessions/${sessionId}/variances/${variance.id}/ai-draft`),
+    enabled: showDraft && !isExplained,
+  });
+
+  const queryClient = useQueryClient();
+
+  const explainMutation = useMutation({
+    mutationFn: (explanation: string) =>
+      apiFetch(`/api/close/variances/${variance.id}/explain`, {
+        method: 'POST',
+        body: { explanation },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['variances', sessionId] });
+      onExplained();
+    },
+  });
+
+  const changePercent = variance.changePercent ?? 0;
+  const isPositive = changePercent >= 0;
+
+  return (
+    <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg overflow-hidden">
+      {/* Header */}
+      <div className="px-5 py-4">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <h3 className="text-sm font-medium text-[#2C2416]">{variance.lineItemName}</h3>
+            {variance.isMaterial && (
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-[#F5E4DE] text-[#C44B2B] uppercase tracking-wider">
+                Material
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-2">
-            <span className="text-sm text-[var(--text-secondary)]">Compare:</span>
-            <select
-              value={comparisonType}
-              onChange={(e) => setComparisonType(e.target.value as VarianceComparisonType)}
-              className="text-sm px-2 py-1 border border-[var(--border-default)] rounded-[var(--radius-md)] bg-[var(--bg-surface-sunken)] transition-colors focus:border-[var(--border-focus)] focus:outline-none"
+            {isExplained ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-[#E0EDE8] text-[#2D6A4F]">
+                <CheckCircle2 size={10} />
+                Explained
+              </span>
+            ) : hasDraft ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-[#E0EAF5] text-[#3B6EA5]">
+                <Sparkles size={10} />
+                AI Draft Ready
+                {draftQuery.data?.confidence != null && (
+                  <span className="ml-1">{Math.round(draftQuery.data.confidence * 100)}%</span>
+                )}
+              </span>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Amounts grid */}
+        <div className="grid grid-cols-4 gap-4 text-center">
+          <div>
+            <div className="text-[10px] font-medium uppercase tracking-wider text-[#8B7A5E] mb-1">
+              Prior Period
+            </div>
+            <div className="text-sm font-mono text-[#2C2416]">
+              {fmtMoney(variance.priorAmount, { dollar: true, dash: true })}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] font-medium uppercase tracking-wider text-[#8B7A5E] mb-1">
+              Current Period
+            </div>
+            <div className="text-sm font-mono text-[#2C2416]">
+              {fmtMoney(variance.currentAmount, { dollar: true, dash: true })}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] font-medium uppercase tracking-wider text-[#8B7A5E] mb-1">
+              Change
+            </div>
+            <div className="text-sm font-mono text-[#2C2416]">
+              {fmtMoney(variance.changeAmount, { dollar: true, dash: true })}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] font-medium uppercase tracking-wider text-[#8B7A5E] mb-1">
+              % Change
+            </div>
+            <div
+              className="text-sm font-mono font-medium flex items-center justify-center gap-1"
+              style={{ color: Math.abs(changePercent) > 5 ? '#C44B2B' : '#2D6A4F' }}
             >
-              <option value="prior_year_same_period">vs Prior Year</option>
-              <option value="sequential">vs Prior Quarter/Period</option>
-              <option value="budget" disabled>vs Budget (coming soon)</option>
-            </select>
+              {isPositive ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+              {changePercent.toFixed(1)}%
+            </div>
+          </div>
+        </div>
+
+        {/* Explained state */}
+        {isExplained && variance.explanation && (
+          <div className="mt-4 bg-[#E0EDE8] border border-[#2D6A4F]/10 rounded px-4 py-3">
+            <p className="text-xs text-[#2C2416] leading-relaxed">{variance.explanation}</p>
+            {(variance.explainedBy || variance.explainedAt) && (
+              <p className="text-[10px] text-[#8B7A5E] mt-2">
+                Attested by {variance.explainedBy || 'Controller'}
+                {variance.explainedAt && (
+                  <> on {new Date(variance.explainedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</>
+                )}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* AI Draft / Actions for unexplained */}
+        {!isExplained && (
+          <div className="mt-4 space-y-3">
+            {/* Show AI draft */}
+            {showDraft && draftQuery.data && mode !== 'custom' && (
+              <div className="bg-[#E0EAF5] border border-[#3B6EA5]/10 rounded px-4 py-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Sparkles size={12} className="text-[#3B6EA5]" />
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-[#3B6EA5]">
+                    AI Draft
+                    {draftQuery.data.confidence != null && (
+                      <> - {Math.round(draftQuery.data.confidence * 100)}% confidence</>
+                    )}
+                  </span>
+                </div>
+                <p className="text-xs text-[#2C2416] leading-relaxed mb-2">
+                  {mode === 'edit' ? (
+                    <textarea
+                      className="w-full bg-[#F5F0E8] border border-[#DDD5C2] rounded px-3 py-2 text-xs text-[#2C2416] focus:outline-none focus:border-[#3B6EA5] resize-y min-h-[60px]"
+                      defaultValue={draftQuery.data.explanation}
+                      onChange={(e) => setCustomExplanation(e.target.value)}
+                      rows={3}
+                    />
+                  ) : (
+                    draftQuery.data.explanation
+                  )}
+                </p>
+                {draftQuery.data.ascReferences && draftQuery.data.ascReferences.length > 0 && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {draftQuery.data.ascReferences.map((ref) => (
+                      <span
+                        key={ref}
+                        className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#F5F0E8] text-[#3B6EA5]"
+                      >
+                        {ref}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Custom explanation */}
+            {mode === 'custom' && (
+              <div>
+                <textarea
+                  className="w-full bg-[#F5F0E8] border border-[#DDD5C2] rounded px-3 py-2 text-xs text-[#2C2416] focus:outline-none focus:border-[#3B6EA5] resize-y"
+                  placeholder="Write your variance explanation..."
+                  value={customExplanation}
+                  onChange={(e) => setCustomExplanation(e.target.value)}
+                  rows={3}
+                />
+              </div>
+            )}
+
+            {/* Loading AI draft */}
+            {showDraft && draftQuery.isLoading && (
+              <div className="flex items-center gap-2 text-xs text-[#3B6EA5]">
+                <Loader2 size={12} className="animate-spin" />
+                Generating AI draft...
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {!showDraft && hasDraft && (
+                <button
+                  onClick={() => setShowDraft(true)}
+                  className="px-3 py-1.5 text-xs font-medium rounded bg-[#E0EAF5] text-[#3B6EA5] hover:bg-[#3B6EA5] hover:text-[#E0EAF5] transition-colors flex items-center gap-1.5"
+                >
+                  <Sparkles size={12} />
+                  View AI Draft
+                </button>
+              )}
+              {showDraft && draftQuery.data && mode === 'view' && (
+                <>
+                  <button
+                    onClick={() => explainMutation.mutate(draftQuery.data!.explanation)}
+                    disabled={explainMutation.isPending}
+                    className="px-3 py-1.5 text-xs font-medium rounded bg-[#2D6A4F] text-[#E0EDE8] hover:bg-[#245A42] transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    {explainMutation.isPending ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      <CheckCircle2 size={12} />
+                    )}
+                    Accept &amp; Attest
+                  </button>
+                  <button
+                    onClick={() => {
+                      setMode('edit');
+                      setCustomExplanation(draftQuery.data!.explanation);
+                    }}
+                    className="px-3 py-1.5 text-xs font-medium rounded border border-[#DDD5C2] text-[#5C4F3A] hover:bg-[#DDD5C2] transition-colors flex items-center gap-1.5"
+                  >
+                    <Pencil size={12} />
+                    Edit Draft
+                  </button>
+                </>
+              )}
+              {mode === 'edit' && (
+                <button
+                  onClick={() => {
+                    if (customExplanation.trim()) explainMutation.mutate(customExplanation.trim());
+                  }}
+                  disabled={explainMutation.isPending || !customExplanation.trim()}
+                  className="px-3 py-1.5 text-xs font-medium rounded bg-[#2D6A4F] text-[#E0EDE8] hover:bg-[#245A42] transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {explainMutation.isPending ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <CheckCircle2 size={12} />
+                  )}
+                  Save &amp; Attest
+                </button>
+              )}
+              {mode !== 'custom' && (
+                <button
+                  onClick={() => {
+                    setMode('custom');
+                    setCustomExplanation('');
+                  }}
+                  className="px-3 py-1.5 text-xs font-medium rounded border border-[#DDD5C2] text-[#5C4F3A] hover:bg-[#DDD5C2] transition-colors flex items-center gap-1.5"
+                >
+                  <FileText size={12} />
+                  Write My Own
+                </button>
+              )}
+              {mode === 'custom' && (
+                <button
+                  onClick={() => {
+                    if (customExplanation.trim()) explainMutation.mutate(customExplanation.trim());
+                  }}
+                  disabled={explainMutation.isPending || !customExplanation.trim()}
+                  className="px-3 py-1.5 text-xs font-medium rounded bg-[#2D6A4F] text-[#E0EDE8] hover:bg-[#245A42] transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {explainMutation.isPending ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <CheckCircle2 size={12} />
+                  )}
+                  Submit &amp; Attest
+                </button>
+              )}
+              {(mode === 'edit' || mode === 'custom') && (
+                <button
+                  onClick={() => setMode('view')}
+                  className="px-3 py-1.5 text-xs font-medium rounded text-[#8B7A5E] hover:text-[#2C2416] transition-colors"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>
+    </div>
+  );
+}
 
-      {/* Cumulative Variance Note */}
-      {variancePeriodView !== 'current' && cumulativeVarData && (
-        <div className="p-3 text-sm rounded-[var(--radius-lg)] border border-[var(--interactive-primary)] bg-[rgba(59,130,246,0.05)] text-[var(--text-secondary)]">
-          <span className="font-medium text-[var(--interactive-primary)]">{cumulativeVarData.currentPeriodLabel}</span>{' '}
-          vs <span className="font-medium">{cumulativeVarData.priorPeriodLabel || 'N/A'}</span>
-          {' '}&mdash; {cumulativeVarData.note}
-        </div>
-      )}
+/* ------------------------------------------------------------------ */
+/*  Skeleton                                                           */
+/* ------------------------------------------------------------------ */
 
-      {/* Cumulative Variance Table */}
-      {variancePeriodView !== 'current' && cumulativeVarData && cumulativeVarData.variances.length > 0 && (
-        <div className="overflow-hidden border border-[var(--border-default)] rounded-[var(--radius-lg)] bg-[var(--bg-surface)]">
-          <table className="w-full text-sm border-collapse">
-            <thead>
-              <tr
-                style={{
-                  borderBottomWidth: '1px',
-                  borderBottomStyle: 'solid',
-                  borderBottomColor: 'var(--border-default)',
-                  backgroundColor: 'var(--bg-surface-sunken)',
-                }}
-              >
-                <th className="text-left py-2.5 px-3 font-medium text-[var(--text-secondary)]">Statement</th>
-                <th className="text-left py-2.5 px-3 font-medium text-[var(--text-secondary)]">Line Item</th>
-                <th className="text-right py-2.5 px-3 font-medium text-[var(--text-secondary)]">{cumulativeVarData.currentPeriodLabel}</th>
-                <th className="text-right py-2.5 px-3 font-medium text-[var(--text-secondary)]">{cumulativeVarData.priorPeriodLabel || 'Prior'}</th>
-                <th className="text-right py-2.5 px-3 font-medium text-[var(--text-secondary)]">Change ($)</th>
-                <th className="text-right py-2.5 px-3 font-medium text-[var(--text-secondary)]">Change (%)</th>
-                <th className="text-center py-2.5 px-3 font-medium text-[var(--text-secondary)]">Material</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cumulativeVarData.variances.map((v) => (
-                <tr
-                  key={v.fsLineId}
-                  className={cn(!v.isMaterial && 'opacity-60')}
-                  style={{
-                    borderBottomWidth: '1px',
-                    borderBottomStyle: 'solid',
-                    borderBottomColor: 'var(--border-subtle)',
-                    ...(v.isMaterial ? { backgroundColor: 'var(--status-warning-bg)' } : {}),
-                  }}
-                >
-                  <td className="py-2 px-3 text-xs uppercase text-[var(--text-tertiary)]">{v.statement.replace(/_/g, ' ')}</td>
-                  <td className="py-2 px-3">{v.label}</td>
-                  <td className="py-2 px-3 text-right font-mono">{fmtMoney(v.currentAmount, { dollar: true })}</td>
-                  <td className="py-2 px-3 text-right font-mono">{fmtMoney(v.priorAmount, { dollar: true })}</td>
-                  <td className="py-2 px-3 text-right font-mono">{fmtMoney(v.changeAmount, { dollar: true })}</td>
-                  <td className="py-2 px-3 text-right font-mono">{v.changePercent != null ? `${fmtMoney(v.changePercent, { dash: false })}%` : '\u2014'}</td>
-                  <td className="py-2 px-3 text-center">{v.isMaterial ? <span className="text-[var(--status-warning)]">&#x25CF;</span> : '\u2014'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+function Skeleton({ className = '' }: { className?: string }) {
+  return <div className={`animate-pulse bg-[#DDD5C2] rounded ${className}`} />;
+}
 
-      {/* Summary bar */}
-      <div className="flex flex-wrap items-center gap-6 py-3 px-4 rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-surface)]">
-        <span className="text-sm text-[var(--text-secondary)]">
-          {stats.explained} of {stats.material} explained ({stats.material ? Math.round((stats.explained / stats.material) * 100) : 0}%)
-        </span>
-        <div className="flex-1 min-w-[100px] max-w-[160px] h-2 rounded-full overflow-hidden bg-[var(--bg-surface-sunken)]">
-          <div
-            className="h-full rounded-full bg-[var(--interactive-primary)] transition-all duration-500 ease-out"
-            style={{ width: `${stats.material ? Math.round((stats.explained / stats.material) * 100) : 0}%` }}
-          />
-        </div>
-        <span className="text-sm text-[var(--status-success)]">Approved: <strong>{stats.approved}</strong></span>
-        <span
-          className={cn(
-            'text-sm',
-            stats.unexplained > 0 ? 'text-[var(--status-error)] font-medium' : 'text-[var(--text-secondary)]'
-          )}
-        >
-          Need explanation: <strong>{stats.unexplained}</strong>
-        </span>
-        <span className="text-xs text-[var(--text-tertiary)]">
-          Threshold: {variances[0]?.materialityThreshold ? `$${parseFloat(variances[0].materialityThreshold).toLocaleString()} or 10%` : 'From settings'}
-        </span>
+function PageSkeleton() {
+  return (
+    <div className="space-y-6">
+      <Skeleton className="h-7 w-80 mb-2" />
+      <div className="grid grid-cols-5 gap-4">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-4 h-24" />
+        ))}
       </div>
+      <Skeleton className="h-10 w-96" />
+      <div className="space-y-4">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-5 h-48" />
+        ))}
+      </div>
+    </div>
+  );
+}
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-4">
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={materialOnly} onChange={(e) => setMaterialOnly(e.target.checked)} />
-          Material only
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={unexplainedOnly} onChange={(e) => setUnexplainedOnly(e.target.checked)} />
-          Unexplained only
-        </label>
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-[var(--text-secondary)]">Statement:</span>
-          {['income_statement', 'balance_sheet', 'cash_flow', 'equity'].map((st) => (
-            <button
-              key={st}
-              type="button"
-              onClick={() => setStatementFilter((prev) => (prev === st ? null : st))}
-              className={cn(
-                'px-2.5 py-1 text-xs font-medium border rounded-[var(--radius-md)] transition-all duration-200',
-                statementFilter === st
-                  ? 'border-[var(--interactive-primary)] bg-[rgba(59,130,246,0.08)] text-[var(--interactive-primary)]'
-                  : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--interactive-primary)] hover:text-[var(--interactive-primary)]'
-              )}
+/* ------------------------------------------------------------------ */
+/*  Main Page                                                          */
+/* ------------------------------------------------------------------ */
+
+export default function VarianceAnalysisPage() {
+  const params = useParams();
+  const sessionId = params.sessionId as string;
+  const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState<FilterTab>('all');
+
+  /* --- Data fetching --- */
+
+  const sessionQuery = useQuery({
+    queryKey: ['close-session', sessionId],
+    queryFn: () => apiFetch<SessionResponse>(`/api/close/sessions/${sessionId}`),
+    enabled: !!sessionId,
+  });
+
+  const readinessQuery = useQuery({
+    queryKey: ['close-readiness', sessionId],
+    queryFn: () =>
+      apiFetch<ReadinessResponse>(`/api/close/sessions/${sessionId}/readiness`, {
+        params: { format: 'gates' },
+      }),
+    enabled: !!sessionId,
+  });
+
+  const variancesQuery = useQuery({
+    queryKey: ['variances', sessionId],
+    queryFn: async () => {
+      const data = await apiFetch<Variance[] | { variances?: Variance[] }>(
+        `/api/close/sessions/${sessionId}/variances`
+      );
+      return Array.isArray(data) ? data : data.variances ?? [];
+    },
+    enabled: !!sessionId,
+  });
+
+  /* --- Derived state --- */
+
+  const session = sessionQuery.data;
+  const gates = readinessQuery.data?.gates ?? [];
+  const gatesTotal = readinessQuery.data?.gatesTotal ?? 0;
+  const variances = variancesQuery.data ?? [];
+
+  const materialVariances = variances.filter((v) => v.isMaterial);
+  const explained = variances.filter((v) => v.explanationStatus === 'explained');
+  const unexplained = variances.filter(
+    (v) => v.explanationStatus !== 'explained' && v.isMaterial
+  );
+  const aiDraftsReady = variances.filter(
+    (v) => v.explanationStatus === 'ai_drafted' || v.explanationStatus === 'draft_ready'
+  );
+
+  const counts: Record<FilterTab, number> = {
+    all: variances.length,
+    material: materialVariances.length,
+    unexplained: unexplained.length,
+    explained: explained.length,
+  };
+
+  const filteredVariances = variances.filter((v) => {
+    if (activeTab === 'material') return v.isMaterial;
+    if (activeTab === 'unexplained') return v.explanationStatus !== 'explained' && v.isMaterial;
+    if (activeTab === 'explained') return v.explanationStatus === 'explained';
+    return true;
+  });
+
+  const isLoading = sessionQuery.isLoading || variancesQuery.isLoading;
+  const error = sessionQuery.error || variancesQuery.error;
+
+  return (
+    <div className="min-h-screen bg-[#F5F0E8] flex">
+      <Sidebar sessionId={sessionId} />
+
+      <div className="ml-[260px] flex-1 flex flex-col min-h-screen">
+        {/* Top bar */}
+        <div className="h-12 bg-[#EDE6D6] border-b border-[#DDD5C2] flex items-center px-6">
+          <div className="flex items-center gap-2 text-sm">
+            <Link href="/close" className="text-[#8B7A5E] hover:text-[#5C4F3A] transition-colors">
+              Dashboard
+            </Link>
+            <ChevronRight size={14} className="text-[#8B7A5E]" />
+            <Link
+              href={`/close/${sessionId}/dashboard`}
+              className="text-[#8B7A5E] hover:text-[#5C4F3A] transition-colors"
             >
-              {STATEMENT_LABELS[st] ?? st}
-            </button>
-          ))}
+              {session?.periodLabel || 'Close Session'}
+            </Link>
+            <ChevronRight size={14} className="text-[#8B7A5E]" />
+            <span className="text-[#2C2416] font-medium">Variance Analysis</span>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-[var(--text-secondary)]">Sort:</span>
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as 'changeAbs' | 'lineItem' | 'statement')}
-            className="text-sm px-2 py-1 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface-sunken)] transition-colors focus:border-[var(--border-focus)] focus:outline-none"
-          >
-            <option value="changeAbs">Largest variance first</option>
-            <option value="lineItem">Line item</option>
-            <option value="statement">Statement</option>
-          </select>
-        </div>
-      </div>
 
-      {/* Table */}
-      {variances.length === 0 ? (
-        <EmptyState
-          icon={TrendingUp}
-          title="No variances to explain"
-          description="Variances will appear here once statements are generated and prior period data is available."
-          variant="prerequisite-missing"
-        />
-      ) : filtered.length === 0 ? (
-        <EmptyState
-          icon={Search}
-          title="No variances match the current filters"
-          description="Try adjusting the filters above to see more results."
-        />
-      ) : (
-      <div className="overflow-hidden bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] transition-shadow duration-300">
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr
-                style={{
-                  borderBottomWidth: '1px',
-                  borderBottomStyle: 'solid',
-                  borderBottomColor: 'var(--border-default)',
-                  backgroundColor: 'var(--bg-surface-sunken)',
-                }}
-              >
-                <th className="w-10 py-2" />
-                <th className="text-left py-2 px-3 font-medium w-12 text-[var(--text-secondary)]">Statement</th>
-                <th className="text-left py-2 px-3 font-medium text-[var(--text-secondary)]">Line Item</th>
-                <th className="text-right py-2 px-3 font-medium w-[140px] text-[var(--text-secondary)]">Prior Period</th>
-                <th className="text-right py-2 px-3 font-medium w-[140px] text-[var(--text-secondary)]">Current Period</th>
-                <th className="text-right py-2 px-3 font-medium w-[130px] text-[var(--text-secondary)]">Change ($)</th>
-                <th className="text-right py-2 px-3 font-medium w-20 text-[var(--text-secondary)]">Change (%)</th>
-                <th className="text-center py-2 px-2 font-medium w-14 text-[var(--text-secondary)]">Material</th>
-                <th className="text-center py-2 px-2 font-medium w-20 text-[var(--text-secondary)]">Explanation</th>
-                <th className="text-left py-2 px-3 font-medium w-24 text-[var(--text-secondary)]">Approval</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((v) => {
-                const isExpanded = expandedId === v.id;
-                const color = changeColor(v.statementType, v.lineItemName, v.changeAmount, v.changePercent);
-                const displayExplanation = localExplanations[v.id] ?? v.explanation;
-                const displayStatus = v.explanationStatus;
-                const showAiDraft = v.isMaterial && v.explanationStatus === 'pending' && v.aiDraftExplanation && !localDismissedAi[v.id];
-                const isMaterialPending = v.isMaterial && v.explanationStatus === 'pending';
-                const isExplained = v.isMaterial && (v.explanationStatus === 'explained' || v.explanationStatus === 'approved');
+        {/* Progress Rail */}
+        {gates.length > 0 && (
+          <ProgressRail
+            gates={gates}
+            gatesTotal={gatesTotal}
+            sessionState={session?.state ?? 'IN_PROGRESS'}
+            unexplainedCount={unexplained.length}
+          />
+        )}
 
-                return (
-                  <React.Fragment key={v.id}>
-                    <tr
-                      className={cn(!v.isMaterial && 'opacity-70')}
-                      style={{
-                        borderBottomWidth: '1px',
-                        borderBottomStyle: 'solid',
-                        borderBottomColor: 'var(--border-subtle)',
-                        ...(isMaterialPending
-                          ? {
-                              borderLeft: '3px solid var(--status-error)',
-                              backgroundColor: 'var(--status-error-bg)',
-                            }
-                          : isExplained
-                          ? { borderLeft: '3px solid var(--status-success)' }
-                          : {}),
-                      }}
-                    >
-                      <td className="py-1.5 pl-2">
-                        {v.isMaterial ? (
-                          <button
-                            type="button"
-                            onClick={() => toggleExpanded(v.id)}
-                            className="p-0.5 rounded"
-                            aria-label={isExpanded ? 'Collapse' : 'Expand'}
-                          >
-                            {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                          </button>
-                        ) : null}
-                      </td>
-                      <td className="py-2 px-3 text-center font-mono text-[var(--text-secondary)]">{STATEMENT_LABELS[v.statementType] ?? v.statementType}</td>
-                      <td className="py-2 px-3 font-medium">{v.lineItemName}</td>
-                      <td className="py-2 px-3 text-right font-mono tabular-nums">
-                        <MoneyCell value={v.priorAmount} showDollar />
-                      </td>
-                      <td className="py-2 px-3 text-right font-mono tabular-nums">
-                        <MoneyCell value={v.currentAmount} showDollar />
-                      </td>
-                      <td className="py-2 px-3 text-right font-mono tabular-nums" style={colorStyle(color)}>
-                        <MoneyCell value={v.changeAmount} showDollar />
-                      </td>
-                      <td className="py-2 px-3 text-right font-mono tabular-nums" style={colorStyle(color)}>
-                        {v.changePercent}%
-                      </td>
-                      <td className="py-2 px-2 text-center">{v.isMaterial ? '●' : '—'}</td>
-                      <td className="py-2 px-2 text-center">
-                        {!v.isMaterial && '—'}
-                        {v.isMaterial && displayStatus === 'approved' && <span className="text-[var(--status-success)]">✓</span>}
-                        {v.isMaterial && displayStatus === 'pending' && <span className="text-[var(--status-error)]">✗</span>}
-                        {v.isMaterial && displayStatus === 'explained' && <span className="text-[var(--status-success)]">✓</span>}
-                      </td>
-                      <td className="py-2 px-3">
-                        {!v.isMaterial && <span className="text-[var(--text-tertiary)]">N/A</span>}
-                        {v.isMaterial && displayStatus === 'pending' && <span className="text-[var(--status-warning)]">Pending</span>}
-                        {v.isMaterial && displayStatus === 'explained' && <span className="text-[var(--status-warning)]">Pending Approval</span>}
-                        {v.isMaterial && displayStatus === 'approved' && <span className="text-[var(--status-success)]">Approved</span>}
-                      </td>
-                    </tr>
-                    {isExpanded && v.isMaterial && (
-                      <tr
-                        key={`${v.id}-detail`}
-                        style={{
-                          borderBottomWidth: '1px',
-                          borderBottomStyle: 'solid',
-                          borderBottomColor: 'var(--border-subtle)',
-                          backgroundColor: 'var(--bg-surface-sunken)',
-                        }}
-                      >
-                        <td colSpan={10} className="p-4">
-                          <div className="space-y-4 max-w-3xl">
-                            {!v.isMaterial ? (
-                              <p className="text-sm text-[var(--text-tertiary)]">Below materiality threshold.</p>
-                            ) : (
-                              <>
-                                {/* Classification dropdown */}
-                                <div className="flex flex-wrap items-center gap-4">
-                                  <div>
-                                    <label
-                                      className="block text-xs font-medium mb-1 text-[var(--text-secondary)]"
-                                    >
-                                      Classification
-                                    </label>
-                                    <select
-                                      value={localClassifications[v.id] ?? v.classification ?? ''}
-                                      onChange={(e) => handleClassify(v.id, e.target.value)}
-                                      className="px-3 py-1.5 text-sm rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface-sunken)] transition-colors focus:border-[var(--border-focus)] focus:outline-none disabled:opacity-60"
-                                      disabled={readOnly || displayStatus === 'approved'}
-                                    >
-                                      <option value="">Select classification...</option>
-                                      {CLASSIFICATION_OPTIONS.map((c) => (
-                                        <option key={c} value={c}>{c}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                  {v.fullYearImpact != null && (
-                                    <div>
-                                      <label
-                                        className="block text-xs font-medium mb-1 text-[var(--text-secondary)]"
-                                      >
-                                        Full Year Impact
-                                      </label>
-                                      <div className="text-sm font-mono text-[var(--text-primary)]">
-                                        If this trend continues: {fmtMoney(v.fullYearImpact, { dollar: true })} annual impact
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-
-                                {showAiDraft && (
-                                  <AISuggestionCard
-                                    title={<><AISuggestionBadge label="AI Draft" confidence={v.aiConfidence ?? undefined} /> Review and Edit</>}
-                                    advisoryLabel="Advisory only — do not auto-apply"
-                                    actions={
-                                      <div className="flex gap-2">
-                                        <button
-                                          type="button"
-                                          className="px-3 py-1.5 text-sm rounded-[var(--radius-md)] border border-[var(--ai-border)] text-[var(--ai-primary)] bg-[var(--ai-bg)] transition-colors hover:bg-[var(--ai-badge-bg)]"
-                                          onClick={() => handleUseDraft(v.id, v.aiDraftExplanation!)}
-                                        >
-                                          Use as Starting Point
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="px-3 py-1.5 text-sm rounded-[var(--radius-md)] border border-[var(--border-default)] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-table-row-hover)]"
-                                          onClick={() => handleDismissDraft(v.id)}
-                                        >
-                                          Dismiss Draft
-                                        </button>
-                                      </div>
-                                    }
-                                  >
-                                    <p className="whitespace-pre-wrap">{v.aiDraftExplanation}</p>
-                                  </AISuggestionCard>
-                                )}
-                                <div>
-                                  <label
-                                    className="block text-xs font-medium mb-1 text-[var(--text-secondary)]"
-                                  >
-                                    Explanation {displayStatus === 'approved' ? '' : '(review and edit before saving)'}
-                                  </label>
-                                  {displayStatus === 'approved' ? (
-                                    <p className="text-sm p-3 text-[var(--text-primary)] rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface-sunken)]">
-                                      {displayExplanation || '—'}
-                                    </p>
-                                  ) : (
-                                    <>
-                                      <textarea
-                                        value={localExplanations[v.id] ?? displayExplanation ?? ''}
-                                        onChange={(e) => setLocalExplanations((prev) => ({ ...prev, [v.id]: e.target.value }))}
-                                        placeholder="Enter explanation (min 20 characters)"
-                                        className="w-full min-h-[100px] px-3 py-2 text-sm rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-surface-sunken)] transition-colors duration-200 focus:border-[var(--border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--interactive-primary)]/20"
-                                        rows={4}
-                                      />
-                                      <div className="flex items-center gap-2 mt-1">
-                                        <p
-                                          className="text-xs"
-                                          style={{
-                                            color: (localExplanations[v.id] ?? displayExplanation ?? '').trim().length >= 20
-                                              ? 'var(--text-secondary)'
-                                              : 'var(--status-error)',
-                                          }}
-                                        >
-                                          {(localExplanations[v.id] ?? displayExplanation ?? '').trim().length}/20 min characters
-                                        </p>
-                                        {draftSavedStatus[v.id] === 'saving' && <span className="text-xs text-[var(--text-tertiary)]">Saving...</span>}
-                                        {draftSavedStatus[v.id] === 'saved' && <span className="text-xs text-[var(--status-success)]">Draft saved</span>}
-                                      </div>
-                                    </>
-                                  )}
-                                </div>
-                                {displayStatus !== 'approved' && !readOnly && (
-                                  <div className="flex gap-2">
-                                    {canExplain && displayStatus === 'pending' && (
-                                      <button
-                                        type="button"
-                                        className="px-4 py-2 text-sm font-medium disabled:opacity-50 rounded-[var(--radius-md)] bg-[var(--interactive-primary)] text-white transition-colors hover:bg-[var(--interactive-primary-hover)]"
-                                        onClick={() => handleSaveExplanation(v.id, localExplanations[v.id] ?? displayExplanation ?? '')}
-                                        disabled={((localExplanations[v.id] ?? displayExplanation ?? '').trim().length ?? 0) < 20 || savingIds.has(v.id)}
-                                      >
-                                        {savingIds.has(v.id) ? 'Saving...' : 'Save Explanation'}
-                                      </button>
-                                    )}
-                                    {canApprove && displayStatus === 'explained' && (
-                                      <button
-                                        type="button"
-                                        className="px-4 py-2 text-sm font-medium disabled:opacity-50 rounded-[var(--radius-md)] border border-[var(--status-success)] text-[var(--status-success)] transition-colors hover:bg-[var(--status-success-bg)]"
-                                        onClick={() => handleApprove(v.id)}
-                                        disabled={approvingIds.has(v.id)}
-                                      >
-                                        {approvingIds.has(v.id) ? 'Approving...' : 'Approve Explanation'}
-                                      </button>
-                                    )}
-                                    {canExplain && (
-                                      <button
-                                        type="button"
-                                        className="px-4 py-2 text-sm font-medium flex items-center gap-1.5 rounded-[var(--radius-md)] border border-[var(--border-default)] text-[var(--text-secondary)] transition-colors hover:border-[var(--interactive-primary)] hover:text-[var(--interactive-primary)]"
-                                        onClick={() => setInvestigatingVariance(v)}
-                                      >
-                                        <Search className="w-3.5 h-3.5" /> Investigate
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      )}
-
-      {/* Toast */}
-      {toast && (
-        <div
-          className={cn(
-            'fixed bottom-4 right-4 px-4 py-3 text-sm font-medium z-50 rounded-[var(--radius-lg)] border shadow-[var(--shadow-md)] animate-in fade-in slide-in-from-bottom-2',
-            toast.type === 'success'
-              ? 'border-[var(--status-success)] bg-[var(--status-success-bg)] text-[var(--status-success)]'
-              : 'border-[var(--status-error)] bg-[var(--status-error-bg)] text-[var(--status-error)]'
+        {/* Page body */}
+        <main className="flex-1 px-6 py-6">
+          {error && (
+            <div className="bg-[#F5E4DE] border border-[#C44B2B]/20 rounded-lg p-4 flex items-center gap-3 mb-6">
+              <AlertTriangle size={18} className="text-[#C44B2B] shrink-0" />
+              <div className="text-sm text-[#C44B2B]">{(error as Error).message}</div>
+            </div>
           )}
-        >
-          {toast.message}
-        </div>
-      )}
 
-      <ContinueToNextStep
-        currentStep="Variance Analysis"
-        nextStep={{ label: 'Review', href: `/close/${sessionId}/review` }}
-        gatesPassed={stats.material > 0 && stats.unexplained === 0}
-        gateSummary={`All ${stats.material} material variances explained`}
-      />
+          {isLoading ? (
+            <PageSkeleton />
+          ) : (
+            <div className="space-y-6">
+              {/* Title */}
+              <div>
+                <h1 className="text-lg font-medium text-[#2C2416]">
+                  Period-over-Period Variance Analysis
+                </h1>
+                <p className="text-sm text-[#8B7A5E] mt-1">
+                  Material variances exceeding the 5% threshold require documented explanation before
+                  the close can advance.
+                </p>
+              </div>
 
-      <InvestigationPanel
-        open={!!investigatingVariance}
-        onClose={() => setInvestigatingVariance(null)}
-        sessionId={sessionId}
-        varianceId={investigatingVariance?.id ?? ''}
-        fsLineId={investigatingVariance?.fsLineId ?? ''}
-        lineItemLabel={investigatingVariance?.lineItemName ?? ''}
-        currentPeriodId={sessionId}
-        priorPeriodId={investigatingVariance?.priorPeriodId ?? sessionId}
-        onUseExplanation={(text) => {
-          if (investigatingVariance) {
-            setLocalExplanations((prev) => ({ ...prev, [investigatingVariance.id]: text }));
-            setExplanationSources((prev) => ({ ...prev, [investigatingVariance.id]: 'ai_draft' }));
-            setExpandedId(investigatingVariance.id);
-          }
-        }}
-      />
+              {/* Stat cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                <StatCard
+                  label="Total Variances"
+                  count={variances.length}
+                  color="#2C2416"
+                  bgColor="#DDD5C2"
+                />
+                <StatCard
+                  label="Material >5%"
+                  count={materialVariances.length}
+                  color="#C44B2B"
+                  bgColor="#F5E4DE"
+                />
+                <StatCard
+                  label="Explained"
+                  count={explained.length}
+                  color="#2D6A4F"
+                  bgColor="#E0EDE8"
+                />
+                <StatCard
+                  label="Unexplained"
+                  count={unexplained.length}
+                  color="#8B6914"
+                  bgColor="#F0E8D0"
+                />
+                <StatCard
+                  label="AI Drafts Ready"
+                  count={aiDraftsReady.length}
+                  color="#3B6EA5"
+                  bgColor="#E0EAF5"
+                />
+              </div>
+
+              {/* Filter tabs */}
+              <FilterTabs active={activeTab} onChange={setActiveTab} counts={counts} />
+
+              {/* Variance cards */}
+              {filteredVariances.length === 0 ? (
+                <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-8 text-center">
+                  <CheckCircle2 size={24} className="text-[#2D6A4F] mx-auto mb-3" />
+                  <p className="text-sm text-[#5C4F3A]">
+                    {activeTab === 'unexplained'
+                      ? 'All material variances have been explained.'
+                      : 'No variances match this filter.'}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {filteredVariances.map((v) => (
+                    <VarianceCard
+                      key={v.id}
+                      variance={v}
+                      sessionId={sessionId}
+                      onExplained={() =>
+                        queryClient.invalidateQueries({ queryKey: ['variances', sessionId] })
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </main>
+      </div>
     </div>
   );
 }

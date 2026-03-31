@@ -292,7 +292,7 @@ export async function certifyCloseSession(
     // SoD check: certifier must differ from person who advanced to under_review (unless tenant setting allows)
     if (session.advancedToReviewBy && input.certifiedBy && session.advancedToReviewBy === input.certifiedBy) {
       const entitySettings = await getEntitySettings(pool, input.tenantId, session.entityId);
-      if (!entitySettings.allowSameUserCertify) {
+      if (entitySettings?.allowSameUserCertify !== true) {
         throw new CloseSessionError(
           'Segregation of duties: certifier cannot be the same user who advanced to under_review',
           'INSUFFICIENT_ROLE'
@@ -420,6 +420,7 @@ export async function certifyCloseSession(
     }
 
     let evidenceManifest: EvidenceManifest | undefined;
+    let evidenceManifestComplete = true;
     try {
       await client.query('SAVEPOINT evidence_manifest');
       evidenceManifest = await buildEvidenceManifest(client, input.tenantId, input.closeSessionId);
@@ -428,6 +429,7 @@ export async function certifyCloseSession(
       await client.query('ROLLBACK TO SAVEPOINT evidence_manifest').catch(() => {});
       console.warn('[CERTIFY] Evidence manifest build failed (non-fatal):', (manifestErr as Error).message);
       evidenceManifest = { journalEntries: [] };
+      evidenceManifestComplete = false;
     }
     let snapshot;
     try {
@@ -471,6 +473,7 @@ export async function certifyCloseSession(
     }
     if (!existingArtifact) {
       let auditChainResult;
+      let auditChainVerified = true;
       try {
         await client.query('SAVEPOINT verify_chain');
         auditChainResult = await verifyChain(client, input.tenantId);
@@ -478,7 +481,8 @@ export async function certifyCloseSession(
       } catch (chainErr) {
         await client.query('ROLLBACK TO SAVEPOINT verify_chain').catch(() => {});
         console.warn('[CERTIFY] verifyChain failed (non-fatal):', (chainErr as Error).message);
-        auditChainResult = { valid: true, entryCount: 0, latestEntryHash: '', latestEntryId: '', verifiedAt: new Date().toISOString() };
+        auditChainResult = { valid: false, entryCount: 0, latestEntryHash: '', latestEntryId: '', verifiedAt: new Date().toISOString() };
+        auditChainVerified = false;
       }
       let aiMetadata;
       try {
@@ -525,6 +529,8 @@ export async function certifyCloseSession(
         })),
         aiMetadata,
         gateSnapshot,
+        evidenceManifestComplete,
+        auditChainVerified,
       });
       const inserted = await certArtifactRepo.insertCertificationArtifact(client, {
         tenantId: input.tenantId,

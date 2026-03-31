@@ -17,8 +17,8 @@ const router = Router();
 
 function requirePortfolioAccess(req: Request, res: Response, next: () => void): void {
   const role = (req as AuthRequest).role;
-  if (role !== 'operating_partner' && role !== 'admin') {
-    res.status(403).json({ error: 'Portfolio access requires operating_partner or admin role' });
+  if (role !== 'pe_operating_partner' && role !== 'system_admin' && role !== 'cfo') {
+    res.status(403).json({ error: 'Portfolio access requires pe_operating_partner, system_admin, or cfo role' });
     return;
   }
   next();
@@ -201,8 +201,8 @@ router.get('/integrity-report', async (req: Request, res: Response) => {
 /** POST /api/portfolio/access/grant — grant portfolio access (admin only) */
 router.post('/access/grant', async (req: Request, res: Response) => {
   try {
-    if ((req as AuthRequest).role !== 'admin') {
-      res.status(403).json({ error: 'Only admins can grant portfolio access' });
+    if ((req as AuthRequest).role !== 'system_admin') {
+      res.status(403).json({ error: 'Only system admins can grant portfolio access' });
       return;
     }
     const body = req.body as { userId?: string; tenantId?: string };
@@ -227,8 +227,8 @@ router.post('/access/grant', async (req: Request, res: Response) => {
 /** DELETE /api/portfolio/access/revoke — revoke portfolio access */
 router.delete('/access/revoke', async (req: Request, res: Response) => {
   try {
-    if ((req as AuthRequest).role !== 'admin') {
-      res.status(403).json({ error: 'Only admins can revoke portfolio access' });
+    if ((req as AuthRequest).role !== 'system_admin') {
+      res.status(403).json({ error: 'Only system admins can revoke portfolio access' });
       return;
     }
     const body = req.body as { userId?: string; tenantId?: string };

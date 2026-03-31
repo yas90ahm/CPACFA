@@ -9,6 +9,7 @@ import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { send500 } from '../../lib/errorHandler.js';
 import type { AuthRequest } from '../../auth/middleware.js';
+import { getCloseRoleFromReq } from '../../lib/closeRole.js';
 import {
   initializeReconciliations,
   setSupportingBalance,
@@ -355,6 +356,12 @@ router.post('/sessions/:periodId/reconciliations/:reconId/approve', async (req: 
       return;
     }
     if (!await guardSessionWritable(res, pool, tenantId, periodId)) return;
+    // Role enforcement: only approvers (controller, cfo, system_admin) can approve reconciliations
+    const approverRole = getCloseRoleFromReq(req as AuthRequest);
+    if (approverRole !== 'approver') {
+      res.status(403).json({ error: 'Only approvers (controller, cfo, system_admin) can approve reconciliations' });
+      return;
+    }
     const updated = await approveReconciliation(pool, tenantId, reconId, getUserId(req));
     res.json(updated);
   } catch (e) {

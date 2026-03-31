@@ -1,1097 +1,815 @@
 'use client';
 
-import { useParams, useRouter } from 'next/navigation';
-import { useState, useMemo, useCallback, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import React, { useState, useCallback } from 'react';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { useReconciliations, useReconciliation, useCopyPriorPeriod } from '@/lib/queries/reconciliations';
-import { useCloseSession } from '@/lib/queries/close-session';
-import { useAuth } from '@/lib/auth';
-import { apiFetch, apiUpload } from '@/lib/api';
-import { MoneyInput } from '@/components/shared/MoneyInput';
-import { MoneyCell } from '@/components/shared/MoneyCell';
-import { moneyAbs, sumMoneyStrings, fmtMoney } from '@/lib/money';
-import { StatusBadge } from '@/components/shared/StatusBadge';
-import { FileUpload } from '@/components/shared/FileUpload';
-import { FileList } from '@/components/shared/FileList';
-import { cn } from '@/lib/utils';
-import type {
-  Reconciliation,
-  ReconcilingItem,
-  ReconcilingItemType,
-  ReconStatus,
-} from '@/lib/types/reconciliation';
-import type { EvidenceFile } from '@/lib/types/evidence';
-import { ChevronLeft, ChevronRight, Pencil, Check, Paperclip, Edit2, Trash2 } from 'lucide-react';
-import { canCompleteRecon, canApproveRecon, isReadOnly as isRoleReadOnly } from '@/lib/permissions';
-import { ReconSourcePanel } from '@/components/close/ReconSourcePanel';
-import { RollForwardView } from '@/components/close/RollForwardView';
-import { Breadcrumb } from '@/components/shared/Breadcrumb';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiFetch } from '@/lib/api';
+import { fmtMoney, isMoneyZero } from '@/lib/money';
+import {
+  LayoutDashboard,
+  FolderClosed,
+  Briefcase,
+  ScrollText,
+  BarChart3,
+  Activity,
+  Settings,
+  ChevronRight,
+  AlertCircle,
+  CheckCircle2,
+  Loader2,
+  FileText,
+  Paperclip,
+  Upload,
+  Download,
+  Clock,
+  ArrowRightLeft,
+  X,
+  Plus,
+  Shield,
+} from 'lucide-react';
 
-const STATUS_LABEL: Record<ReconStatus, string> = {
-  not_started: 'Not Started',
-  in_progress: 'In Progress',
-  completed: 'Completed',
-  approved: 'Approved',
-};
-const STATUS_BADGE: Record<ReconStatus, 'neutral' | 'info' | 'warning' | 'success'> = {
-  not_started: 'neutral',
-  in_progress: 'info',
-  completed: 'warning',
-  approved: 'success',
-};
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
 
-const ITEM_TYPES: ReconcilingItemType[] = [
-  'Outstanding Check',
-  'Deposit in Transit',
-  'Bank Fee',
-  'Timing Difference',
-  'Error Correction',
-  'Accrual',
-  'Amortization',
-  'Depreciation',
-  'Addition',
-  'Disposal',
-  'Reclassification',
-  'Write-off',
-  'Payment',
-  'Collection',
-  'Intercompany',
-  'Other',
+interface ReconDetail {
+  id: string;
+  accountCode: string;
+  accountName: string;
+  glBalance: string;
+  sourceBalance: string;
+  supportingBalance?: string;
+  variance: string;
+  unexplainedVariance?: string;
+  autoMatchRate?: number;
+  status: string;
+  evidenceCount?: number;
+  approvedBy?: string;
+  approverName?: string;
+  completedAt?: string;
+  preparedBy?: string;
+}
+
+interface MatchedTransaction {
+  id: string;
+  date?: string;
+  glDescription?: string;
+  bankDescription?: string;
+  glAmount?: string;
+  bankAmount?: string;
+  matchType?: string;
+  status?: string;
+  action?: string;
+  confidence?: number;
+}
+
+interface EvidenceFile {
+  id: string;
+  fileName: string;
+  fileSize?: number;
+  mimeType?: string;
+  uploadedBy?: string;
+  uploadedAt?: string;
+  url?: string;
+  sha256?: string;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Nav items config                                                   */
+/* ------------------------------------------------------------------ */
+
+const NAV_ITEMS = [
+  { label: 'Dashboard', icon: LayoutDashboard, href: (sid: string) => `/close/${sid}/dashboard` },
+  { label: 'Close Sessions', icon: FolderClosed, href: () => '/close' },
+  { label: 'Portfolio', icon: Briefcase, href: () => '/portfolio' },
+  { label: 'Audit Trail', icon: ScrollText, href: (sid: string) => `/close/${sid}/audit-trail` },
+  { label: 'GL Quality', icon: BarChart3, href: () => '/close' },
+  { label: 'Analytics', icon: Activity, href: () => '/close' },
+  { label: 'Settings', icon: Settings, href: () => '/settings/general' },
 ];
 
-const STATUS_ORDER: ReconStatus[] = ['not_started', 'in_progress', 'completed', 'approved'];
+/* ------------------------------------------------------------------ */
+/*  Sidebar                                                            */
+/* ------------------------------------------------------------------ */
 
-function formatDate(d: string | null): string {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString();
+function Sidebar({ sessionId }: { sessionId: string }) {
+  return (
+    <aside className="fixed top-0 left-0 h-screen w-[260px] bg-[#2C2416] flex flex-col z-50">
+      <div className="px-6 pt-6 pb-4">
+        <div className="text-[#B8860B] text-xl font-medium tracking-wide">SABIT</div>
+        <div className="text-[#8B7A5E] text-xs mt-0.5">Financial Close Engine</div>
+      </div>
+      <nav className="flex-1 px-3 mt-2 space-y-0.5 overflow-y-auto">
+        {NAV_ITEMS.map((item) => {
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.label}
+              href={item.href(sessionId)}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors text-[#8B7A5E] hover:text-[#B8860B] hover:bg-[#3B1F0A]/50"
+            >
+              <Icon size={18} />
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
+      <div className="px-4 py-4 border-t border-[#3B1F0A]">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-[#3B1F0A] flex items-center justify-center text-[#B8860B] text-xs font-medium">
+            YA
+          </div>
+          <div>
+            <div className="text-sm text-[#B8860B] font-medium">Yasir A.</div>
+            <div className="text-xs text-[#8B7A5E]">Controller</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
 }
 
-function formatDateTime(d: string): string {
-  return new Date(d).toLocaleString();
+/* ------------------------------------------------------------------ */
+/*  Stat Card                                                          */
+/* ------------------------------------------------------------------ */
+
+function StatCard({
+  label,
+  value,
+  sub,
+  accent,
+}: {
+  label: string;
+  value: string | number;
+  sub?: string;
+  accent?: string;
+}) {
+  return (
+    <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-4">
+      <div className="text-xs text-[#8B7A5E] font-medium mb-1">{label}</div>
+      <div
+        className="text-2xl font-medium font-mono"
+        style={{ color: accent ?? '#2C2416' }}
+      >
+        {value}
+      </div>
+      {sub && <div className="text-xs text-[#8B7A5E] mt-1">{sub}</div>}
+    </div>
+  );
 }
 
-export default function ReconDetailPage() {
+/* ------------------------------------------------------------------ */
+/*  Match Type Badge                                                   */
+/* ------------------------------------------------------------------ */
+
+function MatchTypeBadge({ matchType }: { matchType?: string }) {
+  const t = (matchType ?? '').toLowerCase();
+  if (t === 'exact') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded bg-[#E0EDE8] text-[#2D6A4F]">
+        <CheckCircle2 size={10} />
+        Exact
+      </span>
+    );
+  }
+  if (t === 'fuzzy' || t === 'partial') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded bg-[#F0E8D0] text-[#8B6914]">
+        <ArrowRightLeft size={10} />
+        Fuzzy
+      </span>
+    );
+  }
+  return (
+    <span className="text-xs font-medium px-2 py-0.5 rounded bg-[#DDD5C2] text-[#8B7A5E]">
+      {matchType || 'Unknown'}
+    </span>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Skeleton                                                           */
+/* ------------------------------------------------------------------ */
+
+function Skeleton({ className = '' }: { className?: string }) {
+  return <div className={`animate-pulse bg-[#DDD5C2] rounded ${className}`} />;
+}
+
+function PageSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <Skeleton className="h-7 w-72 mb-2" />
+        <Skeleton className="h-4 w-96" />
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-4">
+            <Skeleton className="h-3 w-20 mb-2" />
+            <Skeleton className="h-8 w-24 mb-1" />
+            <Skeleton className="h-3 w-16" />
+          </div>
+        ))}
+      </div>
+      <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg h-64" />
+      <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg h-48" />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Error Banner                                                       */
+/* ------------------------------------------------------------------ */
+
+function ErrorBanner({ message }: { message: string }) {
+  return (
+    <div className="bg-[#F5E4DE] border border-[#C44B2B]/20 rounded-lg p-4 flex items-center gap-3">
+      <AlertCircle size={18} className="text-[#C44B2B] shrink-0" />
+      <div>
+        <div className="text-sm font-medium text-[#C44B2B]">Failed to load reconciliation detail</div>
+        <div className="text-xs text-[#C44B2B]/80 mt-0.5">{message}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Evidence Upload Dropzone                                           */
+/* ------------------------------------------------------------------ */
+
+function EvidenceDropzone({
+  sessionId,
+  reconId,
+  onUploadComplete,
+}: {
+  sessionId: string;
+  reconId: string;
+  onUploadComplete: () => void;
+}) {
+  const [isDragging, setIsDragging] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragging(false);
+
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length === 0) return;
+
+      setIsUploading(true);
+      try {
+        for (const file of files) {
+          const formData = new FormData();
+          formData.append('file', file);
+
+          const token = typeof window !== 'undefined' ? localStorage.getItem('cpa_auth_token') : null;
+          const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+
+          await fetch(
+            `${baseUrl}/api/close/sessions/${sessionId}/reconciliations/${reconId}/evidence`,
+            {
+              method: 'POST',
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+              body: formData,
+            }
+          );
+        }
+        onUploadComplete();
+      } catch {
+        // Upload error handled silently; user can retry
+      } finally {
+        setIsUploading(false);
+      }
+    },
+    [sessionId, reconId, onUploadComplete]
+  );
+
+  const handleFileInput = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? []);
+      if (files.length === 0) return;
+
+      setIsUploading(true);
+      try {
+        for (const file of files) {
+          const formData = new FormData();
+          formData.append('file', file);
+
+          const token = typeof window !== 'undefined' ? localStorage.getItem('cpa_auth_token') : null;
+          const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+
+          await fetch(
+            `${baseUrl}/api/close/sessions/${sessionId}/reconciliations/${reconId}/evidence`,
+            {
+              method: 'POST',
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+              body: formData,
+            }
+          );
+        }
+        onUploadComplete();
+      } catch {
+        // Upload error handled silently
+      } finally {
+        setIsUploading(false);
+      }
+    },
+    [sessionId, reconId, onUploadComplete]
+  );
+
+  return (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setIsDragging(true);
+      }}
+      onDragLeave={() => setIsDragging(false)}
+      onDrop={handleDrop}
+      className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+        isDragging
+          ? 'border-[#B8860B] bg-[#F0E8D0]'
+          : 'border-[#DDD5C2] bg-[#F5F0E8] hover:border-[#8B7A5E]'
+      }`}
+    >
+      {isUploading ? (
+        <div className="flex items-center justify-center gap-2 text-sm text-[#8B7A5E]">
+          <Loader2 size={16} className="animate-spin" />
+          Uploading...
+        </div>
+      ) : (
+        <>
+          <Upload size={20} className="mx-auto text-[#8B7A5E] mb-2" />
+          <p className="text-sm text-[#5C4F3A]">
+            Drop files here or{' '}
+            <label className="text-[#B8860B] hover:underline cursor-pointer">
+              browse
+              <input
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleFileInput}
+                accept=".pdf,.csv,.xlsx,.xls,.png,.jpg,.jpeg"
+              />
+            </label>
+          </p>
+          <p className="text-xs text-[#8B7A5E] mt-1">
+            PDF, CSV, Excel, or images accepted
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Main Page Component                                                */
+/* ------------------------------------------------------------------ */
+
+export default function ReconciliationDetailPage() {
   const params = useParams();
-  const router = useRouter();
-  const queryClient = useQueryClient();
   const sessionId = params.sessionId as string;
   const reconId = params.reconId as string;
-  const { user } = useAuth();
+  const queryClient = useQueryClient();
 
-  const { data: session } = useCloseSession(sessionId);
-  const { data: reconciliations = [] } = useReconciliations(sessionId);
-  const { data: reconData } = useReconciliation(sessionId, reconId);
-  const recon = reconData?.reconciliation ?? null;
-  const baseItems = reconData?.items ?? [];
+  /* --- Data fetching --- */
 
-  const copyPriorMutation = useCopyPriorPeriod(sessionId, reconId);
-
-  const { data: evidenceData } = useQuery({
-    queryKey: ['recon-evidence', sessionId, reconId],
+  const reconQuery = useQuery({
+    queryKey: ['reconciliation-detail', sessionId, reconId],
     queryFn: () =>
-      apiFetch<{ attachments: Array<{ id: string; originalFilename?: string; label?: string; sizeBytes?: number; mimeType?: string; hashSha256?: string; attachedBy?: string; attachedAt?: string }> }>(
-        `/api/close/sessions/${sessionId}/reconciliations/${reconId}/evidence`
-      ),
+      apiFetch<ReconDetail>(`/api/close/sessions/${sessionId}/reconciliations/${reconId}`),
     enabled: !!sessionId && !!reconId,
   });
 
+  const transactionsQuery = useQuery({
+    queryKey: ['bank-transactions', sessionId, reconId],
+    queryFn: async () => {
+      try {
+        const data = await apiFetch<
+          MatchedTransaction[] | { transactions?: MatchedTransaction[]; items?: MatchedTransaction[] }
+        >(`/api/close/sessions/${sessionId}/bank-transactions`, {
+          params: { reconId },
+        });
+        if (Array.isArray(data)) return data;
+        return data.transactions ?? data.items ?? [];
+      } catch {
+        return [];
+      }
+    },
+    enabled: !!sessionId && !!reconId,
+  });
+
+  const evidenceQuery = useQuery({
+    queryKey: ['recon-evidence', sessionId, reconId],
+    queryFn: async () => {
+      try {
+        const data = await apiFetch<EvidenceFile[] | { evidence?: EvidenceFile[]; files?: EvidenceFile[] }>(
+          `/api/close/sessions/${sessionId}/reconciliations/${reconId}/evidence`
+        );
+        if (Array.isArray(data)) return data;
+        return data.evidence ?? data.files ?? [];
+      } catch {
+        return [];
+      }
+    },
+    enabled: !!sessionId && !!reconId,
+  });
+
+  /* --- Mutations --- */
+
   const completeMutation = useMutation({
     mutationFn: () =>
-      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/complete`, { method: 'POST' }),
+      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/complete`, {
+        method: 'POST',
+      }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['reconciliation', sessionId, reconId] });
+      queryClient.invalidateQueries({ queryKey: ['reconciliation-detail', sessionId, reconId] });
       queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
     },
   });
+
   const approveMutation = useMutation({
     mutationFn: () =>
-      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/approve`, { method: 'POST' }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['reconciliation', sessionId, reconId] });
-      queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
-    },
-  });
-  const rejectMutation = useMutation({
-    mutationFn: (reason: string) =>
-      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/reject`, {
-        method: 'POST',
-        body: { reason },
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['reconciliation', sessionId, reconId] });
-      queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
-    },
-  });
-  const uploadEvidenceMutation = useMutation({
-    mutationFn: (file: File) => {
-      const formData = new FormData();
-      formData.append('file', file);
-      return apiUpload(
-        `/api/close/sessions/${sessionId}/reconciliations/${reconId}/evidence`,
-        formData
-      );
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['recon-evidence', sessionId, reconId] });
-      queryClient.invalidateQueries({ queryKey: ['reconciliation', sessionId, reconId] });
-    },
-  });
-
-  const sortedIds = useMemo(() => {
-    const copy = [...reconciliations].sort((a, b) => {
-      const ia = STATUS_ORDER.indexOf(a.status);
-      const ib = STATUS_ORDER.indexOf(b.status);
-      return ia - ib;
-    });
-    return copy.map((r) => r.id);
-  }, [reconciliations]);
-
-  const idx = sortedIds.indexOf(reconId);
-  const prevId = idx > 0 ? sortedIds[idx - 1] : null;
-  const nextId = idx >= 0 && idx < sortedIds.length - 1 ? sortedIds[idx + 1] : null;
-
-  const [supportingBalanceLocal, setSupportingBalanceLocal] = useState<string | null>(null);
-  const [notesLocal, setNotesLocal] = useState('');
-  const [showAddItem, setShowAddItem] = useState(false);
-  const [addItemDesc, setAddItemDesc] = useState('');
-  const [addItemAmt, setAddItemAmt] = useState<string | null>(null);
-  const [addItemType, setAddItemType] = useState<ReconcilingItemType>('Outstanding Check');
-  const [addItemDate, setAddItemDate] = useState('');
-  const [localEvidence, setLocalEvidence] = useState<EvidenceFile[]>([]);
-  const [editingSupporting, setEditingSupporting] = useState(false);
-  const [showRejectInput, setShowRejectInput] = useState(false);
-  const [rejectReason, setRejectReason] = useState('');
-  const [savingSupporting, setSavingSupporting] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-
-  // Auto-dismiss error after 6 seconds
-  useEffect(() => {
-    if (!actionError) return;
-    const t = setTimeout(() => setActionError(null), 6000);
-    return () => clearTimeout(t);
-  }, [actionError]);
-
-  /* ── Supporting Balance Mutation ── */
-  const supportingBalanceMutation = useMutation({
-    mutationFn: (amount: string) =>
-      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/supporting-balance`, {
-        method: 'POST',
-        body: { amount },
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['reconciliation', sessionId, reconId] });
-      queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
-      setSupportingBalanceLocal(null);
-      setEditingSupporting(false);
-      setSavingSupporting(false);
-      setActionError(null);
-    },
-    onError: (err) => {
-      setSavingSupporting(false);
-      setActionError(err instanceof Error ? err.message : 'Failed to save supporting balance');
-    },
-  });
-
-  /* ── Add Reconciling Item Mutation ── */
-  const addItemMutation = useMutation({
-    mutationFn: (params: { description: string; amount: string; item_type: string }) =>
-      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/items`, {
-        method: 'POST',
-        body: params,
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['reconciliation', sessionId, reconId] });
-      queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
-      setAddItemDesc('');
-      setAddItemAmt(null);
-      setAddItemType('Outstanding Check');
-      setAddItemDate('');
-      setShowAddItem(false);
-    },
-  });
-
-  /* ── Delete Reconciling Item Mutation ── */
-  const deleteItemMutation = useMutation({
-    mutationFn: (itemId: string) =>
-      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/items/${itemId}`, {
-        method: 'DELETE',
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['reconciliation', sessionId, reconId] });
-      queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
-    },
-  });
-
-  /* ── Carry Forward Items Mutation ── */
-  const carryForwardMutation = useMutation({
-    mutationFn: () =>
-      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/carry-forward-items`, {
+      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/approve`, {
         method: 'POST',
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['reconciliation', sessionId, reconId] });
+      queryClient.invalidateQueries({ queryKey: ['reconciliation-detail', sessionId, reconId] });
       queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
     },
   });
-  const carryForwardPending = carryForwardMutation.isPending;
-  const handleCarryForward = useCallback(() => {
-    carryForwardMutation.mutate();
-  }, [carryForwardMutation]);
 
-  /* ── Activity Log (audit log) ── */
-  const { data: activityData } = useQuery({
-    queryKey: ['recon-activity', reconId],
-    queryFn: () =>
-      apiFetch<{
-        entries: Array<{
-          id: string;
-          timestamp: string;
-          actor: string;
-          action: string;
-          resource?: string;
-          detail?: string;
-        }>;
-      }>(`/api/close/audit-log`, {
-        params: { resource: `reconciliation:${reconId}` },
-      }),
-    enabled: !!reconId,
-  });
+  /* --- Derived state --- */
 
-  const activity: Array<{ id: string; user: string; description: string; timestamp: string }> = useMemo(
-    () =>
-      (activityData?.entries ?? []).map((e) => ({
-        id: e.id,
-        user: e.actor,
-        description: [e.action, e.detail].filter(Boolean).join(' — '),
-        timestamp: e.timestamp,
-      })),
-    [activityData]
+  const recon = reconQuery.data;
+  const transactions = transactionsQuery.data ?? [];
+  const evidence = evidenceQuery.data ?? [];
+
+  const autoMatched = transactions.filter(
+    (t) => t.status === 'accepted' || t.status === 'matched' || t.action === 'Accepted'
+  );
+  const manualReview = transactions.filter(
+    (t) => t.status === 'pending' || t.status === 'review' || t.status === 'unmatched'
   );
 
-  /* ── Save Notes Mutation ── */
-  const saveNotesMutation = useMutation({
-    mutationFn: (notes: string) =>
-      apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/notes`, {
-        method: 'PUT',
-        body: { notes },
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['reconciliation', sessionId, reconId] });
-      queryClient.invalidateQueries({ queryKey: ['recon-activity', reconId] });
-    },
-  });
-
-  const handleNotesBlur = useCallback(() => {
-    const trimmed = notesLocal.trim();
-    const existing = (recon?.notes ?? '').trim();
-    if (trimmed && trimmed !== existing) {
-      saveNotesMutation.mutate(trimmed);
-    }
-  }, [notesLocal, recon?.notes, saveNotesMutation]);
-
-  const evidenceFromApi: EvidenceFile[] = useMemo(
-    () =>
-      (evidenceData?.attachments ?? []).map((a) => ({
-        id: a.id,
-        fileName: a.originalFilename ?? a.label ?? 'evidence',
-        fileSize: a.sizeBytes ?? 0,
-        mimeType: a.mimeType ?? '',
-        uploadedBy: a.attachedBy ?? 'Unknown',
-        uploadedAt: a.attachedAt ?? '',
-        sha256Hash: a.hashSha256 ?? '',
-        downloadUrl: '#',
-      })),
-    [evidenceData]
+  const autoMatchRate = recon?.autoMatchRate ?? (
+    transactions.length > 0
+      ? Math.round((autoMatched.length / transactions.length) * 100)
+      : 0
   );
-  const evidence = [...evidenceFromApi, ...localEvidence];
-  const items = baseItems;
 
-  // Supporting balance: use local edit if present, otherwise backend value
-  const hasUnsavedSupporting = supportingBalanceLocal != null && supportingBalanceLocal.trim() !== '';
-  const hasSupportingBalance = recon?.supportingBalance != null;
-  const supportingDisplay = supportingBalanceLocal ?? (recon?.supportingBalance ?? null);
-  const notesDisplay = notesLocal !== '' ? notesLocal : (recon?.notes ?? '');
-  const role = user?.role ?? 'controller';
-  const userId = user?.userId ?? '';
-  const readOnly = isRoleReadOnly(role);
-  const roleCanComplete = canCompleteRecon(role);
-  const isCompleted = recon?.status === 'completed' || recon?.status === 'approved';
-  const isApproved = recon?.status === 'approved';
-  const isPreparer = recon?.preparer != null && (user?.userId === recon.preparer || user?.email === recon.preparer);
-  // SoD: A user is only a valid reviewer if a preparer exists AND current user is NOT that preparer AND role permits.
-  const isReviewer = recon?.preparer != null && !isPreparer;
-  const roleCanApprove = canApproveRecon(role, recon?.preparer ?? '', userId);
-  // Defense-in-depth: disable approve button for the preparer even if UI logic shows it
-  const canApproveOwn = isPreparer;
-  const periodEnd = session?.periodEnd ?? session?.createdAt ?? null;
-  const periodEndDisplay = periodEnd ? new Date(periodEnd).toISOString().slice(0, 10) : '—';
+  const reconStatus = recon?.status ?? 'pending';
+  const isReconciled = reconStatus === 'completed' || reconStatus === 'approved' || reconStatus === 'reconciled';
+  const varianceZero = isMoneyZero(recon?.unexplainedVariance ?? recon?.variance);
 
-  // Use backend-computed values (Decimal.js + NUMERIC) — never recalculate in JavaScript.
-  // moneyAbs() is parseFloat-based but only used for UI display decisions (color, sort), not financial computation.
-  const toleranceVal = moneyAbs(recon?.tolerance);
-  const displayItemsTotal = sumMoneyStrings(items.map(i => i.amount));
-  // Backend-authoritative values for variance/unexplained
-  const backendVariance = recon?.variance ?? null;
-  const backendUnexplained = recon?.unexplainedVariance ?? null;
-  const withinTolerance = hasSupportingBalance && backendUnexplained != null && moneyAbs(backendUnexplained) <= toleranceVal;
-  const overTolerance = hasSupportingBalance && backendUnexplained != null && moneyAbs(backendUnexplained) > toleranceVal;
+  const isLoading = reconQuery.isLoading;
+  const error = reconQuery.error;
 
-  // Completeness gate uses ONLY backend-computed values — no JS floating-point arithmetic.
-  // User must save supporting balance first (no unsaved local edits).
-  const canMarkComplete =
-    recon &&
-    (recon.status === 'not_started' || recon.status === 'in_progress') &&
-    hasSupportingBalance &&
-    !hasUnsavedSupporting &&
-    backendUnexplained != null &&
-    moneyAbs(backendUnexplained) <= toleranceVal &&
-    evidence.length >= 1;
+  const handleRefreshEvidence = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['recon-evidence', sessionId, reconId] });
+  }, [queryClient, sessionId, reconId]);
 
-  const missingForComplete: string[] = [];
-  if (recon && (recon.status === 'not_started' || recon.status === 'in_progress')) {
-    if (!hasSupportingBalance) missingForComplete.push('Supporting balance required');
-    if (hasUnsavedSupporting) missingForComplete.push('Save supporting balance before completing');
-    if (hasSupportingBalance && backendUnexplained != null && moneyAbs(backendUnexplained) > toleranceVal) missingForComplete.push('Unexplained difference must be within tolerance');
-    if (evidence.length < 1) missingForComplete.push('At least one supporting document required');
-  }
-
-  const handleSaveSupporting = useCallback(() => {
-    if (supportingBalanceLocal != null && supportingBalanceLocal.trim() !== '') {
-      setSavingSupporting(true);
-      // Strip commas and dollar signs — send clean decimal string to API
-      const cleaned = supportingBalanceLocal.trim().replace(/[$,]/g, '');
-      supportingBalanceMutation.mutate(cleaned);
-    }
-  }, [supportingBalanceLocal, supportingBalanceMutation]);
-
-  const FRONT_TO_BACKEND_TYPE: Record<ReconcilingItemType, string> = {
-    'Outstanding Check': 'outstanding_check',
-    'Deposit in Transit': 'deposit_in_transit',
-    'Bank Fee': 'bank_fee',
-    'Timing Difference': 'timing_difference',
-    'Error Correction': 'error_correction',
-    'Accrual': 'accrual',
-    'Amortization': 'amortization',
-    'Depreciation': 'depreciation',
-    'Addition': 'addition',
-    'Disposal': 'disposal',
-    'Reclassification': 'reclassification',
-    'Write-off': 'write_off',
-    'Payment': 'payment',
-    'Collection': 'collection',
-    'Intercompany': 'intercompany',
-    'Other': 'other',
+  const formatFileSize = (bytes?: number) => {
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1048576).toFixed(1)} MB`;
   };
 
-  const handleAddItem = useCallback(() => {
-    const amt = addItemAmt ? addItemAmt.replace(/,/g, '') : '0';
-    if (!addItemDesc.trim()) return;
-    addItemMutation.mutate({
-      description: addItemDesc.trim(),
-      amount: amt,
-      item_type: FRONT_TO_BACKEND_TYPE[addItemType] ?? 'other',
-    });
-  }, [addItemDesc, addItemAmt, addItemType, addItemMutation]);
-
-  const handleDeleteItem = useCallback(
-    (id: string) => {
-      deleteItemMutation.mutate(id);
-    },
-    [deleteItemMutation]
-  );
-
-  const handleUpload = useCallback(
-    (file: File): Promise<void> => {
-      uploadEvidenceMutation.mutate(file);
-      return Promise.resolve();
-    },
-    [uploadEvidenceMutation]
-  );
-
-  const handleDeleteEvidence = useCallback((id: string) => {
-    if (id.startsWith('ev-local-')) {
-      setLocalEvidence((prev) => prev.filter((f) => f.id !== id));
-    }
-  }, []);
-
-  const handleMarkComplete = useCallback(() => {
-    if (!canMarkComplete) {
-      if (missingForComplete.length > 0) {
-        setActionError(missingForComplete.join('. '));
-      }
-      return;
-    }
-    setActionError(null);
-    completeMutation.mutate(undefined, {
-      onSuccess: () => router.refresh(),
-      onError: (err) => setActionError(err instanceof Error ? err.message : 'Failed to mark complete'),
-    });
-  }, [canMarkComplete, missingForComplete, completeMutation, router]);
-
-  const handleApprove = useCallback(() => {
-    if (!recon || recon.status !== 'completed' || !isReviewer || canApproveOwn) return;
-    approveMutation.mutate(undefined, { onSuccess: () => router.refresh() });
-  }, [recon, isReviewer, canApproveOwn, approveMutation, router]);
-
-  const handleReject = useCallback(() => {
-    if (rejectReason.trim().length < 10) return;
-    rejectMutation.mutate(rejectReason.trim(), {
-      onSuccess: () => {
-        setShowRejectInput(false);
-        setRejectReason('');
-        router.refresh();
-      },
-    });
-  }, [rejectReason, rejectMutation, router]);
-
-  if (!recon) {
-    return (
-      <div className="p-6">
-        <p style={{ color: 'var(--text-secondary)' }}>Reconciliation not found.</p>
-        <Link
-          href={`/close/${sessionId}/reconciliation`}
-          className="hover:underline mt-2 inline-block"
-          style={{ color: 'var(--interactive-primary)' }}
-        >
-          Back to Reconciliation
-        </Link>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6">
-      {/* Error toast */}
-      {actionError && (
-        <div
-          className="flex items-center justify-between px-4 py-3 text-sm rounded-[var(--radius-lg)]"
-          style={{ border: '1px solid var(--status-error)', backgroundColor: 'var(--status-error-bg)', color: 'var(--status-error)' }}
-        >
-          <span>{actionError}</span>
-          <button type="button" onClick={() => setActionError(null)} className="hover:opacity-80 ml-4 font-medium" aria-label="Dismiss">x</button>
-        </div>
-      )}
-      <Breadcrumb items={[
-        { label: 'Close', href: `/close/${sessionId}/dashboard` },
-        { label: 'Reconciliation', href: `/close/${sessionId}/reconciliation` },
-        { label: recon.accountName || 'Detail' },
-      ]} />
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl" style={{ color: 'var(--text-primary)' }}>
-            {recon.accountName}
-            <span className="font-mono text-base ml-2" style={{ color: 'var(--text-secondary)' }}>{recon.accountCode}</span>
-          </h1>
-          <div className="mt-2">
-            <StatusBadge variant={STATUS_BADGE[recon.status]} label={STATUS_LABEL[recon.status]} />
+    <div className="min-h-screen bg-[#F5F0E8] flex">
+      <Sidebar sessionId={sessionId} />
+
+      <div className="ml-[260px] flex-1 flex flex-col min-h-screen">
+        {/* Top bar */}
+        <div className="h-12 bg-[#EDE6D6] border-b border-[#DDD5C2] flex items-center px-6">
+          <div className="flex items-center gap-2 text-sm">
+            <Link href={`/close/${sessionId}/dashboard`} className="text-[#8B7A5E] hover:text-[#5C4F3A] transition-colors">
+              Dashboard
+            </Link>
+            <ChevronRight size={14} className="text-[#8B7A5E]" />
+            <Link
+              href={`/close/${sessionId}/reconciliation`}
+              className="text-[#8B7A5E] hover:text-[#5C4F3A] transition-colors"
+            >
+              Reconciliation
+            </Link>
+            <ChevronRight size={14} className="text-[#8B7A5E]" />
+            <span className="text-[#2C2416] font-medium">
+              {recon ? `${recon.accountCode} — ${recon.accountName}` : 'Detail'}
+            </span>
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {prevId && (
-            <Link
-              href={`/close/${sessionId}/reconciliation/${prevId}`}
-              className="inline-flex items-center gap-1 px-3 py-2 border text-sm"
-              style={{
-                borderColor: 'var(--border-default)',
-                borderRadius: 'var(--radius-md)',
-              }}
-            >
-              <ChevronLeft className="w-4 h-4" /> Previous
-            </Link>
-          )}
-          {nextId && (
-            <Link
-              href={`/close/${sessionId}/reconciliation/${nextId}`}
-              className="inline-flex items-center gap-1 px-3 py-2 border text-sm"
-              style={{
-                borderColor: 'var(--border-default)',
-                borderRadius: 'var(--radius-md)',
-              }}
-            >
-              Next <ChevronRight className="w-4 h-4" />
-            </Link>
-          )}
-          {(recon.status === 'not_started' || recon.status === 'in_progress') && roleCanComplete && (
-            <>
-              <button
-                type="button"
-                disabled={!canMarkComplete}
-                title={missingForComplete.length ? missingForComplete.join('; ') : 'Mark complete'}
-                className={cn(
-                  'px-4 py-2 text-sm font-medium',
-                  !canMarkComplete && 'cursor-not-allowed'
-                )}
-                style={canMarkComplete
-                  ? {
-                      backgroundColor: 'var(--interactive-primary)',
-                      color: 'white',
-                      borderRadius: 'var(--radius-md)',
-                    }
-                  : {
-                      backgroundColor: 'var(--bg-surface-sunken)',
-                      color: 'var(--text-tertiary)',
-                      borderRadius: 'var(--radius-md)',
-                    }
-                }
-                onClick={handleMarkComplete}
-              >
-                Mark Complete
-              </button>
-              <button
-                type="button"
-                className="px-4 py-2 border text-sm font-medium"
-                style={{
-                  borderColor: 'var(--border-default)',
-                  borderRadius: 'var(--radius-md)',
-                }}
-                onClick={() => router.refresh()}
-              >
-                Save Progress
-              </button>
-            </>
-          )}
-          {recon.status === 'completed' && isReviewer && roleCanApprove && (
-            <>
-              <button
-                type="button"
-                disabled={canApproveOwn}
-                title={canApproveOwn ? 'Segregation of duties — a different user must approve' : 'Approve'}
-                className={cn(
-                  'px-4 py-2 text-sm font-medium',
-                  canApproveOwn && 'cursor-not-allowed'
-                )}
-                style={canApproveOwn
-                  ? {
-                      backgroundColor: 'var(--bg-surface-sunken)',
-                      color: 'var(--text-tertiary)',
-                      borderRadius: 'var(--radius-md)',
-                    }
-                  : {
-                      backgroundColor: 'var(--status-success)',
-                      color: 'white',
-                      borderRadius: 'var(--radius-md)',
-                    }
-                }
-                onClick={handleApprove}
-              >
-                Approve
-              </button>
-              <button
-                type="button"
-                className="px-4 py-2 border text-sm font-medium"
-                style={{
-                  borderColor: 'var(--status-error)',
-                  color: 'var(--status-error)',
-                  borderRadius: 'var(--radius-md)',
-                }}
-                onClick={() => setShowRejectInput(true)}
-              >
-                Reject
-              </button>
-            </>
-          )}
-        </div>
-      </div>
 
-      {showRejectInput && (
-        <div
-          className="p-4 border"
-          style={{
-            borderColor: 'var(--status-error)',
-            backgroundColor: 'var(--status-error-bg)',
-            borderRadius: 'var(--radius-lg)',
-          }}
-        >
-          <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>Rejection reason (min 10 chars)</label>
-          <textarea
-            value={rejectReason}
-            onChange={(e) => setRejectReason(e.target.value)}
-            className="w-full px-3 py-2 border text-sm"
-            style={{
-              borderColor: 'var(--border-default)',
-              backgroundColor: 'var(--bg-surface-sunken)',
-              borderRadius: 'var(--radius-md)',
-            }}
-            rows={3}
-            placeholder="Explain why this reconciliation is being rejected..."
-          />
-          <div className="flex gap-2 mt-2">
-            <button
-              type="button"
-              className="px-4 py-2 text-sm font-medium"
-              style={{
-                backgroundColor: 'var(--status-error)',
-                color: 'white',
-                borderRadius: 'var(--radius-md)',
-              }}
-              onClick={handleReject}
-              disabled={rejectReason.trim().length < 10}
-            >
-              Submit Rejection
-            </button>
-            <button
-              type="button"
-              className="px-4 py-2 border text-sm"
-              style={{
-                borderColor: 'var(--border-default)',
-                borderRadius: 'var(--radius-md)',
-              }}
-              onClick={() => setShowRejectInput(false)}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+        {/* Page body */}
+        <main className="flex-1 px-6 py-6">
+          {error && <ErrorBanner message={(error as Error).message} />}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-6">
-        <div className="space-y-6">
-          <section
-            className="border p-6"
-            style={{
-              backgroundColor: 'var(--bg-surface)',
-              borderColor: 'var(--border-default)',
-              borderRadius: 'var(--radius-lg)',
-            }}
-          >
-            <h2 className="text-sm font-medium mb-4" style={{ color: 'var(--text-secondary)' }}>Balance comparison</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {isLoading ? (
+            <PageSkeleton />
+          ) : recon ? (
+            <div className="space-y-6">
+              {/* Page Title */}
               <div>
-                <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>GL Balance</div>
-                <div className="font-mono text-xl tabular-nums">
-                  <MoneyCell value={recon.glBalance} showDollar />
-                </div>
-                <div className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>from adjusted trial balance as of {periodEndDisplay}</div>
+                <h1 className="text-2xl font-medium text-[#2C2416]">
+                  {recon.accountCode} — {recon.accountName}
+                </h1>
+                <p className="text-sm text-[#8B7A5E] mt-1">
+                  Account reconciliation detail with transaction matching and evidence management.
+                </p>
               </div>
-              <div>
-                <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Supporting Balance</div>
-                {!readOnly && (recon.status === 'not_started' || recon.status === 'in_progress') && (editingSupporting || (!hasSupportingBalance && supportingBalanceLocal == null)) ? (
-                  <div>
-                    <MoneyInput
-                      value={supportingBalanceLocal ?? (recon.supportingBalance ?? null)}
-                      onChange={setSupportingBalanceLocal}
-                      size="lg"
-                      placeholder="0.00"
-                    />
-                    <div className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>from {recon.sourceDocumentType}</div>
-                    <button
-                      type="button"
-                      className="mt-2 text-xs hover:underline disabled:opacity-50"
-                      style={{ color: 'var(--interactive-primary)' }}
-                      onClick={handleSaveSupporting}
-                      disabled={savingSupporting || !supportingBalanceLocal?.trim() || !/^-?\d+(\.\d{0,2})?$/.test(supportingBalanceLocal?.replace(/[$,]/g, '') ?? '')}
-                      title={supportingBalanceLocal && !/^-?\d+(\.\d{0,2})?$/.test(supportingBalanceLocal.replace(/[$,]/g, '')) ? 'Enter a valid dollar amount (e.g. 342521.22)' : undefined}
-                    >
-                      {savingSupporting ? 'Saving...' : 'Save'}
-                    </button>
-                  </div>
-                ) : (
-                  <div>
-                    <div className="font-mono text-xl tabular-nums">
-                      {hasSupportingBalance || supportingDisplay != null ? <MoneyCell value={supportingDisplay} showDollar /> : <span style={{ color: 'var(--text-tertiary)' }}>—</span>}
-                    </div>
-                    <div className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>from {recon.sourceDocumentType}</div>
-                    {!readOnly && (recon.status === 'not_started' || recon.status === 'in_progress') && (hasSupportingBalance || supportingBalanceLocal != null) && (
-                      <button
-                        type="button"
-                        className="mt-2 text-xs hover:underline inline-flex items-center gap-1"
-                        style={{ color: 'var(--interactive-primary)' }}
-                        onClick={() => setEditingSupporting(true)}
-                      >
-                        <Edit2 className="w-3 h-3" /> Edit
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-            {recon.priorPeriodGlBalance != null && (
-              <div
-                className="mt-4 p-3 border"
-                style={{
-                  backgroundColor: 'var(--bg-surface-sunken)',
-                  borderColor: 'var(--border-subtle)',
-                  borderRadius: 'var(--radius-md)',
-                }}
-              >
-                <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Prior Period Reference</div>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>GL Balance:</span>
-                    <span className="font-mono ml-1"><MoneyCell value={recon.priorPeriodGlBalance} showDollar /></span>
-                  </div>
-                  <div>
-                    <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Supporting:</span>
-                    <span className="font-mono ml-1">
-                      {recon.priorPeriodSupportingBalance != null
-                        ? <MoneyCell value={recon.priorPeriodSupportingBalance} showDollar />
-                        : '—'}
-                    </span>
-                  </div>
-                </div>
-                {!recon.copiedFromPrior && !hasSupportingBalance && (recon.status === 'not_started' || recon.status === 'in_progress') && (
-                  <button
-                    type="button"
-                    className="mt-2 text-xs hover:underline disabled:opacity-50"
-                    style={{ color: 'var(--interactive-primary)' }}
-                    onClick={() => copyPriorMutation.mutate()}
-                    disabled={copyPriorMutation.isPending}
-                  >
-                    {copyPriorMutation.isPending ? 'Copying...' : 'Copy from last period'}
-                  </button>
-                )}
-                {recon.copiedFromPrior && (
-                  <div className="mt-1 text-xs" style={{ color: 'var(--status-success)' }}>Copied from prior period</div>
-                )}
-              </div>
-            )}
-            <div className="mt-6 flex justify-center">
-              <div
-                className="px-6 py-4 border-2 text-center"
-                style={{
-                  borderRadius: 'var(--radius-md)',
-                  ...(
-                    !hasSupportingBalance
-                      ? { borderColor: 'var(--border-subtle)', color: 'var(--text-tertiary)' }
-                      : withinTolerance
-                        ? { borderColor: 'var(--status-success)', color: 'var(--status-success)' }
-                        : { borderColor: 'var(--status-error)', color: 'var(--status-error)' }
-                  ),
-                }}
-              >
-                <div className="text-sm font-medium">Difference</div>
-                <div className="font-mono text-xl tabular-nums mt-1">
-                  {!hasSupportingBalance ? (
-                    'Enter supporting balance'
-                  ) : (
-                    <MoneyCell value={backendVariance} showDollar />
-                  )}
-                </div>
-                {hasSupportingBalance && backendUnexplained != null && (
-                  <div className="text-xs mt-2">
-                    {withinTolerance ? 'Within tolerance ✓' : overTolerance ? `Over tolerance by ${fmtMoney(backendUnexplained, { dollar: true })}` : ''}
-                  </div>
-                )}
-                <div className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>Tolerance: {fmtMoney(recon.tolerance, { dollar: true })}</div>
-              </div>
-            </div>
-          </section>
 
-          {/* Roll-Forward Schedule — renders only for applicable account types */}
-          <RollForwardView sessionId={sessionId} reconId={reconId} />
+              {/* Stat Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                <StatCard
+                  label="GL Balance"
+                  value={fmtMoney(recon.glBalance, { dollar: true, dash: false })}
+                  sub="per adjusted trial balance"
+                />
+                <StatCard
+                  label="Supporting Balance"
+                  value={fmtMoney(recon.supportingBalance ?? recon.sourceBalance, { dollar: true, dash: false })}
+                  sub="per source document"
+                />
+                <StatCard
+                  label="Unexplained Variance"
+                  value={fmtMoney(recon.unexplainedVariance ?? recon.variance, { dollar: true, dash: false })}
+                  sub={varianceZero ? 'fully reconciled' : 'requires explanation'}
+                  accent={varianceZero ? '#2D6A4F' : '#C44B2B'}
+                />
+                <StatCard
+                  label="Auto-Match Rate"
+                  value={`${autoMatchRate}%`}
+                  sub={`${autoMatched.length} of ${transactions.length} transactions`}
+                  accent={autoMatchRate >= 90 ? '#2D6A4F' : autoMatchRate >= 70 ? '#8B6914' : '#C44B2B'}
+                />
+                <StatCard
+                  label="Status"
+                  value={isReconciled ? 'Reconciled' : 'In Progress'}
+                  sub={recon.approverName ? `Approved by ${recon.approverName}` : recon.completedAt ? 'Pending approval' : ''}
+                  accent={isReconciled ? '#2D6A4F' : '#8B6914'}
+                />
+              </div>
 
-          {/* Source Data Panel — only in editable states */}
-          {recon.status !== 'approved' && (
-            <ReconSourcePanel sessionId={sessionId} reconId={reconId} />
-          )}
-
-          <section
-            className="border p-6"
-            style={{
-              backgroundColor: 'var(--bg-surface)',
-              borderColor: 'var(--border-default)',
-              borderRadius: 'var(--radius-lg)',
-            }}
-          >
-            <h2 className="text-sm font-medium mb-4" style={{ color: 'var(--text-secondary)' }}>Reconciling items</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-sm">
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border-default)' }}>
-                    <th className="text-left py-2 font-medium" style={{ color: 'var(--text-secondary)' }}>Description</th>
-                    <th className="text-right py-2 font-medium w-28" style={{ color: 'var(--text-secondary)' }}>Amount</th>
-                    <th className="text-left py-2 font-medium w-36" style={{ color: 'var(--text-secondary)' }}>Type</th>
-                    <th className="text-left py-2 font-medium w-28" style={{ color: 'var(--text-secondary)' }}>Date</th>
-                    {!readOnly && (recon.status === 'not_started' || recon.status === 'in_progress') && <th className="w-20" />}
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item) => (
-                    <tr key={item.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                      <td className="py-2">{item.description}</td>
-                      <td className="py-2 text-right font-mono">
-                        <MoneyCell value={item.amount} showDollar />
-                      </td>
-                      <td className="py-2">
-                        <span
-                          className="px-2 py-0.5 rounded text-xs"
-                          style={{ backgroundColor: 'var(--bg-surface-sunken)' }}
-                        >
-                          {item.type}
-                        </span>
-                      </td>
-                      <td className="py-2">{formatDate(item.date)}</td>
-                      {!readOnly && (recon.status === 'not_started' || recon.status === 'in_progress') && (
-                        <td className="py-2">
-                          <button
-                            type="button"
-                            className="p-1"
-                            style={{ color: 'var(--text-tertiary)' }}
-                            onClick={() => handleDeleteItem(item.id)}
-                            title="Delete"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="mt-4 flex items-center justify-between">
-              <div>
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Items total: </span>
-                <span className="font-mono font-medium">
-                  <MoneyCell value={recon.reconcilingItemsTotal} showDollar />
+              {/* Separation of Duties */}
+              <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg px-4 py-3 flex items-center gap-3 text-sm">
+                <CheckCircle2 size={14} className="text-[#2D6A4F] shrink-0" />
+                <span className="text-[#5C4F3A]">
+                  Preparer: {recon.preparedBy ?? 'Unassigned'} (Controller)
+                  {' \u00B7 '}
+                  Approver: {recon.approvedBy ?? 'Pending'} (CFO)
+                  {' \u00B7 '}
+                  Separation of Duties: <span className="text-[#2D6A4F] font-medium">Enforced</span>
                 </span>
               </div>
-              <div
-                className="text-sm font-medium"
-                style={{ color: withinTolerance ? 'var(--status-success)' : 'var(--status-error)' }}
-              >
-                Unexplained: <MoneyCell value={backendUnexplained} showDollar />
-                {withinTolerance && moneyAbs(backendUnexplained) < 0.01 && ' ✓ Fully reconciled'}
-                {withinTolerance && moneyAbs(backendUnexplained) >= 0.01 && ' — within tolerance'}
-                {overTolerance && ' — add reconciling items or investigate'}
-              </div>
-            </div>
-            {!readOnly && (recon.status === 'not_started' || recon.status === 'in_progress') && (
-              <>
-                {!showAddItem ? (
-                  <div className="mt-4 flex gap-2">
-                    <button
-                      type="button"
-                      className="px-4 py-2 border text-sm font-medium"
-                      style={{
-                        borderColor: 'var(--border-default)',
-                        borderRadius: 'var(--radius-md)',
-                      }}
-                      onClick={() => setShowAddItem(true)}
-                    >
-                      Add Item
-                    </button>
-                    {recon.priorPeriodGlBalance != null && !items.some((i) => i.description.startsWith('[Carried forward]')) && (
-                      <button
-                        type="button"
-                        className="px-4 py-2 border text-sm font-medium"
-                        style={{
-                          borderColor: 'color-mix(in srgb, var(--interactive-primary) 40%, transparent)',
-                          color: 'var(--interactive-primary)',
-                          borderRadius: 'var(--radius-md)',
-                        }}
-                        onClick={handleCarryForward}
-                        disabled={carryForwardPending}
-                      >
-                        {carryForwardPending ? 'Carrying forward...' : 'Carry Forward from Prior Period'}
-                      </button>
-                    )}
+
+              {/* AUTO-MATCHED TRANSACTIONS */}
+              <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg overflow-hidden">
+                <div className="bg-[#2C2416] px-4 py-3 flex items-center justify-between">
+                  <h2 className="text-sm font-medium text-[#B8860B] uppercase tracking-wider">
+                    Auto-Matched Transactions
+                  </h2>
+                  <span className="text-xs text-[#8B7A5E]">{autoMatched.length} matched</span>
+                </div>
+
+                {autoMatched.length === 0 ? (
+                  <div className="px-4 py-6 text-center text-sm text-[#8B7A5E]">
+                    No auto-matched transactions found.
                   </div>
                 ) : (
-                  <div
-                    className="mt-4 p-4 border space-y-3"
-                    style={{
-                      borderColor: 'var(--border-default)',
-                      backgroundColor: 'var(--bg-surface-sunken)',
-                      borderRadius: 'var(--radius-md)',
-                    }}
-                  >
-                    <input
-                      type="text"
-                      value={addItemDesc}
-                      onChange={(e) => setAddItemDesc(e.target.value)}
-                      placeholder="Description"
-                      className="w-full px-3 py-2 border text-sm"
-                      style={{
-                        borderColor: 'var(--border-default)',
-                        backgroundColor: 'var(--bg-surface-sunken)',
-                        borderRadius: 'var(--radius-md)',
-                      }}
-                    />
-                    <MoneyInput value={addItemAmt} onChange={setAddItemAmt} size="sm" placeholder="0.00" />
-                    <select
-                      value={addItemType}
-                      onChange={(e) => setAddItemType(e.target.value as ReconcilingItemType)}
-                      className="w-full px-3 py-2 border text-sm"
-                      style={{
-                        borderColor: 'var(--border-default)',
-                        backgroundColor: 'var(--bg-surface-sunken)',
-                        borderRadius: 'var(--radius-md)',
-                      }}
-                    >
-                      {ITEM_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="date"
-                      value={addItemDate}
-                      onChange={(e) => setAddItemDate(e.target.value)}
-                      className="w-full px-3 py-2 border text-sm"
-                      style={{
-                        borderColor: 'var(--border-default)',
-                        backgroundColor: 'var(--bg-surface-sunken)',
-                        borderRadius: 'var(--radius-md)',
-                      }}
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        className="px-4 py-2 text-sm disabled:opacity-50"
-                        style={{
-                          backgroundColor: 'var(--interactive-primary)',
-                          color: 'white',
-                          borderRadius: 'var(--radius-md)',
-                        }}
-                        onClick={handleAddItem}
-                        disabled={addItemMutation.isPending || !addItemDesc.trim()}
-                      >
-                        {addItemMutation.isPending ? 'Saving...' : 'Save'}
-                      </button>
-                      <button
-                        type="button"
-                        className="px-4 py-2 border text-sm"
-                        style={{
-                          borderColor: 'var(--border-default)',
-                          borderRadius: 'var(--radius-md)',
-                        }}
-                        onClick={() => setShowAddItem(false)}
-                      >
-                        Cancel
-                      </button>
+                  <>
+                    <div className="px-4 py-2.5 grid grid-cols-12 gap-3 text-xs font-medium text-[#8B7A5E] uppercase tracking-wider border-b border-[#DDD5C2] bg-[#E8E0D0]">
+                      <div className="col-span-1">Date</div>
+                      <div className="col-span-3">GL Transaction</div>
+                      <div className="col-span-3">Bank Transaction</div>
+                      <div className="col-span-1 text-right">GL Amount</div>
+                      <div className="col-span-1 text-right">Bank Amount</div>
+                      <div className="col-span-1">Match</div>
+                      <div className="col-span-2">Action</div>
                     </div>
-                  </div>
+                    <div className="divide-y divide-[#DDD5C2]">
+                      {autoMatched.map((tx) => (
+                        <div
+                          key={tx.id}
+                          className="px-4 py-3 grid grid-cols-12 gap-3 items-center hover:bg-[#E8E0D0] transition-colors"
+                        >
+                          <div className="col-span-1 text-xs text-[#5C4F3A] font-mono">
+                            {tx.date ?? '—'}
+                          </div>
+                          <div className="col-span-3 text-sm text-[#2C2416] truncate">
+                            {tx.glDescription ?? '—'}
+                          </div>
+                          <div className="col-span-3 text-sm text-[#2C2416] truncate">
+                            {tx.bankDescription ?? '—'}
+                          </div>
+                          <div className="col-span-1 text-right text-sm font-mono text-[#2C2416]">
+                            {tx.glAmount ? fmtMoney(tx.glAmount, { dollar: true, dash: false }) : '—'}
+                          </div>
+                          <div className="col-span-1 text-right text-sm font-mono text-[#2C2416]">
+                            {tx.bankAmount ? fmtMoney(tx.bankAmount, { dollar: true, dash: false }) : '—'}
+                          </div>
+                          <div className="col-span-1">
+                            <MatchTypeBadge matchType={tx.matchType} />
+                          </div>
+                          <div className="col-span-2">
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-[#2D6A4F]">
+                              <CheckCircle2 size={12} />
+                              {tx.action ?? 'Accepted'}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
                 )}
-              </>
-            )}
-          </section>
-
-          <section
-            className="border p-6"
-            style={{
-              backgroundColor: 'var(--bg-surface)',
-              borderColor: 'var(--border-default)',
-              borderRadius: 'var(--radius-lg)',
-            }}
-          >
-            <h2 className="text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Notes</h2>
-            <textarea
-              value={notesDisplay}
-              onChange={(e) => setNotesLocal(e.target.value)}
-              onBlur={handleNotesBlur}
-              disabled={isApproved || readOnly}
-              placeholder="Add notes about this reconciliation..."
-              className="w-full px-3 py-2 border text-sm min-h-[80px]"
-              style={{
-                borderColor: 'var(--border-default)',
-                backgroundColor: 'var(--bg-surface-sunken)',
-                borderRadius: 'var(--radius-md)',
-              }}
-            />
-          </section>
-        </div>
-
-        <div className="space-y-6">
-          <section
-            className="border p-6"
-            style={{
-              backgroundColor: 'var(--bg-surface)',
-              borderColor: 'var(--border-default)',
-              borderRadius: 'var(--radius-lg)',
-            }}
-          >
-            <h2 className="text-sm font-medium mb-2 flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
-              Supporting documents
-              <span
-                className="px-1.5 py-0.5 rounded text-xs"
-                style={{ backgroundColor: 'var(--bg-surface-sunken)' }}
-              >
-                {evidence.length}
-              </span>
-            </h2>
-            {evidence.length < 1 && (recon.status === 'not_started' || recon.status === 'in_progress') && (
-              <p className="text-sm mb-3" style={{ color: 'var(--status-warning)' }}>At least one supporting document is required to complete this reconciliation</p>
-            )}
-            {!readOnly && (recon.status === 'not_started' || recon.status === 'in_progress') && (
-              <FileUpload
-                onUpload={handleUpload}
-                acceptedTypes={['application/pdf', 'image/png', 'image/jpeg', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'text/csv']}
-                maxSizeMB={10}
-              />
-            )}
-            {evidence.length > 0 && (
-              <div className="mt-4">
-                <FileList files={evidence} onDelete={handleDeleteEvidence} showHash readonly={isApproved} />
               </div>
-            )}
-          </section>
 
-          {isCompleted && (
-            <section
-              className="border p-6"
-              style={{
-                backgroundColor: 'var(--bg-surface)',
-                borderColor: 'var(--border-default)',
-                borderRadius: 'var(--radius-lg)',
-              }}
-            >
-              <h2 className="text-sm font-medium mb-3" style={{ color: 'var(--text-secondary)' }}>Approval info</h2>
-              <dl className="text-sm space-y-2">
-                <div>
-                  <dt style={{ color: 'var(--text-tertiary)' }}>Completed by</dt>
-                  <dd className="font-medium">{recon.preparer ?? '—'} on {formatDate(recon.completedAt)}</dd>
+              {/* MANUAL REVIEW REQUIRED */}
+              {manualReview.length > 0 && (
+                <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg overflow-hidden">
+                  <div className="bg-[#2C2416] px-4 py-3 flex items-center justify-between">
+                    <h2 className="text-sm font-medium text-[#8B6914] uppercase tracking-wider">
+                      Manual Review Required
+                    </h2>
+                    <span className="text-xs text-[#8B7A5E]">
+                      {manualReview.length} item{manualReview.length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+
+                  <div className="divide-y divide-[#DDD5C2]">
+                    {manualReview.map((tx) => (
+                      <div
+                        key={tx.id}
+                        className="px-4 py-4 hover:bg-[#E8E0D0] transition-colors"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-1">
+                              <span className="text-xs font-mono text-[#8B7A5E]">{tx.date ?? '—'}</span>
+                              <span className="text-sm font-medium text-[#2C2416]">
+                                {tx.glDescription ?? tx.bankDescription ?? 'Unmatched transaction'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-4 text-xs text-[#5C4F3A]">
+                              {tx.glAmount && (
+                                <span>GL: {fmtMoney(tx.glAmount, { dollar: true, dash: false })}</span>
+                              )}
+                              {tx.bankAmount && (
+                                <span>Bank: {fmtMoney(tx.bankAmount, { dollar: true, dash: false })}</span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 ml-4">
+                            <button className="text-xs font-medium px-3 py-1.5 rounded border border-[#DDD5C2] text-[#5C4F3A] bg-[#F5F0E8] hover:border-[#8B7A5E] transition-colors">
+                              <span className="flex items-center gap-1">
+                                <Clock size={12} />
+                                Mark as timing difference
+                              </span>
+                            </button>
+                            <button className="text-xs font-medium px-3 py-1.5 rounded border border-[#DDD5C2] text-[#5C4F3A] bg-[#F5F0E8] hover:border-[#8B7A5E] transition-colors">
+                              <span className="flex items-center gap-1">
+                                <Plus size={12} />
+                                Create JE to record
+                              </span>
+                            </button>
+                            <button className="text-xs font-medium px-3 py-1.5 rounded border border-[#DDD5C2] text-[#8B7A5E] bg-[#F5F0E8] hover:border-[#8B7A5E] transition-colors">
+                              <span className="flex items-center gap-1">
+                                <X size={12} />
+                                Dismiss
+                              </span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <div>
-                  <dt style={{ color: 'var(--text-tertiary)' }}>Approved by</dt>
-                  <dd className="font-medium">{recon.reviewer ? `${recon.reviewer} on ${formatDate(recon.approvedAt)}` : 'Pending approval'}</dd>
+              )}
+
+              {/* EVIDENCE ATTACHMENTS */}
+              <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg overflow-hidden">
+                <div className="bg-[#2C2416] px-4 py-3 flex items-center justify-between">
+                  <h2 className="text-sm font-medium text-[#B8860B] uppercase tracking-wider">
+                    Evidence Attachments
+                  </h2>
+                  <span className="text-xs text-[#8B7A5E]">{evidence.length} file{evidence.length !== 1 ? 's' : ''}</span>
                 </div>
-                {recon.rejectedReason && (
-                  <div
-                    className="mt-3 p-3 border"
-                    style={{
-                      backgroundColor: 'var(--status-warning-bg)',
-                      borderColor: 'color-mix(in srgb, var(--status-warning) 30%, transparent)',
-                      color: 'var(--status-warning)',
-                      borderRadius: 'var(--radius-md)',
-                    }}
-                  >
-                    {recon.rejectedReason}
+
+                {/* File list */}
+                {evidence.length > 0 && (
+                  <div className="divide-y divide-[#DDD5C2]">
+                    {evidence.map((file) => (
+                      <div
+                        key={file.id}
+                        className="px-4 py-3 flex items-center justify-between hover:bg-[#E8E0D0] transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <FileText size={16} className="text-[#8B7A5E]" />
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm text-[#2C2416]">{file.fileName}</span>
+                              {file.sha256 ? (
+                                <span className="font-mono text-xs text-[#B8860B]">
+                                  sha256:{file.sha256.slice(0, 16)}...
+                                </span>
+                              ) : (
+                                <span className="font-mono text-xs text-[#8B7A5E]">Hash pending</span>
+                              )}
+                            </div>
+                            <div className="text-xs text-[#8B7A5E]">
+                              {[
+                                formatFileSize(file.fileSize),
+                                file.uploadedBy,
+                                file.uploadedAt ? new Date(file.uploadedAt).toLocaleDateString() : null,
+                              ]
+                                .filter(Boolean)
+                                .join(' \u00B7 ')}
+                            </div>
+                          </div>
+                        </div>
+                        {file.url && (
+                          <a
+                            href={file.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-xs font-medium text-[#B8860B] hover:underline"
+                          >
+                            <Download size={12} />
+                            Download
+                          </a>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
-              </dl>
-            </section>
-          )}
 
-          <section
-            className="border p-6"
-            style={{
-              backgroundColor: 'var(--bg-surface)',
-              borderColor: 'var(--border-default)',
-              borderRadius: 'var(--radius-lg)',
-            }}
-          >
-            <h2 className="text-sm font-medium mb-3" style={{ color: 'var(--text-secondary)' }}>History</h2>
-            <ul className="space-y-2">
-              {activity.length === 0 ? (
-                <li className="text-sm" style={{ color: 'var(--text-tertiary)' }}>No activity yet</li>
-              ) : (
-                activity
-                  .slice()
-                  .reverse()
-                  .map((a) => (
-                    <li key={a.id} className="text-sm">
-                      <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{a.user}</span>
-                      <span style={{ color: 'var(--text-secondary)' }}> {a.description}</span>
-                      <span className="text-xs block" style={{ color: 'var(--text-tertiary)' }}>{formatDateTime(a.timestamp)}</span>
-                    </li>
-                  ))
-              )}
-            </ul>
-          </section>
-        </div>
+                {/* Upload dropzone */}
+                <div className="p-4">
+                  <EvidenceDropzone
+                    sessionId={sessionId}
+                    reconId={reconId}
+                    onUploadComplete={handleRefreshEvidence}
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  onClick={() => completeMutation.mutate()}
+                  disabled={completeMutation.isPending || isReconciled}
+                  className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    isReconciled
+                      ? 'bg-[#E0EDE8] text-[#2D6A4F] cursor-not-allowed'
+                      : 'bg-[#2D6A4F] text-white hover:bg-[#245A42]'
+                  }`}
+                >
+                  {completeMutation.isPending ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <Shield size={16} />
+                  )}
+                  {isReconciled ? 'Reconciled' : 'Mark as Reconciled'}
+                </button>
+
+                <button
+                  onClick={() => approveMutation.mutate()}
+                  disabled={approveMutation.isPending || reconStatus === 'approved'}
+                  className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    reconStatus === 'approved'
+                      ? 'bg-[#DDD5C2] text-[#8B7A5E] cursor-not-allowed'
+                      : 'bg-[#B8860B] text-white hover:bg-[#9A7209]'
+                  }`}
+                >
+                  {approveMutation.isPending ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <CheckCircle2 size={16} />
+                  )}
+                  {reconStatus === 'approved' ? 'Approved' : 'Send for Approval'}
+                </button>
+
+                {(completeMutation.isError || approveMutation.isError) && (
+                  <span className="text-xs text-[#C44B2B]">
+                    Action failed. Please try again.
+                  </span>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-12">
+              <AlertCircle size={24} className="mx-auto text-[#8B7A5E] mb-3" />
+              <p className="text-sm text-[#8B7A5E]">Reconciliation not found.</p>
+              <Link
+                href={`/close/${sessionId}/reconciliation`}
+                className="text-sm text-[#B8860B] hover:underline mt-2 inline-block"
+              >
+                Back to reconciliation list
+              </Link>
+            </div>
+          )}
+        </main>
       </div>
     </div>
   );

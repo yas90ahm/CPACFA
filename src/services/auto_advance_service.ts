@@ -167,7 +167,7 @@ export async function checkAndNotifyReadiness(
 
 /**
  * Send email notification for readiness (if SMTP is configured).
- * Sends to: session creator + all users with 'admin' or 'reviewer' role for this tenant.
+ * Sends to: session creator + all users with 'system_admin', 'reviewer', 'controller', or 'cfo' role for this tenant.
  */
 async function sendReadinessEmail(
   pool: Pool,
@@ -188,7 +188,7 @@ async function sendReadinessEmail(
   const control = getControlPool();
   const recipientRes = await control.query<{ email: string; name: string }>(
     `SELECT email, name FROM users
-     WHERE tenant_id = $1 AND role IN ('admin', 'reviewer', 'approver') AND active = true AND email IS NOT NULL`,
+     WHERE tenant_id = $1 AND role IN ('system_admin', 'reviewer', 'controller', 'cfo') AND active = true AND email IS NOT NULL`,
     [tenantId]
   );
 

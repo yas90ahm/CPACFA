@@ -1,579 +1,475 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import React from 'react';
 import { useParams } from 'next/navigation';
+import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
+import { apiFetch } from '@/lib/api';
 import {
-  Shield,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  ChevronDown,
+  LayoutDashboard,
+  FolderClosed,
+  Briefcase,
+  ScrollText,
+  BarChart3,
+  Activity,
+  Settings,
   ChevronRight,
-  Paperclip,
-  User,
-  CalendarClock,
-  FileWarning,
+  Loader2,
+  AlertCircle,
+  CheckCircle2,
+  Shield,
+  ShieldCheck,
+  ClipboardList,
+  Eye,
+  FileCheck,
+  Radio,
+  MessageSquare,
 } from 'lucide-react';
-import { useAuth } from '@/lib/auth';
-import { isReadOnly as isRoleReadOnly } from '@/lib/permissions';
-import { useCloseSession } from '@/lib/queries/close-session';
-import {
-  useControls,
-  useControlAssertions,
-  useControlEvidence,
-  type CloseControl,
-  type ControlEvidenceRow,
-} from '@/lib/queries/data-quality';
-import { StatusBadge } from '@/components/shared/StatusBadge';
-import { EmptyState } from '@/components/shared/EmptyState';
-import { EvidenceAttachment, type EvidenceFile } from '@/components/shared/EvidenceAttachment';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
 
-type ControlStatus = 'passed' | 'failed' | 'not-tested';
-
-function deriveControlStatus(
-  control: CloseControl,
-  evidence: ControlEvidenceRow[],
-): ControlStatus {
-  const linked = evidence.filter((e) => e.controlId === control.id);
-  if (linked.length === 0) return 'not-tested';
-  // Simple heuristic: if evidence exists, consider passed.
-  // In a real implementation the backend would provide a pass/fail flag.
-  return 'passed';
+interface Gate {
+  id: string;
+  label: string;
+  passing: boolean;
+  detail?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Sub-components
-// ---------------------------------------------------------------------------
-
-/** Assertions list for an expanded control */
-function AssertionsList({ controlId }: { controlId: string }) {
-  const { data: assertions = [], isLoading } = useControlAssertions(controlId);
-
-  if (isLoading) {
-    return (
-      <div className="space-y-2 animate-pulse">
-        {[1, 2].map((i) => (
-          <div
-            key={i}
-            className="h-6 rounded"
-            style={{ background: 'var(--bg-surface-sunken)' }}
-          />
-        ))}
-      </div>
-    );
-  }
-
-  if (assertions.length === 0) {
-    return (
-      <p className="text-xs py-1" style={{ color: 'var(--text-tertiary)' }}>
-        No assertions defined for this control.
-      </p>
-    );
-  }
-
-  return (
-    <div className="space-y-1.5">
-      <p
-        className="text-xs font-semibold uppercase tracking-[0.04em]"
-        style={{ color: 'var(--text-tertiary)' }}
-      >
-        Assertions
-      </p>
-      {assertions.map((a) => (
-        <div
-          key={a.id}
-          className="flex items-center gap-3 py-1.5 px-3 rounded-md text-xs"
-          style={{
-            background: 'var(--bg-surface-sunken)',
-            border: '1px solid var(--border-subtle)',
-          }}
-        >
-          <span style={{ color: 'var(--text-primary)' }}>{a.assertionLabel}</span>
-          {a.riskCategory && (
-            <StatusBadge
-              status="pending"
-              label={a.riskCategory}
-              size="sm"
-              showIcon={false}
-              className="ml-auto"
-            />
-          )}
-        </div>
-      ))}
-    </div>
-  );
+interface ReadinessResponse {
+  gates: Gate[];
+  gatesPassing: number;
+  gatesTotal: number;
+  canAdvance: boolean;
 }
 
-/** Evidence section for an expanded control */
-function EvidenceSection({
-  controlId,
-  evidence,
-  readOnly,
-}: {
+interface Control {
+  id: string;
   controlId: string;
-  evidence: ControlEvidenceRow[];
-  readOnly: boolean;
-}) {
-  const controlEvidence = evidence.filter((e) => e.controlId === controlId);
-
-  // Map ControlEvidenceRow to EvidenceFile shape for display purposes.
-  // In a real implementation these would be fetched from an evidence endpoint.
-  const files: EvidenceFile[] = controlEvidence.map((e) => ({
-    id: e.id,
-    fileName: `${e.evidenceType}-${e.evidenceId.slice(0, 8)}`,
-    fileSize: 0,
-    mimeType: 'application/pdf',
-    hash: e.evidenceId,
-    uploadedBy: '',
-    uploadedAt: e.createdAt,
-  }));
-
-  if (controlEvidence.length === 0 && readOnly) {
-    return (
-      <p className="text-xs py-1" style={{ color: 'var(--text-tertiary)' }}>
-        No evidence linked for this period.
-      </p>
-    );
-  }
-
-  return (
-    <div className="space-y-1.5">
-      <p
-        className="text-xs font-semibold uppercase tracking-[0.04em]"
-        style={{ color: 'var(--text-tertiary)' }}
-      >
-        Evidence ({controlEvidence.length})
-      </p>
-      <EvidenceAttachment
-        attachments={files}
-        onUpload={() => {
-          /* TODO: wire upload endpoint */
-        }}
-        readOnly={readOnly}
-      />
-    </div>
-  );
-}
-
-/** Remediation plan for failed controls */
-function RemediationPlan({ readOnly }: { readOnly: boolean }) {
-  const [plan, setPlan] = useState('');
-
-  return (
-    <div className="space-y-1.5">
-      <p
-        className="text-xs font-semibold uppercase tracking-[0.04em]"
-        style={{ color: 'var(--text-tertiary)' }}
-      >
-        Remediation Plan
-      </p>
-      <textarea
-        value={plan}
-        onChange={(e) => setPlan(e.target.value)}
-        disabled={readOnly}
-        rows={3}
-        placeholder={
-          readOnly
-            ? 'No remediation plan provided.'
-            : 'Describe the remediation steps for this failed control...'
-        }
-        className="w-full rounded-md px-3 py-2 text-sm resize-none focus:outline-none"
-        style={{
-          background: 'var(--bg-surface-sunken)',
-          color: 'var(--text-primary)',
-          border: '1px solid var(--border-default)',
-        }}
-      />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Control Card
-// ---------------------------------------------------------------------------
-
-function ControlCard({
-  control,
-  status,
-  evidenceCount,
-  evidence,
-  readOnly,
-  isExpanded,
-  onToggle,
-}: {
-  control: CloseControl;
-  status: ControlStatus;
+  description: string;
+  assertionType: string;
+  cosoComponent: string;
+  status: 'tested' | 'pending' | 'failed';
   evidenceCount: number;
-  evidence: ControlEvidenceRow[];
-  readOnly: boolean;
-  isExpanded: boolean;
-  onToggle: () => void;
-}) {
-  const statusToBadge = {
-    passed: 'complete' as const,
-    failed: 'failed' as const,
-    'not-tested': 'not-started' as const,
-  };
+  lastTested?: string;
+}
 
-  const borderColor =
-    status === 'failed'
-      ? 'var(--status-error)'
-      : status === 'passed'
-        ? 'var(--status-success)'
-        : 'var(--border-default)';
+interface ControlEvidence {
+  controlId: string;
+  evidenceId: string;
+  fileName: string;
+  uploadedAt: string;
+}
 
+/* ------------------------------------------------------------------ */
+/*  COSO Components                                                    */
+/* ------------------------------------------------------------------ */
+
+const COSO_COMPONENTS = [
+  { key: 'control_environment', label: 'Control Environment', icon: Shield, description: 'Tone at the top, ethical values, and organizational structure' },
+  { key: 'risk_assessment', label: 'Risk Assessment', icon: AlertCircle, description: 'Identification and analysis of relevant risks' },
+  { key: 'control_activities', label: 'Control Activities', icon: ClipboardList, description: 'Policies and procedures to mitigate risks' },
+  { key: 'information_communication', label: 'Information & Communication', icon: MessageSquare, description: 'Quality information flow across the organization' },
+  { key: 'monitoring', label: 'Monitoring', icon: Radio, description: 'Ongoing evaluation of internal control effectiveness' },
+];
+
+/* ------------------------------------------------------------------ */
+/*  Nav items config                                                   */
+/* ------------------------------------------------------------------ */
+
+const NAV_ITEMS = [
+  { label: 'Dashboard', icon: LayoutDashboard, href: (sid: string) => `/close/${sid}/dashboard` },
+  { label: 'Close Sessions', icon: FolderClosed, href: () => '/close' },
+  { label: 'Portfolio', icon: Briefcase, href: () => '/portfolio' },
+  { label: 'Audit Trail', icon: ScrollText, href: (sid: string) => `/close/${sid}/audit-trail` },
+  { label: 'GL Quality', icon: BarChart3, href: (sid: string) => `/close/${sid}/gl-quality` },
+  { label: 'Analytics', icon: Activity, href: () => '/close' },
+  { label: 'Settings', icon: Settings, href: () => '/settings/general' },
+];
+
+/* ------------------------------------------------------------------ */
+/*  Sidebar                                                            */
+/* ------------------------------------------------------------------ */
+
+function Sidebar({ sessionId }: { sessionId: string }) {
   return (
-    <div
-      className="rounded-lg overflow-hidden"
-      style={{
-        background: 'var(--bg-surface)',
-        borderWidth: '1px',
-        borderStyle: 'solid',
-        borderColor: 'var(--border-default)',
-        borderLeftWidth: '3px',
-        borderLeftColor: borderColor,
-      }}
-    >
-      {/* Header row — clickable to expand */}
-      <button
-        type="button"
-        onClick={onToggle}
-        className="w-full flex items-center gap-4 p-4 text-left transition-opacity hover:opacity-90"
-        aria-expanded={isExpanded}
-      >
-        {/* Status icon */}
-        <StatusBadge status={statusToBadge[status]} showLabel={false} size="sm" />
-
-        {/* Name + description */}
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-            {control.name}
-          </p>
-          {control.description && (
-            <p
-              className="text-[11px] mt-0.5 truncate"
-              style={{ color: 'var(--text-secondary)' }}
+    <aside className="fixed top-0 left-0 h-screen w-[260px] bg-[#2C2416] flex flex-col z-50">
+      <div className="px-6 pt-6 pb-4">
+        <div className="text-[#B8860B] text-xl font-medium tracking-wide">SABIT</div>
+        <div className="text-[#8B7A5E] text-xs mt-0.5">Financial Close Engine</div>
+      </div>
+      <nav className="flex-1 px-3 mt-2 space-y-0.5 overflow-y-auto">
+        {NAV_ITEMS.map((item) => {
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.label}
+              href={item.href(sessionId)}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors text-[#8B7A5E] hover:text-[#B8860B] hover:bg-[#3B1F0A]/50"
             >
-              {control.description}
-            </p>
-          )}
-        </div>
-
-        {/* Meta badges */}
-        <div className="flex items-center gap-3 shrink-0">
-          {control.owner && (
-            <span
-              className="inline-flex items-center gap-1 text-xs"
-              style={{ color: 'var(--text-tertiary)' }}
-            >
-              <User className="w-3 h-3" />
-              {control.owner}
-            </span>
-          )}
-          {control.frequency && (
-            <span
-              className="inline-flex items-center gap-1 text-xs uppercase px-1.5 py-0.5 rounded"
-              style={{
-                color: 'var(--text-tertiary)',
-                background: 'var(--bg-surface-sunken)',
-              }}
-            >
-              <CalendarClock className="w-3 h-3" />
-              {control.frequency}
-            </span>
-          )}
-
-          <StatusBadge status={statusToBadge[status]} size="sm" />
-
-          {evidenceCount > 0 && (
-            <span
-              className="flex items-center gap-1 text-xs"
-              style={{ color: 'var(--text-tertiary)' }}
-            >
-              <Paperclip className="w-3 h-3" /> {evidenceCount}
-            </span>
-          )}
-
-          {isExpanded ? (
-            <ChevronDown className="w-3.5 h-3.5" style={{ color: 'var(--text-tertiary)' }} />
-          ) : (
-            <ChevronRight className="w-3.5 h-3.5" style={{ color: 'var(--text-tertiary)' }} />
-          )}
-        </div>
-      </button>
-
-      {/* Expanded detail */}
-      {isExpanded && (
-        <div
-          className="px-4 pb-4 space-y-4"
-          style={{ borderTop: '1px solid var(--border-subtle)' }}
-        >
-          <div className="pt-3 space-y-4">
-            <AssertionsList controlId={control.id} />
-            <EvidenceSection controlId={control.id} evidence={evidence} readOnly={readOnly} />
-            {status === 'failed' && <RemediationPlan readOnly={readOnly} />}
+              <Icon size={18} />
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
+      <div className="px-4 py-4 border-t border-[#3B1F0A]">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-[#3B1F0A] flex items-center justify-center text-[#B8860B] text-xs font-medium">
+            YA
+          </div>
+          <div>
+            <div className="text-sm text-[#B8860B] font-medium">Yasir A.</div>
+            <div className="text-xs text-[#8B7A5E]">Controller</div>
           </div>
         </div>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Summary Bar
-// ---------------------------------------------------------------------------
-
-function SummaryBar({
-  passed,
-  failed,
-  notTested,
-}: {
-  passed: number;
-  failed: number;
-  notTested: number;
-}) {
-  const allPassed = failed === 0 && notTested === 0 && passed > 0;
-  const hasFails = failed > 0;
-
-  return (
-    <div
-      className="flex items-center gap-6 px-5 py-4 rounded-lg"
-      style={{
-        background: allPassed
-          ? 'var(--status-success-bg)'
-          : hasFails
-            ? 'var(--status-error-bg)'
-            : 'var(--bg-surface)',
-        border: `1px solid ${
-          allPassed
-            ? 'var(--status-success-border)'
-            : hasFails
-              ? 'var(--status-error-border)'
-              : 'var(--border-default)'
-        }`,
-      }}
-    >
-      <SummaryItem
-        icon={<CheckCircle2 className="w-4 h-4" style={{ color: 'var(--status-success)' }} />}
-        label="Passed"
-        count={passed}
-      />
-      <SummaryItem
-        icon={<XCircle className="w-4 h-4" style={{ color: 'var(--status-error)' }} />}
-        label="Failed"
-        count={failed}
-      />
-      <SummaryItem
-        icon={<Clock className="w-4 h-4" style={{ color: 'var(--text-tertiary)' }} />}
-        label="Not Tested"
-        count={notTested}
-      />
-    </div>
-  );
-}
-
-function SummaryItem({
-  icon,
-  label,
-  count,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  count: number;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      {icon}
-      <span className="text-sm font-semibold tabular-nums" style={{ color: 'var(--text-primary)' }}>
-        {count}
-      </span>
-      <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-        {label}
-      </span>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Skeleton loader
-// ---------------------------------------------------------------------------
-
-function ControlsSkeleton() {
-  return (
-    <div className="space-y-6 max-w-[1000px]">
-      <div className="space-y-2 animate-pulse">
-        <div
-          className="h-6 w-48 rounded"
-          style={{ background: 'var(--bg-surface-sunken)' }}
-        />
-        <div
-          className="h-4 w-64 rounded"
-          style={{ background: 'var(--bg-surface-sunken)' }}
-        />
       </div>
-      <div
-        className="h-16 rounded-lg animate-pulse"
-        style={{ background: 'var(--bg-surface-sunken)' }}
-      />
-      {[1, 2, 3, 4].map((i) => (
-        <div
-          key={i}
-          className="h-20 rounded-lg animate-pulse"
-          style={{ background: 'var(--bg-surface-sunken)' }}
-        />
-      ))}
+    </aside>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Progress Rail                                                      */
+/* ------------------------------------------------------------------ */
+
+function ProgressRail({
+  gates,
+  gatesPassing,
+  gatesTotal,
+}: {
+  gates: Gate[];
+  gatesPassing: number;
+  gatesTotal: number;
+}) {
+  const activeGateIndex = gates.findIndex((g) => !g.passing);
+  const activeGateNum = activeGateIndex >= 0 ? activeGateIndex + 1 : gatesTotal;
+
+  return (
+    <div className="bg-[#2C2416] px-6 py-3 flex items-center justify-between">
+      <div className="flex items-center gap-4 text-sm">
+        <span className="text-[#B8860B] font-medium">
+          Gate {activeGateNum} of {gatesTotal}
+        </span>
+        <span className="text-[#8B7A5E]">
+          {gatesPassing} of {gatesTotal} passing
+        </span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        {gates.map((gate, i) => {
+          let bg = '#5C4F3A';
+          if (gate.passing) bg = '#2D6A4F';
+          else if (i === activeGateIndex) bg = '#B8860B';
+          return (
+            <div
+              key={gate.id}
+              className="w-2.5 h-2.5 rounded-full transition-colors"
+              style={{ backgroundColor: bg }}
+              title={`${gate.label}: ${gate.passing ? 'Passing' : 'Pending'}`}
+            />
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Main Page
-// ---------------------------------------------------------------------------
+/* ------------------------------------------------------------------ */
+/*  Status Badge                                                       */
+/* ------------------------------------------------------------------ */
+
+function ControlStatusBadge({ status }: { status: string }) {
+  const map: Record<string, { bg: string; text: string; label: string }> = {
+    tested: { bg: 'bg-[#E0EDE8]', text: 'text-[#2D6A4F]', label: 'Tested' },
+    pending: { bg: 'bg-[#F0E8D0]', text: 'text-[#8B6914]', label: 'Pending' },
+    failed: { bg: 'bg-[#FDEAE6]', text: 'text-[#C44B2B]', label: 'Failed' },
+  };
+  const s = map[status] ?? map.pending;
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded ${s.bg} ${s.text}`}>
+      {status === 'tested' && <CheckCircle2 size={10} />}
+      {status === 'pending' && <AlertCircle size={10} />}
+      {status === 'failed' && <AlertCircle size={10} />}
+      {s.label}
+    </span>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Skeleton                                                           */
+/* ------------------------------------------------------------------ */
+
+function Skeleton({ className = '' }: { className?: string }) {
+  return <div className={`animate-pulse bg-[#DDD5C2] rounded ${className}`} />;
+}
+
+function PageSkeleton() {
+  return (
+    <div className="space-y-6">
+      <Skeleton className="h-7 w-72 mb-2" />
+      <Skeleton className="h-4 w-96" />
+      <div className="grid grid-cols-5 gap-4">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-4">
+            <Skeleton className="h-3 w-20 mb-2" />
+            <Skeleton className="h-8 w-24" />
+          </div>
+        ))}
+      </div>
+      <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg h-64" />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Error Banner                                                       */
+/* ------------------------------------------------------------------ */
+
+function ErrorBanner({ message }: { message: string }) {
+  return (
+    <div className="bg-[#F5E4DE] border border-[#C44B2B]/20 rounded-lg p-4 flex items-center gap-3">
+      <AlertCircle size={18} className="text-[#C44B2B] shrink-0" />
+      <div>
+        <div className="text-sm font-medium text-[#C44B2B]">Failed to load controls data</div>
+        <div className="text-xs text-[#C44B2B]/80 mt-0.5">{message}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Main Page                                                          */
+/* ------------------------------------------------------------------ */
 
 export default function ControlsPage() {
   const params = useParams();
   const sessionId = params.sessionId as string;
 
-  const { user } = useAuth();
-  const readOnly = isRoleReadOnly(user?.role ?? 'controller');
+  /* --- Readiness gates --- */
+  const readinessQuery = useQuery({
+    queryKey: ['close-readiness', sessionId],
+    queryFn: () =>
+      apiFetch<ReadinessResponse>(`/api/close/sessions/${sessionId}/readiness`, {
+        params: { format: 'gates' },
+      }),
+    enabled: !!sessionId,
+  });
 
-  const { data: session } = useCloseSession(sessionId);
-  const periodLabel = session?.periodLabel ?? '';
+  const gates = readinessQuery.data?.gates ?? [];
+  const gatesPassing = readinessQuery.data?.gatesPassing ?? gates.filter((g) => g.passing).length;
+  const gatesTotal = readinessQuery.data?.gatesTotal ?? gates.length;
 
-  const { data: controls = [], isLoading: controlsLoading } = useControls();
-  const { data: evidence = [] } = useControlEvidence(periodLabel || null);
+  /* --- Controls --- */
+  const controlsQuery = useQuery({
+    queryKey: ['controls', sessionId],
+    queryFn: async () => {
+      try {
+        const data = await apiFetch<Control[] | { controls?: Control[] }>(
+          `/api/close/controls`
+        );
+        return Array.isArray(data) ? data : data.controls ?? [];
+      } catch {
+        return [];
+      }
+    },
+    enabled: !!sessionId,
+  });
 
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<'all' | ControlStatus>('all');
+  /* --- Control Evidence --- */
+  const evidenceQuery = useQuery({
+    queryKey: ['control-evidence', sessionId],
+    queryFn: async () => {
+      try {
+        const data = await apiFetch<ControlEvidence[] | { evidence?: ControlEvidence[] }>(
+          `/api/close/control-evidence`
+        );
+        return Array.isArray(data) ? data : data.evidence ?? [];
+      } catch {
+        return [];
+      }
+    },
+    enabled: !!sessionId,
+  });
 
-  // Derive status for each control
-  const controlsWithStatus = useMemo(() => {
-    return controls.map((c) => {
-      const status = deriveControlStatus(c, evidence);
-      return {
-        ...c,
-        status,
-        evidenceCount: evidence.filter((e) => e.controlId === c.id).length,
-      };
-    });
-  }, [controls, evidence]);
+  const controls = controlsQuery.data ?? [];
+  const evidence = evidenceQuery.data ?? [];
+  const isLoading = controlsQuery.isLoading;
+  const error = controlsQuery.error;
 
-  // Counts
-  const stats = useMemo(() => {
-    const passed = controlsWithStatus.filter((c) => c.status === 'passed').length;
-    const failed = controlsWithStatus.filter((c) => c.status === 'failed').length;
-    const notTested = controlsWithStatus.filter((c) => c.status === 'not-tested').length;
-    return { passed, failed, notTested };
-  }, [controlsWithStatus]);
+  // Compute COSO component stats
+  const cosoStats = COSO_COMPONENTS.map((comp) => {
+    const related = controls.filter(
+      (c) => c.cosoComponent === comp.key || c.cosoComponent === comp.label
+    );
+    const assertionCount = related.length;
+    const evidenceCount = related.reduce((sum, c) => sum + (c.evidenceCount ?? 0), 0);
+    const passCount = related.filter((c) => c.status === 'tested').length;
+    const failCount = related.filter((c) => c.status === 'failed').length;
+    const status: 'pass' | 'fail' | 'pending' =
+      failCount > 0 ? 'fail' : passCount === assertionCount && assertionCount > 0 ? 'pass' : 'pending';
+    return { ...comp, assertionCount, evidenceCount, passCount, failCount, status };
+  });
 
-  // Filter
-  const filtered = useMemo(() => {
-    if (filter === 'all') return controlsWithStatus;
-    return controlsWithStatus.filter((c) => c.status === filter);
-  }, [controlsWithStatus, filter]);
-
-  const toggleExpanded = useCallback(
-    (id: string) => setExpandedId((prev) => (prev === id ? null : id)),
-    [],
-  );
-
-  // --- Loading ---
-  if (controlsLoading) {
-    return <ControlsSkeleton />;
-  }
-
-  // --- Render ---
   return (
-    <div className="space-y-6 max-w-[1000px]">
-      {/* Header */}
-      <div>
-        <h1 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
-          Internal Controls
-        </h1>
-        {periodLabel && (
-          <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>
-            Control testing for {periodLabel}
-          </p>
+    <div className="min-h-screen bg-[#F5F0E8] flex">
+      <Sidebar sessionId={sessionId} />
+
+      <div className="ml-[260px] flex-1 flex flex-col min-h-screen">
+        {/* Progress Rail */}
+        {gates.length > 0 && (
+          <ProgressRail
+            gates={gates}
+            gatesPassing={gatesPassing}
+            gatesTotal={gatesTotal}
+          />
         )}
+
+        {/* Top bar */}
+        <div className="h-12 bg-[#EDE6D6] border-b border-[#DDD5C2] flex items-center px-6">
+          <div className="flex items-center gap-2 text-sm">
+            <Link href={`/close/${sessionId}/dashboard`} className="text-[#8B7A5E] hover:text-[#5C4F3A] transition-colors">
+              Dashboard
+            </Link>
+            <ChevronRight size={14} className="text-[#8B7A5E]" />
+            <span className="text-[#2C2416] font-medium">Controls</span>
+          </div>
+        </div>
+
+        {/* Page body */}
+        <main className="flex-1 px-6 py-6">
+          {error && <ErrorBanner message={(error as Error).message} />}
+
+          {isLoading ? (
+            <PageSkeleton />
+          ) : (
+            <div className="space-y-6">
+              {/* Page Title */}
+              <div>
+                <h1 className="text-2xl font-medium text-[#2C2416]">
+                  Internal Controls -- COSO Framework
+                </h1>
+                <p className="text-sm text-[#8B7A5E] mt-1">
+                  Evaluate internal control effectiveness across the five COSO components with evidence-based testing.
+                </p>
+              </div>
+
+              {/* COSO Component Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                {cosoStats.map((comp) => {
+                  const Icon = comp.icon;
+                  const statusColor =
+                    comp.status === 'pass' ? '#2D6A4F' : comp.status === 'fail' ? '#C44B2B' : '#8B6914';
+                  const statusBg =
+                    comp.status === 'pass' ? '#E0EDE8' : comp.status === 'fail' ? '#FDEAE6' : '#F0E8D0';
+                  const statusLabel =
+                    comp.status === 'pass' ? 'All Passing' : comp.status === 'fail' ? 'Issues Found' : 'Pending';
+
+                  return (
+                    <div
+                      key={comp.key}
+                      className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-4"
+                    >
+                      <div className="flex items-center gap-2 mb-3">
+                        <Icon size={16} className="text-[#B8860B]" />
+                        <span className="text-xs font-medium text-[#2C2416] leading-tight">
+                          {comp.label}
+                        </span>
+                      </div>
+                      <div className="text-xs text-[#8B7A5E] mb-3 line-clamp-2">
+                        {comp.description}
+                      </div>
+                      <div className="space-y-1.5 text-xs text-[#5C4F3A]">
+                        <div className="flex justify-between">
+                          <span>Assertions</span>
+                          <span className="font-mono">{comp.assertionCount}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Evidence</span>
+                          <span className="font-mono">{comp.evidenceCount}</span>
+                        </div>
+                      </div>
+                      <div className="mt-3 pt-3 border-t border-[#DDD5C2]">
+                        <span
+                          className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded"
+                          style={{ backgroundColor: statusBg, color: statusColor }}
+                        >
+                          {comp.status === 'pass' && <CheckCircle2 size={10} />}
+                          {comp.status === 'fail' && <AlertCircle size={10} />}
+                          {comp.status === 'pending' && <AlertCircle size={10} />}
+                          {statusLabel}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Control Testing Table */}
+              <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg overflow-hidden">
+                <div className="bg-[#2C2416] px-4 py-3 flex items-center justify-between">
+                  <h2 className="text-sm font-medium text-[#B8860B] uppercase tracking-wider">
+                    Control Testing
+                  </h2>
+                  <span className="text-xs text-[#8B7A5E]">{controls.length} controls</span>
+                </div>
+
+                {controls.length === 0 ? (
+                  <div className="px-4 py-8 text-center text-sm text-[#8B7A5E]">
+                    No controls defined for this close session. Configure controls in Settings.
+                  </div>
+                ) : (
+                  <>
+                    <div className="px-4 py-2.5 grid grid-cols-12 gap-3 text-xs font-medium text-[#8B7A5E] uppercase tracking-wider border-b border-[#DDD5C2] bg-[#E8E0D0]">
+                      <div className="col-span-2">Control ID</div>
+                      <div className="col-span-3">Description</div>
+                      <div className="col-span-2">Assertion Type</div>
+                      <div className="col-span-2 text-center">Evidence</div>
+                      <div className="col-span-1">Status</div>
+                      <div className="col-span-2">Last Tested</div>
+                    </div>
+                    <div className="divide-y divide-[#DDD5C2]">
+                      {controls.map((ctrl) => (
+                        <div
+                          key={ctrl.id}
+                          className="px-4 py-3 grid grid-cols-12 gap-3 items-center hover:bg-[#E8E0D0] transition-colors"
+                        >
+                          <div className="col-span-2 text-sm font-mono text-[#2C2416]">
+                            {ctrl.controlId}
+                          </div>
+                          <div className="col-span-3 text-sm text-[#2C2416] truncate">
+                            {ctrl.description}
+                          </div>
+                          <div className="col-span-2">
+                            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded bg-[#F5F0E8] text-[#5C4F3A] border border-[#DDD5C2]">
+                              {ctrl.assertionType === 'existence' && <Eye size={10} />}
+                              {ctrl.assertionType === 'completeness' && <FileCheck size={10} />}
+                              {ctrl.assertionType === 'valuation' && <ShieldCheck size={10} />}
+                              {ctrl.assertionType}
+                            </span>
+                          </div>
+                          <div className="col-span-2 text-center">
+                            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded bg-[#EDE6D6] text-[#5C4F3A]">
+                              {ctrl.evidenceCount} file{ctrl.evidenceCount !== 1 ? 's' : ''}
+                            </span>
+                          </div>
+                          <div className="col-span-1">
+                            <ControlStatusBadge status={ctrl.status} />
+                          </div>
+                          <div className="col-span-2 text-xs text-[#8B7A5E]">
+                            {ctrl.lastTested
+                              ? new Date(ctrl.lastTested).toLocaleDateString()
+                              : '--'}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </main>
       </div>
-
-      {/* Summary bar */}
-      {controlsWithStatus.length > 0 && (
-        <SummaryBar
-          passed={stats.passed}
-          failed={stats.failed}
-          notTested={stats.notTested}
-        />
-      )}
-
-      {/* Filter tabs */}
-      {controlsWithStatus.length > 0 && (
-        <div className="flex items-center gap-2" role="tablist" aria-label="Filter controls">
-          {(
-            [
-              { key: 'all', label: 'All' },
-              { key: 'passed', label: 'Passed' },
-              { key: 'failed', label: 'Failed' },
-              { key: 'not-tested', label: 'Not Tested' },
-            ] as const
-          ).map(({ key, label }) => {
-            const isActive = filter === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                onClick={() => setFilter(key)}
-                className="px-3 py-1.5 rounded-md text-xs font-medium transition-opacity"
-                style={{
-                  background: isActive ? 'var(--interactive-primary)' : 'transparent',
-                  color: isActive ? '#fff' : 'var(--text-secondary)',
-                  opacity: isActive ? 1 : 0.8,
-                }}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Controls list */}
-      {filtered.length === 0 ? (
-        <EmptyState
-          icon={controls.length === 0 ? Shield : FileWarning}
-          title={
-            controls.length === 0
-              ? 'No controls defined'
-              : 'No controls match this filter'
-          }
-          description={
-            controls.length === 0
-              ? 'Controls are configured in Settings and tested against evidence each period.'
-              : 'Try selecting a different filter above.'
-          }
-        />
-      ) : (
-        <div className="space-y-2">
-          {filtered.map((control) => (
-            <ControlCard
-              key={control.id}
-              control={control}
-              status={control.status}
-              evidenceCount={control.evidenceCount}
-              evidence={evidence}
-              readOnly={readOnly}
-              isExpanded={expandedId === control.id}
-              onToggle={() => toggleExpanded(control.id)}
-            />
-          ))}
-        </div>
-      )}
     </div>
   );
 }

@@ -391,6 +391,12 @@ router.post('/sessions/:id/module-proposals/:proposalId/approve', async (req: Re
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
     if (!tenantId || !pool) { res.status(400).json({ error: 'Tenant context required' }); return; }
+    // Role enforcement: only approver-level roles (controller, cfo, system_admin) can approve proposals
+    const actorRole = getCloseRoleFromReq(req as AuthRequest);
+    if (actorRole !== 'approver') {
+      res.status(403).json({ error: 'Insufficient role: module proposal approval requires controller, cfo, or system_admin role' });
+      return;
+    }
     const { proposalId } = req.params;
     const userId = (req as unknown as { userId?: string }).userId ?? 'unknown';
     await pool.query(
@@ -409,6 +415,12 @@ router.post('/sessions/:id/module-proposals/:proposalId/skip', async (req: Reque
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
     if (!tenantId || !pool) { res.status(400).json({ error: 'Tenant context required' }); return; }
+    // Role enforcement: reviewer or higher (reviewer, controller, cfo, system_admin) can skip proposals
+    const actorRole = getCloseRoleFromReq(req as AuthRequest);
+    if (actorRole === 'preparer') {
+      res.status(403).json({ error: 'Insufficient role: skipping module proposals requires reviewer, controller, cfo, or system_admin role' });
+      return;
+    }
     const { proposalId } = req.params;
     const userId = (req as unknown as { userId?: string }).userId ?? 'unknown';
     const reason = String(req.body?.reason ?? '').trim();

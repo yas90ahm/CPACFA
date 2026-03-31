@@ -24,6 +24,7 @@ import { runJustifier, hashJustifierInputs } from '../ai/ai_orchestrator.js';
 import { JUSTIFIER_PROMPT_VERSION } from '../ai/prompts/justifier.prompt.js';
 import { executeCascade, CascadeTriggerType } from './cascade_engine.js';
 import { financialEvents, buildEventPacket } from '../events/financial_event_emitter.js';
+import { createIssueForSession } from './issue_service.js';
 
 /** Maximum amount that fits NUMERIC(20,2): 99_999_999_999_999.99 */
 const MAX_AMOUNT = 99_999_999_999_999.99;
@@ -352,6 +353,41 @@ export async function postJE(pool: Pool, tenantId: string, id: string, aiPool?: 
     journalEntry: je,
     lines,
   });
+  // Surface shadow audit findings as close issues so Controllers see them in their workflow
+  if ((shadowResult.severity === 'block' || shadowResult.severity === 'warn') && je.closeSessionId) {
+    const blockFindings = shadowResult.flags.filter((f) => f.severity === 'block');
+    const warnFindings = shadowResult.flags.filter((f) => f.severity === 'warn');
+    // Create critical issues for BLOCK findings
+    for (const finding of blockFindings) {
+      try {
+        await createIssueForSession(pool, {
+          closeSessionId: je.closeSessionId,
+          tenantId,
+          issueType: 'shadow_audit',
+          category: 'journal_entry',
+          severity: 'critical',
+          title: `Shadow Audit BLOCK: ${finding.code ?? 'UNKNOWN'} on JE ${id}`,
+          description: finding.message,
+          sourceRef: { journalEntryId: id, findingId: shadowResult.findingId, code: finding.code, severity: 'block' },
+        });
+      } catch { /* non-fatal issue creation */ }
+    }
+    // Create warning issues for WARN findings
+    for (const finding of warnFindings) {
+      try {
+        await createIssueForSession(pool, {
+          closeSessionId: je.closeSessionId,
+          tenantId,
+          issueType: 'shadow_audit',
+          category: 'journal_entry',
+          severity: 'warning',
+          title: `Shadow Audit WARNING: ${finding.code ?? 'UNKNOWN'} on JE ${id}`,
+          description: finding.message,
+          sourceRef: { journalEntryId: id, findingId: shadowResult.findingId, code: finding.code, severity: 'warn' },
+        });
+      } catch { /* non-fatal issue creation */ }
+    }
+  }
   if (shadowResult.severity === 'block') {
     const messages = shadowResult.flags.map((f) => f.message).join('; ');
     throw new JournalEntryError(`Shadow Auditor blocked post: ${messages}`, 'SHADOW_AUDIT_BLOCK');

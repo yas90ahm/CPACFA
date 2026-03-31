@@ -18,8 +18,8 @@ export const loginSchema = z.object({
 // Register
 // ============================================================================
 
-/** Roles allowed for self-registration. Admin/approver must be assigned by an existing admin. */
-export const allowedRolesSchema = z.enum(['accountant', 'preparer', 'reviewer']);
+/** Roles allowed for self-registration. Internal auditor, PE, external auditor, and system_admin must be invited by admin. */
+export const allowedRolesSchema = z.enum(['controller', 'senior_accountant', 'cfo', 'reviewer']);
 
 const passwordComplexity = z
   .string()

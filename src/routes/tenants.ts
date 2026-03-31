@@ -24,7 +24,7 @@ function isValidPostgresUrl(url: string): boolean {
 }
 
 /** POST /api/tenants — Create tenant. Requires admin role. Optionally validate BYOD connection and run migrations. */
-router.post('/', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+router.post('/', requireAuth, requireRole('system_admin'), async (req: Request, res: Response) => {
   try {
     if (!isDbConfigured()) {
       return res.status(503).json({ error: 'Tenant creation requires DATABASE_URL (control DB)' });

@@ -15,8 +15,8 @@ import { loginSchema, registerSchema, allowedRolesSchema } from '../schemas/auth
 
 const router = Router();
 
-/** Allowed roles for self-registration. Privileged roles (admin, approver, operating_partner) must be assigned by an admin. */
-const ALLOWED_ROLES = ['accountant', 'preparer', 'reviewer'] as const;
+/** Allowed roles for self-registration. Privileged roles (system_admin, internal_auditor, pe_operating_partner, external_auditor) must be invited. */
+const ALLOWED_ROLES = ['controller', 'senior_accountant', 'cfo', 'reviewer'] as const;
 
 /** Register: 50 requests per 15 minutes per IP (generous for automated tests). */
 const registerLimiter = rateLimit({
@@ -87,7 +87,7 @@ router.post('/register', registerLimiter, validateBody(registerSchema), async (r
       return res.status(503).json({ error: 'Register requires DATABASE_URL (Postgres)' });
     }
     const { tenantName, name, email, password, role } = req.body;
-    const roleValue = role ?? 'accountant';
+    const roleValue = role ?? 'controller';
     // H2 fix: Self-registration only creates NEW tenants. Joining existing tenants
     // must go through the team/invite flow managed by an admin.
     if (req.body.tenantId) {

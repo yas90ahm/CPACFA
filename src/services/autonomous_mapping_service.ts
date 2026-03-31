@@ -190,8 +190,10 @@ export async function runAutonomousMapping(
     // TB not available yet — skip validation layers
   }
 
-  // Auto-accept logic
-  const AUTO_ACCEPT_THRESHOLD = 0.80;
+  // Auto-accept logic: use entity-configured threshold, fallback to 0.80
+  const { getEntitySettings } = await import('./entity_settings_service.js');
+  const entitySettings = await getEntitySettings(pool, tenantId, entityId);
+  const AUTO_ACCEPT_THRESHOLD = entitySettings.mappingConfidenceThreshold ?? 0.80;
   const reviewRequired: AutonomousMappingResult['reviewRequired'] = [];
   let autoAccepted = 0;
 
@@ -208,20 +210,20 @@ export async function runAutonomousMapping(
 
     if (canAutoAccept) {
       try {
-        await acceptCoaSuggestion(pool, tenantId, s.id, 'autonomous_mapping');
+        // HITL: Mark as auto_recommended — requires human confirmation before writing to coa_mapping_rules
         await pool.query(
-          `UPDATE ai_coa_suggestions SET auto_accepted = TRUE, auto_accepted_at = NOW() WHERE id = $1 AND tenant_id = $2`,
+          `UPDATE ai_coa_suggestions SET status = 'auto_recommended', auto_accepted = FALSE, auto_accepted_at = NULL WHERE id = $1 AND tenant_id = $2`,
           [s.id, tenantId]
         );
         autoAccepted++;
       } catch {
-        // Accept failed — add to review
+        // Recommendation failed — add to review
         reviewRequired.push({
           accountCode: s.accountCode ?? '',
           accountName: s.accountName,
           suggestedMapping: s.suggestedFsLineLabel,
           confidence: s.confidence,
-          reason: 'Auto-accept failed',
+          reason: 'Auto-recommend failed',
         });
       }
     } else {

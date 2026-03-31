@@ -115,7 +115,7 @@ app.use(requestIdMiddleware);
 
 // AI boundary scope: each request gets its own advisory-context counter
 // so concurrent requests don't interfere with each other.
-app.use((_req, _res, next) => { runInBoundaryScope(next); });
+app.use((_req, _res, next) => { runInBoundaryScope(() => { next(); }); });
 
 // Health check (public)
 app.get('/health', (_req, res) => {

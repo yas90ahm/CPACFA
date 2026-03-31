@@ -30,7 +30,8 @@ export type IssueType =
   | 'period_reopened'
   | 'manual_flag'
   | 'review_rejection'
-  | 'staged_gl_entries';
+  | 'staged_gl_entries'
+  | 'shadow_audit';
 
 export type CloseIssueSeverity = 'critical' | 'blocking' | 'warning' | 'info';
 
@@ -40,6 +41,7 @@ export type CloseIssueCategory =
   | 'adjustment'
   | 'statement'
   | 'review'
+  | 'journal_entry'
   | 'general';
 
 export type CloseIssueStatus =

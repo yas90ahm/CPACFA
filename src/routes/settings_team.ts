@@ -59,7 +59,7 @@ router.post('/invite', async (req: Request, res: Response) => {
       return;
     }
     if (!teamService.canInvite(authReq.role)) {
-      res.status(403).json({ error: 'Only admins and certifiers can invite team members' });
+      res.status(403).json({ error: 'Only system admins, controllers, and CFOs can invite team members' });
       return;
     }
     const body = req.body as { email?: string; name?: string; role?: string };
@@ -108,7 +108,7 @@ router.post('/invite', async (req: Request, res: Response) => {
 });
 
 /** PUT /api/settings/team/:userId/role — change a user's role */
-router.put('/:userId/role', requireRole('admin'), async (req: Request, res: Response) => {
+router.put('/:userId/role', requireRole('system_admin'), async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
@@ -144,7 +144,7 @@ router.put('/:userId/role', requireRole('admin'), async (req: Request, res: Resp
     res.json(result);
   } catch (e) {
     if (e instanceof Error) {
-      if (e.message.includes('Cannot change your own') || e.message.includes('User not found') || e.message.includes('deactivated') || e.message.includes('last certifier')) {
+      if (e.message.includes('Cannot change your own') || e.message.includes('User not found') || e.message.includes('deactivated') || e.message.includes('last CFO')) {
         res.status(400).json({ error: e.message });
         return;
       }
@@ -154,7 +154,7 @@ router.put('/:userId/role', requireRole('admin'), async (req: Request, res: Resp
 });
 
 /** PUT /api/settings/team/:userId/deactivate */
-router.put('/:userId/deactivate', requireRole('admin'), async (req: Request, res: Response) => {
+router.put('/:userId/deactivate', requireRole('system_admin'), async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
@@ -183,7 +183,7 @@ router.put('/:userId/deactivate', requireRole('admin'), async (req: Request, res
     res.json(result);
   } catch (e) {
     if (e instanceof Error) {
-      if (e.message.includes('Cannot deactivate your own') || e.message.includes('User not found') || e.message.includes('already deactivated') || e.message.includes('last admin')) {
+      if (e.message.includes('Cannot deactivate your own') || e.message.includes('User not found') || e.message.includes('already deactivated') || e.message.includes('last system admin')) {
         res.status(400).json({ error: e.message });
         return;
       }
@@ -193,7 +193,7 @@ router.put('/:userId/deactivate', requireRole('admin'), async (req: Request, res
 });
 
 /** PUT /api/settings/team/:userId/reactivate */
-router.put('/:userId/reactivate', requireRole('admin'), async (req: Request, res: Response) => {
+router.put('/:userId/reactivate', requireRole('system_admin'), async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
@@ -225,7 +225,7 @@ router.put('/:userId/reactivate', requireRole('admin'), async (req: Request, res
 });
 
 /** DELETE /api/settings/team/:userId — soft delete (deactivate) */
-router.delete('/:userId', requireRole('admin'), async (req: Request, res: Response) => {
+router.delete('/:userId', requireRole('system_admin'), async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
@@ -249,7 +249,7 @@ router.delete('/:userId', requireRole('admin'), async (req: Request, res: Respon
     res.json(result);
   } catch (e) {
     if (e instanceof Error) {
-      if (e.message.includes('Cannot deactivate your own') || e.message.includes('User not found') || e.message.includes('already deactivated') || e.message.includes('last admin')) {
+      if (e.message.includes('Cannot deactivate your own') || e.message.includes('User not found') || e.message.includes('already deactivated') || e.message.includes('last system admin')) {
         res.status(400).json({ error: e.message });
         return;
       }

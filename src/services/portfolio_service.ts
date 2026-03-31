@@ -388,16 +388,16 @@ export async function getPortfolioSummary(
         const usersRow = await controlPool.query<{ name: string | null; email: string; role: string }>(
           `SELECT name, email, role FROM users
            WHERE tenant_id = $1 AND status = 'active'
-           AND role IN ('preparer', 'accountant', 'reviewer', 'approver')
+           AND role IN ('controller', 'senior_accountant', 'reviewer', 'cfo')
            ORDER BY last_active_at DESC NULLS LAST
            LIMIT 2`,
           [entity.tenant_id]
         );
         for (const u of usersRow.rows) {
-          if ((u.role === 'preparer' || u.role === 'accountant') && !preparer) {
+          if ((u.role === 'senior_accountant' || u.role === 'controller') && !preparer) {
             preparer = u.name ?? u.email;
           }
-          if ((u.role === 'reviewer' || u.role === 'approver') && !reviewer) {
+          if ((u.role === 'reviewer' || u.role === 'cfo') && !reviewer) {
             reviewer = u.name ?? u.email;
           }
         }

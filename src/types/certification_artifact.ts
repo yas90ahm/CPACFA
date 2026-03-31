@@ -79,5 +79,9 @@ export interface CertificationArtifactV1 {
   aiMetadata?: CertificationArtifactAiMetadata;
   /** Gate readiness snapshot at moment of certification. */
   gateSnapshot?: CertificationArtifactGateSnapshot;
+  /** Whether evidence manifest built successfully (false = fallback to empty manifest). */
+  evidenceManifestComplete?: boolean;
+  /** Whether audit chain verification succeeded (false = verification failed or errored). */
+  auditChainVerified?: boolean;
   mode: 'dev' | 'demo' | 'staging' | 'prod';
 }

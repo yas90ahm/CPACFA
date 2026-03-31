@@ -9,23 +9,25 @@
 import type { Pool } from 'pg';
 import { randomBytes } from 'crypto';
 
-/** Roles valid for team members (operating_partner is portfolio-level, not per-tenant). */
+/** Roles valid for team members (persona-based). */
 export const VALID_ROLES = [
-  'accountant',
-  'preparer',
+  'controller',
+  'senior_accountant',
+  'cfo',
   'reviewer',
-  'approver',
-  'certifier',
-  'admin',
+  'internal_auditor',
+  'pe_operating_partner',
+  'external_auditor',
+  'system_admin',
 ] as const;
 
 export type TeamMemberRole = (typeof VALID_ROLES)[number];
 
-/** Roles that can invite others (admin and certifier). */
-const ROLES_CAN_INVITE: string[] = ['admin', 'certifier'];
+/** Roles that can invite others (system_admin, controller, and cfo). */
+const ROLES_CAN_INVITE: string[] = ['system_admin', 'controller', 'cfo'];
 
-/** Roles that can change roles and deactivate (admin only). */
-const ROLES_CAN_MANAGE_TEAM: string[] = ['admin'];
+/** Roles that can change roles and deactivate (system_admin only). */
+const ROLES_CAN_MANAGE_TEAM: string[] = ['system_admin'];
 
 export interface TeamMember {
   id: string;
@@ -164,14 +166,14 @@ export async function changeUserRole(
 
   const oldRole = user.rows[0].role;
 
-  if (oldRole === 'certifier' && newRole !== 'certifier') {
-    const certifierCount = await pool.query<{ count: string }>(
+  if (oldRole === 'cfo' && newRole !== 'cfo') {
+    const cfoCount = await pool.query<{ count: string }>(
       `SELECT COUNT(*)::text FROM users
-       WHERE tenant_id = $1 AND role = 'certifier' AND status = 'active'`,
+       WHERE tenant_id = $1 AND role = 'cfo' AND status = 'active'`,
       [tenantId]
     );
-    if (parseInt(certifierCount.rows[0].count, 10) <= 1) {
-      throw new Error('Cannot remove the last certifier. At least one certifier is required.');
+    if (parseInt(cfoCount.rows[0].count, 10) <= 1) {
+      throw new Error('Cannot remove the last CFO. At least one CFO is required.');
     }
   }
 
@@ -201,14 +203,14 @@ export async function deactivateUser(
   if (!user.rows[0]) throw new Error('User not found');
   if (user.rows[0].status === 'deactivated') throw new Error('User is already deactivated');
 
-  if (user.rows[0].role === 'admin') {
+  if (user.rows[0].role === 'system_admin') {
     const adminCount = await pool.query<{ count: string }>(
       `SELECT COUNT(*)::text FROM users
-       WHERE tenant_id = $1 AND role = 'admin' AND status = 'active'`,
+       WHERE tenant_id = $1 AND role = 'system_admin' AND status = 'active'`,
       [tenantId]
     );
     if (parseInt(adminCount.rows[0].count, 10) <= 1) {
-      throw new Error('Cannot deactivate the last admin.');
+      throw new Error('Cannot deactivate the last system admin.');
     }
   }
 

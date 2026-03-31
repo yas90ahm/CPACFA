@@ -1,6 +1,6 @@
 /**
  * RBAC middleware: restrict route access to specific roles.
- * Usage: router.post('/admin-action', requireRole('admin'), handler)
+ * Usage: router.post('/admin-action', requireRole('system_admin'), handler)
  *        router.get('/reports', requireRole('admin', 'approver', 'reviewer'), handler)
  */
 

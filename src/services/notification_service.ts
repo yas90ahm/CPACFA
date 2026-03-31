@@ -70,7 +70,7 @@ async function getPortfolioRecipients(tenantId: string): Promise<{ userId: strin
      FROM portfolio_access pa
      JOIN users u ON u.id = pa.user_id AND u.status = 'active'
      WHERE pa.tenant_id = $1
-       AND u.role IN ('operating_partner', 'admin')`,
+       AND u.role IN ('pe_operating_partner', 'system_admin', 'cfo')`,
     [tenantId]
   );
   return r.rows.map((row) => ({ userId: row.user_id }));
@@ -84,7 +84,7 @@ async function getSessionPreparer(tenantId: string): Promise<{ userId: string } 
   const r = await control.query<{ id: string }>(
     `SELECT id FROM users
      WHERE tenant_id = $1 AND status = 'active'
-       AND role IN ('preparer', 'accountant')
+       AND role IN ('senior_accountant', 'controller')
      ORDER BY last_active_at DESC NULLS LAST
      LIMIT 1`,
     [tenantId]

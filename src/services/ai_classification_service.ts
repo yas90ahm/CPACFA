@@ -27,6 +27,7 @@ import { searchXBRL } from './xbrl_search_service.js';
 import { listFsTaxonomyLines, getFsTaxonomyLineById } from '../db/repositories/fs_taxonomy_repository.js';
 import { detectSuspects, type MappingSuspect } from './mapping_validation_agent.js';
 import { minus } from '../utils/decimal.js';
+import { assertNoAiMutationContext } from '../lib/ai_boundary.js';
 
 // ---------- Prompt sanitization (H7 fix) ----------
 
@@ -777,11 +778,16 @@ Respond with JSON only. One object per account. Shape:
                 deterministicFlagSnapshot: {
                   suggestionId: suggestion.id,
                   accountName: suggestion.accountName,
+                  accountCode: suggestion.accountCode,
                   action: 'skipped_invalid_taxonomy',
                   fsLineId: suggestion.suggestedFsLineId,
                   confidence: suggestion.confidence,
+                  confidenceBand: suggestion.confidenceBand,
+                  tier: suggestion.tier,
+                  modelVersion: suggestion.modelVersion,
+                  material: true,
                 },
-                userPromptRationale: `Auto-propose skipped: fsLineId '${suggestion.suggestedFsLineId}' not found in taxonomy`,
+                userPromptRationale: `[MATERIAL] Auto-propose skipped: fsLineId '${suggestion.suggestedFsLineId}' not found in taxonomy for account ${suggestion.accountCode ?? '(no code)'} "${suggestion.accountName}" (model: ${suggestion.modelVersion})`,
               });
             } catch { /* non-fatal audit write */ }
             continue;
@@ -812,66 +818,79 @@ Respond with JSON only. One object per account. Shape:
             try {
               await appendEntry(pool, {
                 tenantId,
-                eventType: 'mapping_auto_accepted',
-                deterministicFlagSnapshot: {
-                  suggestionId: suggestion.id,
-                  accountName: suggestion.accountName,
-                  action: 'routed_to_human_review',
-                  fsLineId: suggestion.suggestedFsLineId,
-                  confidence: suggestion.confidence,
-                  suspects: suspectReasons,
-                },
-                userPromptRationale: `Auto-propose blocked: suspects detected (${suspectReasons.join(', ')}) — requires human review`,
-              });
-            } catch { /* non-fatal audit write */ }
-            continue; // Skip — requires human review
-          }
-
-          // Auto-propose: mark as auto_proposed for controller batch-confirmation
-          try {
-            await acceptCoaSuggestion(pool, tenantId, suggestion.id, 'auto_accept');
-            await pool.query(
-              `UPDATE ai_coa_suggestions SET auto_accepted = TRUE, auto_accepted_at = NOW() WHERE id = $1 AND tenant_id = $2`,
-              [suggestion.id, tenantId]
-            );
-            suggestion.status = 'accepted';
-            suggestion.autoAccepted = true;
-
-            // Log successful auto-propose to audit ledger — surfaceable in audit binder
-            try {
-              await appendEntry(pool, {
-                tenantId,
-                eventType: 'mapping_auto_accepted',
+                eventType: 'mapping_auto_recommended',
                 deterministicFlagSnapshot: {
                   suggestionId: suggestion.id,
                   accountName: suggestion.accountName,
                   accountCode: suggestion.accountCode,
-                  action: 'auto_proposed_and_accepted',
+                  action: 'routed_to_human_review',
                   fsLineId: suggestion.suggestedFsLineId,
                   fsLineName: suggestion.suggestedFsLineLabel,
                   confidence: suggestion.confidence,
                   confidenceBand: suggestion.confidenceBand,
                   tier: suggestion.tier,
+                  modelVersion: suggestion.modelVersion,
+                  suspects: suspectReasons,
+                  material: true,
                 },
-                userPromptRationale: `High-confidence mapping auto-proposed: ${suggestion.accountName} → ${suggestion.suggestedFsLineId} (${Math.round(suggestion.confidence * 100)}%)`,
+                userPromptRationale: `[MATERIAL] Auto-propose blocked: suspects detected (${suspectReasons.join(', ')}) for account ${suggestion.accountCode ?? '(no code)'} "${suggestion.accountName}" → ${suggestion.suggestedFsLineId} (model: ${suggestion.modelVersion}) — requires human review`,
               });
             } catch { /* non-fatal audit write */ }
-          } catch (acceptErr) {
-            // Log the FAILURE to audit ledger — never silent
-            console.warn(`[AUTO-PROPOSE] Failed to accept suggestion for '${suggestion.accountName}':`, (acceptErr as Error).message);
+            continue; // Skip — requires human review
+          }
+
+          // HITL: Mark as auto_recommended — requires human confirmation before writing to coa_mapping_rules
+          try {
+            await pool.query(
+              `UPDATE ai_coa_suggestions SET status = 'auto_recommended', auto_accepted = FALSE, auto_accepted_at = NULL WHERE id = $1 AND tenant_id = $2`,
+              [suggestion.id, tenantId]
+            );
+            suggestion.status = 'auto_recommended' as typeof suggestion.status;
+            suggestion.autoAccepted = false;
+
+            // Log successful auto-recommendation to audit ledger — surfaceable in audit binder
             try {
               await appendEntry(pool, {
                 tenantId,
-                eventType: 'mapping_auto_accepted',
+                eventType: 'mapping_auto_recommended',
                 deterministicFlagSnapshot: {
                   suggestionId: suggestion.id,
                   accountName: suggestion.accountName,
-                  action: 'acceptance_failed',
+                  accountCode: suggestion.accountCode,
+                  action: 'auto_recommended_pending_human_confirmation',
                   fsLineId: suggestion.suggestedFsLineId,
+                  fsLineName: suggestion.suggestedFsLineLabel,
                   confidence: suggestion.confidence,
-                  error: (acceptErr as Error).message,
+                  confidenceBand: suggestion.confidenceBand,
+                  tier: suggestion.tier,
+                  modelVersion: suggestion.modelVersion,
+                  material: true,
                 },
-                userPromptRationale: `Auto-propose acceptance failed: ${(acceptErr as Error).message}`,
+                userPromptRationale: `[MATERIAL] High-confidence mapping auto-recommended (pending human confirmation): account ${suggestion.accountCode ?? '(no code)'} "${suggestion.accountName}" → ${suggestion.suggestedFsLineId} (${Math.round(suggestion.confidence * 100)}%, model: ${suggestion.modelVersion})`,
+              });
+            } catch { /* non-fatal audit write */ }
+          } catch (recommendErr) {
+            // Log the FAILURE to audit ledger — never silent
+            console.warn(`[AUTO-RECOMMEND] Failed to recommend suggestion for '${suggestion.accountName}':`, (recommendErr as Error).message);
+            try {
+              await appendEntry(pool, {
+                tenantId,
+                eventType: 'mapping_auto_recommended',
+                deterministicFlagSnapshot: {
+                  suggestionId: suggestion.id,
+                  accountName: suggestion.accountName,
+                  accountCode: suggestion.accountCode,
+                  action: 'recommendation_failed',
+                  fsLineId: suggestion.suggestedFsLineId,
+                  fsLineName: suggestion.suggestedFsLineLabel,
+                  confidence: suggestion.confidence,
+                  confidenceBand: suggestion.confidenceBand,
+                  tier: suggestion.tier,
+                  modelVersion: suggestion.modelVersion,
+                  material: true,
+                  error: (recommendErr as Error).message,
+                },
+                userPromptRationale: `[MATERIAL] Auto-recommendation failed for account ${suggestion.accountCode ?? '(no code)'} "${suggestion.accountName}": ${(recommendErr as Error).message}`,
               });
             } catch { /* non-fatal audit write */ }
           }
@@ -918,6 +937,9 @@ export async function acceptCoaSuggestion(
   reviewedBy: string,
   overrideFsLineId?: string
 ): Promise<{ ruleId: string; version: number }> {
+  // Defense-in-depth: prevent AI context from invoking this mutation path
+  assertNoAiMutationContext();
+
   // Fetch suggestion
   const { rows } = await pool.query<{
     id: string;

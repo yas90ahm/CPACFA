@@ -44,6 +44,10 @@ export interface BuildArtifactInput {
   aiMetadata?: CertificationArtifactAiMetadata;
   /** Gate readiness snapshot at moment of certification. */
   gateSnapshot?: CertificationArtifactGateSnapshot;
+  /** Whether evidence manifest built successfully (false = fallback to empty). */
+  evidenceManifestComplete?: boolean;
+  /** Whether audit chain verification succeeded (false = verification failed). */
+  auditChainVerified?: boolean;
 }
 
 export function buildCertificationArtifact(input: BuildArtifactInput): {
@@ -98,6 +102,8 @@ export function buildCertificationArtifact(input: BuildArtifactInput): {
     }),
     ...(input.aiMetadata && { aiMetadata: input.aiMetadata }),
     ...(input.gateSnapshot && { gateSnapshot: input.gateSnapshot }),
+    ...(input.evidenceManifestComplete !== undefined && { evidenceManifestComplete: input.evidenceManifestComplete }),
+    ...(input.auditChainVerified !== undefined && { auditChainVerified: input.auditChainVerified }),
     mode,
   };
 

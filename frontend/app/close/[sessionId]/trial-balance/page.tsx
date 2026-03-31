@@ -1,1090 +1,545 @@
 'use client';
 
+import { useState, useMemo } from 'react';
 import { useParams } from 'next/navigation';
-import { useState, useCallback, useMemo } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { useTrialBalance } from '@/lib/queries/trial-balance';
-import { useAccountAnalysis } from '@/lib/queries/account-analysis';
-import { MoneyCell } from '@/components/shared/MoneyCell';
-import { EmptyState } from '@/components/shared/EmptyState';
 import { apiFetch } from '@/lib/api';
-import { fmtMoney, isMoneyZero } from '@/lib/money';
-import { sumMoneyStrings, moneyAbs } from '@/lib/money';
+import { fmtMoney, sumMoneyStrings } from '@/lib/money';
 import {
+  LayoutDashboard,
+  FolderClosed,
+  Briefcase,
+  ScrollText,
+  BarChart3,
+  Activity,
+  Settings,
+  Loader2,
+  AlertCircle,
+  CheckCircle2,
   Search,
-  Download,
-  Printer,
-  Check,
-  AlertTriangle,
-  ChevronDown,
-  ChevronRight,
-  Upload,
+  ArrowUpDown,
 } from 'lucide-react';
-import type {
-  TrialBalanceRow,
-  AccountType,
-  GLDrillDownResponse,
-} from '@/lib/types/trial-balance';
 
-/* -------------------------------------------------------------------------- */
-/*  Constants                                                                  */
-/* -------------------------------------------------------------------------- */
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
 
-const ACCOUNT_TYPE_BG: Record<AccountType, string> = {
-  ASSET: 'var(--status-info-bg)',
-  LIABILITY: 'var(--status-warning-bg)',
-  REVENUE: 'var(--status-success-bg)',
-  EXPENSE: 'var(--status-error-bg)',
-  EQUITY: 'var(--ai-badge-bg)',
-};
+interface TBRow {
+  accountCode: string;
+  accountName: string;
+  debit: string;
+  credit: string;
+  reportingCategory?: string;
+  fsLineItem?: string;
+}
 
-type BalanceFilterValue = 'ALL' | 'DEBIT' | 'CREDIT' | 'ZERO';
+interface TBResponse {
+  rows: TBRow[];
+  totalDebits?: string;
+  totalCredits?: string;
+}
 
-/* -------------------------------------------------------------------------- */
-/*  Skeleton Loader                                                            */
-/* -------------------------------------------------------------------------- */
+/* ------------------------------------------------------------------ */
+/*  Nav config                                                         */
+/* ------------------------------------------------------------------ */
 
-function SkeletonRows() {
+const NAV_ITEMS = [
+  { label: 'Dashboard', icon: LayoutDashboard, href: (sid: string) => `/close/${sid}/dashboard` },
+  { label: 'Trial Balance', icon: BarChart3, href: (sid: string) => `/close/${sid}/trial-balance` },
+  { label: 'Close Sessions', icon: FolderClosed, href: () => '/close' },
+  { label: 'Portfolio', icon: Briefcase, href: () => '/portfolio' },
+  { label: 'Audit Trail', icon: ScrollText, href: (sid: string) => `/close/${sid}/audit-trail` },
+  { label: 'Analytics', icon: Activity, href: () => '/close' },
+  { label: 'Settings', icon: Settings, href: () => '/settings/general' },
+];
+
+/* ------------------------------------------------------------------ */
+/*  Sidebar                                                            */
+/* ------------------------------------------------------------------ */
+
+function Sidebar({ sessionId }: { sessionId: string }) {
   return (
-    <>
-      {Array.from({ length: 10 }).map((_, i) => (
-        <div
-          key={i}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            height: 40,
-            borderBottom: '1px solid var(--border-subtle)',
-            backgroundColor:
-              i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-table-row-alt)',
-          }}
-        >
-          {[100, 1, 100, 140, 140, 140].map((w, j) => (
-            <div
-              key={j}
-              style={{
-                width: w === 1 ? undefined : w,
-                flex: w === 1 ? 1 : undefined,
-                padding: '0 12px',
-              }}
+    <aside className="fixed top-0 left-0 h-screen w-[260px] bg-[#2C2416] flex flex-col z-50">
+      <div className="px-6 pt-6 pb-4">
+        <div className="text-[#B8860B] text-xl font-medium tracking-wide">SABIT</div>
+        <div className="text-[#8B7A5E] text-xs mt-0.5">Financial Close Engine</div>
+      </div>
+
+      <nav className="flex-1 px-3 mt-2 space-y-0.5 overflow-y-auto">
+        {NAV_ITEMS.map((item) => {
+          const isActive = item.label === 'Trial Balance';
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.label}
+              href={item.href(sessionId)}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
+                isActive
+                  ? 'bg-[#3B1F0A] text-[#B8860B]'
+                  : 'text-[#8B7A5E] hover:text-[#B8860B] hover:bg-[#3B1F0A]/50'
+              }`}
             >
-              <div
-                style={{
-                  height: 14,
-                  borderRadius: 4,
-                  backgroundColor: 'var(--bg-surface-sunken)',
-                  animation: 'pulse 1.5s ease-in-out infinite',
-                }}
-              />
-            </div>
-          ))}
+              <Icon size={18} />
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
+
+      <div className="px-4 py-4 border-t border-[#3B1F0A]">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-[#3B1F0A] flex items-center justify-center text-[#B8860B] text-xs font-medium">
+            YA
+          </div>
+          <div>
+            <div className="text-sm text-[#B8860B] font-medium">Yasir A.</div>
+            <div className="text-xs text-[#8B7A5E]">Controller</div>
+          </div>
         </div>
-      ))}
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
-    </>
+      </div>
+    </aside>
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/*  Page Component                                                             */
-/* -------------------------------------------------------------------------- */
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                            */
+/* ------------------------------------------------------------------ */
+
+type AccountType = 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expense';
+
+const TYPE_COLORS: Record<AccountType, string> = {
+  Asset: '#2D6A4F',
+  Liability: '#8B6914',
+  Equity: '#3B6EA5',
+  Revenue: '#B8860B',
+  Expense: '#C44B2B',
+};
+
+function deriveAccountType(row: TBRow): AccountType {
+  const cat = (row.reportingCategory ?? '').toLowerCase();
+  if (cat.includes('asset')) return 'Asset';
+  if (cat.includes('liabilit')) return 'Liability';
+  if (cat.includes('equity') || cat.includes('capital') || cat.includes('retained')) return 'Equity';
+  if (cat.includes('revenue') || cat.includes('income') || cat.includes('sale')) return 'Revenue';
+  if (cat.includes('expense') || cat.includes('cost') || cat.includes('depreci')) return 'Expense';
+
+  // Fallback: derive from account code range
+  const code = parseInt(row.accountCode, 10);
+  if (code >= 1000 && code < 2000) return 'Asset';
+  if (code >= 2000 && code < 3000) return 'Liability';
+  if (code >= 3000 && code < 4000) return 'Equity';
+  if (code >= 4000 && code < 5000) return 'Revenue';
+  return 'Expense';
+}
+
+function computeNetBalance(debit: string, credit: string): string {
+  const d = parseFloat(debit || '0') || 0;
+  const c = parseFloat(credit || '0') || 0;
+  return (d - c).toFixed(2);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Skeleton                                                           */
+/* ------------------------------------------------------------------ */
+
+function Skeleton({ className = '' }: { className?: string }) {
+  return <div className={`animate-pulse bg-[#DDD5C2] rounded ${className}`} />;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Main Page                                                          */
+/* ------------------------------------------------------------------ */
 
 export default function TrialBalancePage() {
   const params = useParams();
   const sessionId = params.sessionId as string;
+  const [tbType, setTbType] = useState<'adjusted' | 'unadjusted'>('adjusted');
+  const [search, setSearch] = useState('');
+  const [sortCol, setSortCol] = useState<'code' | 'name' | 'debit' | 'credit' | 'net' | null>(null);
+  const [sortAsc, setSortAsc] = useState(true);
 
-  /* ---- state ---- */
-  const [searchQuery, setSearchQuery] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'ALL' | AccountType>('ALL');
-  const [balanceFilter, setBalanceFilter] = useState<BalanceFilterValue>('ALL');
-  const [isAdjusted, setIsAdjusted] = useState(false);
-  const [expandedRow, setExpandedRow] = useState<string | null>(null);
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-
-  function toggleGroup(type: string) {
-    setCollapsedGroups(prev => ({ ...prev, [type]: !prev[type] }));
-  }
-
-  /* ---- data ---- */
-  const { data, isLoading, error } = useTrialBalance(sessionId, isAdjusted);
-  const { data: analysisAccounts } = useAccountAnalysis(sessionId);
-  const excludedAccounts = useMemo(
-    () => (analysisAccounts ?? []).filter((a) => a.actionTaken === 'excluded'),
-    [analysisAccounts],
-  );
-  const excludedCount = excludedAccounts.length;
-
-  const rows = data?.rows ?? [];
-  const totalDebits = data?.totalDebits ?? '0.00';
-  const totalCredits = data?.totalCredits ?? '0.00';
-  const difference = sumMoneyStrings([
-    totalDebits,
-    `-${totalCredits.replace(/^-/, '')}`,
-  ]);
-  const isBalanced = moneyAbs(difference) < 0.02;
-
-  /* ---- drill-down ---- */
-  const { data: drillDown, isLoading: drillDownLoading } = useQuery({
-    queryKey: ['tb-drill-down', sessionId, expandedRow],
-    queryFn: () =>
-      apiFetch<GLDrillDownResponse>(
-        `/api/close/sessions/${sessionId}/trial-balance/${encodeURIComponent(expandedRow!)}/entries`,
-      ),
-    enabled: !!sessionId && !!expandedRow,
-    staleTime: 30_000,
+  const sessionQuery = useQuery({
+    queryKey: ['session', sessionId],
+    queryFn: () => apiFetch<any>(`/api/close/sessions/${sessionId}`),
+    enabled: !!sessionId,
+  });
+  const readinessQuery = useQuery({
+    queryKey: ['readiness', sessionId],
+    queryFn: () => apiFetch<any>(`/api/close/sessions/${sessionId}/readiness`, { params: { format: 'gates' } }),
+    enabled: !!sessionId,
   });
 
-  /* ---- filtering ---- */
-  const filteredRows = useMemo(() => {
-    let list = rows;
+  const { data, isLoading, error } = useQuery<TBResponse>({
+    queryKey: ['trial-balance', sessionId, tbType],
+    queryFn: () =>
+      apiFetch<TBResponse>(`/api/close/sessions/${sessionId}/trial-balance`, {
+        params: { type: tbType },
+      }),
+    enabled: !!sessionId,
+  });
 
-    // Search filter
-    if (searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      list = list.filter(
+  const rows = data?.rows ?? [];
+
+  // Computed totals — prefer backend-computed values when available.
+  // Fallback: display-only sum using sumMoneyStrings, not used for financial decisions.
+  const totals = useMemo(() => {
+    const totalDebits = data?.totalDebits ?? sumMoneyStrings(rows.map((r) => r.debit));
+    const totalCredits = data?.totalCredits ?? sumMoneyStrings(rows.map((r) => r.credit));
+    const imbalance = (parseFloat(totalDebits) - parseFloat(totalCredits)).toFixed(2);
+    const accountCount = rows.length;
+    // Count non-zero JE adjustments (rows where both debit and credit are non-zero in adjusted mode)
+    const adjustmentCount = tbType === 'adjusted' ? rows.filter((r) => {
+      const d = parseFloat(r.debit || '0') || 0;
+      const c = parseFloat(r.credit || '0') || 0;
+      return d > 0 && c > 0;
+    }).length : 0;
+    return { totalDebits, totalCredits, imbalance, accountCount, adjustmentCount };
+  }, [data, rows, tbType]);
+
+  const isBalanced = Math.abs(parseFloat(totals.imbalance)) < 0.01;
+
+  // Filter and sort
+  const filteredRows = useMemo(() => {
+    let result = rows;
+
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter(
         (r) =>
           r.accountCode.toLowerCase().includes(q) ||
-          r.accountName.toLowerCase().includes(q),
+          r.accountName.toLowerCase().includes(q) ||
+          (r.fsLineItem ?? '').toLowerCase().includes(q)
       );
     }
 
-    // Type filter
-    if (typeFilter !== 'ALL') {
-      list = list.filter((r) => r.accountType === typeFilter);
+    if (sortCol) {
+      result = [...result].sort((a, b) => {
+        let cmp = 0;
+        switch (sortCol) {
+          case 'code':
+            cmp = a.accountCode.localeCompare(b.accountCode);
+            break;
+          case 'name':
+            cmp = a.accountName.localeCompare(b.accountName);
+            break;
+          case 'debit':
+            cmp = (parseFloat(a.debit || '0') || 0) - (parseFloat(b.debit || '0') || 0);
+            break;
+          case 'credit':
+            cmp = (parseFloat(a.credit || '0') || 0) - (parseFloat(b.credit || '0') || 0);
+            break;
+          case 'net':
+            cmp =
+              (parseFloat(a.debit || '0') - parseFloat(a.credit || '0')) -
+              (parseFloat(b.debit || '0') - parseFloat(b.credit || '0'));
+            break;
+        }
+        return sortAsc ? cmp : -cmp;
+      });
     }
 
-    // Balance filter
-    if (balanceFilter === 'DEBIT') {
-      list = list.filter((r) => !isMoneyZero(r.debitBalance));
-    } else if (balanceFilter === 'CREDIT') {
-      list = list.filter((r) => !isMoneyZero(r.creditBalance));
-    } else if (balanceFilter === 'ZERO') {
-      list = list.filter(
-        (r) => isMoneyZero(r.debitBalance) && isMoneyZero(r.creditBalance),
-      );
+    return result;
+  }, [rows, search, sortCol, sortAsc]);
+
+  function handleSort(col: typeof sortCol) {
+    if (sortCol === col) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortCol(col);
+      setSortAsc(true);
     }
-
-    return list;
-  }, [rows, searchQuery, typeFilter, balanceFilter]);
-
-  /* ---- grouped rows by account type ---- */
-  const ACCOUNT_TYPE_ORDER: AccountType[] = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'];
-
-  const groupedRows = useMemo(() => {
-    const groups: { type: AccountType; accounts: typeof filteredRows; groupDebit: string; groupCredit: string; groupNet: string }[] = [];
-    for (const type of ACCOUNT_TYPE_ORDER) {
-      const accounts = filteredRows.filter((r) => r.accountType === type);
-      if (accounts.length === 0) continue;
-      const groupDebit = sumMoneyStrings(accounts.map((a) => a.debitBalance));
-      const groupCredit = sumMoneyStrings(accounts.map((a) => a.creditBalance));
-      const groupNet = sumMoneyStrings(accounts.map((a) => a.netBalance));
-      groups.push({ type, accounts, groupDebit, groupCredit, groupNet });
-    }
-    return groups;
-  }, [filteredRows]);
-
-  /* ---- handlers ---- */
-  const handleRowClick = useCallback(
-    (accountCode: string) => {
-      setExpandedRow((prev) => (prev === accountCode ? null : accountCode));
-    },
-    [],
-  );
-
-  const handleExportCSV = useCallback(() => {
-    const headers = [
-      'Account Code',
-      'Account Name',
-      'Type',
-      'Debit (USD)',
-      'Credit (USD)',
-      'Net Balance',
-    ];
-    const csvRows = [headers];
-    filteredRows.forEach((r) => {
-      csvRows.push([
-        r.accountCode,
-        r.accountName,
-        r.accountType,
-        r.debitBalance,
-        r.creditBalance,
-        r.netBalance,
-      ]);
-    });
-    const csv = csvRows
-      .map((row) =>
-        row.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','),
-      )
-      .join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `trial-balance-${isAdjusted ? 'adjusted' : 'unadjusted'}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, [filteredRows, isAdjusted]);
-
-  const handlePrint = useCallback(() => {
-    window.print();
-  }, []);
-
-  /* ---- render helpers ---- */
-  const glEntries = expandedRow ? (drillDown?.entries ?? []).slice(0, 5) : [];
-
-  // RENDER
+  }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* ------------------------------------------------------------------ */}
-      {/*  1. Balance Banner (sticky top)                                     */}
-      {/* ------------------------------------------------------------------ */}
-      <div
-        style={{
-          position: 'sticky',
-          top: 0,
-          zIndex: 20,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          height: 48,
-          padding: '0 24px',
-          backgroundColor: isBalanced
-            ? 'var(--bg-surface)'
-            : 'var(--status-error-bg)',
-          borderBottom: `2px solid ${isBalanced ? 'var(--status-success)' : 'var(--status-error)'}`,
-        }}
-      >
-        {/* Left: status */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          {isBalanced ? (
-            <Check
-              size={16}
-              style={{ color: 'var(--status-success)' }}
-            />
-          ) : (
-            <AlertTriangle
-              size={16}
-              style={{ color: 'var(--status-error)' }}
-            />
-          )}
-          <span
-            style={{
-              fontSize: 14,
-              fontWeight: 600,
-              color: isBalanced
-                ? 'var(--status-success)'
-                : 'var(--status-error)',
-            }}
-          >
-            {isBalanced
-              ? 'Trial Balance: In Balance'
-              : 'Trial Balance: OUT OF BALANCE'}
-          </span>
-        </div>
+    <div className="min-h-screen bg-[#F5F0E8] flex">
+      <Sidebar sessionId={sessionId} />
 
-        {/* Center: totals */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 24,
-            fontFamily: 'var(--font-mono, monospace)',
-            fontSize: 13,
-            color: 'var(--text-primary)',
-          }}
-        >
-          <span>Total Debits: {fmtMoney(totalDebits, { dollar: true })}</span>
-          <span>
-            Total Credits: {fmtMoney(totalCredits, { dollar: true })}
-          </span>
-          <span>Difference: {fmtMoney(difference, { dollar: true, dash: false })}</span>
-        </div>
-
-        {/* Right: period label */}
-        <span
-          style={{
-            fontSize: 12,
-            color: 'var(--text-tertiary)',
-          }}
-        >
-          {data?.periodLabel ?? ''}
-        </span>
-      </div>
-
-      {/* ------------------------------------------------------------------ */}
-      {/*  2. Toolbar Row                                                     */}
-      {/* ------------------------------------------------------------------ */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          height: 44,
-          padding: '0 24px',
-          marginTop: 16,
-        }}
-      >
-        {/* Search input */}
-        <div style={{ position: 'relative', width: 280 }}>
-          <Search
-            size={16}
-            style={{
-              position: 'absolute',
-              left: 10,
-              top: 10,
-              color: 'var(--text-tertiary)',
-              pointerEvents: 'none',
-            }}
-          />
-          <input
-            type="text"
-            placeholder="Search accounts..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{
-              width: '100%',
-              height: 36,
-              paddingLeft: 34,
-              paddingRight: 12,
-              fontSize: 13,
-              backgroundColor: 'var(--bg-surface-sunken)',
-              border: '1px solid var(--border-default)',
-              borderRadius: 'var(--radius-md)',
-              color: 'var(--text-primary)',
-              outline: 'none',
-            }}
-          />
-        </div>
-
-        {/* Type filter */}
-        <select
-          value={typeFilter}
-          onChange={(e) =>
-            setTypeFilter(e.target.value as 'ALL' | AccountType)
-          }
-          style={{
-            height: 36,
-            padding: '0 12px',
-            fontSize: 13,
-            backgroundColor: 'var(--bg-surface-sunken)',
-            border: '1px solid var(--border-default)',
-            borderRadius: 'var(--radius-md)',
-            color: 'var(--text-primary)',
-            outline: 'none',
-          }}
-        >
-          <option value="ALL">Type: All</option>
-          <option value="ASSET">Asset</option>
-          <option value="LIABILITY">Liability</option>
-          <option value="EQUITY">Equity</option>
-          <option value="REVENUE">Revenue</option>
-          <option value="EXPENSE">Expense</option>
-        </select>
-
-        {/* Balance filter */}
-        <select
-          value={balanceFilter}
-          onChange={(e) =>
-            setBalanceFilter(e.target.value as BalanceFilterValue)
-          }
-          style={{
-            height: 36,
-            padding: '0 12px',
-            fontSize: 13,
-            backgroundColor: 'var(--bg-surface-sunken)',
-            border: '1px solid var(--border-default)',
-            borderRadius: 'var(--radius-md)',
-            color: 'var(--text-primary)',
-            outline: 'none',
-          }}
-        >
-          <option value="ALL">Balance: All</option>
-          <option value="DEBIT">Debit</option>
-          <option value="CREDIT">Credit</option>
-          <option value="ZERO">Zero</option>
-        </select>
-
-        {/* Adjusted / Unadjusted toggle */}
-        <div
-          style={{
-            display: 'flex',
-            borderRadius: 'var(--radius-md)',
-            border: '1px solid var(--border-default)',
-            overflow: 'hidden',
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setIsAdjusted(false)}
-            style={{
-              padding: '0 14px',
-              height: 36,
-              fontSize: 13,
-              fontWeight: 500,
-              border: 'none',
-              cursor: 'pointer',
-              backgroundColor: !isAdjusted
-                ? 'var(--interactive-primary)'
-                : 'var(--bg-surface)',
-              color: !isAdjusted ? 'white' : 'var(--text-secondary)',
-              transition: 'background-color 0.15s, color 0.15s',
-            }}
-          >
-            Unadjusted
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsAdjusted(true)}
-            style={{
-              padding: '0 14px',
-              height: 36,
-              fontSize: 13,
-              fontWeight: 500,
-              border: 'none',
-              borderLeft: '1px solid var(--border-default)',
-              cursor: 'pointer',
-              backgroundColor: isAdjusted
-                ? 'var(--interactive-primary)'
-                : 'var(--bg-surface)',
-              color: isAdjusted ? 'white' : 'var(--text-secondary)',
-              transition: 'background-color 0.15s, color 0.15s',
-            }}
-          >
-            Adjusted
-          </button>
-        </div>
-
-        {/* Spacer */}
-        <div style={{ flex: 1 }} />
-
-        {/* Export CSV */}
-        <button
-          type="button"
-          onClick={handleExportCSV}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '0 14px',
-            height: 36,
-            fontSize: 13,
-            fontWeight: 500,
-            border: '1px solid var(--border-default)',
-            backgroundColor: 'var(--bg-surface)',
-            color: 'var(--text-primary)',
-            borderRadius: 'var(--radius-md)',
-            cursor: 'pointer',
-          }}
-        >
-          <Download size={14} />
-          Export CSV
-        </button>
-
-        {/* Print */}
-        <button
-          type="button"
-          onClick={handlePrint}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '0 14px',
-            height: 36,
-            fontSize: 13,
-            fontWeight: 500,
-            border: 'none',
-            backgroundColor: 'transparent',
-            color: 'var(--text-secondary)',
-            borderRadius: 'var(--radius-md)',
-            cursor: 'pointer',
-          }}
-        >
-          <Printer size={14} />
-          Print
-        </button>
-      </div>
-
-      {/* ------------------------------------------------------------------ */}
-      {/*  3. Table                                                            */}
-      {/* ------------------------------------------------------------------ */}
-      <div
-        style={{
-          flex: 1,
-          overflow: 'auto',
-          margin: '16px 24px 0',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-md)',
-        }}
-      >
-        {/* Header */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            height: 44,
-            position: 'sticky',
-            top: 0,
-            zIndex: 10,
-            backgroundColor: 'var(--bg-surface-sunken)',
-            borderBottom: '2px solid var(--border-table-header)',
-          }}
-        >
-          <div
-            style={{
-              width: 100,
-              padding: '0 12px',
-              fontSize: 11,
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              color: 'var(--text-secondary)',
-            }}
-          >
-            Acct Code
-          </div>
-          <div
-            style={{
-              flex: 1,
-              padding: '0 12px',
-              fontSize: 11,
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              color: 'var(--text-secondary)',
-            }}
-          >
-            Account Name
-          </div>
-          <div
-            style={{
-              width: 100,
-              padding: '0 12px',
-              fontSize: 11,
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              color: 'var(--text-secondary)',
-            }}
-          >
-            Type
-          </div>
-          <div
-            style={{
-              width: 140,
-              padding: '0 12px',
-              fontSize: 11,
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              color: 'var(--text-secondary)',
-              textAlign: 'right',
-            }}
-          >
-            Debit (USD)
-          </div>
-          <div
-            style={{
-              width: 140,
-              padding: '0 12px',
-              fontSize: 11,
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              color: 'var(--text-secondary)',
-              textAlign: 'right',
-            }}
-          >
-            Credit (USD)
-          </div>
-          <div
-            style={{
-              width: 140,
-              padding: '0 12px',
-              fontSize: 11,
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              color: 'var(--text-secondary)',
-              textAlign: 'right',
-            }}
-          >
-            Net Balance
-          </div>
-        </div>
-
-        {/* Body */}
-        {isLoading ? (
-          <SkeletonRows />
-        ) : error ? (
-          <div
-            style={{
-              padding: 48,
-              textAlign: 'center',
-              color: 'var(--status-error)',
-              fontSize: 14,
-            }}
-          >
-            Failed to load trial balance. Please try again.
-          </div>
-        ) : rows.length === 0 ? (
-          <div style={{ padding: 48 }}>
-            <EmptyState
-              icon={Upload}
-              title="No Trial Balance Data"
-              description="Upload a general ledger or trial balance from the dashboard to get started."
-            />
-          </div>
-        ) : filteredRows.length === 0 ? (
-          <div
-            style={{
-              padding: 48,
-              textAlign: 'center',
-              color: 'var(--text-tertiary)',
-              fontSize: 14,
-            }}
-          >
-            No accounts match your filters.
-          </div>
-        ) : (
-          groupedRows.map((group) => (
-            <div key={group.type} style={{ marginBottom: 2 }}>
-              {/* Group header */}
-              <button
-                type="button"
-                onClick={() => toggleGroup(group.type)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  width: '100%',
-                  padding: '8px 12px',
-                  textAlign: 'left',
-                  fontWeight: 500,
-                  fontSize: 13,
-                  color: 'var(--text-primary)',
-                  background: 'var(--bg-surface-sunken)',
-                  border: 'none',
-                  borderBottom: '1px solid var(--border-subtle)',
-                  cursor: 'pointer',
-                }}
-              >
-                {collapsedGroups[group.type] ? <ChevronRight size={14} style={{ flexShrink: 0 }} /> : <ChevronDown size={14} style={{ flexShrink: 0 }} />}
-                <span>{group.type}</span>
-                <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>({group.accounts.length} accounts)</span>
-                <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono, monospace)', fontSize: 13, color: 'var(--text-secondary)' }}>
-                  <MoneyCell value={group.groupNet} />
+      <div className="ml-[260px] flex-1 flex flex-col min-h-screen">
+        {/* Progress Rail */}
+        {(() => {
+          const _gates = (readinessQuery.data as any)?.gates ?? [];
+          const _gatesTotal = (readinessQuery.data as any)?.gatesTotal ?? _gates.length;
+          const _activeGateIndex = _gates.findIndex((g: any) => !g.passing);
+          const _activeGateNum = _activeGateIndex >= 0 ? _activeGateIndex + 1 : _gatesTotal;
+          const _startedAt = (sessionQuery.data as any)?.startedAt ?? (sessionQuery.data as any)?.createdAt ?? new Date().toISOString();
+          const _dayElapsed = Math.max(1, Math.ceil((Date.now() - new Date(_startedAt).getTime()) / (1000 * 60 * 60 * 24)));
+          const _targetDays = (sessionQuery.data as any)?.closeDayTarget ?? 10;
+          const _sessionState = ((sessionQuery.data as any)?.state ?? 'IN_PROGRESS').replace(/_/g, ' ');
+          const _periodLabel = (sessionQuery.data as any)?.periodLabel ?? '';
+          return _gates.length > 0 ? (
+            <div className="bg-[#2C2416] px-6 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-4 text-sm">
+                <span className="text-[#B8860B] font-medium">
+                  Gate {_activeGateNum} of {_gatesTotal}
                 </span>
-              </button>
-              {/* Account rows */}
-              {!collapsedGroups[group.type] && group.accounts.map((row, idx) => {
-            const isExpanded = expandedRow === row.accountCode;
-            return (
-              <div key={row.accountCode}>
-                {/* Data row */}
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => handleRowClick(row.accountCode)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      handleRowClick(row.accountCode);
-                    }
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    height: 40,
-                    cursor: 'pointer',
-                    borderBottom: '1px solid var(--border-subtle)',
-                    backgroundColor:
-                      idx % 2 === 0
-                        ? 'var(--bg-surface)'
-                        : 'var(--bg-table-row-alt)',
-                    transition: 'background-color 0.1s',
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLDivElement).style.backgroundColor =
-                      'var(--bg-table-row-hover)';
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLDivElement).style.backgroundColor =
-                      idx % 2 === 0
-                        ? 'var(--bg-surface)'
-                        : 'var(--bg-table-row-alt)';
-                  }}
-                >
-                  {/* Account Code */}
-                  <div
-                    style={{
-                      width: 100,
-                      padding: '0 12px',
-                      fontFamily: 'var(--font-mono, monospace)',
-                      fontSize: 13,
-                      color: 'var(--text-primary)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4,
-                    }}
-                  >
-                    {isExpanded ? (
-                      <ChevronDown size={14} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />
-                    ) : (
-                      <ChevronRight size={14} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />
-                    )}
-                    {row.accountCode}
-                  </div>
-
-                  {/* Account Name */}
-                  <div
-                    style={{
-                      flex: 1,
-                      padding: '0 12px',
-                      fontSize: 13,
-                      color: 'var(--text-primary)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {row.accountName}
-                  </div>
-
-                  {/* Type chip */}
-                  <div
-                    style={{
-                      width: 100,
-                      padding: '0 12px',
-                    }}
-                  >
-                    <span
-                      style={{
-                        display: 'inline-block',
-                        padding: '2px 8px',
-                        borderRadius: 9999,
-                        fontSize: 11,
-                        fontWeight: 600,
-                        backgroundColor:
-                          ACCOUNT_TYPE_BG[row.accountType] ?? 'var(--bg-surface-sunken)',
-                        color: 'var(--text-primary)',
-                      }}
-                    >
-                      {row.accountType}
-                    </span>
-                  </div>
-
-                  {/* Debit */}
-                  <div style={{ width: 140, padding: '0 12px' }}>
-                    <MoneyCell value={row.debitBalance} />
-                  </div>
-
-                  {/* Credit */}
-                  <div style={{ width: 140, padding: '0 12px' }}>
-                    <MoneyCell value={row.creditBalance} />
-                  </div>
-
-                  {/* Net Balance */}
-                  <div style={{ width: 140, padding: '0 12px' }}>
-                    <MoneyCell value={row.netBalance} />
-                  </div>
-                </div>
-
-                {/* Expanded detail */}
-                {isExpanded && (
-                  <div
-                    style={{
-                      backgroundColor: 'var(--bg-surface-sunken)',
-                      padding: '16px 24px',
-                      borderLeft: '3px solid var(--interactive-primary)',
-                      borderBottom: '1px solid var(--border-subtle)',
-                    }}
-                  >
-                    {drillDownLoading ? (
-                      <div
-                        style={{
-                          fontSize: 13,
-                          color: 'var(--text-tertiary)',
-                          padding: '8px 0',
-                        }}
-                      >
-                        Loading entries...
-                      </div>
-                    ) : glEntries.length === 0 ? (
-                      <div
-                        style={{
-                          fontSize: 13,
-                          color: 'var(--text-tertiary)',
-                          padding: '8px 0',
-                        }}
-                      >
-                        No GL entries found for this account.
-                      </div>
-                    ) : (
-                      <>
-                        <div
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 600,
-                            color: 'var(--text-secondary)',
-                            marginBottom: 8,
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.04em',
-                          }}
-                        >
-                          Recent GL Entries
-                        </div>
-                        <table
-                          style={{
-                            width: '100%',
-                            borderCollapse: 'collapse',
-                            fontSize: 13,
-                          }}
-                        >
-                          <thead>
-                            <tr>
-                              <th
-                                style={{
-                                  textAlign: 'left',
-                                  padding: '4px 12px 4px 0',
-                                  fontSize: 11,
-                                  fontWeight: 600,
-                                  color: 'var(--text-tertiary)',
-                                  textTransform: 'uppercase',
-                                  letterSpacing: '0.04em',
-                                }}
-                              >
-                                Date
-                              </th>
-                              <th
-                                style={{
-                                  textAlign: 'left',
-                                  padding: '4px 12px 4px 0',
-                                  fontSize: 11,
-                                  fontWeight: 600,
-                                  color: 'var(--text-tertiary)',
-                                  textTransform: 'uppercase',
-                                  letterSpacing: '0.04em',
-                                }}
-                              >
-                                Description
-                              </th>
-                              <th
-                                style={{
-                                  textAlign: 'right',
-                                  padding: '4px 12px 4px 0',
-                                  fontSize: 11,
-                                  fontWeight: 600,
-                                  color: 'var(--text-tertiary)',
-                                  textTransform: 'uppercase',
-                                  letterSpacing: '0.04em',
-                                }}
-                              >
-                                Debit
-                              </th>
-                              <th
-                                style={{
-                                  textAlign: 'right',
-                                  padding: '4px 0',
-                                  fontSize: 11,
-                                  fontWeight: 600,
-                                  color: 'var(--text-tertiary)',
-                                  textTransform: 'uppercase',
-                                  letterSpacing: '0.04em',
-                                }}
-                              >
-                                Credit
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {glEntries.map((entry) => (
-                              <tr key={entry.id}>
-                                <td
-                                  style={{
-                                    padding: '6px 12px 6px 0',
-                                    fontFamily: 'var(--font-mono, monospace)',
-                                    color: 'var(--text-primary)',
-                                  }}
-                                >
-                                  {entry.date}
-                                </td>
-                                <td
-                                  style={{
-                                    padding: '6px 12px 6px 0',
-                                    color: 'var(--text-primary)',
-                                  }}
-                                >
-                                  {entry.description ?? '\u2014'}
-                                </td>
-                                <td
-                                  style={{
-                                    padding: '6px 12px 6px 0',
-                                    textAlign: 'right',
-                                  }}
-                                >
-                                  <MoneyCell value={entry.debit} />
-                                </td>
-                                <td
-                                  style={{
-                                    padding: '6px 0',
-                                    textAlign: 'right',
-                                  }}
-                                >
-                                  <MoneyCell value={entry.credit} />
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </>
-                    )}
-                    <div style={{ marginTop: 12 }}>
-                      <a
-                        href={`/close/${sessionId}/trial-balance/accounts/${row.accountCode}`}
-                        style={{
-                          fontSize: 13,
-                          fontWeight: 500,
-                          color: 'var(--interactive-primary)',
-                          textDecoration: 'none',
-                        }}
-                      >
-                        View Full Account Detail &rarr;
-                      </a>
-                    </div>
-                  </div>
-                )}
+                <span className="text-[#8B7A5E]">
+                  Close Day {_dayElapsed} of {_targetDays}
+                </span>
+                <span className="px-2 py-0.5 rounded text-xs font-medium bg-[#3B1F0A] text-[#B8860B]">
+                  {_sessionState}
+                </span>
+                {_periodLabel && <span className="text-[#8B7A5E]">{_periodLabel}</span>}
               </div>
-            );
-          })}
+              <div className="flex items-center gap-1.5">
+                {_gates.map((gate: any, i: number) => {
+                  let bg = '#5C4F3A';
+                  if (gate.passing) bg = '#2D6A4F';
+                  else if (i === _activeGateIndex) bg = '#B8860B';
+                  return (
+                    <div
+                      key={gate.id}
+                      className="w-2.5 h-2.5 rounded-full transition-colors"
+                      style={{ backgroundColor: bg }}
+                      title={`${gate.label}: ${gate.passing ? 'Passing' : 'Pending'}`}
+                    />
+                  );
+                })}
+              </div>
             </div>
-          ))
-        )}
-      </div>
+          ) : null;
+        })()}
 
-      {/* ------------------------------------------------------------------ */}
-      {/*  4. Footer (sticky bottom)                                          */}
-      {/* ------------------------------------------------------------------ */}
-      {!isLoading && rows.length > 0 && (
-        <div
-          style={{
-            position: 'sticky',
-            bottom: 0,
-            zIndex: 20,
-            display: 'flex',
-            alignItems: 'center',
-            height: 52,
-            margin: '0 24px',
-            padding: '0 12px',
-            backgroundColor: isBalanced
-              ? 'var(--bg-certified)'
-              : 'var(--bg-surface)',
-            borderTop: '2px solid var(--border-table-header)',
-          }}
-        >
-          {/* TOTAL label */}
-          <div
-            style={{
-              width: 100,
-              padding: '0 12px',
-              fontSize: 14,
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              color: 'var(--text-primary)',
-            }}
-          >
-            Total
-          </div>
-
-          {/* Account Name spacer */}
-          <div style={{ flex: 1, padding: '0 12px' }} />
-
-          {/* Type spacer */}
-          <div style={{ width: 100, padding: '0 12px' }} />
-
-          {/* Total Debits */}
-          <div style={{ width: 140, padding: '0 12px' }}>
-            <MoneyCell value={totalDebits} variant="grand-total" />
-          </div>
-
-          {/* Total Credits */}
-          <div style={{ width: 140, padding: '0 12px' }}>
-            <MoneyCell value={totalCredits} variant="grand-total" />
-          </div>
-
-          {/* Net */}
-          <div style={{ width: 140, padding: '0 12px' }}>
-            <MoneyCell value={difference} variant="grand-total" zeroDisplay="zero" />
-          </div>
-        </div>
-      )}
-
-      {/* Excluded accounts section */}
-      {excludedCount > 0 && (
-        <details style={{ margin: '16px 24px 0' }}>
-          <summary
-            className="cursor-pointer text-sm"
-            style={{ color: 'var(--text-tertiary)' }}
-          >
-            {excludedCount} excluded account{excludedCount !== 1 ? 's' : ''} (not included in trial balance)
-          </summary>
-          <div style={{ marginTop: 8, opacity: 0.6 }}>
-            {excludedAccounts.map((acct) => (
-              <div
-                key={acct.accountCode}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  height: 36,
-                  padding: '0 12px',
-                  borderBottom: '1px solid var(--border-subtle)',
-                }}
+        {/* Page header */}
+        <main className="flex-1 px-6 py-6">
+          {/* Title row */}
+          <div className="flex items-center justify-between mb-6">
+            <h1 className="text-2xl font-medium text-[#2C2416]">
+              Trial Balance — March 2026
+            </h1>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setTbType('adjusted')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  tbType === 'adjusted'
+                    ? 'bg-[#B8860B] text-[#2C2416]'
+                    : 'bg-[#EDE6D6] border border-[#DDD5C2] text-[#8B7A5E] hover:text-[#2C2416] hover:border-[#B8860B]'
+                }`}
               >
-                <span
-                  style={{
-                    width: 100,
-                    fontFamily: 'var(--font-mono, monospace)',
-                    fontSize: 13,
-                    color: 'var(--text-secondary)',
-                    textDecoration: 'line-through',
-                  }}
-                >
-                  {acct.accountCode}
-                </span>
-                <span
-                  style={{
-                    flex: 1,
-                    fontSize: 13,
-                    color: 'var(--text-secondary)',
-                    textDecoration: 'line-through',
-                  }}
-                >
-                  {acct.accountName}
-                </span>
-                <span
-                  style={{
-                    width: 140,
-                    textAlign: 'right',
-                    fontSize: 13,
-                    color: 'var(--text-tertiary)',
-                    textDecoration: 'line-through',
-                  }}
-                >
-                  {fmtMoney(acct.balance.net, { dollar: true })}
-                </span>
-              </div>
-            ))}
+                Adjusted
+              </button>
+              <button
+                onClick={() => setTbType('unadjusted')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  tbType === 'unadjusted'
+                    ? 'bg-[#B8860B] text-[#2C2416]'
+                    : 'bg-[#EDE6D6] border border-[#DDD5C2] text-[#8B7A5E] hover:text-[#2C2416] hover:border-[#B8860B]'
+                }`}
+              >
+                Unadjusted
+              </button>
+            </div>
           </div>
-        </details>
-      )}
+
+          {/* Stat cards in dark header */}
+          <div className="bg-[#2C2416] rounded-lg p-5 mb-6">
+            <div className="grid grid-cols-5 gap-4">
+              <div>
+                <div className="text-xs text-[#8B7A5E] mb-1">Total Debits</div>
+                <div className="text-xl font-mono text-[#F5F0E8] font-medium">
+                  {isLoading ? '...' : fmtMoney(totals.totalDebits, { dollar: true, dash: false })}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-[#8B7A5E] mb-1">Total Credits</div>
+                <div className="text-xl font-mono text-[#F5F0E8] font-medium">
+                  {isLoading ? '...' : fmtMoney(totals.totalCredits, { dollar: true, dash: false })}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-[#8B7A5E] mb-1">Imbalance</div>
+                <div className={`text-xl font-mono font-medium ${isBalanced ? 'text-[#2D6A4F]' : 'text-[#C44B2B]'}`}>
+                  {isLoading ? '...' : fmtMoney(totals.imbalance, { dollar: true, dash: false })}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-[#8B7A5E] mb-1">Accounts</div>
+                <div className="text-xl font-mono text-[#F5F0E8] font-medium">
+                  {isLoading ? '...' : totals.accountCount}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-[#8B7A5E] mb-1">Adjustments</div>
+                <div className="text-xl font-mono text-[#F5F0E8] font-medium">
+                  {isLoading ? '...' : `${totals.adjustmentCount} JEs`}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Search bar */}
+          <div className="mb-4">
+            <div className="relative max-w-md">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8B7A5E]" />
+              <input
+                type="text"
+                placeholder="Search accounts..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 rounded-lg bg-[#EDE6D6] border border-[#DDD5C2] text-sm text-[#2C2416] placeholder-[#8B7A5E] focus:outline-none focus:border-[#B8860B] transition-colors"
+              />
+            </div>
+          </div>
+
+          {/* Error state */}
+          {error && (
+            <div className="bg-[#F5E4DE] border border-[#C44B2B]/20 rounded-lg p-4 flex items-center gap-3 mb-4">
+              <AlertCircle size={18} className="text-[#C44B2B] shrink-0" />
+              <div>
+                <div className="text-sm font-medium text-[#C44B2B]">Failed to load trial balance</div>
+                <div className="text-xs text-[#C44B2B]/80 mt-0.5">{(error as Error).message}</div>
+              </div>
+            </div>
+          )}
+
+          {/* Table */}
+          <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg overflow-hidden mb-4">
+            {isLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 size={24} className="animate-spin text-[#B8860B]" />
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-[#2C2416]">
+                      <th
+                        className="text-left px-4 py-3 font-medium text-[#B8860B] cursor-pointer select-none"
+                        onClick={() => handleSort('code')}
+                      >
+                        <span className="flex items-center gap-1">
+                          Account Code
+                          <ArrowUpDown size={12} className="text-[#8B7A5E]" />
+                        </span>
+                      </th>
+                      <th
+                        className="text-left px-4 py-3 font-medium text-[#B8860B] cursor-pointer select-none"
+                        onClick={() => handleSort('name')}
+                      >
+                        <span className="flex items-center gap-1">
+                          Name
+                          <ArrowUpDown size={12} className="text-[#8B7A5E]" />
+                        </span>
+                      </th>
+                      <th className="text-left px-4 py-3 font-medium text-[#B8860B]">Type</th>
+                      <th
+                        className="text-right px-4 py-3 font-medium text-[#B8860B] cursor-pointer select-none"
+                        onClick={() => handleSort('debit')}
+                      >
+                        <span className="flex items-center justify-end gap-1">
+                          Debit
+                          <ArrowUpDown size={12} className="text-[#8B7A5E]" />
+                        </span>
+                      </th>
+                      <th
+                        className="text-right px-4 py-3 font-medium text-[#B8860B] cursor-pointer select-none"
+                        onClick={() => handleSort('credit')}
+                      >
+                        <span className="flex items-center justify-end gap-1">
+                          Credit
+                          <ArrowUpDown size={12} className="text-[#8B7A5E]" />
+                        </span>
+                      </th>
+                      <th
+                        className="text-right px-4 py-3 font-medium text-[#B8860B] cursor-pointer select-none"
+                        onClick={() => handleSort('net')}
+                      >
+                        <span className="flex items-center justify-end gap-1">
+                          Net Balance
+                          <ArrowUpDown size={12} className="text-[#8B7A5E]" />
+                        </span>
+                      </th>
+                      <th className="text-left px-4 py-3 font-medium text-[#B8860B]">FS Line</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-8 text-center text-[#8B7A5E]">
+                          {search ? 'No accounts match your search.' : 'No trial balance data available.'}
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredRows.map((row, i) => {
+                        const accountType = deriveAccountType(row);
+                        const net = computeNetBalance(row.debit, row.credit);
+                        return (
+                          <tr
+                            key={`${row.accountCode}-${i}`}
+                            className="border-t border-[#DDD5C2] hover:bg-[#F5F0E8] transition-colors"
+                          >
+                            <td className="px-4 py-2.5 font-mono text-[#2C2416]">
+                              {row.accountCode}
+                            </td>
+                            <td className="px-4 py-2.5 text-[#2C2416]">
+                              {row.accountName}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <span
+                                className="inline-block text-xs font-medium px-2 py-0.5 rounded"
+                                style={{
+                                  color: TYPE_COLORS[accountType],
+                                  backgroundColor: `${TYPE_COLORS[accountType]}18`,
+                                }}
+                              >
+                                {accountType}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2.5 text-right font-mono text-[#2C2416]">
+                              {fmtMoney(row.debit)}
+                            </td>
+                            <td className="px-4 py-2.5 text-right font-mono text-[#2C2416]">
+                              {fmtMoney(row.credit)}
+                            </td>
+                            <td className="px-4 py-2.5 text-right font-mono text-[#2C2416]">
+                              {fmtMoney(net)}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              {row.fsLineItem ? (
+                                <span className="text-[#B8860B] text-sm cursor-pointer hover:underline">
+                                  {row.fsLineItem}
+                                </span>
+                              ) : (
+                                <span className="text-[#8B7A5E] text-sm">--</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Bottom balanced bar */}
+          {!isLoading && rows.length > 0 && (
+            <div
+              className={`rounded-lg px-5 py-3 flex items-center gap-3 text-sm font-medium ${
+                isBalanced
+                  ? 'bg-[#E0EDE8] border border-[#2D6A4F] text-[#2D6A4F]'
+                  : 'bg-[#F5E4DE] border border-[#C44B2B] text-[#C44B2B]'
+              }`}
+            >
+              {isBalanced ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+              {isBalanced ? (
+                <span>
+                  BALANCED — Total Debits {fmtMoney(totals.totalDebits, { dollar: true, dash: false })} = Total Credits{' '}
+                  {fmtMoney(totals.totalCredits, { dollar: true, dash: false })} · Imbalance:{' '}
+                  {fmtMoney(totals.imbalance, { dollar: true, dash: false })} · {totals.accountCount} accounts verified
+                </span>
+              ) : (
+                <span>
+                  IMBALANCED — Total Debits {fmtMoney(totals.totalDebits, { dollar: true, dash: false })} != Total Credits{' '}
+                  {fmtMoney(totals.totalCredits, { dollar: true, dash: false })} · Imbalance:{' '}
+                  {fmtMoney(totals.imbalance, { dollar: true, dash: false })}
+                </span>
+              )}
+            </div>
+          )}
+        </main>
+      </div>
     </div>
   );
 }

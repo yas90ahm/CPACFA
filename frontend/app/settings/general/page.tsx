@@ -1,325 +1,439 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MoneyInput } from '@/components/shared/MoneyInput';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
-import { cn } from '@/lib/utils';
+import {
+  Settings,
+  Globe,
+  Landmark,
+  Users,
+  FileCheck,
+  BookOpen,
+  Layers,
+  Plug,
+  ExternalLink,
+  Pencil,
+  Plus,
+  Loader2,
+  AlertTriangle,
+  CheckCircle2,
+  Shield,
+} from 'lucide-react';
 
-const FISCAL_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const CURRENCIES = [
-  { value: 'USD', label: 'USD — US Dollar' },
-  { value: 'EUR', label: 'EUR — Euro' },
-  { value: 'GBP', label: 'GBP — British Pound' },
-  { value: 'CAD', label: 'CAD — Canadian Dollar' },
-  { value: 'AUD', label: 'AUD — Australian Dollar' },
-  { value: 'JPY', label: 'JPY — Japanese Yen' },
-  { value: 'CHF', label: 'CHF — Swiss Franc' },
-  { value: 'CNY', label: 'CNY — Chinese Yuan' },
-  { value: 'INR', label: 'INR — Indian Rupee' },
-  { value: 'MXN', label: 'MXN — Mexican Peso' },
-  { value: 'BRL', label: 'BRL — Brazilian Real' },
-  { value: 'SGD', label: 'SGD — Singapore Dollar' },
-  { value: 'HKD', label: 'HKD — Hong Kong Dollar' },
-  { value: 'KRW', label: 'KRW — South Korean Won' },
-  { value: 'SEK', label: 'SEK — Swedish Krona' },
-  { value: 'NOK', label: 'NOK — Norwegian Krone' },
-  { value: 'DKK', label: 'DKK — Danish Krone' },
-  { value: 'NZD', label: 'NZD — New Zealand Dollar' },
-  { value: 'ZAR', label: 'ZAR — South African Rand' },
-];
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
 
-export default function GeneralSettingsPage() {
-  const queryClient = useQueryClient();
-  const { data: entitiesData } = useQuery({
-    queryKey: ['settings-entities'],
-    queryFn: () => apiFetch<{ entities: Array<{ id: string; name: string }> }>('/api/settings/entities'),
-  });
-  const entityId = entitiesData?.entities?.[0]?.id ?? null;
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['settings-general', entityId],
-    queryFn: () => apiFetch<{ entityName?: string; fiscalYearEnd?: number; fiscalYearEndDay?: number; baseCurrency?: string; functionalCurrency?: string; autoLockDays?: number; varianceMaterialityDollar?: string; varianceMaterialityPercent?: string }>(`/api/settings/general?entityId=${entityId}`),
-    enabled: !!entityId,
-  });
-
-  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-
-  const updateMutation = useMutation({
-    mutationFn: (payload: { entityName?: string; fiscalYearEnd?: number; fiscalYearEndDay?: number; baseCurrency?: string; functionalCurrency?: string; autoLockDays?: number; varianceMaterialityDollar?: string; varianceMaterialityPercent?: string }) =>
-      apiFetch(`/api/settings/general?entityId=${entityId}`, { method: 'PUT', body: payload }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['settings-general', entityId] });
-      queryClient.invalidateQueries({ queryKey: ['settings-entities'] });
-      setToast({ type: 'success', message: 'Settings saved successfully.' });
-      setTimeout(() => setToast(null), 3000);
-    },
-    onError: (err) => {
-      const msg = err instanceof Error ? err.message : 'Failed to save settings';
-      setToast({ type: 'error', message: msg });
-      setTimeout(() => setToast(null), 5000);
-    },
-  });
-
-  const [entityName, setEntityName] = useState('');
-  const [fiscalYearEnd, setFiscalYearEnd] = useState('December');
-  const [fiscalYearEndDay, setFiscalYearEndDay] = useState('31');
-  const [baseCurrency, setBaseCurrency] = useState('USD');
-  const [functionalCurrency, setFunctionalCurrency] = useState('USD');
-  const [autoLockDays, setAutoLockDays] = useState('0');
-  const [varianceDollar, setVarianceDollar] = useState('');
-  const [variancePercent, setVariancePercent] = useState('');
-
-  useEffect(() => {
-    if (!data) return;
-    setEntityName(data.entityName ?? '');
-    setFiscalYearEnd(data.fiscalYearEnd != null ? (FISCAL_MONTHS[data.fiscalYearEnd - 1] ?? 'December') : 'December');
-    setFiscalYearEndDay(String(data.fiscalYearEndDay ?? 31));
-    setBaseCurrency(data.baseCurrency ?? 'USD');
-    setFunctionalCurrency(data.functionalCurrency ?? 'USD');
-    setAutoLockDays(String(data.autoLockDays ?? 0));
-    setVarianceDollar(data.varianceMaterialityDollar ?? '');
-    setVariancePercent(data.varianceMaterialityPercent ?? '');
-  }, [data]);
-
-  const handleSave = () => {
-    const monthIndex = FISCAL_MONTHS.indexOf(fiscalYearEnd) + 1;
-    updateMutation.mutate({
-      entityName: entityName || undefined,
-      fiscalYearEnd: monthIndex || undefined,
-      fiscalYearEndDay: fiscalYearEndDay ? Number(fiscalYearEndDay) : undefined,
-      baseCurrency: baseCurrency || undefined,
-      functionalCurrency: functionalCurrency || undefined,
-      autoLockDays: autoLockDays ? Number(autoLockDays) : undefined,
-      varianceMaterialityDollar: varianceDollar || undefined,
-      varianceMaterialityPercent: variancePercent || undefined,
-    });
-  };
-
-  if (!entitiesData) return <div className="text-text-secondary">Loading...</div>;
-  if (!entityId) return <div className="text-text-secondary">No entity found. Create a close session first.</div>;
-  if (isLoading && !data) return <div className="text-text-secondary">Loading settings...</div>;
-
-  return (
-    <div className="max-w-2xl space-y-10">
-      <div>
-        <h1 className="text-2xl font-display text-primary">General</h1>
-        <p className="text-text-secondary text-sm mt-1">Entity details and close behavior</p>
-      </div>
-
-      <section className="space-y-6">
-        <h2 className="text-sm font-medium text-text-secondary uppercase tracking-wide">Entity Details</h2>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-text-secondary mb-1">Entity Name</label>
-            <input
-              type="text"
-              value={entityName}
-              onChange={(e) => setEntityName(e.target.value)}
-              className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm text-primary"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-text-secondary mb-1">Fiscal Year End</label>
-            <select
-              value={fiscalYearEnd}
-              onChange={(e) => setFiscalYearEnd(e.target.value)}
-              className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm text-primary"
-            >
-              {FISCAL_MONTHS.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-text-secondary mb-1">Fiscal Year End Day</label>
-            <input
-              type="number"
-              min={1}
-              max={31}
-              value={fiscalYearEndDay}
-              onChange={(e) => setFiscalYearEndDay(e.target.value)}
-              className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm text-primary"
-            />
-            <p className="text-xs text-text-tertiary mt-1">Day of month for fiscal year end. Most companies use the last day of the month (28, 30, or 31).</p>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-text-secondary mb-1">Base Currency</label>
-            <select
-              value={baseCurrency}
-              onChange={(e) => setBaseCurrency(e.target.value)}
-              className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm text-primary"
-            >
-              {CURRENCIES.map((c) => (
-                <option key={c.value} value={c.value}>{c.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-text-secondary mb-1">Functional (Reporting) Currency</label>
-            <select
-              value={functionalCurrency}
-              onChange={(e) => setFunctionalCurrency(e.target.value)}
-              className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm text-primary"
-            >
-              {CURRENCIES.map((c) => (
-                <option key={c.value} value={c.value}>{c.label}</option>
-              ))}
-            </select>
-            <p className="text-xs text-text-tertiary mt-1">Currency used for financial statements. GL amounts in other currencies are translated at upload using their exchange rate.</p>
-          </div>
-        </div>
-      </section>
-
-      <section className="space-y-6">
-        <h2 className="text-sm font-medium text-text-secondary uppercase tracking-wide">Close Settings</h2>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-text-secondary mb-1">Auto-Lock After Certification (days)</label>
-            <input
-              type="number"
-              min={0}
-              value={autoLockDays}
-              onChange={(e) => setAutoLockDays(e.target.value)}
-              className="w-full rounded-input border border-border bg-input px-3 py-2 text-sm text-primary"
-            />
-            <p className="text-xs text-text-tertiary mt-1">Certified periods auto-lock after this many days. Set to 0 for manual lock only.</p>
-          </div>
-          <div>
-            <MoneyInput
-              label="Variance Materiality Threshold"
-              value={varianceDollar}
-              onChange={(v) => setVarianceDollar(v ?? '')}
-            />
-            <p className="text-xs text-text-tertiary mt-1">Variances at or above this amount require documented explanation.</p>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-text-secondary mb-1">Variance Percentage Threshold</label>
-            <div className="flex items-center gap-2 rounded-input border border-border bg-input">
-              <input
-                type="text"
-                inputMode="decimal"
-                value={variancePercent}
-                onChange={(e) => setVariancePercent(e.target.value.replace(/[^0-9.]/g, ''))}
-                className="flex-1 min-w-0 px-3 py-2 text-sm text-primary bg-transparent"
-              />
-              <span className="pr-3 text-text-secondary text-sm">%</span>
-            </div>
-            <p className="text-xs text-text-tertiary mt-1">Variances at or above this percentage require explanation, regardless of dollar amount.</p>
-          </div>
-        </div>
-      </section>
-
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={updateMutation.isPending}
-          className={cn(
-            'px-4 py-2 rounded-input text-sm font-medium transition-colors',
-            updateMutation.isPending
-              ? 'bg-accent/50 text-accent-contrast cursor-wait'
-              : 'bg-accent text-accent-contrast hover:opacity-90'
-          )}
-        >
-          {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
-        </button>
-      </div>
-
-      {/* Demo & Testing Section */}
-      <DemoResetSection />
-
-      {toast && (
-        <div
-          className={cn(
-            'fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg border text-sm shadow-lg transition-all',
-            toast.type === 'success'
-              ? 'border-status-green bg-status-green-dim text-status-green'
-              : 'border-status-red bg-status-red-dim text-status-red'
-          )}
-        >
-          {toast.message}
-        </div>
-      )}
-    </div>
-  );
+interface ERPConnection {
+  id: string;
+  provider: string;
+  status: string;
+  lastSyncAt?: string;
+  connectedAt?: string;
 }
 
-/* ── Demo Reset Section ── */
+interface BankConnection {
+  id: string;
+  bankName: string;
+  accountLast4: string;
+  accountType: string;
+  status: string;
+}
 
-function DemoResetSection() {
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [confirmInput, setConfirmInput] = useState('');
-  const [resetResult, setResetResult] = useState<string | null>(null);
+interface MaterialityConfig {
+  varianceThreshold?: number;
+  dollarThreshold?: number;
+  jeApprovalThreshold?: number;
+  reconTolerance?: number;
+}
 
-  const resetMutation = useMutation({
-    mutationFn: () => apiFetch<{ success: boolean; deleted: Record<string, number>; preserved: Record<string, number> }>('/api/settings/demo-reset', { method: 'POST' }),
-    onSuccess: (data) => {
-      const totalDeleted = Object.values(data.deleted).reduce((a, b) => a + b, 0);
-      setResetResult(`Reset complete. ${totalDeleted} records deleted across ${Object.keys(data.deleted).length} tables. ${data.preserved.users} users preserved.`);
-      setShowConfirm(false);
-      setConfirmInput('');
-      setTimeout(() => { window.location.href = '/close'; }, 3000);
-    },
-    onError: (err) => {
-      setResetResult(`Reset failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    },
+interface TeamMember {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  lastActiveAt?: string;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Sidebar nav items                                                  */
+/* ------------------------------------------------------------------ */
+
+const NAV_ITEMS = [
+  { key: 'general', label: 'General', icon: Settings, href: '/settings/general' },
+  { key: 'erp', label: 'ERP Integrations', icon: Plug, href: '/settings/general' },
+  { key: 'bank', label: 'Bank Connections', icon: Landmark, href: '/settings/general' },
+  { key: 'materiality', label: 'Materiality', icon: Layers, href: '/settings/general' },
+  { key: 'team', label: 'Team', icon: Users, href: '/settings/general' },
+  { key: 'evidence', label: 'Evidence Policy', icon: FileCheck, href: '/settings/general' },
+  { key: 'taxonomy', label: 'Taxonomy', icon: BookOpen, href: '/settings/general' },
+];
+
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                            */
+/* ------------------------------------------------------------------ */
+
+const ERP_PROVIDERS: Record<string, { label: string; description: string }> = {
+  netsuite: { label: 'NetSuite', description: 'Oracle NetSuite ERP' },
+  quickbooks: { label: 'QuickBooks Online', description: 'Intuit QuickBooks' },
+  xero: { label: 'Xero', description: 'Xero Cloud Accounting' },
+};
+
+const ROLE_COLORS: Record<string, string> = {
+  controller: 'bg-[#2D6A4F] text-[#F5F0E8]',
+  cfo: 'bg-[#B8860B] text-[#F5F0E8]',
+  'staff accountant': 'bg-[#3B6EA5] text-[#F5F0E8]',
+  'staff_accountant': 'bg-[#3B6EA5] text-[#F5F0E8]',
+  'vp finance': 'bg-[#8B6914] text-[#F5F0E8]',
+  'vp_finance': 'bg-[#8B6914] text-[#F5F0E8]',
+  admin: 'bg-[#5C4F3A] text-[#F5F0E8]',
+  'system admin': 'bg-[#5C4F3A] text-[#F5F0E8]',
+  'system_admin': 'bg-[#5C4F3A] text-[#F5F0E8]',
+};
+
+function roleBadgeClass(role: string): string {
+  const key = role.toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ');
+  return ROLE_COLORS[key] ?? 'bg-[#8B7A5E] text-[#F5F0E8]';
+}
+
+function fmtDate(d?: string): string {
+  if (!d) return '--';
+  return new Date(d).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function fmtRelative(d?: string): string {
+  if (!d) return '--';
+  const now = Date.now();
+  const then = new Date(d).getTime();
+  const diffMin = Math.floor((now - then) / 60_000);
+  if (diffMin < 1) return 'Just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `${diffH}h ago`;
+  return fmtDate(d);
+}
+
+function fmtDollar(n?: number): string {
+  if (n === undefined || n === null) return '--';
+  return '$' + n.toLocaleString('en-US');
+}
+
+function fmtPercent(n?: number): string {
+  if (n === undefined || n === null) return '--';
+  return n + '%';
+}
+
+/* ------------------------------------------------------------------ */
+/*  Page                                                               */
+/* ------------------------------------------------------------------ */
+
+export default function SettingsPage() {
+  const [activeNav, setActiveNav] = useState('erp');
+
+  /* --- Data fetching --- */
+
+  const { data: erpConnections, isLoading: loadingErp } = useQuery({
+    queryKey: ['erp-connections'],
+    queryFn: () => apiFetch<ERPConnection[]>('/api/accounting-integration/connections'),
   });
 
-  return (
-    <>
-      <div className="mt-8 pt-8" style={{ borderTop: '1px solid var(--border-default)' }}>
-        <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>Demo & Testing</h3>
-        <p className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>
-          Removes all sessions, GL data, mappings, reconciliations, journal entries, and statements.
-          Preserves your users, chart of accounts, and configuration.
-        </p>
-        <button
-          type="button"
-          onClick={() => setShowConfirm(true)}
-          className="px-4 py-2 text-sm font-medium rounded-[var(--radius-md)] transition-colors"
-          style={{ backgroundColor: 'var(--status-error-bg)', color: 'var(--status-error)', border: '1px solid var(--status-error-border)' }}
-        >
-          Reset All Close Data
-        </button>
-        {resetResult && (
-          <p className="mt-3 text-xs" style={{ color: resetResult.includes('failed') ? 'var(--status-error)' : 'var(--status-success)' }}>
-            {resetResult}
-          </p>
-        )}
-      </div>
+  const { data: bankConnections, isLoading: loadingBank } = useQuery({
+    queryKey: ['bank-connections'],
+    queryFn: () => apiFetch<BankConnection[]>('/api/bank-connections'),
+  });
 
-      {showConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/50" onClick={() => { setShowConfirm(false); setConfirmInput(''); }} />
-          <div className="relative bg-surface border border-border rounded-card shadow-xl max-w-sm w-full p-6" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-sans text-lg text-primary mb-2">Reset All Close Data</h3>
-            <p className="text-text-secondary text-sm mb-4">
-              This will permanently delete all close data. Type <strong className="font-mono">RESET</strong> to confirm.
-            </p>
-            <input
-              type="text"
-              value={confirmInput}
-              onChange={(e) => setConfirmInput(e.target.value)}
-              placeholder="Type RESET"
-              className="w-full px-3 py-2 rounded-input border border-border bg-surface text-primary mb-4 font-mono"
-              autoFocus
-            />
-            <div className="flex justify-end gap-3">
-              <button type="button" onClick={() => { setShowConfirm(false); setConfirmInput(''); }} className="px-4 py-2 rounded-input border border-border text-sm">Cancel</button>
+  const { data: materiality, isLoading: loadingMat } = useQuery({
+    queryKey: ['materiality-config'],
+    queryFn: () => apiFetch<MaterialityConfig>('/api/config/materiality'),
+  });
+
+  const { data: teamData, isLoading: loadingTeam } = useQuery({
+    queryKey: ['settings-team'],
+    queryFn: () => apiFetch<{ members: TeamMember[] }>('/api/settings/team'),
+  });
+
+  const team = teamData?.members ?? (Array.isArray(teamData) ? (teamData as unknown as TeamMember[]) : []);
+
+  /* --- Derived ERP list (always show 3 providers) --- */
+
+  const erpList = ['netsuite', 'quickbooks', 'xero'].map((provider) => {
+    const conn = (erpConnections ?? []).find(
+      (c) => c.provider?.toLowerCase().replace(/\s+/g, '') === provider.replace(/\s+/g, '')
+    );
+    return {
+      provider,
+      ...(ERP_PROVIDERS[provider] ?? { label: provider, description: '' }),
+      connected: conn?.status === 'connected',
+      lastSyncAt: conn?.lastSyncAt,
+    };
+  });
+
+  const isLoading = loadingErp || loadingBank || loadingMat || loadingTeam;
+
+  return (
+    <div className="min-h-screen bg-[#F5F0E8] flex">
+      {/* ---- Sidebar ---- */}
+      <aside className="w-[190px] min-h-screen bg-[#EDE6D6] border-r border-[#DDD5C2] flex flex-col">
+        <div className="px-5 pt-6 pb-4">
+          <span className="text-lg font-medium tracking-wide text-[#2C2416]">SABIT</span>
+        </div>
+        <nav className="flex-1 flex flex-col gap-0.5 px-2">
+          {NAV_ITEMS.map((item) => {
+            const Icon = item.icon;
+            const active = item.key === activeNav;
+            return (
               <button
-                type="button"
-                onClick={() => resetMutation.mutate()}
-                disabled={confirmInput !== 'RESET' || resetMutation.isPending}
-                className={cn('px-4 py-2 rounded-input text-sm font-medium', confirmInput === 'RESET' ? 'text-white' : 'cursor-not-allowed opacity-50')}
-                style={{ backgroundColor: confirmInput === 'RESET' ? 'var(--status-error)' : 'var(--bg-surface-sunken)', color: confirmInput === 'RESET' ? 'white' : 'var(--text-tertiary)' }}
+                key={item.key}
+                onClick={() => setActiveNav(item.key)}
+                className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded-md transition-colors text-left w-full ${
+                  active
+                    ? 'text-[#B8860B] font-medium border-l-2 border-[#B8860B] bg-[#F5F0E8]'
+                    : 'text-[#8B7A5E] hover:text-[#2C2416] hover:bg-[#F5F0E8]'
+                }`}
               >
-                {resetMutation.isPending ? 'Resetting...' : 'Confirm Reset'}
+                <Icon size={16} />
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
+
+      {/* ---- Main content ---- */}
+      <main className="flex-1 overflow-y-auto">
+        <div className="max-w-5xl mx-auto px-8 py-8">
+          {/* Header */}
+          <div className="mb-8">
+            <h1 className="text-2xl font-medium text-[#2C2416]">
+              Settings{' '}
+              <span className="text-[#8B7A5E] font-normal">
+                — ERP Integrations
+              </span>
+            </h1>
+          </div>
+
+          {isLoading && (
+            <div className="flex items-center gap-2 text-[#8B7A5E] mb-6">
+              <Loader2 size={16} className="animate-spin" />
+              <span className="text-sm">Loading settings...</span>
+            </div>
+          )}
+
+          {/* ============ ERP CONNECTIONS ============ */}
+          <section className="mb-10">
+            <h2 className="text-sm font-medium text-[#8B7A5E] uppercase tracking-wider mb-4">
+              ERP Connections
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {erpList.map((erp) => (
+                <div
+                  key={erp.provider}
+                  className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-5"
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <h3 className="text-sm font-medium text-[#2C2416]">{erp.label}</h3>
+                      <p className="text-xs text-[#8B7A5E] mt-0.5">{erp.description}</p>
+                    </div>
+                    <Globe size={18} className="text-[#8B7A5E] mt-0.5" />
+                  </div>
+                  {erp.connected ? (
+                    <div className="mt-3">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#2D6A4F] bg-[#2D6A4F]/10 px-2.5 py-1 rounded-full">
+                        <CheckCircle2 size={12} />
+                        Connected
+                      </span>
+                      <p className="text-xs text-[#8B7A5E] mt-2">
+                        Last sync: {fmtRelative(erp.lastSyncAt)}
+                      </p>
+                    </div>
+                  ) : (
+                    <button className="mt-3 text-xs font-medium text-[#F5F0E8] bg-[#2C2416] px-4 py-1.5 rounded-md hover:bg-[#2C2416]/90 transition-colors">
+                      Connect
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* ============ BANK CONNECTIONS ============ */}
+          <section className="mb-10">
+            <h2 className="text-sm font-medium text-[#8B7A5E] uppercase tracking-wider mb-4">
+              Bank Connections{' '}
+              <span className="text-[#8B7A5E] font-normal">(via Plaid)</span>
+            </h2>
+            <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[#DDD5C2]">
+                    <th className="text-left px-5 py-3 text-xs font-medium text-[#8B7A5E] uppercase tracking-wider">
+                      Bank
+                    </th>
+                    <th className="text-left px-5 py-3 text-xs font-medium text-[#8B7A5E] uppercase tracking-wider">
+                      Account
+                    </th>
+                    <th className="text-left px-5 py-3 text-xs font-medium text-[#8B7A5E] uppercase tracking-wider">
+                      Type
+                    </th>
+                    <th className="text-left px-5 py-3 text-xs font-medium text-[#8B7A5E] uppercase tracking-wider">
+                      Status
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(bankConnections ?? []).length === 0 && !loadingBank ? (
+                    <tr>
+                      <td colSpan={4} className="px-5 py-6 text-center text-sm text-[#8B7A5E]">
+                        No bank connections configured
+                      </td>
+                    </tr>
+                  ) : (
+                    (bankConnections ?? []).map((bank) => (
+                      <tr key={bank.id} className="border-b border-[#DDD5C2] last:border-0">
+                        <td className="px-5 py-3 text-[#2C2416] font-medium">{bank.bankName}</td>
+                        <td className="px-5 py-3 text-[#8B7A5E] font-mono">****{bank.accountLast4}</td>
+                        <td className="px-5 py-3 text-[#8B7A5E]">{bank.accountType}</td>
+                        <td className="px-5 py-3">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#2D6A4F]">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#2D6A4F]" />
+                            Active
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* ============ MATERIALITY THRESHOLDS ============ */}
+          <section className="mb-10">
+            <h2 className="text-sm font-medium text-[#8B7A5E] uppercase tracking-wider mb-4">
+              Materiality Thresholds
+            </h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[
+                {
+                  label: 'Variance Materiality',
+                  value: fmtPercent(materiality?.varianceThreshold ?? 5),
+                },
+                {
+                  label: 'Dollar Threshold',
+                  value: fmtDollar(materiality?.dollarThreshold ?? 100000),
+                },
+                {
+                  label: 'JE Approval Threshold',
+                  value: fmtDollar(materiality?.jeApprovalThreshold ?? 50000),
+                },
+                {
+                  label: 'Recon Tolerance',
+                  value: fmtDollar(materiality?.reconTolerance ?? 100),
+                },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-4"
+                >
+                  <p className="text-xs text-[#8B7A5E] mb-1">{item.label}</p>
+                  <p className="text-xl font-medium text-[#2C2416] font-mono">{item.value}</p>
+                  <button className="mt-2 flex items-center gap-1 text-xs text-[#8B7A5E] hover:text-[#2C2416] transition-colors">
+                    <Pencil size={12} />
+                    Edit
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* ============ TEAM MANAGEMENT ============ */}
+          <section className="mb-10">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-medium text-[#8B7A5E] uppercase tracking-wider">
+                Team Management
+              </h2>
+              <button className="inline-flex items-center gap-1.5 text-xs font-medium text-[#F5F0E8] bg-[#2D6A4F] px-4 py-1.5 rounded-md hover:bg-[#2D6A4F]/90 transition-colors">
+                <Plus size={14} />
+                Invite User
               </button>
             </div>
+            <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[#DDD5C2]">
+                    <th className="text-left px-5 py-3 text-xs font-medium text-[#8B7A5E] uppercase tracking-wider">
+                      Name
+                    </th>
+                    <th className="text-left px-5 py-3 text-xs font-medium text-[#8B7A5E] uppercase tracking-wider">
+                      Email
+                    </th>
+                    <th className="text-left px-5 py-3 text-xs font-medium text-[#8B7A5E] uppercase tracking-wider">
+                      Role
+                    </th>
+                    <th className="text-left px-5 py-3 text-xs font-medium text-[#8B7A5E] uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="text-left px-5 py-3 text-xs font-medium text-[#8B7A5E] uppercase tracking-wider">
+                      Last Active
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {team.length === 0 && !loadingTeam ? (
+                    <tr>
+                      <td colSpan={5} className="px-5 py-6 text-center text-sm text-[#8B7A5E]">
+                        No team members found
+                      </td>
+                    </tr>
+                  ) : (
+                    team.map((member) => (
+                      <tr key={member.id} className="border-b border-[#DDD5C2] last:border-0">
+                        <td className="px-5 py-3 text-[#2C2416] font-medium">{member.name}</td>
+                        <td className="px-5 py-3 text-[#8B7A5E]">{member.email}</td>
+                        <td className="px-5 py-3">
+                          <span
+                            className={`inline-block text-xs font-medium px-2.5 py-0.5 rounded-full ${roleBadgeClass(member.role)}`}
+                          >
+                            {member.role}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#2D6A4F]">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#2D6A4F]" />
+                            Active
+                          </span>
+                        </td>
+                        <td className="px-5 py-3 text-xs text-[#8B7A5E]">
+                          {fmtRelative(member.lastActiveAt)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* ============ AUDIT NOTICE ============ */}
+          <div className="bg-[#8B6914]/10 border border-[#8B6914]/30 rounded-lg px-5 py-4 flex items-start gap-3">
+            <Shield size={18} className="text-[#8B6914] mt-0.5 shrink-0" />
+            <p className="text-sm text-[#8B6914]">
+              All configuration changes are logged to the tamper-evident audit trail and
+              cryptographically linked to the operator who made the change.
+            </p>
           </div>
         </div>
-      )}
-    </>
+      </main>
+    </div>
   );
 }
