@@ -309,7 +309,7 @@ function TrialBalanceSummary({ rows }: { rows: TBRow[] }) {
     const debit = parseFloat(row.debit || '0') || 0;
     const credit = parseFloat(row.credit || '0') || 0;
     const net = debit - credit;
-    const cat = (row.reportingCategory || row.accountName || '').toLowerCase();
+    const cat = (row?.reportingCategory ?? row?.accountName ?? '').toLowerCase();
 
     if (cat.includes('asset')) totalAssets += net;
     else if (cat.includes('liabilit')) totalLiabilities += Math.abs(net);
@@ -382,7 +382,7 @@ function buildAttentionItems(
   const items: AttentionItem[] = [];
 
   // Pending JE approvals
-  const pendingJes = jes.filter((j) => j.status === 'proposed' || j.status === 'pending_approval');
+  const pendingJes = jes.filter((j) => j?.status === 'proposed' || j?.status === 'pending_approval');
   if (pendingJes.length > 0) {
     items.push({
       id: 'aje-pending',
@@ -394,7 +394,7 @@ function buildAttentionItems(
   }
 
   // Unexplained material variances
-  const unexplained = variances.filter((v) => v.isMaterial && v.explanationStatus !== 'explained');
+  const unexplained = variances.filter((v) => v?.isMaterial && v?.explanationStatus !== 'explained');
   if (unexplained.length > 0) {
     items.push({
       id: 'var-unexplained',
@@ -729,13 +729,13 @@ export default function CloseDashboardPage() {
   const recons = reconsQuery.data ?? [];
   const issues = issuesQuery.data ?? [];
 
-  const pendingJes = jes.filter((j) => j.status === 'proposed' || j.status === 'pending_approval').length;
-  const postedJes = jes.filter((j) => j.status === 'posted').length;
+  const pendingJes = jes.filter((j) => j?.status === 'proposed' || j?.status === 'pending_approval').length;
+  const postedJes = jes.filter((j) => j?.status === 'posted').length;
   const aiDrafts = variances.filter(
     (v) => v.explanationStatus === 'ai_drafted' || v.explanationStatus === 'draft_ready'
   ).length;
 
-  const completedRecons = recons.filter((r) => r.status === 'completed' || r.status === 'approved').length;
+  const completedRecons = recons.filter((r) => r?.status === 'completed' || r?.status === 'approved').length;
 
   const attentionItems = buildAttentionItems(jes, variances, recons, issues);
 
@@ -746,7 +746,7 @@ export default function CloseDashboardPage() {
 
   // Find specific gates or use index-based fallback
   function findGate(keyword: string, index: number): Gate | undefined {
-    return gates.find((g) => g.label.toLowerCase().includes(keyword)) ?? gates[index];
+    return gates.find((g) => g?.label?.toLowerCase()?.includes(keyword)) ?? gates[index];
   }
 
   const tbGate = findGate('trial', 0);
