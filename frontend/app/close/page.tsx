@@ -252,6 +252,13 @@ export default function CloseSessionsPage() {
   const [newYear, setNewYear] = useState('');
   const [createError, setCreateError] = useState('');
 
+  // Fetch tenant/entity name from settings (not localStorage user name)
+  const entityQuery = useQuery({
+    queryKey: ['entity-info'],
+    queryFn: () => apiFetch<{ name?: string; id?: string; companyName?: string; entityName?: string }>('/api/settings/general'),
+  });
+  const tenantDisplayName = entityQuery.data?.companyName ?? entityQuery.data?.entityName ?? entityQuery.data?.name ?? 'Your Entity';
+
   const createMutation = useMutation({
     mutationFn: (body: { periodStart: string; periodEnd: string }) =>
       apiFetch<{ id: string }>('/api/close/sessions', {
@@ -275,7 +282,7 @@ export default function CloseSessionsPage() {
           id: String(s.id ?? ''),
           state: String(s.status ?? s.state ?? 'OPEN').toUpperCase().replace(/-/g, '_'),
           periodLabel: String(s.periodLabel ?? `${s.periodStart ?? ''} to ${s.periodEnd ?? ''}`),
-          entityName: String(s.entityName ?? s.entityId ?? 'Unknown Entity'),
+          entityName: String(s.entityName ?? s.entityId ?? ''),
           gatesPassing: Number(s.gatesPassing ?? 0),
           gatesTotal: Number(s.gatesTotal ?? 11),
           certifiedBy: s.certifiedBy ? String(s.certifiedBy) : undefined,
@@ -422,7 +429,9 @@ export default function CloseSessionsPage() {
 
                     {/* Entity */}
                     <span className="text-sm text-[#5C4F3A] truncate">
-                      {session.entityName || '-'}
+                      {(!session.entityName || session.entityName === 'default' || session.entityName === session.id || /^[0-9a-f-]{20,}$/i.test(session.entityName))
+                        ? tenantDisplayName
+                        : session.entityName}
                     </span>
 
                     {/* Status */}
@@ -472,7 +481,7 @@ export default function CloseSessionsPage() {
             <div className="mb-4">
               <label className="block text-xs font-medium text-[#5C4F3A] uppercase tracking-wider mb-1">Entity</label>
               <div className="px-3 py-2 rounded-md border border-[#DDD5C2] bg-[#DDD5C2]/30 text-[#2C2416] text-sm">
-                {(() => { try { return JSON.parse(localStorage.getItem('cpa_auth_user') ?? '{}').name ?? 'Default Entity'; } catch { return 'Default Entity'; } })()}
+                {tenantDisplayName}
               </div>
               <p className="text-xs text-[#8B7A5E] mt-1">Entity is assigned from your workspace</p>
             </div>

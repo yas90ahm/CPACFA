@@ -236,13 +236,15 @@ function ProgressRail({
       </div>
       <div className="flex items-center gap-1.5">
         {gates.map((gate, i) => {
-          let bg = '#5C4F3A'; // pending (grey)
-          if (gate.passing) bg = '#2D6A4F'; // green
-          else if (i === activeGateIndex) bg = '#B8860B'; // gold active
+          const isActive = i === activeGateIndex && !gate.passing;
+          let bg = '#DDD5C2'; // pending (muted ledger-200)
+          if (gate.passing) bg = '#2D6A4F'; // forest green
+          else if (isActive) bg = '#B8860B'; // gold active
+          const sizeClass = isActive ? 'w-3 h-3' : 'w-2.5 h-2.5';
           return (
             <div
               key={gate.id}
-              className="w-2.5 h-2.5 rounded-full transition-colors"
+              className={`${sizeClass} rounded-full transition-colors`}
               style={{ backgroundColor: bg }}
               title={`${gate.label}: ${gate.passing ? 'Passing' : 'Pending'}`}
             />
@@ -520,20 +522,32 @@ const GATE_ROUTE_MAP: Record<string, string> = {
   cash_rec_complete: 'reconciliation',
 };
 
+const STEP_LABELS: Record<string, string> = {
+  'trial-balance': 'Trial Balance',
+  'mapping': 'Account Mapping',
+  'reconciliation': 'Reconciliation',
+  'adjustments': 'Journal Entries',
+  'statements': 'Statements',
+  'variance': 'Variance Analysis',
+  'review': 'Review & Certify',
+  'dashboard': 'Dashboard',
+  'evidence': 'Evidence',
+  'pipeline': 'Pipeline',
+};
+
 function ContinueCloseButton({ sessionId, gates }: { sessionId: string; gates: Gate[] }) {
   const firstFailing = gates.find((g) => !g.passing);
   const route = firstFailing
-    ? GATE_ROUTE_MAP[firstFailing.id] ?? 'dashboard'
+    ? GATE_ROUTE_MAP[firstFailing.id] ?? 'review'
     : 'review';
-  const label = firstFailing ? firstFailing.label : 'Review & Certify';
+  const stepLabel = STEP_LABELS[route] ?? 'Review & Certify';
 
   return (
     <Link
       href={`/close/${sessionId}/${route}`}
       className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#B8860B] text-sm font-medium text-[#2C2416] hover:bg-[#A07608] transition-colors"
     >
-      {label}
-      <ChevronRight size={16} />
+      Continue to {stepLabel} &rarr;
     </Link>
   );
 }
@@ -774,12 +788,32 @@ export default function CloseDashboardPage() {
   const periodLabel = session?.periodLabel ?? 'Close Session';
   const entityName = session?.entityName ?? '';
 
-  // Derive period end from periodLabel or use current month end
-  const now = new Date();
-  const periodEnd = `${now.toLocaleString('en-US', { month: 'long' })} ${new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()}, ${now.getFullYear()}`;
+  // Derive period end from session periodLabel (e.g. "2026-03-01 to 2026-03-31")
+  const periodEndDisplay = (() => {
+    const match = periodLabel.match(/(\d{4})-(\d{2})-(\d{2})$/);
+    if (match) {
+      const d = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    }
+    // Fallback: try to parse the last date-like segment
+    const fallback = new Date(periodLabel.split(' to ').pop() ?? '');
+    if (!isNaN(fallback.getTime())) {
+      return fallback.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    }
+    return periodLabel;
+  })();
 
-  // Quarter
-  const quarter = `Q${Math.ceil((now.getMonth() + 1) / 3)} FY${now.getFullYear()}`;
+  // Quarter — derive from session period, not current date
+  const quarter = (() => {
+    const match = periodLabel.match(/(\d{4})-(\d{2})/);
+    if (match) {
+      const year = Number(match[1]);
+      const month = Number(match[2]);
+      return `Q${Math.ceil(month / 3)} FY${year}`;
+    }
+    const now = new Date();
+    return `Q${Math.ceil((now.getMonth() + 1) / 3)} FY${now.getFullYear()}`;
+  })();
 
   // Updated ago
   const updatedAgo = session?.statementsGeneratedAt
@@ -823,7 +857,7 @@ export default function CloseDashboardPage() {
               <div>
                 <h1 className="text-2xl font-medium text-[#2C2416]">{periodLabel}</h1>
                 <p className="text-sm text-[#8B7A5E] mt-1">
-                  {[entityName, `Period ending ${periodEnd}`, quarter, `Updated ${updatedAgo}`]
+                  {[entityName, `Period ending ${periodEndDisplay}`, quarter, `Updated ${updatedAgo}`]
                     .filter(Boolean)
                     .join(' \u00B7 ')}
                 </p>
