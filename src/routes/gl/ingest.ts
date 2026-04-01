@@ -133,6 +133,17 @@ router.post(
       if (!periodLabel) periodLabel = getDefaultPeriod();
       const uploadedBy = (req as { userId?: string; tenantId?: string }).userId ?? (req as { userId?: string; tenantId?: string }).tenantId;
 
+      // Resolve session date range for period validation
+      let sessionPeriodStart: string | null = null;
+      let sessionPeriodEnd: string | null = null;
+      if (sessionIdParam && pool && tenantId) {
+        try {
+          const sess = await getCloseSessionById(pool, tenantId, sessionIdParam);
+          sessionPeriodStart = sess?.periodStart ?? null;
+          sessionPeriodEnd = sess?.periodEnd ?? null;
+        } catch { /* fall through */ }
+      }
+
       let columnMapping: import('../../services/gl_upload_service.js').GLColumnMapping | null = null;
       if (req.body?.columnMapping && typeof req.body.columnMapping === 'string') {
         try {
@@ -151,6 +162,33 @@ router.post(
         uploadedBy,
         columnMapping
       );
+
+      // Post-upload: validate entry dates fall within session period
+      let outOfPeriodCount = 0;
+      let outOfPeriodRemoved = 0;
+      if (result.success && sessionPeriodStart && sessionPeriodEnd && pool) {
+        try {
+          const outOfPeriodResult = await pool.query<{ cnt: string }>(
+            `SELECT COUNT(*)::int AS cnt FROM core.general_ledger
+             WHERE tenant_id = $1 AND period_label = $2
+               AND entry_date IS NOT NULL
+               AND (entry_date < $3::date OR entry_date > $4::date)`,
+            [tenantId, periodLabel, sessionPeriodStart, sessionPeriodEnd]
+          );
+          outOfPeriodCount = Number(outOfPeriodResult.rows[0]?.cnt ?? 0);
+          if (outOfPeriodCount > 0) {
+            // Remove out-of-period entries and report
+            const deleteResult = await pool.query(
+              `DELETE FROM core.general_ledger
+               WHERE tenant_id = $1 AND period_label = $2
+                 AND entry_date IS NOT NULL
+                 AND (entry_date < $3::date OR entry_date > $4::date)`,
+              [tenantId, periodLabel, sessionPeriodStart, sessionPeriodEnd]
+            );
+            outOfPeriodRemoved = deleteResult.rowCount ?? 0;
+          }
+        } catch { /* non-fatal — period validation is best-effort */ }
+      }
 
       if (!result.success) {
         if (result.imbalancedCount > 0) {
@@ -190,10 +228,16 @@ router.post(
         }
       }
 
+      const acceptedCount = (result.balancedCount ?? 0) - outOfPeriodRemoved;
+      const periodWarning = outOfPeriodRemoved > 0
+        ? ` ${outOfPeriodRemoved} entries outside the session period (${sessionPeriodStart} to ${sessionPeriodEnd}) were excluded.`
+        : '';
       res.status(200).json({
         status: 'success',
-        message: `${result.balancedCount} entries uploaded successfully`,
+        message: `${acceptedCount} entries uploaded successfully.${periodWarning}`,
         ...result,
+        entriesInserted: acceptedCount,
+        outOfPeriodExcluded: outOfPeriodRemoved,
       });
     } catch (err) {
       const multerErr = err as { code?: string };

@@ -33,8 +33,15 @@ interface TBRow {
   accountName: string;
   debit: string;
   credit: string;
+  /** API may return debitBalance/creditBalance instead of debit/credit */
+  debitBalance?: string;
+  creditBalance?: string;
+  netBalance?: string;
+  accountType?: string;
   reportingCategory?: string;
   fsLineItem?: string;
+  mappingReportingLineName?: string;
+  mappingStatus?: string;
 }
 
 interface TBResponse {
@@ -190,7 +197,14 @@ export default function TrialBalancePage() {
     enabled: !!sessionId,
   });
 
-  const rows = data?.rows ?? [];
+  // Normalize: API may return debitBalance/creditBalance or debit/credit
+  const rows = (data?.rows ?? []).map((r) => ({
+    ...r,
+    debit: r.debit ?? r.debitBalance ?? '0',
+    credit: r.credit ?? r.creditBalance ?? '0',
+    reportingCategory: r.reportingCategory ?? r.accountType ?? '',
+    fsLineItem: r.fsLineItem ?? r.mappingReportingLineName ?? '',
+  }));
 
   const handleGLUpload = useCallback(async (file: File) => {
     setUploading(true);
