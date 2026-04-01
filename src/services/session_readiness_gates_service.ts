@@ -50,71 +50,88 @@ export async function getReadinessGates(
   const readiness = await computeReadiness(pool, tenantId, session);
   const gates: ReadinessGate[] = [];
 
-  // 1. TB Balanced (integrity)
+  // --- Prerequisite: check if GL data exists ---
+  // If no accounts exist, almost all gates should fail (can't close what you haven't started)
+  const mappingResult = await checkMappingCompleteness(pool, tenantId, closeSessionId, entityId);
+  const accountCount = mappingResult.total_accounts ?? 0;
+  const hasData = accountCount > 0;
+
+  // 1. TB Balanced (integrity) — must have accounts AND balance
   gates.push({
     id: 'tb_balanced',
     name: 'Trial Balance Balanced',
     description: 'Total debits must equal total credits',
-    passing: readiness.integrityChecksPass !== false,
-    detail: readiness.integrityChecksPass ? 'Debits equal credits' : 'Trial balance or rounding checks failed',
+    passing: hasData && readiness.integrityChecksPass !== false,
+    detail: !hasData
+      ? 'No trial balance uploaded — upload a GL to begin'
+      : readiness.integrityChecksPass
+        ? `Debits equal credits · ${accountCount} accounts`
+        : 'Trial balance or rounding checks failed',
     category: 'hard',
     navigateTo: '/trial-balance',
   });
 
-  // 2. All Accounts Mapped
-  const mappingResult = await checkMappingCompleteness(pool, tenantId, closeSessionId, entityId);
+  // 2. All Accounts Mapped — requires data to exist
   gates.push({
     id: 'all_accounts_mapped',
     name: 'All Accounts Mapped',
     description: 'Every trial balance account must be mapped to a reporting line item',
-    passing: mappingResult.passes,
-    detail: `${mappingResult.mapped_accounts}/${mappingResult.total_accounts} accounts mapped`,
+    passing: hasData && mappingResult.passes,
+    detail: !hasData
+      ? 'Upload a trial balance first'
+      : `${mappingResult.mapped_accounts}/${mappingResult.total_accounts} accounts mapped`,
     category: 'hard',
     navigateTo: '/mapping',
   });
 
-  // 3. Reconciliations Complete
+  // 3. Reconciliations Complete — requires data
   const reconResult = await checkReconCompleteness(pool, tenantId, closeSessionId);
   const reconCompleteCount = reconResult.completed + reconResult.approved;
   gates.push({
     id: 'recons_complete',
     name: 'Reconciliations Complete',
     description: 'All required accounts must be reconciled with supporting documentation',
-    passing: reconResult.passes,
-    detail: `${reconCompleteCount}/${reconResult.total_required} reconciliations complete`,
+    passing: hasData && reconResult.passes,
+    detail: !hasData
+      ? 'Upload a trial balance first'
+      : `${reconCompleteCount}/${reconResult.total_required} reconciliations complete`,
     category: 'hard',
     navigateTo: '/reconciliation',
   });
 
-  // 4. AJE Templates Resolved
+  // 4. AJE Templates Resolved — requires data
   const templateResult = await checkTemplateCompleteness(pool, tenantId, closeSessionId);
   gates.push({
     id: 'templates_resolved',
     name: 'Recurring Entries Resolved',
     description: 'All proposed recurring entry templates must be applied or skipped',
-    passing: templateResult.passes,
-    detail: templateResult.passes
-      ? `${templateResult.applied} applied, ${templateResult.skipped} skipped`
-      : `${templateResult.pending} template(s) pending`,
+    passing: hasData && templateResult.passes,
+    detail: !hasData
+      ? 'Upload a trial balance first'
+      : templateResult.passes
+        ? `${templateResult.applied} applied, ${templateResult.skipped} skipped`
+        : `${templateResult.pending} template(s) pending`,
     category: 'hard',
     navigateTo: '/adjustments',
   });
 
-  // 5. Statements Current
+  // 5. Statements Current — requires data
   const pkgs = await statementPackageRepo.listStatementPackagesByCloseSessionId(pool, tenantId, closeSessionId, 1);
   const statementsExist = pkgs.length > 0;
   const statementsStale = !!session.statementsStaleSince;
-  const statementsPass = statementsExist && !statementsStale;
+  const statementsPass = hasData && statementsExist && !statementsStale;
   gates.push({
     id: 'statements_current',
     name: 'Statements Current',
     description: 'Financial statements must be generated and not stale',
     passing: statementsPass,
-    detail: !statementsExist
-      ? 'Statements not yet generated'
-      : statementsStale
-        ? 'Statements are stale — regenerate after recent changes'
-        : 'Statements generated and current',
+    detail: !hasData
+      ? 'Upload a trial balance first'
+      : !statementsExist
+        ? 'Statements not yet generated'
+        : statementsStale
+          ? 'Statements are stale — regenerate after recent changes'
+          : 'Statements generated and current',
     category: 'hard',
     navigateTo: '/statements',
   });
@@ -193,13 +210,15 @@ export async function getReadinessGates(
     navigateTo: '/reconciliation',
   });
 
-  // 9. Checklist Complete
+  // 9. Checklist Complete — requires data
   gates.push({
     id: 'checklist_complete',
     name: 'Close Checklist Complete',
     description: 'All required checklist items must be completed or skipped',
-    passing: readiness.checklistComplete !== false,
-    detail: readiness.checklistComplete !== false ? 'All required items complete' : 'Required checklist items incomplete',
+    passing: hasData && readiness.checklistComplete !== false,
+    detail: !hasData
+      ? 'Upload a trial balance first'
+      : readiness.checklistComplete !== false ? 'All required items complete' : 'Required checklist items incomplete',
     category: 'hard',
     navigateTo: '/checklist',
   });
@@ -237,13 +256,15 @@ export async function getReadinessGates(
     navigateTo: '/reconciliation',
   });
 
-  // 11. Material JEs Approved
-  const jesApproved = readiness.materialJesApproved !== false;
-  const jesDetail = !jesApproved
-    ? 'Draft or proposed JEs pending'
-    : readiness.jeTotal === 0
-      ? 'No journal entries posted'
-      : 'All JEs approved or rejected';
+  // 11. Material JEs Approved — requires data
+  const jesApproved = hasData && readiness.materialJesApproved !== false;
+  const jesDetail = !hasData
+    ? 'Upload a trial balance first'
+    : !jesApproved
+      ? 'Draft or proposed JEs pending'
+      : readiness.jeTotal === 0
+        ? 'No journal entries posted'
+        : 'All JEs approved or rejected';
   gates.push({
     id: 'material_jes_approved',
     name: 'Material JEs Approved',
