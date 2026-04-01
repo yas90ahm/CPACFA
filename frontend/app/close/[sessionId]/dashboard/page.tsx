@@ -226,7 +226,7 @@ function ProgressRail({
           Close Day {dayElapsed} of {targetDays}
         </span>
         <span className="px-2 py-0.5 rounded text-xs font-medium bg-[#3B1F0A] text-[#B8860B]">
-          {sessionState.replace(/_/g, ' ')}
+          {(sessionState ?? '').replace(/_/g, ' ')}
         </span>
         {attentionCount > 0 && (
           <span className="text-[#8B6914] text-xs">
@@ -407,7 +407,7 @@ function buildAttentionItems(
 
   // Incomplete reconciliations
   const incompleteRecons = recons.filter(
-    (r) => r.status !== 'completed' && r.status !== 'approved'
+    (r) => r?.status !== 'completed' && r?.status !== 'approved'
   );
   if (incompleteRecons.length > 0) {
     items.push({
@@ -421,7 +421,7 @@ function buildAttentionItems(
 
   // AI drafts ready
   const aiReady = variances.filter(
-    (v) => v.explanationStatus === 'ai_drafted' || v.explanationStatus === 'draft_ready'
+    (v) => v?.explanationStatus === 'ai_drafted' || v?.explanationStatus === 'draft_ready'
   );
   if (aiReady.length > 0) {
     items.push({
@@ -435,11 +435,11 @@ function buildAttentionItems(
 
   // Issues from the API
   for (const issue of issues) {
-    if (issue.status === 'open' || issue.status === 'active') {
+    if (issue?.status === 'open' || issue?.status === 'active') {
       let badge = 'AUDIT';
       let badgeColor = '#C44B2B';
       let badgeBg = '#F5E4DE';
-      if (issue.category === 'evidence' || issue.category === 'missing_evidence') {
+      if (issue?.category === 'evidence' || issue?.category === 'missing_evidence') {
         badge = 'EVID';
         badgeColor = '#8B6914';
         badgeBg = '#F0E8D0';
@@ -743,7 +743,7 @@ export default function CloseDashboardPage() {
   const pendingJes = jes.filter((j) => j?.status === 'proposed' || j?.status === 'pending_approval').length;
   const postedJes = jes.filter((j) => j?.status === 'posted').length;
   const aiDrafts = variances.filter(
-    (v) => v.explanationStatus === 'ai_drafted' || v.explanationStatus === 'draft_ready'
+    (v) => v?.explanationStatus === 'ai_drafted' || v?.explanationStatus === 'draft_ready'
   ).length;
 
   const completedRecons = recons.filter((r) => r?.status === 'completed' || r?.status === 'approved').length;

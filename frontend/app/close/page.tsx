@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
+import Link from 'next/link';
 import {
   Plus,
   ChevronRight,
@@ -13,6 +14,10 @@ import {
   Clock,
   Eye,
   CircleDot,
+  LayoutDashboard,
+  FolderClosed,
+  Briefcase,
+  Settings,
 } from 'lucide-react';
 import { useState, useMemo, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -167,6 +172,74 @@ function ErrorBanner({ message }: { message: string }) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Sidebar                                                            */
+/* ------------------------------------------------------------------ */
+
+const SIDEBAR_NAV = [
+  { label: 'Dashboard', icon: LayoutDashboard, href: '#', disabled: true },
+  { label: 'Close Sessions', icon: FolderClosed, href: '/close', active: true },
+  { label: 'Portfolio', icon: Briefcase, href: '/portfolio' },
+  { label: 'Settings', icon: Settings, href: '/settings/general' },
+];
+
+function Sidebar() {
+  return (
+    <aside className="fixed top-0 left-0 h-screen w-[260px] bg-[#2C2416] flex flex-col z-50">
+      {/* Logo */}
+      <div className="px-6 pt-6 pb-4">
+        <div className="text-[#B8860B] text-xl font-medium tracking-wide">SABIT</div>
+        <div className="text-[#8B7A5E] text-xs mt-0.5">Financial Close Engine</div>
+      </div>
+
+      {/* Nav */}
+      <nav className="flex-1 px-3 mt-2 space-y-0.5 overflow-y-auto">
+        {SIDEBAR_NAV.map((item) => {
+          const Icon = item.icon;
+          if (item.disabled) {
+            return (
+              <div
+                key={item.label}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium text-[#5C4F3A]/40 cursor-not-allowed"
+              >
+                <Icon size={18} />
+                {item.label}
+              </div>
+            );
+          }
+          return (
+            <Link
+              key={item.label}
+              href={item.href}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
+                item.active
+                  ? 'bg-[#3B1F0A] text-[#B8860B]'
+                  : 'text-[#8B7A5E] hover:text-[#B8860B] hover:bg-[#3B1F0A]/50'
+              }`}
+            >
+              <Icon size={18} />
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
+
+      {/* User */}
+      <div className="px-4 py-4 border-t border-[#3B1F0A]">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-[#3B1F0A] flex items-center justify-center text-[#B8860B] text-xs font-medium">
+            YA
+          </div>
+          <div>
+            <div className="text-sm text-[#B8860B] font-medium">Yasir A.</div>
+            <div className="text-xs text-[#8B7A5E]">Controller</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Main Page                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -175,8 +248,8 @@ export default function CloseSessionsPage() {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<FilterTab>('ALL');
   const [showNewModal, setShowNewModal] = useState(false);
-  const [newPeriodStart, setNewPeriodStart] = useState('');
-  const [newPeriodEnd, setNewPeriodEnd] = useState('');
+  const [newMonth, setNewMonth] = useState('');
+  const [newYear, setNewYear] = useState('');
   const [createError, setCreateError] = useState('');
 
   const createMutation = useMutation({
@@ -236,22 +309,19 @@ export default function CloseSessionsPage() {
   const error = sessionsQuery.error;
 
   return (
-    <div className="min-h-screen bg-[#F5F0E8]">
-      {/* Top bar */}
-      <div className="h-14 bg-[#2C2416] flex items-center justify-between px-6">
-        <div className="flex items-center gap-3">
-          <span className="text-[#B8860B] text-xl font-medium tracking-wide">SABIT</span>
-          <span className="text-[#8B7A5E] text-xs">Financial Close Engine</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-[#3B1F0A] flex items-center justify-center text-[#B8860B] text-xs font-medium">
-            YA
-          </div>
-        </div>
-      </div>
+    <div className="min-h-screen bg-[#F5F0E8] flex">
+      {/* Sidebar */}
+      <Sidebar />
 
-      {/* Page content */}
-      <div className="max-w-7xl mx-auto px-6 py-8">
+      {/* Main content */}
+      <div className="ml-[260px] flex-1 flex flex-col min-h-screen">
+        {/* Top bar */}
+        <div className="h-12 bg-[#EDE6D6] border-b border-[#DDD5C2] flex items-center px-6">
+          <span className="text-sm text-[#2C2416] font-medium">Close Sessions</span>
+        </div>
+
+        {/* Page content */}
+        <div className="max-w-7xl mx-auto px-6 py-8 w-full">
         {/* Header row */}
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -386,6 +456,7 @@ export default function CloseSessionsPage() {
           </div>
         )}
       </div>
+      </div>
 
       {/* New Close Session Modal */}
       {showNewModal && (
@@ -397,48 +468,54 @@ export default function CloseSessionsPage() {
                 {createError}
               </div>
             )}
-            <div className="space-y-4">
+            {/* Entity display */}
+            <div className="mb-4">
+              <label className="block text-xs font-medium text-[#5C4F3A] uppercase tracking-wider mb-1">Entity</label>
+              <div className="px-3 py-2 rounded-md border border-[#DDD5C2] bg-[#DDD5C2]/30 text-[#2C2416] text-sm">
+                {(() => { try { return JSON.parse(localStorage.getItem('cpa_auth_user') ?? '{}').name ?? 'Default Entity'; } catch { return 'Default Entity'; } })()}
+              </div>
+              <p className="text-xs text-[#8B7A5E] mt-1">Entity is assigned from your workspace</p>
+            </div>
+            {/* Month / Year selectors */}
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-[#5C4F3A] uppercase tracking-wider mb-1">
-                  Period Start
-                </label>
-                <input
-                  type="date"
-                  value={newPeriodStart}
-                  onChange={(e) => setNewPeriodStart(e.target.value)}
-                  className="w-full px-3 py-2 rounded-md border border-[#DDD5C2] bg-[#F5F0E8] text-[#2C2416] text-sm focus:outline-none focus:border-[#B8860B]"
-                />
+                <label className="block text-xs font-medium text-[#5C4F3A] uppercase tracking-wider mb-1">Month</label>
+                <select value={newMonth} onChange={e => setNewMonth(e.target.value)} className="w-full px-3 py-2 rounded-md border border-[#DDD5C2] bg-[#F5F0E8] text-[#2C2416] text-sm focus:outline-none focus:border-[#B8860B]">
+                  <option value="">Select month</option>
+                  {['January','February','March','April','May','June','July','August','September','October','November','December'].map((m,i) => (
+                    <option key={m} value={String(i+1).padStart(2,'0')}>{m}</option>
+                  ))}
+                </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#5C4F3A] uppercase tracking-wider mb-1">
-                  Period End
-                </label>
-                <input
-                  type="date"
-                  value={newPeriodEnd}
-                  onChange={(e) => setNewPeriodEnd(e.target.value)}
-                  className="w-full px-3 py-2 rounded-md border border-[#DDD5C2] bg-[#F5F0E8] text-[#2C2416] text-sm focus:outline-none focus:border-[#B8860B]"
-                />
+                <label className="block text-xs font-medium text-[#5C4F3A] uppercase tracking-wider mb-1">Year</label>
+                <select value={newYear} onChange={e => setNewYear(e.target.value)} className="w-full px-3 py-2 rounded-md border border-[#DDD5C2] bg-[#F5F0E8] text-[#2C2416] text-sm focus:outline-none focus:border-[#B8860B]">
+                  <option value="">Select year</option>
+                  {[2024,2025,2026,2027].map(y => <option key={y} value={String(y)}>{y}</option>)}
+                </select>
               </div>
             </div>
             <div className="flex justify-end gap-3 mt-6">
               <button
-                onClick={() => { setShowNewModal(false); setCreateError(''); }}
+                onClick={() => { setShowNewModal(false); setCreateError(''); setNewMonth(''); setNewYear(''); }}
                 className="px-4 py-2 text-sm font-medium text-[#5C4F3A] border border-[#DDD5C2] rounded-lg hover:bg-[#F5F0E8] transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={() => {
-                  if (!newPeriodStart || !newPeriodEnd) {
-                    setCreateError('Both dates are required');
+                  if (!newMonth || !newYear) {
+                    setCreateError('Month and year are required');
                     return;
                   }
                   setCreateError('');
-                  createMutation.mutate({ periodStart: newPeriodStart, periodEnd: newPeriodEnd });
+                  const periodStart = `${newYear}-${newMonth}-01`;
+                  const lastDay = new Date(Number(newYear), Number(newMonth), 0).getDate();
+                  const periodEnd = `${newYear}-${newMonth}-${String(lastDay).padStart(2, '0')}`;
+                  createMutation.mutate({ periodStart, periodEnd });
                 }}
                 disabled={createMutation.isPending}
-                className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors disabled:opacity-50"
+                className="px-4 py-2 text-sm font-medium text-[#F5F0E8] rounded-lg transition-colors disabled:opacity-50"
                 style={{ backgroundColor: '#B8860B' }}
               >
                 {createMutation.isPending ? 'Creating...' : 'Create Close Session'}
