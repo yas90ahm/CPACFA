@@ -45,8 +45,12 @@ interface ReadinessResponse {
 interface SessionResponse {
   id: string;
   state: string;
+  status?: string;
   periodLabel: string;
+  periodStart?: string;
+  periodEnd?: string;
   entityName: string;
+  entityId?: string;
   startedAt: string;
   createdAt: string;
   closeDayTarget?: number;
@@ -299,7 +303,7 @@ function GateCard({
 /*  Adjusted Trial Balance Summary                                     */
 /* ------------------------------------------------------------------ */
 
-function TrialBalanceSummary({ rows }: { rows: TBRow[] }) {
+function TrialBalanceSummary({ rows, sessionId, mappingGate }: { rows: TBRow[]; sessionId: string; mappingGate?: Gate }) {
   // Aggregate by reporting category
   let totalAssets = 0;
   let totalLiabilities = 0;
@@ -324,8 +328,34 @@ function TrialBalanceSummary({ rows }: { rows: TBRow[] }) {
   }
 
   const netIncome = totalRevenue - totalExpenses;
+  const allZero = totalAssets === 0 && totalLiabilities === 0 && totalEquity === 0 && totalRevenue === 0 && totalExpenses === 0;
+  const hasRowsButUnmapped = rows.length > 0 && allZero;
   const aleCheck = Math.abs(totalAssets - (totalLiabilities + totalEquity));
   const isBalanced = aleCheck < 0.02; // within penny
+
+  if (hasRowsButUnmapped) {
+    return (
+      <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg overflow-hidden">
+        <div className="bg-[#2C2416] px-4 py-3">
+          <h3 className="text-sm font-medium text-[#B8860B]">Adjusted Trial Balance Summary</h3>
+        </div>
+        <div className="px-4 py-8 text-center">
+          <AlertCircle size={24} className="mx-auto text-[#8B6914] mb-3" />
+          <p className="text-sm font-medium text-[#2C2416]">Accounts need mapping</p>
+          <p className="text-xs text-[#8B7A5E] mt-1 mb-4">
+            {rows.length} accounts uploaded. Map them to financial statement lines to see the summary.
+          </p>
+          <Link
+            href={`/close/${sessionId}/mapping`}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-[#F5F0E8] transition-colors"
+            style={{ backgroundColor: '#B8860B' }}
+          >
+            Map Accounts →
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   const summaryRows = [
     { label: 'Total Assets', value: totalAssets },
@@ -459,25 +489,47 @@ function buildAttentionItems(
   return items.slice(0, 8); // Cap at 8 items
 }
 
-function AttentionList({ items, sessionState }: { items: AttentionItem[]; sessionState?: string }) {
+function AttentionList({ items, sessionState, tbRowCount, unmappedCount, sessionId }: { items: AttentionItem[]; sessionState?: string; tbRowCount: number; unmappedCount: number; sessionId: string }) {
   if (items.length === 0) {
     const state = (sessionState ?? '').toUpperCase();
-    const isOpen = state === 'OPEN' || state === '';
+    const noData = tbRowCount === 0;
+    const needsMapping = tbRowCount > 0 && unmappedCount > 0;
+
+    if (noData) {
+      return (
+        <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-6">
+          <h3 className="text-sm font-medium text-[#2C2416] mb-4">Items Needing Attention</h3>
+          <div className="flex items-center gap-2 text-sm text-[#8B7A5E]">
+            <AlertCircle size={16} />
+            Upload a trial balance to begin your close.
+          </div>
+        </div>
+      );
+    }
+    if (needsMapping) {
+      return (
+        <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-6">
+          <h3 className="text-sm font-medium text-[#2C2416] mb-4">Items Needing Attention</h3>
+          <div className="flex items-center gap-2 text-sm text-[#8B6914]">
+            <AlertCircle size={16} />
+            Map {unmappedCount} account{unmappedCount !== 1 ? 's' : ''} to continue.
+          </div>
+          <Link
+            href={`/close/${sessionId}/mapping`}
+            className="inline-flex items-center gap-2 mt-3 px-3 py-1.5 rounded text-xs font-medium text-[#F5F0E8] transition-colors"
+            style={{ backgroundColor: '#B8860B' }}
+          >
+            Go to Mapping →
+          </Link>
+        </div>
+      );
+    }
     return (
       <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-6">
         <h3 className="text-sm font-medium text-[#2C2416] mb-4">Items Needing Attention</h3>
-        <div className={`flex items-center gap-2 text-sm ${isOpen ? 'text-[#8B7A5E]' : 'text-[#2D6A4F]'}`}>
-          {isOpen ? (
-            <>
-              <AlertCircle size={16} />
-              Upload a trial balance to begin your close.
-            </>
-          ) : (
-            <>
-              <CheckCircle2 size={16} />
-              All items resolved. Ready to advance.
-            </>
-          )}
+        <div className="flex items-center gap-2 text-sm text-[#2D6A4F]">
+          <CheckCircle2 size={16} />
+          All items resolved. Ready to advance.
         </div>
       </div>
     );
@@ -788,31 +840,27 @@ export default function CloseDashboardPage() {
   const periodLabel = session?.periodLabel ?? 'Close Session';
   const entityName = session?.entityName ?? '';
 
-  // Derive period end from session periodLabel (e.g. "2026-03-01 to 2026-03-31")
+  // Derive period end display from session.periodEnd (e.g. "2026-03-31")
   const periodEndDisplay = (() => {
-    const match = periodLabel.match(/(\d{4})-(\d{2})-(\d{2})$/);
-    if (match) {
-      const d = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-      return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-    }
-    // Fallback: try to parse the last date-like segment
-    const fallback = new Date(periodLabel.split(' to ').pop() ?? '');
-    if (!isNaN(fallback.getTime())) {
-      return fallback.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    const pe = session?.periodEnd;
+    if (pe && pe.length >= 10) {
+      const d = new Date(pe + 'T12:00:00Z'); // noon UTC to avoid timezone shift
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+      }
     }
     return periodLabel;
   })();
 
-  // Quarter — derive from session period, not current date
+  // Quarter — derive from session.periodEnd month
   const quarter = (() => {
-    const match = periodLabel.match(/(\d{4})-(\d{2})/);
-    if (match) {
-      const year = Number(match[1]);
-      const month = Number(match[2]);
-      return `Q${Math.ceil(month / 3)} FY${year}`;
+    const pe = session?.periodEnd;
+    if (pe && pe.length >= 7) {
+      const year = Number(pe.slice(0, 4));
+      const month = Number(pe.slice(5, 7));
+      if (year > 0 && month > 0) return `Q${Math.ceil(month / 3)} FY${year}`;
     }
-    const now = new Date();
-    return `Q${Math.ceil((now.getMonth() + 1) / 3)} FY${now.getFullYear()}`;
+    return '';
   })();
 
   // Updated ago
@@ -913,8 +961,19 @@ export default function CloseDashboardPage() {
 
               {/* Two-column: TB Summary + Attention */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <TrialBalanceSummary rows={tbRows} />
-                <AttentionList items={attentionItems} sessionState={session?.state} />
+                <TrialBalanceSummary rows={tbRows} sessionId={sessionId} mappingGate={mappingGate} />
+                <AttentionList
+                  items={attentionItems}
+                  sessionState={session?.state ?? session?.status}
+                  tbRowCount={tbRows.length}
+                  unmappedCount={(() => {
+                    const d = mappingGate?.detail ?? '';
+                    const m = d.match(/(\d+)\s*\/\s*(\d+)/);
+                    if (m) return Math.max(0, Number(m[2]) - Number(m[1]));
+                    return tbRows.length; // assume all unmapped if can't parse
+                  })()}
+                  sessionId={sessionId}
+                />
               </div>
 
               {/* Continue Close */}
