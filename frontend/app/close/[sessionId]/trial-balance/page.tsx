@@ -255,8 +255,8 @@ export default function TrialBalancePage() {
       const q = search.toLowerCase();
       result = result.filter(
         (r) =>
-          r.accountCode.toLowerCase().includes(q) ||
-          r.accountName.toLowerCase().includes(q) ||
+          (r.accountCode ?? '').toLowerCase().includes(q) ||
+          (r.accountName ?? '').toLowerCase().includes(q) ||
           (r.fsLineItem ?? '').toLowerCase().includes(q)
       );
     }
@@ -331,13 +331,15 @@ export default function TrialBalancePage() {
               </div>
               <div className="flex items-center gap-1.5">
                 {_gates.map((gate: any, i: number) => {
-                  let bg = '#5C4F3A';
-                  if (gate.passing) bg = '#2D6A4F';
-                  else if (i === _activeGateIndex) bg = '#B8860B';
+                  const isActive = i === _activeGateIndex && !gate.passing;
+                  let bg = '#DDD5C2'; // pending (muted light)
+                  if (gate.passing) bg = '#2D6A4F'; // forest green
+                  else if (isActive) bg = '#B8860B'; // gold active
+                  const sizeClass = isActive ? 'w-3 h-3' : 'w-2.5 h-2.5';
                   return (
                     <div
                       key={gate.id}
-                      className="w-2.5 h-2.5 rounded-full transition-colors"
+                      className={`${sizeClass} rounded-full transition-colors`}
                       style={{ backgroundColor: bg }}
                       title={`${gate.label}: ${gate.passing ? 'Passing' : 'Pending'}`}
                     />
@@ -359,7 +361,7 @@ export default function TrialBalancePage() {
               <button
                 onClick={() => { setShowUpload(true); setUploadError(''); setUploadSuccess(''); }}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-[#F5F0E8] transition-colors hover:opacity-90"
-                style={{ backgroundColor: '#2D6A4F' }}
+                style={{ backgroundColor: '#B8860B' }}
               >
                 <Upload size={16} />
                 Upload GL
@@ -521,7 +523,7 @@ export default function TrialBalancePage() {
                               <button
                                 onClick={() => { setShowUpload(true); setUploadError(''); setUploadSuccess(''); }}
                                 className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-[#F5F0E8] transition-colors"
-                                style={{ backgroundColor: '#2D6A4F' }}
+                                style={{ backgroundColor: '#B8860B' }}
                               >
                                 <Upload size={14} />
                                 Upload your General Ledger

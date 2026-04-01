@@ -771,7 +771,7 @@ export default function CloseDashboardPage() {
 
   // Find specific gates or use index-based fallback
   function findGate(keyword: string, index: number): Gate | undefined {
-    return gates.find((g) => g?.label?.toLowerCase()?.includes(keyword)) ?? gates[index];
+    return gates.find((g) => (g?.label ?? '').toLowerCase().includes(keyword)) ?? gates[index];
   }
 
   const tbGate = findGate('trial', 0);
@@ -870,8 +870,15 @@ export default function CloseDashboardPage() {
                   title="Trial Balance"
                   passing={tbGate?.passing ?? false}
                   detail={tbGate?.detail}
-                  metric="$0.00"
-                  metricLabel="Imbalance"
+                  metric={tbRows.length === 0 ? 'No data' : (() => {
+                    let totalD = 0, totalC = 0;
+                    for (const r of tbRows) {
+                      totalD += parseFloat(r.debit || '0') || 0;
+                      totalC += parseFloat(r.credit || '0') || 0;
+                    }
+                    return fmtMoney(Math.abs(totalD - totalC).toFixed(2), { dollar: true, dash: false });
+                  })()}
+                  metricLabel={tbRows.length === 0 ? 'Upload GL to begin' : 'Imbalance'}
                 />
                 <GateCard
                   gateLabel="Gate 2"
