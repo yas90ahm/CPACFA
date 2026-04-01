@@ -19,13 +19,11 @@ import {
 
 interface LoginResponse {
   token: string;
-  user: {
-    userId: string;
-    tenantId: string;
-    role: string;
-    email: string;
-    name: string;
-  };
+  userId: string;
+  tenantId: string;
+  role: string;
+  email: string;
+  name: string;
 }
 
 export default function LoginPage() {
@@ -42,7 +40,13 @@ export default function LoginPage() {
       }),
     onSuccess: (data) => {
       localStorage.setItem('cpa_auth_token', data.token);
-      localStorage.setItem('cpa_auth_user', JSON.stringify(data.user));
+      localStorage.setItem('cpa_auth_user', JSON.stringify({
+        userId: data.userId,
+        tenantId: data.tenantId,
+        role: data.role,
+        email: data.email,
+        name: data.name,
+      }));
       router.push('/close');
     },
   });
