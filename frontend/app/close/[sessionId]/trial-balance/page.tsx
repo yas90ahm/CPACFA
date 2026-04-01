@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { fmtMoney, sumMoneyStrings } from '@/lib/money';
 import {
@@ -19,6 +19,9 @@ import {
   CheckCircle2,
   Search,
   ArrowUpDown,
+  Upload,
+  FileSpreadsheet,
+  X,
 } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
@@ -159,6 +162,13 @@ export default function TrialBalancePage() {
   const [search, setSearch] = useState('');
   const [sortCol, setSortCol] = useState<'code' | 'name' | 'debit' | 'credit' | 'net' | null>(null);
   const [sortAsc, setSortAsc] = useState(true);
+  const [showUpload, setShowUpload] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [uploadSuccess, setUploadSuccess] = useState('');
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const queryClient = useQueryClient();
 
   const sessionQuery = useQuery({
     queryKey: ['session', sessionId],
@@ -181,6 +191,43 @@ export default function TrialBalancePage() {
   });
 
   const rows = data?.rows ?? [];
+
+  const handleGLUpload = useCallback(async (file: File) => {
+    setUploading(true);
+    setUploadError('');
+    setUploadSuccess('');
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+      const token = typeof window !== 'undefined' ? localStorage.getItem('cpa_auth_token') : null;
+      const formData = new FormData();
+      formData.append('file', file);
+      const period = sessionQuery.data?.periodEnd?.slice(0, 7) ?? '';
+      const res = await fetch(
+        `${baseUrl}/api/gl/ingest?period=${encodeURIComponent(period)}&sessionId=${encodeURIComponent(sessionId)}`,
+        {
+          method: 'POST',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          credentials: 'include',
+          body: formData,
+        }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Upload failed' }));
+        throw new Error(err.error ?? err.message ?? `Upload failed (${res.status})`);
+      }
+      const result = await res.json();
+      const count = result.entriesInserted ?? result.accountCount ?? result.rowCount ?? 0;
+      setUploadSuccess(`GL imported successfully — ${count} entries loaded. Refreshing trial balance...`);
+      queryClient.invalidateQueries({ queryKey: ['trial-balance', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['readiness', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
+      setTimeout(() => { setShowUpload(false); setUploadSuccess(''); }, 2000);
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  }, [sessionId, sessionQuery.data, queryClient]);
 
   // Computed totals — prefer backend-computed values when available.
   // Fallback: display-only sum using sumMoneyStrings, not used for financial decisions.
@@ -306,9 +353,20 @@ export default function TrialBalancePage() {
           {/* Title row */}
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-medium text-[#2C2416]">
-              Trial Balance — March 2026
+              Trial Balance{sessionQuery.data?.periodLabel ? ` — ${sessionQuery.data.periodLabel}` : ''}
             </h1>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => { setShowUpload(true); setUploadError(''); setUploadSuccess(''); }}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-[#F5F0E8] transition-colors hover:opacity-90"
+                style={{ backgroundColor: '#2D6A4F' }}
+              >
+                <Upload size={16} />
+                Upload GL
+              </button>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 mb-6">
               <button
                 onClick={() => setTbType('adjusted')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -330,7 +388,6 @@ export default function TrialBalancePage() {
                 Unadjusted
               </button>
             </div>
-          </div>
 
           {/* Stat cards in dark header */}
           <div className="bg-[#2C2416] rounded-lg p-5 mb-6">
@@ -457,7 +514,20 @@ export default function TrialBalancePage() {
                     {filteredRows.length === 0 ? (
                       <tr>
                         <td colSpan={7} className="px-4 py-8 text-center text-[#8B7A5E]">
-                          {search ? 'No accounts match your search.' : 'No trial balance data available.'}
+                          {search ? 'No accounts match your search.' : (
+                            <div className="flex flex-col items-center gap-3 py-4">
+                              <FileSpreadsheet size={32} className="text-[#8B7A5E]" />
+                              <p className="text-sm text-[#8B7A5E]">No trial balance data yet.</p>
+                              <button
+                                onClick={() => { setShowUpload(true); setUploadError(''); setUploadSuccess(''); }}
+                                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-[#F5F0E8] transition-colors"
+                                style={{ backgroundColor: '#2D6A4F' }}
+                              >
+                                <Upload size={14} />
+                                Upload your General Ledger
+                              </button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     ) : (
@@ -541,6 +611,105 @@ export default function TrialBalancePage() {
           )}
         </main>
       </div>
+
+      {/* GL Upload Modal */}
+      {showUpload && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-6 w-full max-w-lg mx-4 shadow-xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-medium text-[#2C2416]">Upload General Ledger</h3>
+              <button onClick={() => setShowUpload(false)} className="text-[#8B7A5E] hover:text-[#2C2416]">
+                <X size={20} />
+              </button>
+            </div>
+
+            {uploadError && (
+              <div className="mb-4 px-3 py-2 rounded bg-[#F5E4DE] border border-[#C44B2B] text-[#C44B2B] text-sm">
+                {uploadError}
+              </div>
+            )}
+            {uploadSuccess && (
+              <div className="mb-4 px-3 py-2 rounded bg-[#E0EDE8] border border-[#2D6A4F] text-[#2D6A4F] text-sm flex items-center gap-2">
+                <CheckCircle2 size={16} />
+                {uploadSuccess}
+              </div>
+            )}
+
+            {/* Dropzone */}
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                const file = e.dataTransfer.files[0];
+                if (file) handleGLUpload(file);
+              }}
+              onClick={() => fileInputRef.current?.click()}
+              className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+                dragOver
+                  ? 'border-[#2D6A4F] bg-[#E0EDE8]/50'
+                  : 'border-[#DDD5C2] hover:border-[#B8860B] hover:bg-[#F5F0E8]'
+              }`}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleGLUpload(file);
+                  e.target.value = '';
+                }}
+              />
+              {uploading ? (
+                <div className="flex flex-col items-center gap-3">
+                  <Loader2 size={32} className="animate-spin text-[#B8860B]" />
+                  <p className="text-sm text-[#8B7A5E]">Uploading and processing...</p>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-3">
+                  <FileSpreadsheet size={32} className="text-[#8B7A5E]" />
+                  <div>
+                    <p className="text-sm font-medium text-[#2C2416]">
+                      Drop your GL export here or click to browse
+                    </p>
+                    <p className="text-xs text-[#8B7A5E] mt-1">
+                      CSV or Excel (.csv, .xlsx, .xls) — up to 50 MB
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Format hints */}
+            <div className="mt-4 p-3 rounded bg-[#F5F0E8] border border-[#DDD5C2]">
+              <p className="text-xs font-medium text-[#5C4F3A] mb-2">Expected columns:</p>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-[#8B7A5E]">
+                <span>entry_date</span>
+                <span>account_code</span>
+                <span>account_name</span>
+                <span>debit</span>
+                <span>credit</span>
+                <span>description (optional)</span>
+              </div>
+              <p className="text-xs text-[#8B7A5E] mt-2">
+                Sabit will auto-detect column names and map them. You can adjust the mapping after upload.
+              </p>
+            </div>
+
+            <div className="flex justify-end mt-4">
+              <button
+                onClick={() => setShowUpload(false)}
+                className="px-4 py-2 text-sm font-medium text-[#5C4F3A] border border-[#DDD5C2] rounded-lg hover:bg-[#F5F0E8] transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
