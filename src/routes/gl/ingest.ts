@@ -119,8 +119,18 @@ router.post(
         return;
       }
 
-      const periodLabel =
-        (req.query.period as string)?.trim() || getDefaultPeriod();
+      // Derive period label: prefer session period if sessionId provided, then query param, then default
+      let periodLabel = (req.query.period as string)?.trim() || '';
+      const sessionIdParam = (req.query.sessionId as string)?.trim() || '';
+      if (sessionIdParam && pool && tenantId) {
+        try {
+          const sess = await getCloseSessionById(pool, tenantId, sessionIdParam);
+          if (sess?.periodEnd) {
+            periodLabel = sess.periodEnd.length >= 7 ? sess.periodEnd.slice(0, 7) : sess.periodEnd;
+          }
+        } catch { /* fall through to default */ }
+      }
+      if (!periodLabel) periodLabel = getDefaultPeriod();
       const uploadedBy = (req as { userId?: string; tenantId?: string }).userId ?? (req as { userId?: string; tenantId?: string }).tenantId;
 
       let columnMapping: import('../../services/gl_upload_service.js').GLColumnMapping | null = null;
