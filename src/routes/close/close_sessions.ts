@@ -201,7 +201,8 @@ router.post('/sessions', async (req: Request, res: Response) => {
       standard: body.standard ?? 'GAAP',
       status: body.status as import('../../types/close_session.js').CloseSessionStatus | undefined,
     });
-    res.status(created ? 201 : 200).json(session);
+    const enriched = await enrichSession(pool, tenantId, session as unknown as Record<string, unknown>);
+    res.status(created ? 201 : 200).json(enriched);
   } catch (e) {
     handleSessionError(res, e, 'Create close session failed');
   }
@@ -211,6 +212,26 @@ function derivePeriodLabel(periodEnd: string): string {
   if (!periodEnd || periodEnd.length < 7) return periodEnd || '';
   const date = new Date(periodEnd + 'T12:00:00Z');
   return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+
+/** Enrich a raw session with periodLabel and entityName for API consumers. */
+async function enrichSession(pool: import('pg').Pool, tenantId: string, session: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const payload: Record<string, unknown> = { ...session };
+  payload.periodLabel = derivePeriodLabel(String(session.periodEnd ?? ''));
+  // Resolve entity name
+  try {
+    const entityId = String(session.entityId ?? '');
+    const entitySettings = await getEntitySettings(pool, tenantId, entityId);
+    let name = entitySettings.entityName;
+    if (!name || name === entityId) {
+      const tenantRow = await pool.query<{ name: string }>('SELECT name FROM tenants WHERE id = $1', [tenantId]);
+      name = tenantRow.rows[0]?.name || entityId;
+    }
+    payload.entityName = name;
+  } catch {
+    payload.entityName = session.entityId ?? tenantId;
+  }
+  return payload;
 }
 
 /** GET /api/close/sessions/:id — get close session (enriched with periodLabel, statementsGeneratedAt, statementsStale) */
@@ -816,11 +837,14 @@ router.get('/sessions', async (req: Request, res: Response) => {
     }
     const entityId = req.query.entityId as string | undefined;
     const status = req.query.status as string | undefined;
-    const sessions = await listSessions(pool, {
+    const rawSessions = await listSessions(pool, {
       tenantId,
       entityId,
       status: status as import('../../types/close_session.js').CloseSessionStatus | undefined,
     });
+    const sessions = await Promise.all(
+      rawSessions.map((s) => enrichSession(pool, tenantId, s as unknown as Record<string, unknown>))
+    );
     res.json({ sessions });
   } catch (e) {
     send500(res, e, 'List close sessions failed');
