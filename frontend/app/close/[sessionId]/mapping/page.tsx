@@ -376,6 +376,14 @@ export default function AccountMappingPage() {
 
   /* --- Data fetching --- */
 
+  // Fetch session to get entityId for mapping API calls
+  const sessionQuery = useQuery({
+    queryKey: ['session', sessionId],
+    queryFn: () => apiFetch<Record<string, unknown>>(`/api/close/sessions/${sessionId}`),
+    enabled: !!sessionId,
+  });
+  const entityId = String(sessionQuery.data?.entityId ?? 'default');
+
   const readinessQuery = useQuery({
     queryKey: ['close-readiness', sessionId],
     queryFn: () =>
@@ -395,24 +403,24 @@ export default function AccountMappingPage() {
   });
 
   const rulesQuery = useQuery({
-    queryKey: ['coa-mapping-rules', sessionId],
+    queryKey: ['coa-mapping-rules', sessionId, entityId],
     queryFn: async () => {
       const data = await apiFetch<MappingRule[] | { rules?: MappingRule[] }>(
         `/api/coa-mapping/rules`,
-        { params: { closeSessionId: sessionId } }
+        { params: { entityId } }
       );
       return Array.isArray(data) ? data : data.rules ?? [];
     },
-    enabled: !!sessionId,
+    enabled: !!sessionId && entityId !== 'default',
   });
 
   const suggestionsQuery = useQuery({
-    queryKey: ['coa-mapping-suggestions', sessionId],
+    queryKey: ['coa-mapping-suggestions', sessionId, entityId],
     queryFn: async () => {
       try {
         const data = await apiFetch<MappingSuggestion[] | { suggestions?: MappingSuggestion[] }>(
           `/api/coa-mapping/suggestions`,
-          { params: { closeSessionId: sessionId } }
+          { params: { sessionId, entityId } }
         );
         return Array.isArray(data) ? data : data.suggestions ?? [];
       } catch {

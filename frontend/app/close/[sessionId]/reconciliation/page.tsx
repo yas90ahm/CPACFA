@@ -148,7 +148,7 @@ function ProgressRail({
       </div>
       <div className="flex items-center gap-1.5">
         {gates.map((gate, i) => {
-          let bg = '#5C4F3A';
+          let bg = '#DDD5C2';
           if (gate.passing) bg = '#2D6A4F';
           else if (i === activeGateIndex) bg = '#B8860B';
           return (
@@ -199,7 +199,7 @@ function StatCard({
 /* ------------------------------------------------------------------ */
 
 function ReconStatusBadge({ status }: { status: string }) {
-  const s = status.toLowerCase();
+  const s = (status ?? '').toLowerCase();
   if (s === 'completed' || s === 'approved' || s === 'reconciled') {
     return (
       <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded bg-[#E0EDE8] text-[#2D6A4F]">
@@ -405,14 +405,14 @@ export default function ReconciliationListPage() {
 
   const gates = readinessQuery.data?.gates ?? [];
   const gatesTotal = readinessQuery.data?.gatesTotal ?? 0;
-  const reconGate = gates.find((g) => g.label.toLowerCase().includes('recon')) ?? gates[2];
+  const reconGate = gates.find((g) => (g?.label ?? '').toLowerCase().includes('recon')) ?? gates[2];
 
   const recons = reconsQuery.data ?? [];
   const totalAccounts = recons.length;
   const reconciledCount = recons.filter(
-    (r) => r.status === 'completed' || r.status === 'approved' || r.status === 'reconciled'
+    (r) => r?.status === 'completed' || r?.status === 'approved' || r?.status === 'reconciled'
   ).length;
-  const totalEvidenceCount = recons.reduce((sum, r) => sum + (r.evidenceCount ?? 0), 0);
+  const totalEvidenceCount = recons.reduce((sum, r) => sum + (r?.evidenceCount ?? 0), 0);
 
   // Total variance: sum all variance strings for display
   const totalVariance = recons.reduce((sum, r) => {
