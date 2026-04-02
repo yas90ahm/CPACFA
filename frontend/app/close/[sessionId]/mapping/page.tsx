@@ -74,10 +74,15 @@ interface MappingRule {
 
 interface MappingSuggestion {
   accountCode: string;
+  accountName?: string;
   suggestedLineItem?: string;
+  suggestedLineItemId?: string;
+  suggestedLineItemName?: string;
   fsLineItem?: string;
   source?: string;
-  confidence?: number;
+  confidence?: number | string;
+  reasoning?: string;
+  status?: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -460,13 +465,17 @@ export default function AccountMappingPage() {
       rule?.fsLineItem ??
       rule?.reportingLineItem ??
       rule?.lineItemLabel ??
+      sug?.suggestedLineItemName ??
       sug?.suggestedLineItem ??
+      sug?.suggestedLineItemId ??
       sug?.fsLineItem ??
-      row.reportingCategory ??
       'Unmapped';
 
-    const source = rule?.source ?? sug?.source ?? (rule ? 'Manual' : '');
-    const confidence = rule?.confidence ?? sug?.confidence ?? 0;
+    const source = rule?.source ?? sug?.source ?? sug?.reasoning ?? (rule ? 'Manual' : '');
+    const rawConf = rule?.confidence ?? sug?.confidence ?? 0;
+    const confidence = typeof rawConf === 'string'
+      ? (rawConf === 'high' ? 95 : rawConf === 'medium' ? 70 : rawConf === 'low' ? 40 : Number(rawConf) || 0)
+      : rawConf;
     const isAISource = ((source ?? '').toLowerCase().match(/ai|pattern|xbrl|claude|rag/) !== null);
     const hasReviewer = !!(rule?.reviewedBy);
     const isExplicitAutoAccepted = rule?.autoAccepted === true;
@@ -485,10 +494,10 @@ export default function AccountMappingPage() {
       status = fsLineItem !== 'Unmapped' ? 'Recommended' : 'Pending';
     } else if (rule?.confirmed || rule?.status === 'confirmed' || rule?.status === 'mapped' || (isAISource && hasReviewer)) {
       status = 'Confirmed';
-    } else if (fsLineItem !== 'Unmapped') {
+    } else if (sug && fsLineItem !== 'Unmapped') {
       status = 'Recommended';
     } else {
-      status = 'Pending';
+      status = 'Unmapped';
     }
 
     return {
