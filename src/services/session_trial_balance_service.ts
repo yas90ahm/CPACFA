@@ -70,8 +70,10 @@ export interface SessionTrialBalanceResult {
   rows: SessionTrialBalanceRow[];
 }
 
+import { toPeriodLabel } from '../utils/period.js';
+
 function periodLabelFromSession(session: CloseSession): string {
-  return (session.periodEnd ?? '').length >= 7 ? (session.periodEnd ?? '').slice(0, 7) : '';
+  return toPeriodLabel(session.periodEnd) ?? '';
 }
 
 export async function getSessionTrialBalance(

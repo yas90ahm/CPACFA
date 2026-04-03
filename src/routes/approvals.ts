@@ -33,7 +33,8 @@ const router = Router();
 /** GET /api/approvals/workflows — List workflows */
 router.get('/workflows', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     if (!pool) {
       res.json({ workflows: [] });
@@ -49,7 +50,8 @@ router.get('/workflows', async (req: Request, res: Response) => {
 /** POST /api/approvals/workflows — Create workflow (body: name, resourceType, steps: [{ order, requiredRole, namedApprover? }]) */
 router.post('/workflows', validateBody(createWorkflowBodySchema), async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     if (!pool) {
       res.status(503).json({ error: 'Tenant database required' });
@@ -70,7 +72,8 @@ router.post('/workflows', validateBody(createWorkflowBodySchema), async (req: Re
 /** POST /api/approvals/submit — Submit resource for approval (creates approval request) */
 router.post('/submit', validateBody(submitApprovalBodySchema), async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     if (!pool) {
       res.status(503).json({ error: 'Tenant database required' });
@@ -107,7 +110,8 @@ router.post('/submit', validateBody(submitApprovalBodySchema), async (req: Reque
 /** GET /api/approvals/requests — List requests (optional resourceType, resourceId, status) */
 router.get('/requests', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     if (!pool) {
       res.json({ requests: [] });
@@ -126,7 +130,8 @@ router.get('/requests', async (req: Request, res: Response) => {
 /** GET /api/approvals/requests/:id — Get request; ?summarize=true for agentic summary (requires resource payload) */
 router.get('/requests/:id', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     if (!pool) {
       res.status(503).json({ error: 'Tenant database required' });
@@ -157,7 +162,8 @@ router.get('/requests/:id', async (req: Request, res: Response) => {
 /** GET /api/approvals/requests/:id/summary — Agentic approval summary (for close_adjustment, fetches adjustment) */
 router.get('/requests/:id/summary', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     if (!pool) {
       res.status(503).json({ error: 'Tenant database required' });
@@ -184,20 +190,26 @@ router.get('/requests/:id/summary', async (req: Request, res: Response) => {
   }
 });
 
-/** PATCH /api/approvals/requests/:id — Approve or reject (body: action: 'approved' | 'rejected', actor?, comment?) */
+/** PATCH /api/approvals/requests/:id — Approve or reject (body: action: 'approved' | 'rejected', comment?) */
 router.patch('/requests/:id', validateParams(requestIdParamSchema), validateBody(approveRejectBodySchema), async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     if (!pool) {
       res.status(503).json({ error: 'Tenant database required' });
       return;
     }
     const body = req.body;
-    const actor = body.actor ?? (req as Request & { userId?: string }).userId ?? 'unknown';
+    const actor = (req as Request & { userId?: string }).userId;
+    if (!actor) { res.status(401).json({ error: 'Authentication required for approvals' }); return; }
     const result = await approveOrReject(pool, req.params.id, tenantId, actor, body.action, body.comment);
     if (!result) {
       res.status(404).json({ error: 'Request not found or not pending' });
+      return;
+    }
+    if ('ok' in result && result.ok === false) {
+      res.status(403).json({ error: (result as any).error });
       return;
     }
     if (result.workflowComplete && result.request.resourceType === 'close_adjustment') {

@@ -543,7 +543,8 @@ export async function carryForwardUnresolvedItems(
     `SELECT period_end FROM close_sessions WHERE id = $1 AND tenant_id = $2`,
     [fromSessionId, tenantId]
   );
-  const fromPeriodLabel = (sessResult.rows[0]?.period_end ?? '').slice(0, 7);
+  const { toPeriodLabel } = await import('../../utils/period.js');
+  const fromPeriodLabel = toPeriodLabel(sessResult.rows[0]?.period_end) ?? '';
 
   const created: ReconItem[] = [];
 

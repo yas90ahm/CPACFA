@@ -5,14 +5,9 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { fmtMoney } from '@/lib/money';
+import { CloseSidebar } from '@/components/close-sidebar';
+import { WorkflowBreadcrumb } from '@/components/workflow-breadcrumb';
 import {
-  LayoutDashboard,
-  FolderClosed,
-  Briefcase,
-  ScrollText,
-  BarChart3,
-  Activity,
-  Settings,
   ChevronRight,
   FileText,
   MessageSquare,
@@ -61,13 +56,19 @@ interface SessionResponse {
 interface TBRow {
   accountCode: string;
   accountName: string;
-  debit: string;
-  credit: string;
+  debit?: string;
+  credit?: string;
+  debitBalance?: string;
+  creditBalance?: string;
   reportingCategory?: string;
+  accountType?: string;
 }
 
 interface TBResponse {
   rows: TBRow[];
+  totalDebits?: string;
+  totalCredits?: string;
+  balanced?: boolean;
 }
 
 interface JournalEntry {
@@ -106,70 +107,7 @@ interface Issue {
   status: string;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Nav items config                                                   */
-/* ------------------------------------------------------------------ */
-
-const NAV_ITEMS = [
-  { label: 'Dashboard', icon: LayoutDashboard, href: (sid: string) => `/close/${sid}/dashboard` },
-  { label: 'Close Sessions', icon: FolderClosed, href: () => '/close' },
-  { label: 'Portfolio', icon: Briefcase, href: () => '/portfolio' },
-  { label: 'Audit Trail', icon: ScrollText, href: (sid: string) => `/close/${sid}/audit-trail` },
-  { label: 'GL Quality', icon: BarChart3, href: (sid: string) => `/close/${sid}/gl-quality` },
-  { label: 'Modules', icon: Activity, href: (sid: string) => `/close/${sid}/modules` },
-  { label: 'Settings', icon: Settings, href: () => '/settings/general' },
-];
-
-/* ------------------------------------------------------------------ */
-/*  Sidebar                                                            */
-/* ------------------------------------------------------------------ */
-
-function Sidebar({ sessionId }: { sessionId: string }) {
-  return (
-    <aside className="fixed top-0 left-0 h-screen w-[260px] bg-[#2C2416] flex flex-col z-50">
-      {/* Logo */}
-      <div className="px-6 pt-6 pb-4">
-        <div className="text-[#B8860B] text-xl font-medium tracking-wide">SABIT</div>
-        <div className="text-[#8B7A5E] text-xs mt-0.5">Financial Close Engine</div>
-      </div>
-
-      {/* Nav */}
-      <nav className="flex-1 px-3 mt-2 space-y-0.5 overflow-y-auto">
-        {NAV_ITEMS.map((item) => {
-          const isActive = item.label === 'Dashboard';
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.label}
-              href={item.href(sessionId)}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
-                isActive
-                  ? 'bg-[#3B1F0A] text-[#B8860B]'
-                  : 'text-[#8B7A5E] hover:text-[#B8860B] hover:bg-[#3B1F0A]/50'
-              }`}
-            >
-              <Icon size={18} />
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
-
-      {/* User */}
-      <div className="px-4 py-4 border-t border-[#3B1F0A]">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-[#3B1F0A] flex items-center justify-center text-[#B8860B] text-xs font-medium">
-            YA
-          </div>
-          <div>
-            <div className="text-sm text-[#B8860B] font-medium">Yasir A.</div>
-            <div className="text-xs text-[#8B7A5E]">Controller</div>
-          </div>
-        </div>
-      </div>
-    </aside>
-  );
-}
+/* Sidebar imported from @/components/close-sidebar */
 
 /* ------------------------------------------------------------------ */
 /*  Top Bar                                                            */
@@ -304,7 +242,7 @@ function GateCard({
 /* ------------------------------------------------------------------ */
 
 function TrialBalanceSummary({ rows, sessionId, mappingGate }: { rows: TBRow[]; sessionId: string; mappingGate?: Gate }) {
-  // Aggregate by reporting category
+  // Aggregate by account type — use account code range as primary signal, category as fallback
   let totalAssets = 0;
   let totalLiabilities = 0;
   let totalEquity = 0;
@@ -315,22 +253,41 @@ function TrialBalanceSummary({ rows, sessionId, mappingGate }: { rows: TBRow[]; 
     const debit = parseFloat(row.debit || '0') || 0;
     const credit = parseFloat(row.credit || '0') || 0;
     const net = debit - credit;
-    const cat = (row?.reportingCategory ?? row?.accountName ?? '').toLowerCase();
 
-    if (cat.includes('asset')) totalAssets += net;
-    else if (cat.includes('liabilit')) totalLiabilities += Math.abs(net);
-    else if (cat.includes('equity') || cat.includes('capital') || cat.includes('retained'))
-      totalEquity += Math.abs(net);
-    else if (cat.includes('revenue') || cat.includes('income') || cat.includes('sale'))
-      totalRevenue += credit - debit;
-    else if (cat.includes('expense') || cat.includes('cost') || cat.includes('depreci'))
-      totalExpenses += debit - credit;
+    // Primary: account code range (1xxx=Asset, 2xxx=Liability, 3xxx=Equity, 4xxx=Revenue, 5xxx+=Expense)
+    const code = parseInt(row.accountCode, 10);
+    let type: string | null = null;
+    if (!isNaN(code)) {
+      if (code >= 1000 && code < 2000) type = 'asset';
+      else if (code >= 2000 && code < 3000) type = 'liability';
+      else if (code >= 3000 && code < 4000) type = 'equity';
+      else if (code >= 4000 && code < 5000) type = 'revenue';
+      else if (code >= 5000) type = 'expense';
+    }
+    // Fallback: reporting category or account type from API
+    if (!type) {
+      const cat = (row?.reportingCategory ?? row?.accountName ?? '').toLowerCase();
+      if (cat.includes('asset')) type = 'asset';
+      else if (cat.includes('liabilit')) type = 'liability';
+      else if (cat.includes('equity') || cat.includes('capital') || cat.includes('retained')) type = 'equity';
+      else if (cat.includes('revenue') || cat.includes('income') || cat.includes('sale')) type = 'revenue';
+      else if (cat.includes('expense') || cat.includes('cost') || cat.includes('depreci')) type = 'expense';
+    }
+
+    if (type === 'asset') totalAssets += net;
+    else if (type === 'liability') totalLiabilities += Math.abs(net);
+    else if (type === 'equity') totalEquity += Math.abs(net);
+    else if (type === 'revenue') totalRevenue += credit - debit;
+    else if (type === 'expense') totalExpenses += debit - credit;
   }
 
   const netIncome = totalRevenue - totalExpenses;
   const allZero = totalAssets === 0 && totalLiabilities === 0 && totalEquity === 0 && totalRevenue === 0 && totalExpenses === 0;
   const hasRowsButUnmapped = rows.length > 0 && allZero;
-  const aleCheck = Math.abs(totalAssets - (totalLiabilities + totalEquity));
+  // A = L + E check: mid-period, net income hasn't been closed to retained earnings,
+  // so equity = BS equity accounts + current period net income (Revenue - Expenses)
+  const equityForCheck = totalEquity + netIncome;
+  const aleCheck = Math.abs(totalAssets - (totalLiabilities + equityForCheck));
   const isBalanced = aleCheck < 0.02; // within penny
 
   if (hasRowsButUnmapped) {
@@ -747,11 +704,12 @@ export default function CloseDashboardPage() {
   const jesQuery = useQuery({
     queryKey: ['journal-entries', sessionId],
     queryFn: async () => {
-      const data = await apiFetch<{ entries?: JournalEntry[] } | JournalEntry[]>(
+      const data = await apiFetch<{ journalEntries?: JournalEntry[]; entries?: JournalEntry[] } | JournalEntry[]>(
         `/api/close/journal-entries`,
         { params: { closeSessionId: sessionId } }
       );
-      return Array.isArray(data) ? data : data.entries ?? [];
+      if (Array.isArray(data)) return data;
+      return data.journalEntries ?? data.entries ?? [];
     },
     enabled: !!sessionId,
   });
@@ -800,7 +758,12 @@ export default function CloseDashboardPage() {
   const gates = readinessQuery.data?.gates ?? [];
   const gatesPassing = readinessQuery.data?.gatesPassing ?? 0;
   const gatesTotal = readinessQuery.data?.gatesTotal ?? 0;
-  const tbRows = tbQuery.data?.rows ?? [];
+  const tbRows = (tbQuery.data?.rows ?? []).map((r) => ({
+    ...r,
+    debit: r.debit ?? r.debitBalance ?? '0',
+    credit: r.credit ?? r.creditBalance ?? '0',
+    reportingCategory: r.reportingCategory ?? r.accountType ?? '',
+  }));
   const jes = jesQuery.data ?? [];
   const variances = variancesQuery.data ?? [];
   const recons = reconsQuery.data ?? [];
@@ -872,13 +835,15 @@ export default function CloseDashboardPage() {
 
   return (
     <div className="min-h-screen bg-[#F5F0E8] flex">
-      {/* Sidebar */}
-      <Sidebar sessionId={sessionId} />
+      {/* Sidebar rendered by layout.tsx */}
 
       {/* Main content */}
       <div className="ml-[260px] flex-1 flex flex-col min-h-screen">
         {/* Top bar */}
         <TopBar periodLabel={periodLabel} />
+
+        {/* Workflow Breadcrumb */}
+        <WorkflowBreadcrumb sessionId={sessionId} gates={gates} />
 
         {/* Progress Rail */}
         {gates.length > 0 && (

@@ -171,8 +171,25 @@ export default function StatementsPage() {
   const _sessionState = ((sessionQuery.data as any)?.state ?? 'IN_PROGRESS').replace(/_/g, ' ');
   const _periodLabel = (sessionQuery.data as any)?.periodLabel ?? '';
 
+  // Derive current and prior period labels from session periodEnd
+  const periodEnd = (sessionQuery.data as any)?.periodEnd ?? '';
+  const currentPeriodLabel = _periodLabel || 'Current Period';
+  const priorPeriodLabel = (() => {
+    if (periodEnd && periodEnd.length >= 7) {
+      const year = parseInt(periodEnd.slice(0, 4));
+      const month = parseInt(periodEnd.slice(5, 7));
+      if (year > 0 && month > 0) {
+        const priorMonth = month === 1 ? 12 : month - 1;
+        const priorYear = month === 1 ? year - 1 : year;
+        const monthNames = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        return `${monthNames[priorMonth]} ${priorYear}`;
+      }
+    }
+    return 'Prior Period';
+  })();
+
   return (
-    <div className="min-h-screen bg-[#F5F0E8]">
+    <div className="min-h-screen bg-[#F5F0E8] ml-[260px]">
       {/* Progress Rail */}
       {_gates.length > 0 && (
         <div className="bg-[#2C2416] px-6 py-3 flex items-center justify-between">
@@ -208,7 +225,7 @@ export default function StatementsPage() {
 
       {/* Header */}
       <div className="px-8 pt-8 pb-6">
-        <h1 className="text-2xl font-medium text-[#2C2416]">Financial Statements — March 2026</h1>
+        <h1 className="text-2xl font-medium text-[#2C2416]">Financial Statements — {(sessionQuery.data as any)?.periodLabel ?? 'Close Session'}</h1>
         <p className="text-sm text-[#8B7A5E] mt-1">
           Generated from the adjusted trial balance through deterministic arithmetic.
         </p>
@@ -243,8 +260,8 @@ export default function StatementsPage() {
               <thead>
                 <tr className="bg-[#2C2416] text-[#B8860B]">
                   <th className="text-left px-4 py-3 font-medium w-1/2">Line Item</th>
-                  <th className="text-right px-4 py-3 font-medium">March 2026</th>
-                  <th className="text-right px-4 py-3 font-medium">February 2026</th>
+                  <th className="text-right px-4 py-3 font-medium">{currentPeriodLabel}</th>
+                  <th className="text-right px-4 py-3 font-medium">{priorPeriodLabel}</th>
                 </tr>
               </thead>
               <tbody>

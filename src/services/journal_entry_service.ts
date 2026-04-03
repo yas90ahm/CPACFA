@@ -657,7 +657,8 @@ export async function listJournalEntries(
   return repo.listJournalEntries(pool, tenantId, filters);
 }
 
-/** List JEs that are approved or posted (for statement builder / adjusted TB). */
+/** List JEs that are posted or exported (booked to GL) for adjusted TB / statement builder.
+ *  Approved-but-not-posted JEs are excluded — they haven't hit the ledger yet. */
 export async function listPostableJournalEntries(
   pool: Pool,
   tenantId: string,
@@ -667,7 +668,7 @@ export async function listPostableJournalEntries(
     closeSessionId,
     limit: 5000,
   });
-  return all.filter((je) => je.status === 'approved' || je.status === 'posted' || je.status === 'exported');
+  return all.filter((je) => je.status === 'posted' || je.status === 'exported');
 }
 
 /** Convert postable JEs to TrialBalanceAdjustment format for merge into adjusted TB / statements. */

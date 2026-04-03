@@ -27,6 +27,7 @@ import { ProvenanceValidationError } from '../services/close_adjustments_service
 import { canPerform } from '../services/segregation_service.js';
 import { parseTrialBalance } from '../services/trialBalanceParser.js';
 import { computeLineId } from '../utils/line_id.js';
+import { toPeriodLabel } from '../utils/period.js';
 import { getRoundingTolerance } from '../services/rules_registry.js';
 import { absGt, sumRound2 } from '../utils/decimal.js';
 import * as persistence from '../services/persistence_service.js';
@@ -333,7 +334,7 @@ export async function executeBridgeCommand(
         if (!session) {
           return { ok: false, error: 'Close session not found', code: 'VALIDATION' };
         }
-        const periodLabel = session.periodEnd.slice(0, 7);
+        const periodLabel = toPeriodLabel(session.periodEnd) ?? '';
         await assertPeriodNotLocked(periodLabel, ctx.tenantId, ctx.pool);
         const je = await createDraftJE(ctx.pool, {
           closeSessionId: cmd.closeSessionId,
@@ -363,7 +364,7 @@ export async function executeBridgeCommand(
           return { ok: false, error: 'Journal entry not found', code: 'VALIDATION' };
         }
         const session = await getCloseSessionById(ctx.pool, ctx.tenantId, je.closeSessionId);
-        const periodLabel = session?.periodEnd?.slice(0, 7);
+        const periodLabel = toPeriodLabel(session?.periodEnd);
         if (periodLabel) {
           await assertPeriodNotLocked(periodLabel, ctx.tenantId, ctx.pool);
         }
@@ -378,7 +379,7 @@ export async function executeBridgeCommand(
       case 'ApproveJE': {
         const updated = await approveJE(ctx.pool, ctx.tenantId, cmd.journalEntryId, cmd.approvedBy);
         const session = await getCloseSessionById(ctx.pool, ctx.tenantId, updated.closeSessionId);
-        const periodLabel = session?.periodEnd?.slice(0, 7);
+        const periodLabel = toPeriodLabel(session?.periodEnd);
         await recordBridgeMutation(ctx, 'ApproveJE', {
           periodLabel: periodLabel ?? undefined,
           journalEntryId: cmd.journalEntryId,
@@ -393,7 +394,7 @@ export async function executeBridgeCommand(
           return { ok: false, error: 'Journal entry not found', code: 'VALIDATION' };
         }
         const session = await getCloseSessionById(ctx.pool, ctx.tenantId, je.closeSessionId);
-        const periodLabel = session?.periodEnd?.slice(0, 7);
+        const periodLabel = toPeriodLabel(session?.periodEnd);
         if (periodLabel) {
           await assertPeriodNotLocked(periodLabel, ctx.tenantId, ctx.pool);
         }

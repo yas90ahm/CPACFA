@@ -338,8 +338,6 @@ export default function AuditBinderPage() {
 
   return (
     <div className="min-h-screen bg-[#F5F0E8] flex">
-      <Sidebar sessionId={sessionId} />
-
       <div className="ml-[260px] flex-1 flex flex-col min-h-screen">
         {/* Progress Rail */}
         {gates.length > 0 && (

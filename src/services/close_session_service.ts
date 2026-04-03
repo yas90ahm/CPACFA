@@ -140,20 +140,11 @@ export async function createSessionOrGetExisting(
   return { session, created: true };
 }
 
-const PERIOD_LABEL_REGEX = /^(\d{4})-(\d{2})$/;
+import { toPeriodBounds } from '../utils/period.js';
 
-/** Convert periodLabel (YYYY-MM) to periodStart and periodEnd (first and last day of month). Returns null if invalid. */
+/** Convert periodLabel (YYYY-MM) to periodStart and periodEnd. Delegates to shared utility. */
 export function periodLabelToPeriodBounds(periodLabel: string): { periodStart: string; periodEnd: string } | null {
-  const trimmed = (periodLabel ?? '').trim();
-  const m = trimmed.match(PERIOD_LABEL_REGEX);
-  if (!m) return null;
-  const year = parseInt(m[1], 10);
-  const month = parseInt(m[2], 10);
-  if (month < 1 || month > 12) return null;
-  const periodStart = `${m[1]}-${m[2]}-01`;
-  const lastDay = new Date(year, month, 0).getDate();
-  const periodEnd = `${m[1]}-${m[2]}-${String(lastDay).padStart(2, '0')}`;
-  return { periodStart, periodEnd };
+  return toPeriodBounds(periodLabel);
 }
 
 export interface EnsureSessionForPeriodResult {
@@ -462,28 +453,14 @@ export async function certifyCloseSession(
     const certifiedAt = new Date().toISOString();
 
     let certificationArtifactId: string | null = null;
-    let existingArtifact = false;
-    try {
-      await client.query('SAVEPOINT check_existing');
-      existingArtifact = await certArtifactRepo.existsForCloseSession(client, input.tenantId, input.closeSessionId);
-      await client.query('RELEASE SAVEPOINT check_existing');
-    } catch (existErr) {
-      await client.query('ROLLBACK TO SAVEPOINT check_existing').catch(() => {});
-      console.warn('[CERTIFY] existsForCloseSession failed (non-fatal):', (existErr as Error).message);
-    }
+    await client.query('SAVEPOINT check_existing');
+    const existingArtifact = await certArtifactRepo.existsForCloseSession(client, input.tenantId, input.closeSessionId);
+    await client.query('RELEASE SAVEPOINT check_existing');
     if (!existingArtifact) {
-      let auditChainResult;
-      let auditChainVerified = true;
-      try {
-        await client.query('SAVEPOINT verify_chain');
-        auditChainResult = await verifyChain(client, input.tenantId);
-        await client.query('RELEASE SAVEPOINT verify_chain');
-      } catch (chainErr) {
-        await client.query('ROLLBACK TO SAVEPOINT verify_chain').catch(() => {});
-        console.warn('[CERTIFY] verifyChain failed (non-fatal):', (chainErr as Error).message);
-        auditChainResult = { valid: false, entryCount: 0, latestEntryHash: '', latestEntryId: '', verifiedAt: new Date().toISOString() };
-        auditChainVerified = false;
-      }
+      await client.query('SAVEPOINT verify_chain');
+      const auditChainResult = await verifyChain(client, input.tenantId);
+      await client.query('RELEASE SAVEPOINT verify_chain');
+      const auditChainVerified = auditChainResult.valid;
       let aiMetadata;
       try {
         await client.query('SAVEPOINT ai_metadata');
@@ -941,8 +918,8 @@ export async function autoLockCertifiedSessions(
       await confirmNoSubsequentEvents(pool, session.id, tenantId, 'system:auto-lock', 'approver');
       await lockCloseSession(pool, session.id, tenantId, 'system:auto-lock', 'approver');
       locked.push(session.id);
-    } catch {
-      // Skip sessions that fail (e.g. concurrent modification)
+    } catch (err) {
+      console.warn('[close] non-fatal: auto-lock review session failed:', err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -958,8 +935,8 @@ export async function autoLockCertifiedSessions(
         await confirmNoSubsequentEvents(pool, session.id, tenantId, 'system:auto-lock', 'approver');
         await lockCloseSession(pool, session.id, tenantId, 'system:auto-lock', 'approver');
         locked.push(session.id);
-      } catch {
-        // Skip sessions that fail to lock (e.g. concurrent modification)
+      } catch (err) {
+        console.warn('[close] non-fatal: auto-lock certified session failed:', err instanceof Error ? err.message : String(err));
       }
     }
   }
@@ -1116,8 +1093,8 @@ export async function advanceSession(
                   console.warn(`[advance] RE continuity break: prior=$${priorRE.toFixed(2)}, opening=$${openingRE.toFixed(2)}`);
                 }
               }
-            } catch {
-              // TB not yet available at session start — skip check
+            } catch (err) {
+              console.warn('[close] non-fatal: RE continuity TB fetch failed:', err instanceof Error ? err.message : String(err));
             }
           }
         } catch (reCheckErr) {
@@ -1157,7 +1134,9 @@ export async function advanceSession(
           data: { statusBefore: session.status, statusAfter: current.status },
           timestamp: new Date().toISOString(),
         });
-      } catch { /* non-fatal */ }
+      } catch (err) {
+        console.warn('[close] non-fatal: emit session event failed:', err instanceof Error ? err.message : String(err));
+      }
 
       // Notify on state transitions
       try {
@@ -1178,7 +1157,9 @@ export async function advanceSession(
             data: { sessionId: input.closeSessionId, statusBefore: session.status, statusAfter: current.status },
           });
         }
-      } catch { /* non-fatal */ }
+      } catch (err) {
+        console.warn('[close] non-fatal: notify state transition failed:', err instanceof Error ? err.message : String(err));
+      }
     }
 
     return {
@@ -1254,8 +1235,31 @@ async function autoProposModules(
     {
       name: 'deferred_tax',
       fn: async () => {
+        // Query enacted tax rate from entity settings; reject if not configured
+        const rateResult = await pool.query<{ tax_rate: string }>(
+          `SELECT tax_rate::text FROM tenant_entity_settings WHERE tenant_id = $1 AND entity_id = $2`,
+          [tenantId, entityId]
+        );
+        const configuredRate = rateResult.rows[0]?.tax_rate ? parseFloat(rateResult.rows[0].tax_rate) : NaN;
+        if (isNaN(configuredRate) || configuredRate <= 0 || configuredRate >= 1) {
+          // Fall back to US federal default but flag it
+          const fallbackRate = 0.21;
+          try {
+            const { createIssueForSession } = await import('./issue_service.js');
+            await createIssueForSession(pool, {
+              tenantId, closeSessionId, entityId,
+              title: 'Deferred tax rate not configured — using US federal default (21%)',
+              description: 'No enacted tax rate is configured in entity settings. The deferred tax module used the US federal default of 21%. Configure the correct rate in Settings > Entity to ensure accurate deferred tax computation.',
+              severity: 'medium', category: 'configuration',
+            });
+          } catch (err) {
+            console.warn('[close] non-fatal: create deferred tax config issue failed:', err instanceof Error ? err.message : String(err));
+          }
+          const { proposeDeferredTaxJE } = await import('./deferred_tax_service.js');
+          return proposeDeferredTaxJE(pool, tenantId, closeSessionId, periodLabel, fallbackRate, createdBy);
+        }
         const { proposeDeferredTaxJE } = await import('./deferred_tax_service.js');
-        return proposeDeferredTaxJE(pool, tenantId, closeSessionId, periodLabel, 0.21, createdBy);
+        return proposeDeferredTaxJE(pool, tenantId, closeSessionId, periodLabel, configuredRate, createdBy);
       },
     },
     {
@@ -1280,7 +1284,9 @@ async function autoProposModules(
               description: 'The inventory reserve (obsolescence) module was not proposed because no inventory aging configuration exists. If this entity holds inventory, upload the inventory aging data and re-run. If inventory is not applicable, resolve this issue as N/A.',
               severity: 'medium', category: 'data_quality',
             });
-          } catch { /* non-fatal */ }
+          } catch (err) {
+            console.warn('[close] non-fatal: create inventory reserve issue failed:', err instanceof Error ? err.message : String(err));
+          }
           return null;
         }
         return null;
@@ -1322,7 +1328,9 @@ async function autoProposModules(
               description: 'The AR aging (CECL allowance) module was not proposed because no AR aging snapshots exist. If this entity has accounts receivable, upload the AR aging data and re-run. If AR is not applicable, resolve this issue as N/A.',
               severity: 'medium', category: 'data_quality',
             });
-          } catch { /* non-fatal */ }
+          } catch (err) {
+            console.warn('[close] non-fatal: create AR aging issue failed:', err instanceof Error ? err.message : String(err));
+          }
           return null;
         }
         const { computeCECLAllowance } = await import('./ar_aging_service.js');
@@ -1336,6 +1344,31 @@ async function autoProposModules(
         return checkReportabilityThresholds(pool, tenantId, periodLabel);
       },
     },
+    {
+      name: 'revenue_recognition',
+      fn: async () => {
+        const { listContracts } = await import('./revenue_recognition_service.js');
+        const contracts = await listContracts(tenantId, pool);
+        if (!contracts || contracts.length === 0) {
+          // No contracts — mark as not applicable, create informational issue
+          try {
+            const { createIssueForSession } = await import('./issue_service.js');
+            await createIssueForSession(pool, {
+              tenantId, closeSessionId, entityId,
+              title: 'Revenue recognition module skipped — no contracts found',
+              description: 'The revenue recognition (ASC 606) module was not proposed because no contracts exist. If this entity has revenue contracts, create them in the revenue module and re-run.',
+              severity: 'low', category: 'data_quality',
+            });
+          } catch (err) {
+            console.warn('[close] non-fatal: create revenue recognition issue failed:', err instanceof Error ? err.message : String(err));
+          }
+          return null;
+        }
+        // Revenue recognition requires contract-specific allocation (ASC 606 5-step model).
+        // Auto-propose creates an informational proposal for controller review.
+        return { contracts: contracts.length, requiresManualReview: true };
+      },
+    },
   ];
 
   let proposed = 0;
@@ -1347,7 +1380,9 @@ async function autoProposModules(
 
       // Store module proposal with computation inputs for HITL review
       try {
-        const inputs = extractComputationInputs(mod.name, result);
+        const inputs = result === null
+          ? { autoDetected: true, reason: `Module ${mod.name} returned no applicable data for this entity/period. No contracts, schedules, or source data found.` }
+          : extractComputationInputs(mod.name, result);
         const flags = detectDataQualityFlags(mod.name, inputs);
         await pool.query(
           `INSERT INTO tenant_module_proposals (tenant_id, close_session_id, module_name, standard, status, computation_inputs, data_quality_flags)
@@ -1358,7 +1393,9 @@ async function autoProposModules(
            result === null ? 'not_applicable' : 'needs_review',
            JSON.stringify(inputs), JSON.stringify(flags)]
         );
-      } catch { /* non-fatal: proposal storage failed */ }
+      } catch (err) {
+        console.warn('[close] non-fatal: store module proposal failed:', err instanceof Error ? err.message : String(err));
+      }
     } catch (e) {
       skipped++;
       console.warn(`[autoProposModules] ${mod.name} failed (non-fatal):`, e instanceof Error ? e.message : String(e));
@@ -1372,7 +1409,9 @@ async function autoProposModules(
           [tenantId, closeSessionId, mod.name, getModuleStandard(mod.name),
            e instanceof Error ? e.message : String(e)]
         );
-      } catch { /* non-fatal */ }
+      } catch (err2) {
+        console.warn('[close] non-fatal: store failed proposal failed:', err2 instanceof Error ? err2.message : String(err2));
+      }
     }
   }
   console.log(`[autoProposModules] ${proposed} modules proposed, ${skipped} skipped`);
@@ -1388,8 +1427,8 @@ async function autoProposModules(
       affected_accounts: [],
       details: { proposed, skipped },
     });
-  } catch {
-    // non-fatal
+  } catch (err) {
+    console.warn('[close] non-fatal: post-module cascade failed:', err instanceof Error ? err.message : String(err));
   }
 }
 

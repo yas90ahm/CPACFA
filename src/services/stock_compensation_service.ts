@@ -57,9 +57,9 @@ export async function computeExpenseForPeriod(
     const totalGrantExpense = round2(fairValue * totalShares);
     const targetCumulative = round2(totalGrantExpense * vestingFraction);
 
-    // Cumulative expense already recorded for this grant
-    const priorExpenses = await repo.listExpenses(pool, tenantId, periodLabel);
-    const priorForGrant = priorExpenses.filter((e) => e.grantId === grant.id);
+    // Cumulative expense already recorded for this grant across ALL prior periods
+    const priorExpenses = await repo.listExpenses(pool, tenantId);
+    const priorForGrant = priorExpenses.filter((e) => e.grantId === grant.id && e.periodLabel !== periodLabel);
     const priorCumulative = priorForGrant.reduce((sum, e) => plus(sum, round2(e.cumulativeExpense)), 0);
     const periodExpense = round2(Math.max(0, targetCumulative - priorCumulative));
 

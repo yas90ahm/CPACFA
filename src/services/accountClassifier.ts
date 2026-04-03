@@ -32,6 +32,11 @@ const COMPOUND_OVERRIDES: [string, AccountType][] = [
   ['deferred income', 'LIABILITY'],
   ['unearned income', 'LIABILITY'],
   ['deferred rent', 'LIABILITY'],
+  // Prepaid items — balance sheet assets despite containing "expenses"
+  ['prepaid expenses', 'ASSET'],
+  ['prepaid expense', 'ASSET'],
+  ['prepaid insurance', 'ASSET'],
+  ['prepaid rent', 'ASSET'],
   // Accrued liabilities
   ['accrued expenses', 'LIABILITY'],
   ['accrued liabilities', 'LIABILITY'],

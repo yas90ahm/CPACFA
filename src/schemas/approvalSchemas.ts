@@ -39,7 +39,6 @@ export const submitApprovalBodySchema = z.object({
 
 export const approveRejectBodySchema = z.object({
   action: z.enum(['approved', 'rejected']),
-  actor: z.string().optional(),
   comment: z.string().optional(),
 });
 

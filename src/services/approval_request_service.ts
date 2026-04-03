@@ -105,6 +105,11 @@ export async function approveOrReject(
   const currentStep = workflow.steps[request.currentStepIndex];
   if (!currentStep) return null;
 
+  // Enforce step-level approval constraints
+  if (currentStep.namedApprover && actor !== currentStep.namedApprover) {
+    return { ok: false, error: `This step requires approval by ${currentStep.namedApprover}` } as any;
+  }
+
   await addApprovalRequestEvent(pool, requestId, {
     requestId,
     stepIndex: request.currentStepIndex,

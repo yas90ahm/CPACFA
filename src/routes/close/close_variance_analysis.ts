@@ -10,6 +10,7 @@ import * as varianceService from '../../services/variance_analysis_service.js';
 import * as repo from '../../db/repositories/variance_analysis_repository.js';
 import { guardSessionWritable } from '../../lib/session_write_guard.js';
 import { computeCumulativeVariances, type ComparisonType } from '../../services/cumulative_variance_service.js';
+import type { AuthRequest } from '../../auth/middleware.js';
 
 const router = Router();
 
@@ -90,8 +91,7 @@ router.post('/variances/:id/approve', async (req: Request, res: Response) => {
       return;
     }
     const id = req.params.id;
-    const body = req.body as { approvedBy?: string };
-    const approvedBy = body.approvedBy ?? (req as { user?: { email?: string } }).user?.email ?? 'unknown';
+    const approvedBy = (req as AuthRequest).userId ?? 'unknown';
     const v = await repo.getVarianceById(pool, tenantId, id);
     if (v && !await guardSessionWritable(res, pool, tenantId, v.closeSessionId)) return;
     const variance = await varianceService.approveVariance(pool, tenantId, id, approvedBy);

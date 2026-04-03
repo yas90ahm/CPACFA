@@ -205,10 +205,25 @@ const BUCKET_RATE_MAP: Record<string, keyof CECLConfig> = {
 };
 
 export async function computeCECLAllowance(
-  pool: Pool, tenantId: string, snapshotId: string, closeSessionId: string, currentAllowanceBalance: number
+  pool: Pool, tenantId: string, snapshotId: string, closeSessionId: string, currentAllowanceBalance?: number
 ): Promise<CECLComputation> {
   const config = await getCECLConfig(pool, tenantId);
   if (!config) throw new Error('CECL config not found — configure loss rates first');
+
+  // Query actual GL balance for the allowance account if not explicitly provided
+  if (currentAllowanceBalance === undefined || currentAllowanceBalance === 0) {
+    try {
+      const glResult = await pool.query<{ net: string }>(
+        `SELECT COALESCE(SUM(credit) - SUM(debit), 0)::text AS net
+         FROM general_ledger
+         WHERE tenant_id = $1 AND account_code = $2`,
+        [tenantId, config.allowanceAccount]
+      );
+      currentAllowanceBalance = Math.abs(parseFloat(glResult.rows[0]?.net ?? '0'));
+    } catch {
+      currentAllowanceBalance = 0; // fallback if GL query fails
+    }
+  }
 
   const detail = await getAgingDetail(pool, tenantId, snapshotId);
   const bucketTotals: Record<string, Decimal> = {};

@@ -352,6 +352,11 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 211, file: '211_variance_human_review_marker.sql' },
   { version: 212, file: '212_decision_record_ai_call_log_fk.sql' },
   { version: 213, file: '213_module_proposals.sql' },
+  { version: 214, file: '214_certification_artifacts_immutability.sql' },
+  { version: 215, file: '215_amount_provenance_not_null_constraint.sql' },
+  { version: 216, file: '216_move_ai_suggestion_tables_to_ai_schema.sql' },
+  { version: 217, file: '217_je_lines_immutable_when_certified.sql' },
+  { version: 218, file: '218_module_proposal_na_reason.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 

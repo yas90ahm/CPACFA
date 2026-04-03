@@ -1,19 +1,14 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { fmtMoney, isMoneyZero } from '@/lib/money';
+import { CloseSidebar } from '@/components/close-sidebar';
+import { WorkflowBreadcrumb } from '@/components/workflow-breadcrumb';
 import {
-  LayoutDashboard,
-  FolderClosed,
-  Briefcase,
-  ScrollText,
-  BarChart3,
-  Activity,
-  Settings,
   ChevronRight,
   ChevronDown,
   ChevronUp,
@@ -24,6 +19,8 @@ import {
   Paperclip,
   ExternalLink,
   Shield,
+  Upload,
+  Save,
 } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
@@ -45,15 +42,19 @@ interface ReadinessResponse {
 }
 
 interface Reconciliation {
-  id: string;
+  reconId?: string;
+  id?: string;
   accountCode: string;
   accountName: string;
   glBalance: string;
   sourceBalance: string;
+  supportingBalance?: string;
   variance: string;
   evidenceCount?: number;
   approvedBy?: string;
   approverName?: string;
+  reviewedBy?: string;
+  preparedBy?: string;
   status: string;
 }
 
@@ -61,56 +62,7 @@ interface Reconciliation {
 /*  Nav items config                                                   */
 /* ------------------------------------------------------------------ */
 
-const NAV_ITEMS = [
-  { label: 'Dashboard', icon: LayoutDashboard, href: (sid: string) => `/close/${sid}/dashboard` },
-  { label: 'Close Sessions', icon: FolderClosed, href: () => '/close' },
-  { label: 'Portfolio', icon: Briefcase, href: () => '/portfolio' },
-  { label: 'Audit Trail', icon: ScrollText, href: (sid: string) => `/close/${sid}/audit-trail` },
-  { label: 'GL Quality', icon: BarChart3, href: (sid: string) => `/close/${sid}/gl-quality` },
-  { label: 'Modules', icon: Activity, href: (sid: string) => `/close/${sid}/modules` },
-  { label: 'Settings', icon: Settings, href: () => '/settings/general' },
-];
-
-/* ------------------------------------------------------------------ */
-/*  Sidebar                                                            */
-/* ------------------------------------------------------------------ */
-
-function Sidebar({ sessionId }: { sessionId: string }) {
-  return (
-    <aside className="fixed top-0 left-0 h-screen w-[260px] bg-[#2C2416] flex flex-col z-50">
-      <div className="px-6 pt-6 pb-4">
-        <div className="text-[#B8860B] text-xl font-medium tracking-wide">SABIT</div>
-        <div className="text-[#8B7A5E] text-xs mt-0.5">Financial Close Engine</div>
-      </div>
-      <nav className="flex-1 px-3 mt-2 space-y-0.5 overflow-y-auto">
-        {NAV_ITEMS.map((item) => {
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.label}
-              href={item.href(sessionId)}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors text-[#8B7A5E] hover:text-[#B8860B] hover:bg-[#3B1F0A]/50"
-            >
-              <Icon size={18} />
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
-      <div className="px-4 py-4 border-t border-[#3B1F0A]">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-[#3B1F0A] flex items-center justify-center text-[#B8860B] text-xs font-medium">
-            YA
-          </div>
-          <div>
-            <div className="text-sm text-[#B8860B] font-medium">Yasir A.</div>
-            <div className="text-xs text-[#8B7A5E]">Controller</div>
-          </div>
-        </div>
-      </div>
-    </aside>
-  );
-}
+/* Sidebar imported from @/components/close-sidebar */
 
 /* ------------------------------------------------------------------ */
 /*  Progress Rail                                                      */
@@ -226,62 +178,182 @@ function ReconStatusBadge({ status }: { status: string }) {
 /*  Expandable Account Detail                                          */
 /* ------------------------------------------------------------------ */
 
-function AccountDetail({ recon, sessionId }: { recon: Reconciliation; sessionId: string }) {
+function AccountDetail({ recon, sessionId, onUpdate }: { recon: Reconciliation; sessionId: string; onUpdate: () => void }) {
+  const reconId = recon.reconId ?? recon.id ?? recon.accountCode;
+  const [sourceBalance, setSourceBalance] = useState(recon.sourceBalance || '');
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [completing, setCompleting] = useState(false);
+  const [feedback, setFeedback] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isComplete = recon.status === 'completed' || recon.status === 'approved' || recon.status === 'reconciled';
+
+  const handleSaveSourceBalance = async () => {
+    if (!sourceBalance.trim()) return;
+    setSaving(true);
+    setFeedback('');
+    try {
+      await apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/supporting-balance`, {
+        method: 'POST',
+        body: { balance: sourceBalance.replace(/[$,]/g, '') },
+      });
+      setFeedback('Source balance saved');
+      onUpdate();
+    } catch (err) {
+      setFeedback((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUploadEvidence = async (file: File) => {
+    setUploading(true);
+    setFeedback('');
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+      const token = typeof window !== 'undefined' ? localStorage.getItem('cpa_auth_token') : null;
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(
+        `${baseUrl}/api/close/sessions/${sessionId}/reconciliations/${reconId}/evidence`,
+        {
+          method: 'POST',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          credentials: 'include',
+          body: formData,
+        }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Upload failed' }));
+        throw new Error(err.error ?? `Upload failed (${res.status})`);
+      }
+      setFeedback('Evidence uploaded');
+      onUpdate();
+    } catch (err) {
+      setFeedback((err as Error).message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleComplete = async () => {
+    setCompleting(true);
+    setFeedback('');
+    try {
+      await apiFetch(`/api/close/sessions/${sessionId}/reconciliations/${reconId}/complete`, {
+        method: 'POST',
+      });
+      setFeedback('Reconciliation marked complete');
+      onUpdate();
+    } catch (err) {
+      setFeedback((err as Error).message);
+    } finally {
+      setCompleting(false);
+    }
+  };
+
   return (
     <div className="px-4 py-4 bg-[#F5F0E8] border-t border-[#DDD5C2]">
       <div className="text-xs font-medium text-[#8B7A5E] uppercase tracking-wider mb-3">
         Account Detail — {recon.accountCode} {recon.accountName}
       </div>
+
+      {feedback && (
+        <div className={`mb-3 px-3 py-2 rounded text-xs font-medium ${
+          feedback.toLowerCase().includes('fail') || feedback.toLowerCase().includes('error')
+            ? 'bg-[#F5E4DE] text-[#C44B2B]'
+            : 'bg-[#E0EDE8] text-[#2D6A4F]'
+        }`}>
+          {feedback}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* GL Balance Breakdown */}
+        {/* GL Balance */}
         <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-4">
           <div className="text-xs font-medium text-[#8B7A5E] mb-3">GL Balance</div>
           <div className="text-lg font-mono font-medium text-[#2C2416] mb-3">
             {fmtMoney(recon.glBalance, { dollar: true, dash: false })}
           </div>
-          <div className="space-y-2 text-xs text-[#5C4F3A]">
-            <div className="flex justify-between">
-              <span>Opening Balance</span>
-              <span className="font-mono">—</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Period Debits</span>
-              <span className="font-mono">—</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Period Credits</span>
-              <span className="font-mono">—</span>
-            </div>
-            <div className="flex justify-between border-t border-[#DDD5C2] pt-2 font-medium">
-              <span>Closing Balance</span>
-              <span className="font-mono">{fmtMoney(recon.glBalance, { dollar: true, dash: false })}</span>
-            </div>
+          <div className="text-xs text-[#5C4F3A]">
+            Per adjusted trial balance
           </div>
         </div>
 
-        {/* Source Documents */}
+        {/* Source Balance + Evidence Upload */}
         <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-4">
-          <div className="text-xs font-medium text-[#8B7A5E] mb-3">Source Documents</div>
-          <div className="text-lg font-mono font-medium text-[#2C2416] mb-3">
-            {fmtMoney(recon.sourceBalance, { dollar: true, dash: false })}
-          </div>
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-xs text-[#5C4F3A]">
-              <FileText size={12} className="text-[#8B7A5E]" />
-              <span>Bank statement ending balance</span>
-            </div>
-            {(recon.evidenceCount ?? 0) > 0 && (
-              <div className="flex items-center gap-2 text-xs text-[#3B6EA5]">
-                <Paperclip size={12} />
-                <span>{recon.evidenceCount} evidence file{(recon.evidenceCount ?? 0) !== 1 ? 's' : ''} attached</span>
+          <div className="text-xs font-medium text-[#8B7A5E] mb-3">Source Balance</div>
+          {!isComplete ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-[#8B7A5E]">$</span>
+                <input
+                  type="text"
+                  value={sourceBalance}
+                  onChange={(e) => setSourceBalance(e.target.value)}
+                  placeholder="Enter source balance..."
+                  className="flex-1 px-3 py-1.5 text-sm font-mono bg-white border border-[#DDD5C2] rounded text-[#2C2416] placeholder-[#8B7A5E]/50 focus:outline-none focus:border-[#B8860B]"
+                />
+                <button
+                  onClick={handleSaveSourceBalance}
+                  disabled={saving || !sourceBalance.trim()}
+                  className="px-2.5 py-1.5 rounded text-xs font-medium bg-[#B8860B] text-[#F5F0E8] hover:bg-[#A07608] disabled:opacity-50 transition-colors"
+                >
+                  {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                </button>
               </div>
-            )}
-          </div>
+
+              {/* Evidence upload */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.csv,.xlsx,.xls,.png,.jpg,.jpeg"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleUploadEvidence(file);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded border border-dashed border-[#B8860B] text-xs font-medium text-[#B8860B] hover:bg-[#F5F0E8] transition-colors disabled:opacity-50"
+              >
+                {uploading ? (
+                  <Loader2 size={12} className="animate-spin" />
+                ) : (
+                  <Upload size={12} />
+                )}
+                {uploading ? 'Uploading...' : 'Upload Evidence'}
+              </button>
+
+              {(recon.evidenceCount ?? 0) > 0 && (
+                <div className="flex items-center gap-2 text-xs text-[#3B6EA5]">
+                  <Paperclip size={12} />
+                  <span>{recon.evidenceCount} file{(recon.evidenceCount ?? 0) !== 1 ? 's' : ''} attached</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div>
+              <div className="text-lg font-mono font-medium text-[#2C2416] mb-2">
+                {fmtMoney(recon.sourceBalance, { dollar: true, dash: false })}
+              </div>
+              {(recon.evidenceCount ?? 0) > 0 && (
+                <div className="flex items-center gap-2 text-xs text-[#3B6EA5]">
+                  <Paperclip size={12} />
+                  <span>{recon.evidenceCount} file{(recon.evidenceCount ?? 0) !== 1 ? 's' : ''} attached</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Reconciling Items */}
+        {/* Variance + Complete */}
         <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-4">
-          <div className="text-xs font-medium text-[#8B7A5E] mb-3">Reconciling Items</div>
+          <div className="text-xs font-medium text-[#8B7A5E] mb-3">Variance</div>
           <div
             className={`text-lg font-mono font-medium mb-3 ${
               isMoneyZero(recon.variance) ? 'text-[#2D6A4F]' : 'text-[#C44B2B]'
@@ -289,35 +361,27 @@ function AccountDetail({ recon, sessionId }: { recon: Reconciliation; sessionId:
           >
             {fmtMoney(recon.variance, { dollar: true, dash: false })}
           </div>
-          <div className="space-y-2 text-xs text-[#5C4F3A]">
-            <div className="flex justify-between">
-              <span>Outstanding deposits</span>
-              <span className="font-mono">—</span>
+
+          {!isComplete ? (
+            <button
+              onClick={handleComplete}
+              disabled={completing}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded text-xs font-medium bg-[#2D6A4F] text-white hover:bg-[#245A42] disabled:opacity-50 transition-colors"
+            >
+              {completing ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <CheckCircle2 size={12} />
+              )}
+              {completing ? 'Completing...' : 'Mark Reconciled'}
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 text-xs text-[#2D6A4F] font-medium">
+              <CheckCircle2 size={14} />
+              Reconciled
+              {recon.approverName && <span className="text-[#8B7A5E] font-normal">by {recon.approverName}</span>}
             </div>
-            <div className="flex justify-between">
-              <span>Outstanding checks</span>
-              <span className="font-mono">—</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Timing differences</span>
-              <span className="font-mono">—</span>
-            </div>
-            <div className="flex justify-between border-t border-[#DDD5C2] pt-2 font-medium">
-              <span>Unexplained Variance</span>
-              <span
-                className={`font-mono ${isMoneyZero(recon.variance) ? 'text-[#2D6A4F]' : 'text-[#C44B2B]'}`}
-              >
-                {fmtMoney(recon.variance, { dollar: true, dash: false })}
-              </span>
-            </div>
-          </div>
-          <Link
-            href={`/close/${sessionId}/reconciliation/${recon.id}`}
-            className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-[#B8860B] hover:underline"
-          >
-            View full detail
-            <ExternalLink size={12} />
-          </Link>
+          )}
         </div>
       </div>
     </div>
@@ -378,6 +442,11 @@ export default function ReconciliationListPage() {
   const sessionId = params.sessionId as string;
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const refreshRecons = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['reconciliations', sessionId] });
+    queryClient.invalidateQueries({ queryKey: ['close-readiness', sessionId] });
+  }, [queryClient, sessionId]);
 
   /* --- Data fetching --- */
 
@@ -390,13 +459,22 @@ export default function ReconciliationListPage() {
     enabled: !!sessionId,
   });
 
+  /** Get unique identifier for a reconciliation — API returns reconId, not id */
+  function reconKey(r: Reconciliation): string {
+    return r.reconId ?? r.id ?? r.accountCode;
+  }
+
   const reconsQuery = useQuery({
     queryKey: ['reconciliations', sessionId],
     queryFn: async () => {
       const data = await apiFetch<Reconciliation[] | { reconciliations?: Reconciliation[] }>(
         `/api/close/sessions/${sessionId}/reconciliations`
       );
-      return Array.isArray(data) ? data : data.reconciliations ?? [];
+      const list = Array.isArray(data) ? data : data.reconciliations ?? [];
+      return list.map((r) => ({
+        ...r,
+        sourceBalance: r.sourceBalance ?? r.supportingBalance ?? '0',
+      }));
     },
     enabled: !!sessionId,
   });
@@ -427,7 +505,7 @@ export default function ReconciliationListPage() {
 
   return (
     <div className="min-h-screen bg-[#F5F0E8] flex">
-      <Sidebar sessionId={sessionId} />
+      {/* Sidebar rendered by layout.tsx */}
 
       <div className="ml-[260px] flex-1 flex flex-col min-h-screen">
         {/* Top bar */}
@@ -440,6 +518,9 @@ export default function ReconciliationListPage() {
             <span className="text-[#2C2416] font-medium">Reconciliation</span>
           </div>
         </div>
+
+        {/* Workflow Breadcrumb */}
+        <WorkflowBreadcrumb sessionId={sessionId} gates={gates} />
 
         {/* Progress Rail */}
         {gates.length > 0 && (
@@ -509,20 +590,21 @@ export default function ReconciliationListPage() {
                     </div>
                   ) : (
                     recons.map((recon) => {
-                      const isExpanded = expandedId === recon.id;
+                      const rk = reconKey(recon);
+                      const isExpanded = expandedId === rk;
                       const reconVarianceZero = isMoneyZero(recon.variance);
 
                       return (
-                        <React.Fragment key={recon.id}>
+                        <React.Fragment key={rk}>
                           <div
                             className="px-4 py-3 grid grid-cols-12 gap-4 items-center hover:bg-[#E8E0D0] transition-colors cursor-pointer"
-                            onClick={() => setExpandedId(isExpanded ? null : recon.id)}
+                            onClick={() => setExpandedId(isExpanded ? null : rk)}
                             role="button"
                             tabIndex={0}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter' || e.key === ' ') {
                                 e.preventDefault();
-                                setExpandedId(isExpanded ? null : recon.id);
+                                setExpandedId(isExpanded ? null : rk);
                               }
                             }}
                             aria-expanded={isExpanded}
@@ -579,7 +661,7 @@ export default function ReconciliationListPage() {
 
                           {/* Expandable Detail */}
                           {isExpanded && (
-                            <AccountDetail recon={recon} sessionId={sessionId} />
+                            <AccountDetail recon={recon} sessionId={sessionId} onUpdate={refreshRecons} />
                           )}
                         </React.Fragment>
                       );

@@ -13,12 +13,10 @@
 import type { Pool } from 'pg';
 import { randomUUID } from 'crypto';
 import { getReadinessGates } from './session_readiness_gates_service.js';
-import { getEntitySettings } from './entity_settings_service.js';
-import { getSession, advanceSession } from './close_session_service.js';
+import { getSession } from './close_session_service.js';
 import { recordMaterialEvent } from './audit_service.js';
 import { financialEvents } from '../events/financial_event_emitter.js';
 import { log } from '../lib/logger.js';
-import { notifyAutoAdvance } from './close_notification_service.js';
 
 export interface GateCheckResult {
   sessionId: string;
@@ -111,77 +109,15 @@ export async function checkGatesAndAutoAdvance(
     // Non-fatal: checklist auto-completion failed
   }
 
-  let autoAdvanced = false;
-  let newStatus: string | null = null;
-
-  // Auto-advance if all gates pass and auto-advance is enabled
-  if (gatesResult.canAdvance) {
-    let autoAdvanceEnabled = false;
-    try {
-      const settings = await getEntitySettings(pool, tenantId, session.entityId);
-      autoAdvanceEnabled = settings.autoAdvanceEnabled;
-    } catch {
-      // Settings may not exist; default to disabled
-    }
-
-    if (autoAdvanceEnabled) {
-      try {
-        const result = await advanceSession(pool, {
-          tenantId,
-          closeSessionId: sessionId,
-          certifiedBy: triggeredBy,
-          actorRole: 'preparer',
-        });
-        if (result.success && result.actionTaken === 'advanced') {
-          autoAdvanced = true;
-          newStatus = result.statusAfter;
-
-          await recordMaterialEvent(pool, {
-            tenantId,
-            periodLabel: session.periodEnd?.slice(0, 7),
-            eventType: 'close_session_transition',
-            deterministicFlagSnapshot: {
-              event: 'auto_advanced',
-              sessionId,
-              fromState: 'in_progress',
-              toState: newStatus,
-              triggeredBy,
-              gatesPassing: gatesResult.gatesPassing,
-              gatesTotal: gatesResult.gatesTotal,
-            },
-            createdBy: 'system:auto-advance',
-          });
-
-          log('info', 'Auto-advanced session', {
-            sessionId,
-            newStatus,
-            triggeredBy,
-            gatesPassing: gatesResult.gatesPassing,
-          });
-
-          // Notify team of auto-advance
-          try {
-            await notifyAutoAdvance(pool, tenantId, sessionId, newStatus, triggeredBy);
-          } catch {
-            // Non-fatal: notification delivery failure
-          }
-        }
-      } catch (err) {
-        log('warn', 'Auto-advance failed', {
-          sessionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
-  }
+  // Auto-advance removed: controller must always click Advance manually.
 
   return {
     sessionId,
     gatesPassing: gatesResult.gatesPassing,
     gatesTotal: gatesResult.gatesTotal,
     canAdvance: gatesResult.canAdvance,
-    autoAdvanced,
-    newStatus,
+    autoAdvanced: false,
+    newStatus: null,
     snapshotId,
   };
 }

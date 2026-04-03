@@ -209,7 +209,7 @@ function SummaryCard({ icon: Icon, title, value, label }: SummaryCardProps) {
 
 function CeremonySkeleton() {
   return (
-    <div className="min-h-screen bg-[#1A1510] flex items-center justify-center">
+    <div className="ml-[260px] min-h-screen bg-[#1A1510] flex items-center justify-center">
       <Loader2 size={32} className="text-[#B8860B] animate-spin" />
     </div>
   );

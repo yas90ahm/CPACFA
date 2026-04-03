@@ -1,18 +1,13 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
+import { CloseSidebar } from '@/components/close-sidebar';
+import { WorkflowBreadcrumb } from '@/components/workflow-breadcrumb';
 import {
-  LayoutDashboard,
-  FolderClosed,
-  Briefcase,
-  ScrollText,
-  BarChart3,
-  Activity,
-  Settings,
   ChevronRight,
   Loader2,
   AlertCircle,
@@ -24,6 +19,7 @@ import {
   ArrowUpDown,
   Zap,
   X,
+  Pencil,
 } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
@@ -58,11 +54,16 @@ interface TBResponse {
 
 interface MappingRule {
   id: string;
-  accountCode: string;
+  // Backend fields (actual API response from GET /api/coa-mapping/rules)
+  sourceAccountNamePattern?: string;
+  sourceAccountNumberPattern?: string;
+  mappedFsLineId?: string;
+  confidenceDefault?: number;
+  version?: number;
+  // Derived/display fields (set during merge)
+  accountCode?: string;
   accountName?: string;
   fsLineItem?: string;
-  reportingLineItem?: string;
-  lineItemLabel?: string;
   source?: string;
   confidence?: number;
   status?: string;
@@ -89,56 +90,7 @@ interface MappingSuggestion {
 /*  Nav items config                                                   */
 /* ------------------------------------------------------------------ */
 
-const NAV_ITEMS = [
-  { label: 'Dashboard', icon: LayoutDashboard, href: (sid: string) => `/close/${sid}/dashboard` },
-  { label: 'Close Sessions', icon: FolderClosed, href: () => '/close' },
-  { label: 'Portfolio', icon: Briefcase, href: () => '/portfolio' },
-  { label: 'Audit Trail', icon: ScrollText, href: (sid: string) => `/close/${sid}/audit-trail` },
-  { label: 'GL Quality', icon: BarChart3, href: (sid: string) => `/close/${sid}/gl-quality` },
-  { label: 'Modules', icon: Activity, href: (sid: string) => `/close/${sid}/modules` },
-  { label: 'Settings', icon: Settings, href: () => '/settings/general' },
-];
-
-/* ------------------------------------------------------------------ */
-/*  Sidebar                                                            */
-/* ------------------------------------------------------------------ */
-
-function Sidebar({ sessionId }: { sessionId: string }) {
-  return (
-    <aside className="fixed top-0 left-0 h-screen w-[260px] bg-[#2C2416] flex flex-col z-50">
-      <div className="px-6 pt-6 pb-4">
-        <div className="text-[#B8860B] text-xl font-medium tracking-wide">SABIT</div>
-        <div className="text-[#8B7A5E] text-xs mt-0.5">Financial Close Engine</div>
-      </div>
-      <nav className="flex-1 px-3 mt-2 space-y-0.5 overflow-y-auto">
-        {NAV_ITEMS.map((item) => {
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.label}
-              href={item.href(sessionId)}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors text-[#8B7A5E] hover:text-[#B8860B] hover:bg-[#3B1F0A]/50"
-            >
-              <Icon size={18} />
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
-      <div className="px-4 py-4 border-t border-[#3B1F0A]">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-[#3B1F0A] flex items-center justify-center text-[#B8860B] text-xs font-medium">
-            YA
-          </div>
-          <div>
-            <div className="text-sm text-[#B8860B] font-medium">Yasir A.</div>
-            <div className="text-xs text-[#8B7A5E]">Controller</div>
-          </div>
-        </div>
-      </div>
-    </aside>
-  );
-}
+/* Sidebar imported from @/components/close-sidebar */
 
 /* ------------------------------------------------------------------ */
 /*  Progress Rail                                                      */
@@ -183,13 +135,15 @@ function ProgressRail({
       </div>
       <div className="flex items-center gap-1.5">
         {gates.map((gate, i) => {
-          let bg = '#5C4F3A';
-          if (gate.passing) bg = '#2D6A4F';
-          else if (i === activeGateIndex) bg = '#B8860B';
+          const isActive = i === activeGateIndex && !gate.passing;
+          let bg = '#DDD5C2'; // pending (muted)
+          if (gate.passing) bg = '#2D6A4F'; // forest green
+          else if (isActive) bg = '#B8860B'; // gold active
+          const sizeClass = isActive ? 'w-3 h-3' : 'w-2.5 h-2.5';
           return (
             <div
               key={gate.id}
-              className="w-2.5 h-2.5 rounded-full transition-colors"
+              className={`${sizeClass} rounded-full transition-colors`}
               style={{ backgroundColor: bg }}
               title={`${gate.label}: ${gate.passing ? 'Passing' : 'Pending'}`}
             />
@@ -416,23 +370,33 @@ export default function AccountMappingPage() {
       );
       return Array.isArray(data) ? data : data.rules ?? [];
     },
-    enabled: !!sessionId && entityId !== 'default',
+    enabled: !!sessionId && !!entityId,
+  });
+
+  // Fetch taxonomy to resolve rule mappedFsLineId -> display name
+  const taxonomyQuery = useQuery({
+    queryKey: ['coa-taxonomy'],
+    queryFn: async () => {
+      const data = await apiFetch<{ lines?: Array<{ id: string; name: string; statement: string }> }>(
+        `/api/coa-mapping/taxonomy`
+      );
+      return data.lines ?? [];
+    },
+    staleTime: 300_000,
   });
 
   const suggestionsQuery = useQuery({
     queryKey: ['coa-mapping-suggestions', sessionId, entityId],
     queryFn: async () => {
-      try {
-        const data = await apiFetch<MappingSuggestion[] | { suggestions?: MappingSuggestion[] }>(
-          `/api/coa-mapping/suggestions`,
-          { params: { sessionId, entityId } }
-        );
-        return Array.isArray(data) ? data : data.suggestions ?? [];
-      } catch {
-        return [];
-      }
+      const data = await apiFetch<MappingSuggestion[] | { suggestions?: MappingSuggestion[] }>(
+        `/api/coa-mapping/suggestions`,
+        { params: { sessionId, entityId } }
+      );
+      return Array.isArray(data) ? data : data.suggestions ?? [];
     },
     enabled: !!sessionId,
+    staleTime: 60_000,
+    retry: 2,
   });
 
   /* --- Derived state --- */
@@ -443,11 +407,19 @@ export default function AccountMappingPage() {
   const tbRows = tbQuery.data?.rows ?? [];
   const rules = rulesQuery.data ?? [];
   const suggestions = suggestionsQuery.data ?? [];
+  const taxonomyLines = taxonomyQuery.data ?? [];
 
-  // Build a lookup: accountCode -> rule
+  // Taxonomy lookup: fs_line_id -> display name
+  const taxonomyNameMap = new Map<string, string>();
+  for (const line of taxonomyLines) {
+    taxonomyNameMap.set(line.id, line.name);
+  }
+
+  // Build a lookup: accountCode -> rule (rules use sourceAccountNumberPattern as key)
   const ruleMap = new Map<string, MappingRule>();
   for (const rule of rules) {
-    ruleMap.set(rule.accountCode, rule);
+    const key = rule.sourceAccountNumberPattern ?? rule.accountCode ?? '';
+    if (key && key !== '%') ruleMap.set(key, rule);
   }
 
   // Build a lookup: accountCode -> suggestion
@@ -461,40 +433,38 @@ export default function AccountMappingPage() {
     const rule = ruleMap.get(row.accountCode);
     const sug = suggestionMap.get(row.accountCode);
 
-    const fsLineItem =
-      rule?.fsLineItem ??
-      rule?.reportingLineItem ??
-      rule?.lineItemLabel ??
-      sug?.suggestedLineItemName ??
-      sug?.suggestedLineItem ??
+    // fsLineId = taxonomy ID (e.g. "fs_asset_cash") — used for API calls
+    const fsLineId =
+      rule?.mappedFsLineId ??
       sug?.suggestedLineItemId ??
       sug?.fsLineItem ??
+      null;
+
+    // fsLineItem = display name — resolve from taxonomy, then suggestion, then ID as fallback
+    const fsLineItem =
+      (fsLineId ? taxonomyNameMap.get(fsLineId) : null) ??
+      sug?.suggestedLineItemName ??
+      sug?.suggestedLineItem ??
+      fsLineId ??
       'Unmapped';
 
-    const source = rule?.source ?? sug?.source ?? sug?.reasoning ?? (rule ? 'Manual' : '');
-    const rawConf = rule?.confidence ?? sug?.confidence ?? 0;
+    const source = rule?.source ?? sug?.source ?? sug?.reasoning ?? (rule ? 'AI Confirmed' : '');
+    const rawConf = rule?.confidenceDefault ?? rule?.confidence ?? sug?.confidence ?? 0;
     const confidence = typeof rawConf === 'string'
       ? (rawConf === 'high' ? 95 : rawConf === 'medium' ? 70 : rawConf === 'low' ? 40 : Number(rawConf) || 0)
-      : rawConf;
-    const isAISource = ((source ?? '').toLowerCase().match(/ai|pattern|xbrl|claude|rag/) !== null);
+      : (typeof rawConf === 'number' && rawConf > 0 && rawConf <= 1 ? Math.round(rawConf * 100) : rawConf);
+    const isAISource = ((source ?? '').toLowerCase().match(/ai|pattern|xbrl|claude|rag|rule/) !== null);
     const hasReviewer = !!(rule?.reviewedBy);
     const isExplicitAutoAccepted = rule?.autoAccepted === true;
 
     // Derive status:
-    // 1. "Override" — human manually overrode AI suggestion (source is Manual, or overridden flag)
-    // 2. "Confirmed" — human explicitly clicked confirm (AI source + reviewer, or confirmed flag)
-    // 3. "Recommended" — AI recommends this mapping, awaiting human confirmation
-    // 4. "Rejected" — human rejected the AI recommendation
+    // - Rule exists → account is "Confirmed" (mapped via rule)
+    // - No rule but suggestion exists → "Recommended" (AI suggestion awaiting confirmation)
+    // - Neither → "Unmapped"
     let status: string;
-    if (rule?.status === 'rejected') {
-      status = 'Rejected';
-    } else if (rule?.overridden || (source ?? '').toLowerCase() === 'manual') {
-      status = fsLineItem !== 'Unmapped' ? 'Override' : 'Pending';
-    } else if (rule?.status === 'auto_recommended' || isExplicitAutoAccepted || (isAISource && !hasReviewer && !rule?.confirmed && rule?.status !== 'confirmed')) {
-      status = fsLineItem !== 'Unmapped' ? 'Recommended' : 'Pending';
-    } else if (rule?.confirmed || rule?.status === 'confirmed' || rule?.status === 'mapped' || (isAISource && hasReviewer)) {
+    if (rule && fsLineId) {
       status = 'Confirmed';
-    } else if (sug && fsLineItem !== 'Unmapped') {
+    } else if (sug && fsLineId) {
       status = 'Recommended';
     } else {
       status = 'Unmapped';
@@ -503,6 +473,7 @@ export default function AccountMappingPage() {
     return {
       accountCode: row.accountCode,
       accountName: row.accountName,
+      fsLineId,
       fsLineItem,
       source,
       confidence,
@@ -519,14 +490,16 @@ export default function AccountMappingPage() {
   }).length;
   const recommended = mergedAccounts.filter((a) => a.status === 'Recommended').length;
   const manualOverrides = mergedAccounts.filter((a) => a.status === 'Override').length;
+  const mappedAccounts = mergedAccounts.filter((a) => a.confidence > 0);
   const avgConfidence =
-    totalAccounts > 0
-      ? Math.round(mergedAccounts.reduce((sum, a) => sum + (a.confidence || 0), 0) / totalAccounts)
+    mappedAccounts.length > 0
+      ? Math.round(mappedAccounts.reduce((sum, a) => sum + (a.confidence || 0), 0) / mappedAccounts.length)
       : 0;
   const unmapped = mergedAccounts.filter((a) => a.fsLineItem === 'Unmapped').length;
   const allMapped = unmapped === 0 && totalAccounts > 0;
 
   const isLoading = tbQuery.isLoading || rulesQuery.isLoading;
+  const suggestionsLoading = suggestionsQuery.isLoading || suggestionsQuery.isFetching;
   const error = tbQuery.error || rulesQuery.error;
 
   /* --- Confirm / Reject handlers --- */
@@ -534,31 +507,50 @@ export default function AccountMappingPage() {
   const [confirming, setConfirming] = useState(false);
 
   const handleConfirmAll = useCallback(async () => {
-    const recommendedItems = mergedAccounts.filter((a) => a.status === 'Recommended');
+    const recommendedItems = mergedAccounts.filter((a) => a.status === 'Recommended' && a.fsLineId);
     if (recommendedItems.length === 0) return;
     setConfirming(true);
     try {
-      await Promise.all(
-        recommendedItems.map((item) =>
-          apiFetch('/api/coa-mapping/rules', {
-            method: 'POST',
-            body: {
-              closeSessionId: sessionId,
-              accountCode: item.accountCode,
-              fsLineItem: item.fsLineItem,
-              status: 'confirmed',
-              confirmed: true,
-            },
-          })
-        )
-      );
+      await apiFetch('/api/coa-mapping/map', {
+        method: 'POST',
+        body: {
+          entityId,
+          mappings: recommendedItems.map((item) => ({
+            accountCode: item.accountCode,
+            fsLineId: item.fsLineId,
+          })),
+          suggestionSource: 'ai_accepted',
+        },
+      });
       queryClient.invalidateQueries({ queryKey: ['coa-mapping-rules', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['coa-mapping-suggestions', sessionId] });
     } catch (err) {
       console.error('Failed to confirm recommended mappings:', err);
     } finally {
       setConfirming(false);
     }
-  }, [mergedAccounts, sessionId, queryClient]);
+  }, [mergedAccounts, sessionId, entityId, queryClient]);
+
+  const handleConfirm = useCallback(
+    async (accountCode: string, fsLineId: string) => {
+      try {
+        await apiFetch('/api/coa-mapping/map', {
+          method: 'POST',
+          body: {
+            entityId,
+            accountCode,
+            fsLineId,
+            suggestionSource: 'ai_accepted',
+          },
+        });
+        queryClient.invalidateQueries({ queryKey: ['coa-mapping-rules', sessionId] });
+        queryClient.invalidateQueries({ queryKey: ['coa-mapping-suggestions', sessionId] });
+      } catch (err) {
+        console.error('Failed to confirm mapping:', err);
+      }
+    },
+    [sessionId, entityId, queryClient]
+  );
 
   const handleReject = useCallback(
     async (accountCode: string) => {
@@ -578,6 +570,49 @@ export default function AccountMappingPage() {
     },
     [sessionId, queryClient]
   );
+
+  /* --- Override state --- */
+  const [overrideAccount, setOverrideAccount] = useState<string | null>(null);
+  const [overrideSearch, setOverrideSearch] = useState('');
+  const overrideRef = useRef<HTMLDivElement>(null);
+
+  // Close override dropdown on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (overrideRef.current && !overrideRef.current.contains(e.target as Node)) {
+        setOverrideAccount(null);
+        setOverrideSearch('');
+      }
+    }
+    if (overrideAccount) document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [overrideAccount]);
+
+  const handleOverride = useCallback(
+    async (accountCode: string, newFsLineId: string) => {
+      try {
+        await apiFetch('/api/coa-mapping/map', {
+          method: 'POST',
+          body: {
+            entityId,
+            accountCode,
+            fsLineId: newFsLineId,
+            suggestionSource: 'ai_edited',
+          },
+        });
+        queryClient.invalidateQueries({ queryKey: ['coa-mapping-rules', sessionId] });
+        queryClient.invalidateQueries({ queryKey: ['coa-mapping-suggestions', sessionId] });
+        setOverrideAccount(null);
+        setOverrideSearch('');
+      } catch (err) {
+        console.error('Failed to override mapping:', err);
+      }
+    },
+    [sessionId, entityId, queryClient]
+  );
+
+  // Mappable taxonomy lines for override dropdown
+  const mappableLines = taxonomyLines.filter((l) => !(l as Record<string, unknown>).isSubtotal);
 
   /* --- Search / filter state --- */
   const [searchTerm, setSearchTerm] = useState('');
@@ -602,7 +637,7 @@ export default function AccountMappingPage() {
 
   return (
     <div className="min-h-screen bg-[#F5F0E8] flex">
-      <Sidebar sessionId={sessionId} />
+      {/* Sidebar rendered by layout.tsx */}
 
       <div className="ml-[260px] flex-1 flex flex-col min-h-screen">
         {/* Top bar */}
@@ -615,6 +650,9 @@ export default function AccountMappingPage() {
             <span className="text-[#2C2416] font-medium">Account Mapping</span>
           </div>
         </div>
+
+        {/* Workflow Breadcrumb */}
+        <WorkflowBreadcrumb sessionId={sessionId} gates={gates} />
 
         {/* Progress Rail */}
         {gates.length > 0 && (
@@ -681,6 +719,16 @@ export default function AccountMappingPage() {
                   accent={unmapped === 0 ? '#2D6A4F' : '#C44B2B'}
                 />
               </div>
+
+              {/* AI loading indicator */}
+              {suggestionsLoading && (
+                <div className="bg-[#E0EAF5] border border-[#3B6EA5]/20 rounded-lg px-4 py-3 flex items-center gap-3">
+                  <Loader2 size={16} className="animate-spin text-[#3B6EA5]" />
+                  <span className="text-sm text-[#3B6EA5]">
+                    AI is analyzing {totalAccounts} accounts — mapping suggestions will appear shortly...
+                  </span>
+                </div>
+              )}
 
               {/* Search and Filter Bar */}
               <div className="flex items-center gap-3">
@@ -784,15 +832,63 @@ export default function AccountMappingPage() {
                         <div className="col-span-2">
                           <StatusBadge status={account.status} confidence={account.confidence} />
                         </div>
-                        <div className="col-span-1 flex justify-end">
+                        <div className="col-span-1 flex justify-end gap-1 relative">
                           {account.status === 'Recommended' && (
+                            <>
+                              <button
+                                onClick={() => handleConfirm(account.accountCode, account.fsLineId ?? '')}
+                                className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded text-[#2D6A4F] hover:bg-[#E0EDE8] transition-colors"
+                                title="Confirm this recommendation"
+                              >
+                                <CheckCircle2 size={14} />
+                              </button>
+                              <button
+                                onClick={() => handleReject(account.accountCode)}
+                                className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded text-[#C44B2B] hover:bg-[#F5E4DE] transition-colors"
+                                title="Reject this recommendation"
+                              >
+                                <X size={14} />
+                              </button>
+                            </>
+                          )}
+                          {account.status === 'Confirmed' && (
                             <button
-                              onClick={() => handleReject(account.accountCode)}
-                              className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded text-[#C44B2B] hover:bg-[#F5E4DE] transition-colors"
-                              title="Reject this recommendation"
+                              onClick={(e) => { e.stopPropagation(); setOverrideAccount(overrideAccount === account.accountCode ? null : account.accountCode); setOverrideSearch(''); }}
+                              className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded text-[#8B6914] hover:bg-[#F0E8D0] transition-colors"
+                              title="Change mapping"
                             >
-                              <X size={14} />
+                              <Pencil size={14} />
                             </button>
+                          )}
+                          {/* Override dropdown */}
+                          {overrideAccount === account.accountCode && (
+                            <div ref={overrideRef} className="absolute right-0 top-8 z-50 w-72 bg-white border border-[#DDD5C2] rounded-lg shadow-xl p-2" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="text"
+                                placeholder="Search FS lines..."
+                                value={overrideSearch}
+                                onChange={(e) => setOverrideSearch(e.target.value)}
+                                className="w-full px-2 py-1.5 text-xs bg-[#F5F0E8] border border-[#DDD5C2] rounded mb-1 focus:outline-none focus:border-[#B8860B]"
+                                autoFocus
+                              />
+                              <div className="max-h-48 overflow-y-auto">
+                                {mappableLines
+                                  .filter((l) => !overrideSearch || l.name.toLowerCase().includes(overrideSearch.toLowerCase()) || l.id.toLowerCase().includes(overrideSearch.toLowerCase()))
+                                  .slice(0, 20)
+                                  .map((line) => (
+                                    <button
+                                      key={line.id}
+                                      onClick={() => handleOverride(account.accountCode, line.id)}
+                                      className={`w-full text-left px-2 py-1.5 text-xs rounded hover:bg-[#E0EAF5] transition-colors ${
+                                        account.fsLineId === line.id ? 'bg-[#E0EDE8] font-medium' : ''
+                                      }`}
+                                    >
+                                      <span className="text-[#2C2416]">{line.name}</span>
+                                      <span className="text-[#8B7A5E] ml-1">({line.statement})</span>
+                                    </button>
+                                  ))}
+                              </div>
+                            </div>
                           )}
                         </div>
                       </div>

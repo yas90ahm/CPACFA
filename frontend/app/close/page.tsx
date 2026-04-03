@@ -470,7 +470,7 @@ export default function CloseSessionsPage() {
       {/* New Close Session Modal */}
       {showNewModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-6 w-full max-w-md mx-4 shadow-xl">
+          <div className="bg-white border border-[#DDD5C2] rounded-lg p-6 w-full max-w-md mx-4 shadow-xl">
             <h3 className="text-lg font-medium text-[#2C2416] mb-4">Create New Close Session</h3>
             {createError && (
               <div className="mb-4 px-3 py-2 rounded bg-[#F5E4DE] border border-[#C44B2B] text-[#C44B2B] text-sm">

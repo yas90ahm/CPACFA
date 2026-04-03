@@ -224,7 +224,7 @@ export default function GLHealthPage() {
   const transactionsAnalyzed = healthData?.transactionsAnalyzed ?? healthData?.summary?.transactionsAnalyzed ?? 12847;
 
   return (
-    <div className="min-h-screen bg-[#F5F0E8]">
+    <div className="ml-[260px] min-h-screen bg-[#F5F0E8]">
       {/* Breadcrumb */}
       <div className="h-12 bg-[#EDE6D6] border-b border-[#DDD5C2] flex items-center px-6">
         <div className="flex items-center gap-2 text-sm">

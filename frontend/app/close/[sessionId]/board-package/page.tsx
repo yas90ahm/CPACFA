@@ -371,16 +371,16 @@ export default function BoardPackagePage() {
         day: 'numeric',
         year: 'numeric',
       })
-    : 'March 27, 2026';
+    : new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   const gatesVerified = (cert as any).gatesVerified ?? 11;
 
-  const entityName = boardQuery.data?.entityName ?? 'CloudMetrics Inc.';
-  const periodLabel = boardQuery.data?.periodLabel ?? 'March 2026';
-  const quarter = boardQuery.data?.quarter ?? 'Q1 FY2026';
+  const entityName = boardQuery.data?.entityName ?? 'Entity';
+  const periodLabel = boardQuery.data?.periodLabel ?? 'Close Session';
+  const quarter = boardQuery.data?.quarter ?? '';
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#F5F0E8]">
+      <div className="ml-[260px] min-h-screen bg-[#F5F0E8]">
         <BoardSkeleton />
       </div>
     );
@@ -504,10 +504,10 @@ export default function BoardPackagePage() {
                     Line Item
                   </th>
                   <th className="text-right px-4 py-2.5 font-medium text-[#B8860B]">
-                    March 2026
+                    {periodLabel}
                   </th>
                   <th className="text-right px-4 py-2.5 font-medium text-[#B8860B]">
-                    February 2026
+                    Prior Period
                   </th>
                   <th className="text-right px-4 py-2.5 font-medium text-[#B8860B]">$ Change</th>
                   <th className="text-right px-4 py-2.5 font-medium text-[#B8860B]">% Change</th>

@@ -108,7 +108,7 @@ export async function buildCloseStatus(
     .filter((s: CloseChecklistStep) => s.status !== 'completed' && s.status !== 'skipped')
     .map((s) => ({ id: s.id, label: s.label, status: s.status }));
 
-  const materiality = getMateriality(tenantId, periodLabel, pool ?? undefined);
+  const materiality = await getMateriality(tenantId, periodLabel, pool ?? undefined);
   const threshold = materialityThresholdFromSettings(materiality);
   const materialityRef: MaterialityRef | undefined = materiality
     ? {

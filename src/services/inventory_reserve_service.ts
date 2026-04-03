@@ -354,12 +354,16 @@ export async function proposeReserveAJE(
     source: 'manual',
     lines: isIncrease
       ? [
-          { accountRef: '5900', debit: absAdj, credit: 0, description: 'Inventory write-down expense' },
-          { accountRef: '1299', debit: 0, credit: absAdj, description: 'Inventory obsolescence reserve' },
+          { accountRef: '5900', debit: absAdj, credit: 0, description: 'Inventory write-down expense',
+            amountProvenance: { kind: 'engine_calculation' as const, ruleId: `inventory_reserve_${computationId}`, ruleVersion: '1', inputs: { computationId, adjustmentNeeded: adj.toFixed(2), direction: 'increase' } } },
+          { accountRef: '1299', debit: 0, credit: absAdj, description: 'Inventory obsolescence reserve',
+            amountProvenance: { kind: 'engine_calculation' as const, ruleId: `inventory_reserve_${computationId}`, ruleVersion: '1', inputs: { computationId, adjustmentNeeded: adj.toFixed(2), direction: 'increase' } } },
         ]
       : [
-          { accountRef: '1299', debit: absAdj, credit: 0, description: 'Inventory obsolescence reserve reversal' },
-          { accountRef: '5900', debit: 0, credit: absAdj, description: 'Inventory write-down expense reversal' },
+          { accountRef: '1299', debit: absAdj, credit: 0, description: 'Inventory obsolescence reserve reversal',
+            amountProvenance: { kind: 'engine_calculation' as const, ruleId: `inventory_reserve_${computationId}`, ruleVersion: '1', inputs: { computationId, adjustmentNeeded: adj.toFixed(2), direction: 'decrease' } } },
+          { accountRef: '5900', debit: 0, credit: absAdj, description: 'Inventory write-down expense reversal',
+            amountProvenance: { kind: 'engine_calculation' as const, ruleId: `inventory_reserve_${computationId}`, ruleVersion: '1', inputs: { computationId, adjustmentNeeded: adj.toFixed(2), direction: 'decrease' } } },
         ],
   });
 

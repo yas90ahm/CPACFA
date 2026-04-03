@@ -238,7 +238,7 @@ function StatRow({
 
 function PageSkeleton() {
   return (
-    <div className="min-h-screen bg-[#F5F0E8] flex items-center justify-center">
+    <div className="ml-[260px] min-h-screen bg-[#F5F0E8] flex items-center justify-center">
       <Loader2 size={32} className="text-[#B8860B] animate-spin" />
     </div>
   );
@@ -619,7 +619,7 @@ export default function ReviewModePage() {
             Close Package Review
           </h1>
           <p className="text-sm text-[#8B7A5E] mt-1">
-            {session?.periodLabel ?? 'March 2026'}
+            {session?.periodLabel ?? 'Close Session'}
             {session?.entityName ? ` \u00B7 ${session.entityName}` : ''}
           </p>
         </div>

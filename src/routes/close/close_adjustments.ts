@@ -117,7 +117,6 @@ router.patch('/adjustments/:id', async (req: Request, res: Response) => {
     const id = req.params.id ?? '';
     const body = req.body as {
       status: import('../../types/close_and_controls.js').CloseAdjustmentStatus;
-      approvedBy?: string;
       connectionId?: string;
     };
     if (!id || !body?.status) {
@@ -141,7 +140,7 @@ router.patch('/adjustments/:id', async (req: Request, res: Response) => {
         commandType: 'UpdateCloseAdjustment',
         adjustmentId: id,
         status: body.status,
-        approvedBy: body.approvedBy,
+        approvedBy: (req as AuthRequest).userId ?? 'anonymous',
         connectionId: body.connectionId,
       }
     );

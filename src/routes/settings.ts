@@ -47,11 +47,17 @@ router.get('/general', async (req: Request, res: Response) => {
   }
 });
 
-/** PUT /api/settings/general?entityId=X — update entity general settings */
+/** PUT /api/settings/general?entityId=X — update entity general settings. Requires approver role. */
 router.put('/general', async (req: Request, res: Response) => {
   try {
     const pool = getTenantPool(req);
     const tenantId = getTenantId(req);
+    // Role enforcement: settings that impact close controls require approver-level role
+    const role = (req as AuthRequest).role;
+    if (role && !['admin', 'system_admin', 'controller', 'cfo', 'approver'].includes(role)) {
+      res.status(403).json({ error: 'Settings update requires controller, CFO, or admin role' });
+      return;
+    }
     const entityId = (req.query.entityId as string) ?? (req.body as { entityId?: string }).entityId;
     if (!pool || !tenantId) {
       res.status(400).json({ error: 'Tenant context required' });

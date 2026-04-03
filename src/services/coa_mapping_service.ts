@@ -70,13 +70,33 @@ export async function applyCoaRulesToAccounts(
       }
     }
     if (!matched) {
-      const { accountType } = classifyAccount(acc.accountName);
+      let { accountType } = classifyAccount(acc.accountName);
+      // Account code range overrides name-based classification when available
+      // 1000-1999 = ASSET, 2000-2999 = LIABILITY, 3000-3999 = EQUITY,
+      // 4000-4999 = REVENUE, 5000+ = EXPENSE
+      const codeNum = acc.accountNumber ? parseInt(acc.accountNumber, 10) : NaN;
+      if (!isNaN(codeNum)) {
+        let codeType: AccountType | null = null;
+        if (codeNum >= 1000 && codeNum < 2000) codeType = 'ASSET';
+        else if (codeNum >= 2000 && codeNum < 3000) codeType = 'LIABILITY';
+        else if (codeNum >= 3000 && codeNum < 4000) codeType = 'EQUITY';
+        else if (codeNum >= 4000 && codeNum < 5000) codeType = 'REVENUE';
+        else if (codeNum >= 5000) codeType = 'EXPENSE';
+        // Code range takes precedence when it disagrees with name-based BS/PL split
+        if (codeType && codeType !== accountType) {
+          const codeBs = codeType === 'ASSET' || codeType === 'LIABILITY' || codeType === 'EQUITY';
+          const nameBs = accountType === 'ASSET' || accountType === 'LIABILITY' || accountType === 'EQUITY';
+          if (codeBs !== nameBs) {
+            accountType = codeType;
+          }
+        }
+      }
       const fsLineId = DEFAULT_FS_LINE_BY_TYPE[accountType];
       const line = taxonomyMap.get(fsLineId);
       matched = {
         fsLineId,
         fsLineCode: line?.code,
-        explanation: `fallback:classifier accountType=${accountType}`,
+        explanation: `fallback:classifier accountType=${accountType}${!isNaN(codeNum) ? ` code=${acc.accountNumber}` : ''}`,
         confidence: 0.8,
       };
     }

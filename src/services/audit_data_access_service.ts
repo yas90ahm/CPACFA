@@ -197,7 +197,8 @@ export async function getAuditBinder(
   const session = sessResult.rows[0];
   if (!session) throw new Error('Close session not found');
 
-  const periodLabel = (session.period_end ?? '').slice(0, 7);
+  const { toPeriodLabel } = await import('../utils/period.js');
+  const periodLabel = toPeriodLabel(session.period_end) ?? '';
 
   // Get entity name
   const entityResult = await pool.query<{ name: string }>(

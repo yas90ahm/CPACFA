@@ -168,7 +168,8 @@ router.post('/templates/propose', async (req: Request, res: Response) => {
     let periodLabel = body.periodLabel ?? (req.query.periodLabel as string | undefined);
     if (!periodLabel) {
       const session = await getCloseSessionById(pool, tenantId, body.closeSessionId);
-      periodLabel = session?.periodEnd?.slice(0, 7) ?? body.closeSessionId;
+      const { toPeriodLabel } = await import('../../utils/period.js');
+      periodLabel = toPeriodLabel(session?.periodEnd) ?? body.closeSessionId;
     }
     const result = await ajeTemplateService.proposeTemplatesForPeriod(pool, {
       tenantId,

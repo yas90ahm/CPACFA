@@ -231,8 +231,8 @@ export async function executeCascade(
     let reverted: string[] = [];
     try {
       ({ updated, reverted } = await refreshGLBalances(pool, tenantId, trigger.period_id));
-    } catch {
-      // No TB yet (e.g. mapping changed before GL uploaded) — skip recon refresh
+    } catch (err) {
+      console.warn('[cascade] non-fatal: refresh GL balances failed:', err instanceof Error ? err.message : String(err));
     }
     result.recon_balances_refreshed = updated;
     if (reverted.length > 0) {
@@ -263,7 +263,9 @@ export async function executeCascade(
           body: `${reverted.length} reconciliation${reverted.length === 1 ? '' : 's'} reopened — GL balance changed (${accountNames.join(', ')})`,
           data: { sessionId: trigger.period_id, revertedCount: reverted.length, accounts: accountNames },
         });
-      } catch { /* non-fatal */ }
+      } catch (err) {
+        console.warn('[cascade] non-fatal: notify recon out of tolerance failed:', err instanceof Error ? err.message : String(err));
+      }
     }
     timings['step2_refresh_gl_balances'] = Date.now() - t0;
   }
@@ -333,7 +335,9 @@ export async function executeCascade(
         body: `${readiness.hardBlockers.length} gate${readiness.hardBlockers.length === 1 ? '' : 's'} failing — ${readiness.hardBlockers[0]}`,
         data: { sessionId: trigger.period_id, blockers: readiness.hardBlockers.slice(0, 5) },
       });
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      console.warn('[cascade] non-fatal: notify gate failed:', err instanceof Error ? err.message : String(err));
+    }
   }
 
   result.duration_ms = Date.now() - startTime;
@@ -373,8 +377,8 @@ export async function executeCascade(
       },
       timestamp: new Date().toISOString(),
     });
-  } catch {
-    /* non-fatal: realtime not initialized */
+  } catch (err) {
+    console.warn('[cascade] non-fatal: emit cascade complete event failed:', err instanceof Error ? err.message : String(err));
   }
 
   // Readiness notification: if all gates pass, notify controller (never auto-advance)
@@ -385,8 +389,8 @@ export async function executeCascade(
       if (readinessResult.ready && readinessResult.notified) {
         console.log(`[cascade] All gates passed for ${trigger.period_id} — controller notified (manual advance required)`);
       }
-    } catch {
-      /* non-fatal: readiness check failed */
+    } catch (err) {
+      console.warn('[cascade] non-fatal: readiness notification check failed:', err instanceof Error ? err.message : String(err));
     }
   }
 

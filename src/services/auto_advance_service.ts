@@ -106,7 +106,9 @@ export async function checkAndNotifyReadiness(
       },
       timestamp: new Date().toISOString(),
     });
-  } catch { /* non-fatal */ }
+  } catch (err) {
+    console.warn('[readiness] non-fatal: emit readiness websocket event failed:', err instanceof Error ? err.message : String(err));
+  }
 
   // Channel 2: In-app notification (stored in DB, shows in notification bell)
   try {
@@ -125,7 +127,9 @@ export async function checkAndNotifyReadiness(
         allGatesPassed: true,
       },
     });
-  } catch { /* non-fatal: notification service not available */ }
+  } catch (err) {
+    console.warn('[readiness] non-fatal: in-app notification failed:', err instanceof Error ? err.message : String(err));
+  }
 
   // Channel 3: Email notification (if SMTP configured)
   try {
@@ -136,7 +140,9 @@ export async function checkAndNotifyReadiness(
       title: notificationTitle,
       body: notificationBody,
     });
-  } catch { /* non-fatal: email not configured */ }
+  } catch (err) {
+    console.warn('[readiness] non-fatal: send readiness email failed:', err instanceof Error ? err.message : String(err));
+  }
 
   // Audit trail — record that the system detected readiness
   try {
@@ -153,7 +159,9 @@ export async function checkAndNotifyReadiness(
       },
       userPromptRationale: 'All readiness gates passed — notification sent to controller (manual advance required)',
     });
-  } catch { /* non-fatal */ }
+  } catch (err) {
+    console.warn('[readiness] non-fatal: audit trail append failed:', err instanceof Error ? err.message : String(err));
+  }
 
   return {
     ready: true,
@@ -226,12 +234,12 @@ async function sendReadinessEmail(
           if (!response.ok) {
             console.warn(`[readiness-email] Webhook ${wh.url} returned ${response.status}`);
           }
-        } catch {
-          /* non-fatal: individual webhook delivery failed */
+        } catch (err) {
+          console.warn('[readiness] non-fatal: webhook delivery failed:', err instanceof Error ? err.message : String(err));
         }
       }
-    } catch {
-      /* non-fatal: webhook listing failed */
+    } catch (err) {
+      console.warn('[readiness] non-fatal: webhook listing failed:', err instanceof Error ? err.message : String(err));
     }
   }
 }

@@ -6,14 +6,9 @@ import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { fmtMoney } from '@/lib/money';
+import { CloseSidebar } from '@/components/close-sidebar';
+import { WorkflowBreadcrumb } from '@/components/workflow-breadcrumb';
 import {
-  LayoutDashboard,
-  FolderClosed,
-  Briefcase,
-  ScrollText,
-  BarChart3,
-  Activity,
-  Settings,
   ChevronRight,
   ChevronDown,
   CheckCircle2,
@@ -31,11 +26,15 @@ import {
   Package,
   Award,
   TrendingDown,
+  BarChart3,
   Layers,
   DollarSign,
   ShieldAlert,
   Pencil,
   SkipForward,
+  Sparkles,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
@@ -150,56 +149,7 @@ const MODULES: ModuleDef[] = [
 /*  Nav                                                                */
 /* ------------------------------------------------------------------ */
 
-const NAV_ITEMS = [
-  { label: 'Dashboard', icon: LayoutDashboard, href: (sid: string) => `/close/${sid}/dashboard` },
-  { label: 'Close Sessions', icon: FolderClosed, href: () => '/close' },
-  { label: 'Portfolio', icon: Briefcase, href: () => '/portfolio' },
-  { label: 'Audit Trail', icon: ScrollText, href: (sid: string) => `/close/${sid}/audit-trail` },
-  { label: 'GL Quality', icon: BarChart3, href: (sid: string) => `/close/${sid}/gl-quality` },
-  { label: 'Modules', icon: Activity, href: (sid: string) => `/close/${sid}/modules` },
-  { label: 'Settings', icon: Settings, href: () => '/settings/general' },
-];
-
-/* ------------------------------------------------------------------ */
-/*  Sidebar                                                            */
-/* ------------------------------------------------------------------ */
-
-function Sidebar({ sessionId }: { sessionId: string }) {
-  return (
-    <aside className="fixed top-0 left-0 h-screen w-[260px] bg-[#2C2416] flex flex-col z-50">
-      <div className="px-6 pt-6 pb-4">
-        <div className="text-[#B8860B] text-xl font-medium tracking-wide">SABIT</div>
-        <div className="text-[#8B7A5E] text-xs mt-0.5">Financial Close Engine</div>
-      </div>
-      <nav className="flex-1 px-3 mt-2 space-y-0.5 overflow-y-auto">
-        {NAV_ITEMS.map((item) => {
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.label}
-              href={item.href(sessionId)}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium text-[#8B7A5E] hover:text-[#B8860B] hover:bg-[#3B1F0A]/50 transition-colors"
-            >
-              <Icon size={18} />
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
-      <div className="px-4 py-4 border-t border-[#3B1F0A]">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-[#3B1F0A] flex items-center justify-center text-[#B8860B] text-xs font-medium">
-            YA
-          </div>
-          <div>
-            <div className="text-sm text-[#B8860B] font-medium">Yasir A.</div>
-            <div className="text-xs text-[#8B7A5E]">Controller</div>
-          </div>
-        </div>
-      </div>
-    </aside>
-  );
-}
+/* Sidebar imported from @/components/close-sidebar */
 
 /* ------------------------------------------------------------------ */
 /*  Progress Rail                                                      */
@@ -823,11 +773,12 @@ export default function JournalEntriesPage() {
   const jesQuery = useQuery({
     queryKey: ['journal-entries', sessionId],
     queryFn: async () => {
-      const data = await apiFetch<{ entries?: JournalEntry[] } | JournalEntry[]>(
+      const data = await apiFetch<{ journalEntries?: JournalEntry[]; entries?: JournalEntry[] } | JournalEntry[]>(
         '/api/close/journal-entries',
         { params: { closeSessionId: sessionId } }
       );
-      return Array.isArray(data) ? data : data.entries ?? [];
+      if (Array.isArray(data)) return data;
+      return data.journalEntries ?? data.entries ?? [];
     },
     enabled: !!sessionId,
   });
@@ -854,6 +805,78 @@ export default function JournalEntriesPage() {
       queryClient.invalidateQueries({ queryKey: ['journal-entries', sessionId] });
     },
   });
+
+  const autoProposeMutation = useMutation({
+    mutationFn: () =>
+      apiFetch('/api/close/templates/propose', {
+        method: 'POST',
+        body: { closeSessionId: sessionId },
+      }),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['module-proposals', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['journal-entries', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['close-readiness', sessionId] });
+    },
+  });
+
+  const createJeMutation = useMutation({
+    mutationFn: (body: { memo: string; lines: { accountRef: string; debit: number; credit: number; description?: string }[] }) =>
+      apiFetch<{ id: string }>('/api/close/journal-entries', {
+        method: 'POST',
+        body: { closeSessionId: sessionId, source: 'manual' as const, ...body },
+      }),
+    onSuccess: async (data) => {
+      // Auto-propose after creation
+      try {
+        await apiFetch(`/api/close/journal-entries/${data.id}/propose`, { method: 'POST' });
+      } catch { /* may fail if already proposed */ }
+      queryClient.invalidateQueries({ queryKey: ['journal-entries', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['close-readiness', sessionId] });
+      setShowNewJE(false);
+      setNewJELines([{ accountRef: '', debit: '', credit: '', description: '' }]);
+      setNewJEMemo('');
+    },
+  });
+
+  const [showNewJE, setShowNewJE] = useState(false);
+  const [newJEMemo, setNewJEMemo] = useState('');
+  const [newJELines, setNewJELines] = useState([
+    { accountRef: '', debit: '', credit: '', description: '' },
+  ]);
+
+  function addLine() {
+    setNewJELines([...newJELines, { accountRef: '', debit: '', credit: '', description: '' }]);
+  }
+
+  function updateLine(index: number, field: string, value: string) {
+    const updated = [...newJELines];
+    (updated[index] as Record<string, string>)[field] = value;
+    setNewJELines(updated);
+  }
+
+  function removeLine(index: number) {
+    if (newJELines.length <= 1) return;
+    setNewJELines(newJELines.filter((_, i) => i !== index));
+  }
+
+  function submitNewJE() {
+    const lines = newJELines
+      .filter((l) => l.accountRef.trim())
+      .map((l) => ({
+        accountRef: l.accountRef.trim(),
+        debit: parseFloat(l.debit) || 0,
+        credit: parseFloat(l.credit) || 0,
+        description: l.description || undefined,
+      }));
+    if (lines.length < 1 || !newJEMemo.trim()) return;
+    const totalD = lines.reduce((s, l) => s + l.debit, 0);
+    const totalC = lines.reduce((s, l) => s + l.credit, 0);
+    if (Math.abs(totalD - totalC) > 0.01) {
+      alert(`Entry does not balance. Debits: ${totalD.toFixed(2)}, Credits: ${totalC.toFixed(2)}`);
+      return;
+    }
+    createJeMutation.mutate({ memo: newJEMemo.trim(), lines });
+  }
 
   /* --- Derived state --- */
 
@@ -906,7 +929,7 @@ export default function JournalEntriesPage() {
 
   return (
     <div className="min-h-screen bg-[#F5F0E8] flex">
-      <Sidebar sessionId={sessionId} />
+      {/* Sidebar rendered by layout.tsx */}
 
       <div className="ml-[260px] flex-1 flex flex-col min-h-screen">
         {/* Top bar */}
@@ -926,6 +949,9 @@ export default function JournalEntriesPage() {
             <span className="text-[#2C2416] font-medium">Journal Entries</span>
           </div>
         </div>
+
+        {/* Workflow Breadcrumb */}
+        <WorkflowBreadcrumb sessionId={sessionId} gates={gates} />
 
         {/* Progress Rail */}
         {gates.length > 0 && (
@@ -983,6 +1009,39 @@ export default function JournalEntriesPage() {
               {/* ============================================== */}
               {activeTab === 'modules' && (
                 <div className="space-y-6">
+                  {/* Auto-propose CTA */}
+                  <div className="bg-[#E0EAF5] border border-[#3B6EA5]/20 rounded-lg px-5 py-4 flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium text-[#2C2416]">Auto-Compute Adjusting Entries</div>
+                      <div className="text-xs text-[#8B7A5E] mt-0.5">
+                        Run all 13 accounting modules to propose adjustments based on your trial balance data.
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => autoProposeMutation.mutate()}
+                      disabled={autoProposeMutation.isPending}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-[#B8860B] text-[#F5F0E8] hover:bg-[#A07608] disabled:opacity-50 transition-colors shrink-0"
+                    >
+                      {autoProposeMutation.isPending ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <Sparkles size={14} />
+                      )}
+                      {autoProposeMutation.isPending ? 'Computing...' : 'Run Modules'}
+                    </button>
+                  </div>
+                  {autoProposeMutation.isSuccess && (
+                    <div className="bg-[#E0EDE8] border border-[#2D6A4F]/20 rounded-lg px-4 py-2 text-xs text-[#2D6A4F] font-medium flex items-center gap-2">
+                      <CheckCircle2 size={14} />
+                      Module proposals generated. Review below.
+                    </div>
+                  )}
+                  {autoProposeMutation.isError && (
+                    <div className="bg-[#F5E4DE] border border-[#C44B2B]/20 rounded-lg px-4 py-2 text-xs text-[#C44B2B]">
+                      {(autoProposeMutation.error as Error).message}
+                    </div>
+                  )}
+
                   {/* Module grid */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     {MODULES.map((mod) => {
@@ -1029,6 +1088,129 @@ export default function JournalEntriesPage() {
               {/* ============================================== */}
               {activeTab === 'manual' && (
                 <div className="space-y-6">
+                  {/* New JE button */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium text-[#2C2416]">Manual Adjusting Entries</div>
+                      <div className="text-xs text-[#8B7A5E]">One-time entries not covered by modules</div>
+                    </div>
+                    <button
+                      onClick={() => setShowNewJE(!showNewJE)}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-[#B8860B] text-[#F5F0E8] hover:bg-[#A07608] transition-colors"
+                    >
+                      <Plus size={14} />
+                      New Journal Entry
+                    </button>
+                  </div>
+
+                  {/* New JE form */}
+                  {showNewJE && (
+                    <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-5 space-y-4">
+                      <div className="text-sm font-medium text-[#2C2416]">Create Adjusting Entry</div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-[#5C4F3A] mb-1">Memo (required)</label>
+                        <input
+                          type="text"
+                          value={newJEMemo}
+                          onChange={(e) => setNewJEMemo(e.target.value)}
+                          placeholder="e.g., Accrue Q1 bonus liability"
+                          className="w-full px-3 py-2 text-sm bg-white border border-[#DDD5C2] rounded text-[#2C2416] placeholder-[#8B7A5E]/50 focus:outline-none focus:border-[#B8860B]"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-xs font-medium text-[#5C4F3A]">Lines</label>
+                          <button onClick={addLine} className="text-xs text-[#B8860B] font-medium hover:underline flex items-center gap-1">
+                            <Plus size={12} /> Add Line
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="grid grid-cols-[2fr_1fr_1fr_2fr_auto] gap-2 text-[10px] font-medium text-[#8B7A5E] uppercase tracking-wider px-1">
+                            <span>Account</span><span>Debit</span><span>Credit</span><span>Description</span><span />
+                          </div>
+                          {newJELines.map((line, i) => (
+                            <div key={i} className="grid grid-cols-[2fr_1fr_1fr_2fr_auto] gap-2">
+                              <input
+                                type="text"
+                                value={line.accountRef}
+                                onChange={(e) => updateLine(i, 'accountRef', e.target.value)}
+                                placeholder="Account code"
+                                className="px-2 py-1.5 text-sm font-mono bg-white border border-[#DDD5C2] rounded focus:outline-none focus:border-[#B8860B]"
+                              />
+                              <input
+                                type="text"
+                                value={line.debit}
+                                onChange={(e) => updateLine(i, 'debit', e.target.value)}
+                                placeholder="0.00"
+                                className="px-2 py-1.5 text-sm font-mono bg-white border border-[#DDD5C2] rounded text-right focus:outline-none focus:border-[#B8860B]"
+                              />
+                              <input
+                                type="text"
+                                value={line.credit}
+                                onChange={(e) => updateLine(i, 'credit', e.target.value)}
+                                placeholder="0.00"
+                                className="px-2 py-1.5 text-sm font-mono bg-white border border-[#DDD5C2] rounded text-right focus:outline-none focus:border-[#B8860B]"
+                              />
+                              <input
+                                type="text"
+                                value={line.description}
+                                onChange={(e) => updateLine(i, 'description', e.target.value)}
+                                placeholder="Line description"
+                                className="px-2 py-1.5 text-sm bg-white border border-[#DDD5C2] rounded focus:outline-none focus:border-[#B8860B]"
+                              />
+                              <button
+                                onClick={() => removeLine(i)}
+                                className="text-[#C44B2B] hover:bg-[#F5E4DE] rounded p-1.5 transition-colors"
+                                title="Remove line"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        {/* Running totals */}
+                        <div className="grid grid-cols-[2fr_1fr_1fr_2fr_auto] gap-2 mt-2 pt-2 border-t border-[#DDD5C2]">
+                          <span className="text-xs font-medium text-[#5C4F3A] text-right pr-2">Totals</span>
+                          <span className="text-xs font-mono font-medium text-[#2C2416] text-right px-2">
+                            {newJELines.reduce((s, l) => s + (parseFloat(l.debit) || 0), 0).toFixed(2)}
+                          </span>
+                          <span className="text-xs font-mono font-medium text-[#2C2416] text-right px-2">
+                            {newJELines.reduce((s, l) => s + (parseFloat(l.credit) || 0), 0).toFixed(2)}
+                          </span>
+                          <span className={`text-xs font-medium px-2 ${
+                            Math.abs(newJELines.reduce((s, l) => s + (parseFloat(l.debit) || 0), 0) - newJELines.reduce((s, l) => s + (parseFloat(l.credit) || 0), 0)) < 0.01
+                              ? 'text-[#2D6A4F]' : 'text-[#C44B2B]'
+                          }`}>
+                            {Math.abs(newJELines.reduce((s, l) => s + (parseFloat(l.debit) || 0), 0) - newJELines.reduce((s, l) => s + (parseFloat(l.credit) || 0), 0)) < 0.01 ? 'Balanced' : 'Unbalanced'}
+                          </span>
+                          <span />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-3 pt-2">
+                        {createJeMutation.isError && (
+                          <span className="text-xs text-[#C44B2B]">{(createJeMutation.error as Error).message}</span>
+                        )}
+                        <button
+                          onClick={() => { setShowNewJE(false); setNewJELines([{ accountRef: '', debit: '', credit: '', description: '' }]); setNewJEMemo(''); }}
+                          className="px-3 py-1.5 text-sm font-medium text-[#5C4F3A] border border-[#DDD5C2] rounded hover:bg-[#F5F0E8] transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={submitNewJE}
+                          disabled={createJeMutation.isPending || !newJEMemo.trim()}
+                          className="px-4 py-1.5 text-sm font-medium bg-[#2D6A4F] text-white rounded hover:bg-[#245A42] disabled:opacity-50 transition-colors flex items-center gap-2"
+                        >
+                          {createJeMutation.isPending && <Loader2 size={14} className="animate-spin" />}
+                          Create &amp; Propose
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Lifecycle counter cards */}
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
                     <StatCard label="Draft" count={drafts.length} color="#5C4F3A" bgColor="#DDD5C2" />

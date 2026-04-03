@@ -66,14 +66,15 @@ const OVERRIDE_TYPES: StagingItemType[] = ['policy_change', 'flag_override'];
 router.post(
   '/resolve',
   asyncHandler(async (req: Request, res: Response) => {
-    const body = req.body as { id: string; action: 'approve' | 'reject'; reason?: string; signedBy?: string };
+    const body = req.body as { id: string; action: 'approve' | 'reject'; reason?: string };
     if (!body?.id || !body?.action) {
       res.status(400).json({ error: 'Missing id or action (approve | reject)' });
       return;
     }
+    const signedBy = (req as Request & { userId?: string }).userId ?? 'system';
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    const item = await getStagingItem(body.id, pool ? { pool } : undefined);
+    const item = await getStagingItem(body.id, pool && tenantId ? { pool, tenantId } : undefined);
     const isOverride = item && OVERRIDE_TYPES.includes(item.type);
 
     if (body.action === 'approve') {
@@ -91,10 +92,10 @@ router.post(
           },
           agentDissentSnapshot: { justification: item!.justification },
           userPromptRationale: rationale,
-          createdBy: body.signedBy,
+          createdBy: signedBy,
         });
       }
-      const result = await receiveHumanApproval({ id: body.id, signedBy: body.signedBy }, pool && tenantId ? { pool, tenantId } : undefined);
+      const result = await receiveHumanApproval({ id: body.id, signedBy }, pool && tenantId ? { pool, tenantId } : undefined);
       if (!result.ok) {
         res.status(result.error === 'Staging item not found' ? 404 : 400).json({ error: result.error });
         return;
@@ -108,7 +109,7 @@ router.post(
           relatedType: 'hitl_staging',
           relatedId: result.item.id,
           memoMarkdown: result.item.justification,
-          createdBy: body.signedBy,
+          createdBy: signedBy,
           createdByType: 'user',
         });
       }
@@ -130,7 +131,7 @@ router.post(
           },
           agentDissentSnapshot: { justification: item!.justification },
           userPromptRationale: rationale,
-          createdBy: body.signedBy,
+          createdBy: signedBy,
         });
       }
       const result = await receiveHumanRejection({ id: body.id, rejectionReason: body.reason ?? 'No reason provided' }, pool && tenantId ? { pool, tenantId } : undefined);
@@ -554,7 +555,6 @@ router.post(
     const body = req.body as {
       id: string;
       signal: 'HumanApproved' | 'HumanRejected';
-      signedBy?: string;
       signatureToken?: string;
       /** Required when signal is HumanRejected — stored in context memory so AI avoids same mistake. */
       rejectionReason?: string;
@@ -563,13 +563,18 @@ router.post(
       res.status(400).json({ error: 'id and signal (HumanApproved | HumanRejected) required' });
       return;
     }
+    const signedBy = (req as Request & { userId?: string }).userId;
+    if (!signedBy) {
+      res.status(401).json({ error: 'Authentication required for webhook approvals' });
+      return;
+    }
     if (body.signal === 'HumanRejected' && !body.rejectionReason?.trim()) {
       res.status(400).json({ error: 'rejectionReason required when signal is HumanRejected (feedback loop: Why?)' });
       return;
     }
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    const result = await handleApprovalWebhook(body, pool && tenantId ? { pool, tenantId } : undefined);
+    const result = await handleApprovalWebhook({ ...body, signedBy }, pool && tenantId ? { pool, tenantId } : undefined);
     if (!result.ok) {
       res.status(result.error === 'Staging item not found' ? 404 : 400).json({ ok: false, error: result.error });
       return;

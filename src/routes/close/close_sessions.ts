@@ -381,7 +381,7 @@ router.get('/sessions/:id/module-proposals', async (req: Request, res: Response)
     if (!tenantId || !pool) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const sessionId = req.params.id ?? '';
     const { rows } = await pool.query(
-      `SELECT id, module_name, standard, status, je_id, computation_inputs, data_quality_flags, skip_reason, created_at, reviewed_by, reviewed_at
+      `SELECT id, module_name, standard, status, je_id, computation_inputs, data_quality_flags, skip_reason, not_applicable_reason, created_at, reviewed_by, reviewed_at
        FROM tenant_module_proposals WHERE tenant_id = $1 AND close_session_id = $2 ORDER BY created_at`,
       [tenantId, sessionId]
     );
@@ -394,13 +394,20 @@ router.get('/sessions/:id/module-proposals', async (req: Request, res: Response)
       computationInputs: r.computation_inputs,
       dataQualityFlags: r.data_quality_flags,
       skipReason: r.skip_reason,
+      notApplicableReason: r.not_applicable_reason,
       createdAt: r.created_at,
       reviewedBy: r.reviewed_by,
       reviewedAt: r.reviewed_at,
     }));
-    const needsReview = proposals.filter((p) => p.status === 'needs_review').length;
-    const total = proposals.length;
-    res.json({ proposals, summary: { total, needsReview, reviewed: total - needsReview } });
+    const summary = {
+      total: proposals.length,
+      needsReview: proposals.filter((p) => p.status === 'needs_review').length,
+      approved: proposals.filter((p) => p.status === 'approved').length,
+      skipped: proposals.filter((p) => p.status === 'skipped').length,
+      notApplicable: proposals.filter((p) => p.status === 'not_applicable').length,
+      failed: proposals.filter((p) => p.status === 'failed').length,
+    };
+    res.json({ proposals, summary });
   } catch (e) {
     send500(res, e, 'Get module proposals failed');
   }
@@ -420,10 +427,52 @@ router.post('/sessions/:id/module-proposals/:proposalId/approve', async (req: Re
     }
     const { proposalId } = req.params;
     const userId = (req as unknown as { userId?: string }).userId ?? 'unknown';
+
+    // If proposal has a linked JE, verify it has been posted before allowing approval
+    const proposal = await pool.query<{ je_id: string | null; status: string; module_name: string }>(
+      `SELECT je_id, status, module_name FROM tenant_module_proposals WHERE id = $1 AND tenant_id = $2`,
+      [proposalId, tenantId]
+    );
+    if (proposal.rows.length === 0) {
+      res.status(404).json({ error: 'Module proposal not found' });
+      return;
+    }
+    const jeId = proposal.rows[0].je_id;
+    if (jeId) {
+      const je = await pool.query<{ status: string }>(
+        `SELECT status FROM journal_entries WHERE id = $1 AND tenant_id = $2`,
+        [jeId, tenantId]
+      );
+      const jeStatus = je.rows[0]?.status;
+      if (jeStatus !== 'posted' && jeStatus !== 'exported') {
+        res.status(400).json({
+          error: `Cannot approve: linked journal entry is in '${jeStatus ?? 'unknown'}' status. Post the journal entry before approving the module proposal.`,
+        });
+        return;
+      }
+    }
+
+    // Get module name for audit event
+    const moduleName = proposal.rows[0]?.module_name ?? proposalId;
+
     await pool.query(
       `UPDATE tenant_module_proposals SET status = 'approved', reviewed_by = $1, reviewed_at = NOW() WHERE id = $2 AND tenant_id = $3`,
       [userId, proposalId, tenantId]
     );
+
+    // Audit event
+    try {
+      const { toPeriodLabel } = await import('../../utils/period.js');
+      const sess = await pool.query<{ period_end: string }>(`SELECT period_end::text FROM close_sessions WHERE id = $1 AND tenant_id = $2`, [req.params.id, tenantId]);
+      const periodLabel = toPeriodLabel(sess.rows[0]?.period_end) ?? '';
+      await auditLedgerRepo.appendEntry(pool, {
+        tenantId, eventType: 'module_proposal_approved' as never,
+        deterministicFlagSnapshot: { proposalId, moduleName, actor: userId },
+        userPromptRationale: `Module proposal ${moduleName} approved`,
+        createdBy: userId,
+      });
+    } catch { /* non-fatal: audit event */ }
+
     res.json({ success: true });
   } catch (e) {
     send500(res, e, 'Approve module proposal failed');
@@ -450,9 +499,128 @@ router.post('/sessions/:id/module-proposals/:proposalId/skip', async (req: Reque
       `UPDATE tenant_module_proposals SET status = 'skipped', reviewed_by = $1, reviewed_at = NOW(), skip_reason = $2 WHERE id = $3 AND tenant_id = $4`,
       [userId, reason, proposalId, tenantId]
     );
+
+    // Audit event
+    try {
+      const modRow = await pool.query<{ module_name: string }>(`SELECT module_name FROM tenant_module_proposals WHERE id = $1`, [proposalId]);
+      const moduleName = modRow.rows[0]?.module_name ?? proposalId;
+      await auditLedgerRepo.appendEntry(pool, {
+        tenantId, eventType: 'module_proposal_skipped' as never,
+        deterministicFlagSnapshot: { proposalId, moduleName, actor: userId, reason },
+        userPromptRationale: `Module proposal ${moduleName} skipped: ${reason}`,
+        createdBy: userId,
+      });
+    } catch { /* non-fatal: audit event */ }
+
     res.json({ success: true });
   } catch (e) {
     send500(res, e, 'Skip module proposal failed');
+  }
+});
+
+/** POST /api/close/sessions/:id/module-proposals/:proposalId/not-applicable — mark a module as not applicable with rationale */
+router.post('/sessions/:id/module-proposals/:proposalId/not-applicable', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) { res.status(400).json({ error: 'Tenant context required' }); return; }
+    // Role enforcement: reviewer or higher (consistent with skip policy)
+    const actorRole = getCloseRoleFromReq(req as AuthRequest);
+    if (actorRole === 'preparer') {
+      res.status(403).json({ error: 'Insufficient role: marking modules not applicable requires reviewer, controller, cfo, or system_admin role' });
+      return;
+    }
+    const { proposalId } = req.params;
+    const sessionId = req.params.id;
+    const userId = (req as unknown as { userId?: string }).userId ?? 'unknown';
+    const reason = String(req.body?.reason ?? '').trim();
+    if (reason.length < 10) {
+      res.status(400).json({ error: 'Reason must be at least 10 characters explaining why this module is not applicable' });
+      return;
+    }
+    // Verify proposal exists for this tenant + session
+    const existing = await pool.query<{ module_name: string; status: string }>(
+      `SELECT module_name, status FROM tenant_module_proposals WHERE id = $1 AND tenant_id = $2 AND close_session_id = $3`,
+      [proposalId, tenantId, sessionId]
+    );
+    if (existing.rows.length === 0) {
+      res.status(404).json({ error: 'Module proposal not found for this session' });
+      return;
+    }
+    const moduleName = existing.rows[0].module_name;
+
+    await pool.query(
+      `UPDATE tenant_module_proposals SET status = 'not_applicable', not_applicable_reason = $1, reviewed_by = $2, reviewed_at = NOW() WHERE id = $3 AND tenant_id = $4`,
+      [reason, userId, proposalId, tenantId]
+    );
+
+    // Audit event
+    try {
+      await auditLedgerRepo.appendEntry(pool, {
+        tenantId, eventType: 'module_proposal_not_applicable' as never,
+        deterministicFlagSnapshot: { proposalId, moduleName, actor: userId, reason },
+        userPromptRationale: `Module ${moduleName} marked not applicable: ${reason}`,
+        createdBy: userId,
+      });
+    } catch { /* non-fatal: audit event */ }
+
+    res.json({ success: true });
+  } catch (e) {
+    send500(res, e, 'Mark module not applicable failed');
+  }
+});
+
+/** POST /api/close/sessions/:id/module-proposals/:proposalId/reopen — reopen a skipped or N/A module proposal for review */
+router.post('/sessions/:id/module-proposals/:proposalId/reopen', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+    const pool = getTenantPool(req);
+    if (!tenantId || !pool) { res.status(400).json({ error: 'Tenant context required' }); return; }
+    // Role enforcement: reviewer or higher
+    const actorRole = getCloseRoleFromReq(req as AuthRequest);
+    if (actorRole === 'preparer') {
+      res.status(403).json({ error: 'Insufficient role: reopening module proposals requires reviewer or higher role' });
+      return;
+    }
+    const { proposalId } = req.params;
+    const sessionId = req.params.id;
+    const userId = (req as unknown as { userId?: string }).userId ?? 'unknown';
+
+    // Verify proposal exists and is in a reopenable state
+    const existing = await pool.query<{ module_name: string; status: string }>(
+      `SELECT module_name, status FROM tenant_module_proposals WHERE id = $1 AND tenant_id = $2 AND close_session_id = $3`,
+      [proposalId, tenantId, sessionId]
+    );
+    if (existing.rows.length === 0) {
+      res.status(404).json({ error: 'Module proposal not found for this session' });
+      return;
+    }
+    const { module_name: moduleName, status: currentStatus } = existing.rows[0];
+    if (currentStatus !== 'not_applicable' && currentStatus !== 'skipped') {
+      res.status(400).json({ error: `Cannot reopen: proposal is in '${currentStatus}' status. Only 'not_applicable' or 'skipped' proposals can be reopened.` });
+      return;
+    }
+
+    // Transition to needs_review. Retain skip_reason/not_applicable_reason for audit trail (do NOT clear).
+    // Clear reviewed_by/reviewed_at since the review is being undone.
+    await pool.query(
+      `UPDATE tenant_module_proposals SET status = 'needs_review', reviewed_by = NULL, reviewed_at = NULL WHERE id = $1 AND tenant_id = $2`,
+      [proposalId, tenantId]
+    );
+
+    // Audit event
+    try {
+      await auditLedgerRepo.appendEntry(pool, {
+        tenantId, eventType: 'module_proposal_reopened' as never,
+        deterministicFlagSnapshot: { proposalId, moduleName, actor: userId, previousStatus: currentStatus },
+        userPromptRationale: `Module ${moduleName} reopened from ${currentStatus} for review`,
+        createdBy: userId,
+      });
+    } catch { /* non-fatal: audit event */ }
+
+    res.json({ success: true });
+  } catch (e) {
+    send500(res, e, 'Reopen module proposal failed');
   }
 });
 
@@ -783,13 +951,16 @@ router.post('/checklist-items/:itemId/complete', async (req: Request, res: Respo
       res.status(400).json({ error: 'Tenant context required' });
       return;
     }
-    const itemId = req.params.itemId ?? '';
-    const body = req.body as { completedBy: string; notes?: string };
-    if (!body?.completedBy) {
-      res.status(400).json({ error: 'completedBy required' });
+    // Role enforcement: only reviewer-level roles can complete checklist items
+    const actorRole = getCloseRoleFromReq(req as AuthRequest);
+    if (actorRole !== 'reviewer' && actorRole !== 'approver') {
+      res.status(403).json({ error: 'Insufficient role: checklist completion requires reviewer or approver role' });
       return;
     }
-    const item = await completeChecklistItem(pool, tenantId, itemId, body.completedBy, body.notes);
+    const itemId = req.params.itemId ?? '';
+    const completedBy = (req as AuthRequest).userId ?? 'unknown';
+    const body = req.body as { notes?: string };
+    const item = await completeChecklistItem(pool, tenantId, itemId, completedBy, body.notes);
     if (!item) {
       res.status(404).json({ error: 'Checklist item not found' });
       return;
@@ -810,12 +981,9 @@ router.post('/checklist-items/:itemId/skip', async (req: Request, res: Response)
       return;
     }
     const itemId = req.params.itemId ?? '';
-    const body = req.body as { completedBy: string; notes?: string };
-    if (!body?.completedBy) {
-      res.status(400).json({ error: 'completedBy required' });
-      return;
-    }
-    const item = await skipChecklistItem(pool, tenantId, itemId, body.completedBy, body.notes);
+    const completedBy = (req as AuthRequest).userId ?? 'unknown';
+    const body = req.body as { notes?: string };
+    const item = await skipChecklistItem(pool, tenantId, itemId, completedBy, body.notes);
     if (!item) {
       res.status(404).json({ error: 'Checklist item not found' });
       return;

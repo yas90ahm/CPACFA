@@ -32,10 +32,8 @@ import {
 interface JournalEntry {
   id: string;
   status: string;
-  amount?: string;
   memo?: string;
-  moduleRef?: string;
-  sourceModule?: string;
+  source?: string;
 }
 
 interface ModuleDefinition {
@@ -180,7 +178,7 @@ function getModuleStatus(
   moduleId: string,
   jesByModule: Map<string, JournalEntry[]>
 ): { label: string; color: string; bg: string } {
-  const jes = jesByModule.get(moduleId) ?? [];
+  const jes = (jesByModule.get(moduleId) ?? []).filter(Boolean);
   if (jes.length === 0) {
     // Impairment module with no JEs is a special case
     if (moduleId === 'impairment') {
@@ -189,21 +187,21 @@ function getModuleStatus(
     return { label: 'No JEs', color: '#8B7A5E', bg: '#EDE6D6' };
   }
 
-  const blocked = jes.some((j) => j.status === 'blocked' || j.status === 'rejected');
+  const blocked = jes.some((j) => j?.status === 'blocked' || j?.status === 'rejected');
   if (blocked) return { label: 'Blocked', color: '#C44B2B', bg: '#F5E4DE' };
 
-  const pending = jes.filter((j) => j.status === 'proposed' || j.status === 'pending_approval');
+  const pending = jes.filter((j) => j?.status === 'proposed' || j?.status === 'pending_approval');
   if (pending.length > 0) {
     return { label: `${pending.length} Pending`, color: '#8B6914', bg: '#F0E8D0' };
   }
 
-  const posted = jes.filter((j) => j.status === 'posted');
+  const posted = jes.filter((j) => j?.status === 'posted');
   if (posted.length === jes.length) {
     return { label: 'All Posted', color: '#2D6A4F', bg: '#E0EDE8' };
   }
 
   // Segments / reporting modules
-  const reportable = jes.filter((j) => j.status === 'reportable' || j.status === 'approved');
+  const reportable = jes.filter((j) => j?.status === 'reportable' || j?.status === 'approved');
   if (reportable.length > 0) {
     return { label: `${reportable.length} Reportable`, color: '#3B6EA5', bg: '#E0EAF5' };
   }
@@ -211,16 +209,10 @@ function getModuleStatus(
   return { label: 'In Progress', color: '#8B6914', bg: '#F0E8D0' };
 }
 
-function getModuleAmount(moduleId: string, jesByModule: Map<string, JournalEntry[]>): string {
-  const jes = jesByModule.get(moduleId) ?? [];
-  let total = 0;
-  for (const je of jes) {
-    if (je.amount) {
-      const n = parseFloat(String(je.amount).replace(/[$,()]/g, ''));
-      if (isFinite(n)) total += Math.abs(n);
-    }
-  }
-  return total.toFixed(2);
+function getModuleAmount(_moduleId: string, _jesByModule: Map<string, JournalEntry[]>): string {
+  // JE amounts live on JournalEntryLine (debit/credit per line), not on the JE header.
+  // Module-level totals require fetching lines — display JE count instead.
+  return '0.00';
 }
 
 function getModuleJeCount(moduleId: string, jesByModule: Map<string, JournalEntry[]>): number {
@@ -274,26 +266,27 @@ export default function AccountingModulesPage() {
   const jesQuery = useQuery({
     queryKey: ['journal-entries', sessionId],
     queryFn: async () => {
-      const data = await apiFetch<{ entries?: JournalEntry[] } | JournalEntry[]>(
+      const data = await apiFetch<{ journalEntries?: JournalEntry[]; entries?: JournalEntry[] } | JournalEntry[]>(
         '/api/close/journal-entries',
         { params: { closeSessionId: sessionId } }
       );
-      return Array.isArray(data) ? data : data.entries ?? [];
+      if (Array.isArray(data)) return data;
+      return data.journalEntries ?? data.entries ?? [];
     },
     enabled: !!sessionId,
   });
 
   const jes = jesQuery.data ?? [];
 
-  // Group JEs by module reference
+  // Group JEs by module — match source and memo against module names/IDs
   const jesByModule = new Map<string, JournalEntry[]>();
   for (const je of jes) {
-    const ref = je.moduleRef ?? je.sourceModule ?? '';
-    const key = ref.toLowerCase().replace(/[\s_-]/g, '');
-    // Match to known module IDs
+    if (!je) continue;
+    const searchText = [je.source ?? '', je.memo ?? ''].join(' ').toLowerCase().replace(/[\s_-]/g, '');
     for (const mod of MODULES) {
       const modKey = mod.id.replace(/-/g, '');
-      if (key.includes(modKey) || key.includes(mod.name.toLowerCase().replace(/[\s&]/g, ''))) {
+      const modNameKey = mod.name.toLowerCase().replace(/[\s&]/g, '');
+      if (searchText.includes(modKey) || searchText.includes(modNameKey)) {
         const arr = jesByModule.get(mod.id) ?? [];
         arr.push(je);
         jesByModule.set(mod.id, arr);
@@ -304,16 +297,9 @@ export default function AccountingModulesPage() {
 
   // Summary stats
   const totalJEs = jes.length;
-  let totalAmount = 0;
-  for (const je of jes) {
-    if (je.amount) {
-      const n = parseFloat(String(je.amount).replace(/[$,()]/g, ''));
-      if (isFinite(n)) totalAmount += Math.abs(n);
-    }
-  }
 
   return (
-    <div className="min-h-screen bg-[#F5F0E8]">
+    <div className="ml-[260px] min-h-screen bg-[#F5F0E8]">
       {/* Breadcrumb */}
       <div className="h-12 bg-[#EDE6D6] border-b border-[#DDD5C2] flex items-center px-6">
         <div className="flex items-center gap-2 text-sm">
@@ -352,15 +338,17 @@ export default function AccountingModulesPage() {
             </div>
             <div className="flex items-center gap-1.5">
               {_gates.map((gate: any, i: number) => {
-                let bg = '#5C4F3A';
-                if (gate.passing) bg = '#2D6A4F';
-                else if (i === _activeGateIndex) bg = '#B8860B';
+                const isActive = i === _activeGateIndex && !gate?.passing;
+                let bg = '#DDD5C2'; // pending (muted)
+                if (gate?.passing) bg = '#2D6A4F'; // forest green
+                else if (isActive) bg = '#B8860B'; // gold active
+                const sizeClass = isActive ? 'w-3 h-3' : 'w-2.5 h-2.5';
                 return (
                   <div
-                    key={gate.id}
-                    className="w-2.5 h-2.5 rounded-full transition-colors"
+                    key={gate?.id ?? i}
+                    className={`${sizeClass} rounded-full transition-colors`}
                     style={{ backgroundColor: bg }}
-                    title={`${gate.label}: ${gate.passing ? 'Passing' : 'Pending'}`}
+                    title={`${gate?.label ?? 'Gate'}: ${gate?.passing ? 'Passing' : 'Pending'}`}
                   />
                 );
               })}
@@ -402,7 +390,7 @@ export default function AccountingModulesPage() {
                   {totalJEs} JEs auto-proposed
                 </span>
                 <span className="text-[#8B7A5E]">
-                  {fmtMoney(totalAmount.toFixed(2), { dollar: true, dash: false })} total adjustments
+                  auto-proposed
                 </span>
               </div>
             </div>

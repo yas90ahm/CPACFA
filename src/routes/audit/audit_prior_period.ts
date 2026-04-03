@@ -33,7 +33,8 @@ router.post('/prior-period-comparison', validateBody(priorPeriodComparisonBodySc
       res.status(400).json({ error: 'Prior period data required.', message: priorRequiredErr });
       return;
     }
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     let priorSnapshot: import('../../types/kpi_history.js').KPISnapshot | undefined;
     if (pool && tenantId && body.priorPeriodLabel) {
@@ -46,7 +47,7 @@ router.post('/prior-period-comparison', validateBody(priorPeriodComparisonBodySc
       });
       priorSnapshot = closeCtx.priorSnapshot;
     }
-    const settings = getMateriality(tenantId, body.currentPeriodLabel);
+    const settings = await getMateriality(tenantId, body.currentPeriodLabel);
     const th = materialityThresholdFromSettings(settings);
     // QUARANTINED — Agentic prior period comparison not in MVP architecture
     // const result = buildPriorPeriodComparison(body, {

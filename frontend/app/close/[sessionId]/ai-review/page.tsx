@@ -182,7 +182,7 @@ export default function AIReviewPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#F5F0E8] flex items-center justify-center">
+      <div className="ml-[260px] min-h-screen bg-[#F5F0E8] flex items-center justify-center">
         <Loader2 size={32} className="animate-spin text-[#B8860B]" />
       </div>
     );

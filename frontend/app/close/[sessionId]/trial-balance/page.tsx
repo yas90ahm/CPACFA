@@ -6,14 +6,9 @@ import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { fmtMoney, sumMoneyStrings } from '@/lib/money';
+import { CloseSidebar } from '@/components/close-sidebar';
+import { WorkflowBreadcrumb } from '@/components/workflow-breadcrumb';
 import {
-  LayoutDashboard,
-  FolderClosed,
-  Briefcase,
-  ScrollText,
-  BarChart3,
-  Activity,
-  Settings,
   Loader2,
   AlertCircle,
   CheckCircle2,
@@ -54,64 +49,7 @@ interface TBResponse {
 /*  Nav config                                                         */
 /* ------------------------------------------------------------------ */
 
-const NAV_ITEMS = [
-  { label: 'Dashboard', icon: LayoutDashboard, href: (sid: string) => `/close/${sid}/dashboard` },
-  { label: 'Trial Balance', icon: BarChart3, href: (sid: string) => `/close/${sid}/trial-balance` },
-  { label: 'Close Sessions', icon: FolderClosed, href: () => '/close' },
-  { label: 'Portfolio', icon: Briefcase, href: () => '/portfolio' },
-  { label: 'Audit Trail', icon: ScrollText, href: (sid: string) => `/close/${sid}/audit-trail` },
-  { label: 'GL Quality', icon: BarChart3, href: (sid: string) => `/close/${sid}/gl-quality` },
-  { label: 'Modules', icon: Activity, href: (sid: string) => `/close/${sid}/modules` },
-  { label: 'Settings', icon: Settings, href: () => '/settings/general' },
-];
-
-/* ------------------------------------------------------------------ */
-/*  Sidebar                                                            */
-/* ------------------------------------------------------------------ */
-
-function Sidebar({ sessionId }: { sessionId: string }) {
-  return (
-    <aside className="fixed top-0 left-0 h-screen w-[260px] bg-[#2C2416] flex flex-col z-50">
-      <div className="px-6 pt-6 pb-4">
-        <div className="text-[#B8860B] text-xl font-medium tracking-wide">SABIT</div>
-        <div className="text-[#8B7A5E] text-xs mt-0.5">Financial Close Engine</div>
-      </div>
-
-      <nav className="flex-1 px-3 mt-2 space-y-0.5 overflow-y-auto">
-        {NAV_ITEMS.map((item) => {
-          const isActive = item.label === 'Trial Balance';
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.label}
-              href={item.href(sessionId)}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
-                isActive
-                  ? 'bg-[#3B1F0A] text-[#B8860B]'
-                  : 'text-[#8B7A5E] hover:text-[#B8860B] hover:bg-[#3B1F0A]/50'
-              }`}
-            >
-              <Icon size={18} />
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
-
-      <div className="px-4 py-4 border-t border-[#3B1F0A]">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-[#3B1F0A] flex items-center justify-center text-[#B8860B] text-xs font-medium">
-            YA
-          </div>
-          <div>
-            <div className="text-sm text-[#B8860B] font-medium">Yasir A.</div>
-            <div className="text-xs text-[#8B7A5E]">Controller</div>
-          </div>
-        </div>
-      </div>
-    </aside>
-  );
-}
+/* Sidebar imported from @/components/close-sidebar */
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -198,13 +136,13 @@ export default function TrialBalancePage() {
   });
 
   // Normalize: API may return debitBalance/creditBalance or debit/credit
-  const rows = (data?.rows ?? []).map((r) => ({
+  const rows = useMemo(() => (data?.rows ?? []).map((r) => ({
     ...r,
     debit: r.debit ?? r.debitBalance ?? '0',
     credit: r.credit ?? r.creditBalance ?? '0',
     reportingCategory: r.reportingCategory ?? r.accountType ?? '',
     fsLineItem: r.fsLineItem ?? r.mappingReportingLineName ?? '',
-  }));
+  })), [data]);
 
   const handleGLUpload = useCallback(async (file: File) => {
     setUploading(true);
@@ -315,9 +253,12 @@ export default function TrialBalancePage() {
 
   return (
     <div className="min-h-screen bg-[#F5F0E8] flex">
-      <Sidebar sessionId={sessionId} />
+      {/* Sidebar rendered by layout.tsx */}
 
       <div className="ml-[260px] flex-1 flex flex-col min-h-screen">
+        {/* Workflow Breadcrumb */}
+        <WorkflowBreadcrumb sessionId={sessionId} gates={(readinessQuery.data as any)?.gates ?? []} />
+
         {/* Progress Rail */}
         {(() => {
           const _gates = (readinessQuery.data as any)?.gates ?? [];
@@ -587,7 +528,12 @@ export default function TrialBalancePage() {
                                   {row.fsLineItem}
                                 </span>
                               ) : (
-                                <span className="text-[#8B7A5E] text-sm">--</span>
+                                <Link
+                                  href={`/close/${sessionId}/mapping`}
+                                  className="text-[#C44B2B] text-sm font-medium hover:underline"
+                                >
+                                  Unmapped
+                                </Link>
                               )}
                             </td>
                           </tr>

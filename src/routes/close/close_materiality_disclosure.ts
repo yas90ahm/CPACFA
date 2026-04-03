@@ -16,23 +16,33 @@ import { send500 } from '../../lib/errorHandler.js';
 
 const router = Router();
 
-router.get('/materiality', (req: Request, res: Response) => {
+router.get('/materiality', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
+    const pool = getTenantPool(req);
     const periodLabel = req.query.periodLabel as string | undefined;
-    const settings = getMateriality(tenantId, periodLabel);
+    const settings = await getMateriality(tenantId, periodLabel, pool ?? undefined);
     res.json(settings ?? {});
   } catch (e) {
     send500(res, e, 'Get materiality failed');
   }
 });
 
-router.patch('/materiality', (req: Request, res: Response) => {
+router.patch('/materiality', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
+    const pool = getTenantPool(req);
+    // Role enforcement: materiality changes require approver-level role
+    const role = (req as Request & { role?: string }).role;
+    if (role && !['admin', 'system_admin', 'controller', 'cfo', 'approver'].includes(role)) {
+      res.status(403).json({ error: 'Materiality update requires controller, CFO, or admin role' });
+      return;
+    }
     const body = req.body as MaterialitySettings & { periodLabel?: string };
     const { periodLabel, ...settings } = body;
-    const updated = setMateriality(tenantId, settings as MaterialitySettings, periodLabel);
+    const updated = await setMateriality(tenantId, settings as MaterialitySettings, periodLabel, pool ?? undefined);
     res.json(updated);
   } catch (e) {
     send500(res, e, 'Set materiality failed');

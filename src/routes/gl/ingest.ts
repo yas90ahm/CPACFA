@@ -17,6 +17,7 @@ import { sumRound2 } from '../../utils/decimal.js';
 import { runGLHealthAnalysis } from '../../services/gl_health_analysis_service.js';
 import { analyzeAccountsLegacy, type AccountInput, type AccountIntelligence, type LegacyAccountFlag } from '../../services/account_intelligence_service.js';
 import { getCloseSessionById } from '../../db/repositories/close_session_repository.js';
+import { toPeriodLabel } from '../../utils/period.js';
 
 const router = Router();
 
@@ -126,7 +127,7 @@ router.post(
         try {
           const sess = await getCloseSessionById(pool, tenantId, sessionIdParam);
           if (sess?.periodEnd) {
-            periodLabel = sess.periodEnd.length >= 7 ? sess.periodEnd.slice(0, 7) : sess.periodEnd;
+            periodLabel = toPeriodLabel(sess.periodEnd) ?? sess.periodEnd;
           }
         } catch { /* fall through to default */ }
       }
@@ -177,7 +178,32 @@ router.post(
           );
           outOfPeriodCount = Number(outOfPeriodResult.rows[0]?.cnt ?? 0);
           if (outOfPeriodCount > 0) {
-            // Remove out-of-period entries and report
+            // Count total entries for this upload
+            const totalResult = await pool.query<{ cnt: string }>(
+              `SELECT COUNT(*)::int AS cnt FROM core.general_ledger
+               WHERE tenant_id = $1 AND period_label = $2`,
+              [tenantId, periodLabel]
+            );
+            const totalEntries = Number(totalResult.rows[0]?.cnt ?? 0);
+
+            // If ALL entries are outside the session period, reject the entire upload
+            if (outOfPeriodCount >= totalEntries) {
+              // Roll back: delete all entries from this upload
+              await pool.query(
+                `DELETE FROM core.general_ledger WHERE tenant_id = $1 AND period_label = $2`,
+                [tenantId, periodLabel]
+              );
+              res.status(400).json({
+                error: 'Period mismatch',
+                message: `All ${outOfPeriodCount} GL entries have dates outside the session period (${sessionPeriodStart} to ${sessionPeriodEnd}). Upload a GL file for the correct period.`,
+                sessionPeriodStart,
+                sessionPeriodEnd,
+                outOfPeriodCount,
+              });
+              return;
+            }
+
+            // Remove out-of-period entries and report as warning
             const deleteResult = await pool.query(
               `DELETE FROM core.general_ledger
                WHERE tenant_id = $1 AND period_label = $2

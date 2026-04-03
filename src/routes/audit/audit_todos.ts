@@ -19,7 +19,8 @@ const router = Router();
 /** GET /api/audit/todos */
 router.get('/todos', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     const status = req.query.status as 'open' | 'done' | undefined;
     const limit = req.query.limit != null ? Math.min(500, Math.max(1, Number(req.query.limit))) : 100;
@@ -33,7 +34,8 @@ router.get('/todos', async (req: Request, res: Response) => {
 /** GET /api/audit/gaps-with-resolution */
 router.get('/gaps-with-resolution', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     const status = req.query.status as 'open' | 'done' | undefined;
     const limit = req.query.limit != null ? Math.min(500, Math.max(1, Number(req.query.limit))) : 100;
@@ -47,7 +49,8 @@ router.get('/gaps-with-resolution', async (req: Request, res: Response) => {
 /** POST /api/audit/todos/from-gaps */
 router.post('/todos/from-gaps', validateBody(todosFromGapsBodySchema), async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     const gaps = req.body.gaps ?? [];
     const added = await addTodosFromGaps(gaps as Parameters<typeof addTodosFromGaps>[0], pool, tenantId);
@@ -60,7 +63,8 @@ router.post('/todos/from-gaps', validateBody(todosFromGapsBodySchema), async (re
 /** PATCH /api/audit/todos/:id */
 router.patch('/todos/:id', validateBody(todoUpdateBodySchema), async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     const id = req.params.id;
     const status = req.body.status;

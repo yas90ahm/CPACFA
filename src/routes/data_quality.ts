@@ -28,7 +28,8 @@ const router = Router();
 /** GET /api/data-quality/rules — List rules */
 router.get('/rules', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     if (!pool) {
       res.json({ rules: [] });
@@ -44,7 +45,8 @@ router.get('/rules', async (req: Request, res: Response) => {
 /** POST /api/data-quality/rules — Create rule */
 router.post('/rules', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     if (!pool) {
       res.status(503).json({ error: 'Tenant database required' });
@@ -72,7 +74,8 @@ router.post('/rules', async (req: Request, res: Response) => {
 /** GET /api/data-quality/exceptions — List exceptions (optional periodLabel, ruleId, severity, status, limit) */
 router.get('/exceptions', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     if (!pool) {
       res.json({ exceptions: [] });
@@ -107,7 +110,8 @@ router.get('/exceptions', async (req: Request, res: Response) => {
 /** GET /api/data-quality/exceptions/:id — Get one exception; ?suggest=true for remediation suggestion */
 router.get('/exceptions/:id', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     if (!pool) {
       res.status(404).json({ error: 'Exception not found' });
@@ -134,7 +138,8 @@ router.get('/exceptions/:id', async (req: Request, res: Response) => {
 /** PATCH /api/data-quality/exceptions/:id — Acknowledge, resolve, or add note */
 router.patch('/exceptions/:id', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     if (!pool) {
       res.status(503).json({ error: 'Tenant database required' });
@@ -160,7 +165,8 @@ router.patch('/exceptions/:id', async (req: Request, res: Response) => {
 /** POST /api/data-quality/run — Run rules and persist exceptions (body: scope, periodLabel?, sourceId?, balanceSheet?, profitAndLoss?, trialBalanceEntries?) */
 router.post('/run', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     if (!pool) {
       res.status(503).json({ error: 'Tenant database required' });
@@ -196,7 +202,8 @@ router.post('/run', async (req: Request, res: Response) => {
 /** GET /api/data-quality/summary — Counts by severity/rule/period */
 router.get('/summary', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     if (!pool) {
       res.json({ bySeverity: {}, byRule: {}, total: 0 });

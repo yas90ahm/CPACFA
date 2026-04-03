@@ -193,6 +193,29 @@ export async function computeReadiness(
     );
   }
 
+  // Module proposals gate: all module proposals must be resolved (approved, skipped, or not_applicable)
+  try {
+    const unresolvedModules = await pool.query<{ module_name: string; status: string }>(
+      `SELECT module_name, status FROM tenant_module_proposals
+       WHERE tenant_id = $1 AND close_session_id = $2 AND status IN ('failed', 'needs_review', 'pending', 'proposed')`,
+      [tenantId, closeSessionId]
+    );
+    if (unresolvedModules.rows.length > 0) {
+      const names = unresolvedModules.rows.map((r) => `${r.module_name} (${r.status})`).join(', ');
+      hardBlockers.push(
+        `${unresolvedModules.rows.length} module proposal(s) unresolved: ${names}. Approve, skip with reason, or mark not applicable before advancing.`
+      );
+    }
+  } catch (err) {
+    // Fail-closed in strict modes (prod/staging): if we can't verify module status, block advancement
+    const { isStrictTrustMode } = await import('../lib/runtime_mode.js');
+    if (isStrictTrustMode()) {
+      hardBlockers.push('Module proposal gate check failed — cannot verify module status. Resolve before advancing.');
+    } else {
+      console.warn('[close] non-fatal: module proposal gate query failed:', err instanceof Error ? err.message : String(err));
+    }
+  }
+
   if (!lightweight) {
     // Batched evidence checks — single query per object type instead of N+1
     const { listPeriodReconciliationsByPeriod } = await import('../db/repositories/period_reconciliation_repository.js');

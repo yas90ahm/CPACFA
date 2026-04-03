@@ -129,24 +129,29 @@ export async function upsertEntitySettings(
   entityId: string,
   input: UpsertEntitySettingsInput
 ): Promise<EntitySettings> {
-  const entityName = input.entityName ?? '';
-  const fiscalYearEndMonth = input.fiscalYearEndMonth ?? 12;
-  const fiscalYearEndDay = input.fiscalYearEndDay ?? 31;
-  const baseCurrency = input.baseCurrency ?? 'USD';
-  const autoLockDays = input.autoLockDays ?? 0;
-  const varianceMaterialityDollar = input.varianceMaterialityDollar != null ? String(input.varianceMaterialityDollar) : '10000.00';
-  const varianceMaterialityPercent = input.varianceMaterialityPercent != null ? String(input.varianceMaterialityPercent) : '10.0';
-  // Clamp mappingConfidenceThreshold to [0.80, 1.0] — auto-propose requires high confidence.
-  // Below 80% is too risky for automated mapping decisions; controller must map manually.
-  const rawThreshold = input.mappingConfidenceThreshold ?? 0.95;
-  const mappingConfidenceThreshold = Math.min(1.0, Math.max(0.80, rawThreshold));
-  const mappingAutoAcceptEnabled = input.mappingAutoAcceptEnabled ?? false;
-  const autoApplyAfterNPeriods = input.autoApplyAfterNPeriods ?? 3;
-  const templateAutoApplyEnabled = input.templateAutoApplyEnabled ?? false;
-  const functionalCurrency = input.functionalCurrency ?? 'USD';
-  const reconImmaterialWaiverThreshold = input.reconImmaterialWaiverThreshold != null ? String(input.reconImmaterialWaiverThreshold) : '0.00';
-  const autoAdvanceEnabled = input.autoAdvanceEnabled ?? false;
-  const allowSameUserCertify = input.allowSameUserCertify ?? false;
+  // Read existing values to preserve fields not in the input (PATCH semantics)
+  const existing = await pool.query<EntitySettingsRow>(
+    `SELECT * FROM tenant_entity_settings WHERE tenant_id = $1 AND entity_id = $2`,
+    [tenantId, entityId]
+  );
+  const cur = existing.rows[0];
+
+  const entityName = input.entityName ?? cur?.entity_name ?? '';
+  const fiscalYearEndMonth = input.fiscalYearEndMonth ?? cur?.fiscal_year_end_month ?? 12;
+  const fiscalYearEndDay = input.fiscalYearEndDay ?? cur?.fiscal_year_end_day ?? 31;
+  const baseCurrency = input.baseCurrency ?? cur?.base_currency ?? 'USD';
+  const autoLockDays = input.autoLockDays ?? cur?.auto_lock_days ?? 0;
+  const varianceMaterialityDollar = input.varianceMaterialityDollar != null ? String(input.varianceMaterialityDollar) : (cur?.variance_materiality_dollar ?? '10000.00');
+  const varianceMaterialityPercent = input.varianceMaterialityPercent != null ? String(input.varianceMaterialityPercent) : (cur?.variance_materiality_percent ?? '10.0');
+  const rawThreshold = input.mappingConfidenceThreshold ?? cur?.mapping_confidence_threshold ?? 0.95;
+  const mappingConfidenceThreshold = Math.min(1.0, Math.max(0.80, typeof rawThreshold === 'string' ? parseFloat(rawThreshold) : rawThreshold));
+  const mappingAutoAcceptEnabled = input.mappingAutoAcceptEnabled ?? cur?.mapping_auto_accept_enabled ?? false;
+  const autoApplyAfterNPeriods = input.autoApplyAfterNPeriods ?? cur?.auto_apply_after_n_periods ?? 3;
+  const templateAutoApplyEnabled = input.templateAutoApplyEnabled ?? cur?.template_auto_apply_enabled ?? false;
+  const functionalCurrency = input.functionalCurrency ?? cur?.functional_currency ?? 'USD';
+  const reconImmaterialWaiverThreshold = input.reconImmaterialWaiverThreshold != null ? String(input.reconImmaterialWaiverThreshold) : (cur?.recon_immaterial_waiver_threshold ?? '0.00');
+  const autoAdvanceEnabled = input.autoAdvanceEnabled ?? cur?.auto_advance_enabled ?? false;
+  const allowSameUserCertify = input.allowSameUserCertify ?? cur?.allow_same_user_certify ?? false;
 
   await pool.query(
     `INSERT INTO tenant_entity_settings (

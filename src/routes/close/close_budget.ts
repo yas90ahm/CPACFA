@@ -8,6 +8,7 @@ import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { send500 } from '../../lib/errorHandler.js';
 import { getCloseSessionById } from '../../db/repositories/close_session_repository.js';
 import { guardSessionWritable } from '../../lib/session_write_guard.js';
+import { toPeriodLabel } from '../../utils/period.js';
 import * as budgetService from '../../services/budget_service.js';
 
 const router = Router();
@@ -40,7 +41,7 @@ router.post('/sessions/:sessionId/budget/upload', async (req: Request, res: Resp
       return;
     }
 
-    const periodLabel = session.periodEnd.length >= 7 ? session.periodEnd.slice(0, 7) : session.periodEnd;
+    const periodLabel = toPeriodLabel(session.periodEnd) ?? session.periodEnd;
     const uploadedBy = (req as { user?: { email?: string } }).user?.email ?? undefined;
 
     const entries = await budgetService.uploadBudget(
@@ -81,7 +82,7 @@ router.get('/sessions/:sessionId/budget', async (req: Request, res: Response) =>
       return;
     }
 
-    const periodLabel = session.periodEnd.length >= 7 ? session.periodEnd.slice(0, 7) : session.periodEnd;
+    const periodLabel = toPeriodLabel(session.periodEnd) ?? session.periodEnd;
     const entries = await budgetService.getBudgetForPeriod(pool, tenantId, session.entityId, periodLabel);
 
     res.json({ entries, count: entries.length });
@@ -109,7 +110,7 @@ router.get('/sessions/:sessionId/budget/variance', async (req: Request, res: Res
       return;
     }
 
-    const periodLabel = session.periodEnd.length >= 7 ? session.periodEnd.slice(0, 7) : session.periodEnd;
+    const periodLabel = toPeriodLabel(session.periodEnd) ?? session.periodEnd;
     const items = await budgetService.getBudgetVariance(pool, tenantId, session.entityId, sessionId, periodLabel);
 
     res.json({ items, count: items.length });

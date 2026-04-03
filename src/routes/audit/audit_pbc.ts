@@ -14,7 +14,8 @@ const router = Router();
 /** GET /api/audit/pbc */
 router.get('/pbc', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     const status = req.query.status as 'pending' | 'provided' | 'partial' | undefined;
     const periodLabel = req.query.periodLabel as string | undefined;
@@ -28,7 +29,8 @@ router.get('/pbc', async (req: Request, res: Response) => {
 /** POST /api/audit/pbc */
 router.post('/pbc', validateBody(createPBCBodySchema), async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     const body = req.body as { label: string; description?: string; periodLabel?: string };
     const item = await addPBCItem({
@@ -46,7 +48,8 @@ router.post('/pbc', validateBody(createPBCBodySchema), async (req: Request, res:
 /** PATCH /api/audit/pbc/:id */
 router.patch('/pbc/:id', validateBody(updatePBCBodySchema), async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     const id = req.params.id ?? '';
     const body = req.body as { status?: 'pending' | 'provided' | 'partial'; providedAt?: string; documentId?: string };

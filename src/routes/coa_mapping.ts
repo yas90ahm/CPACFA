@@ -104,30 +104,35 @@ router.get('/suggestions', async (req: Request, res: Response) => {
       return;
     }
 
-    const accounts = unmappedAccounts.map((a) => ({
-      accountName: a.account_name,
-      accountNumber: a.account_code || undefined,
-    }));
-    const session = await getCloseSessionById(pool, tenantId, sessionId);
-    const asOfDate = session?.periodEnd;
-
-    const { results } = await applyCoaRulesToAccounts(
-      pool,
+    // Use AI classification (curated patterns + XBRL trigram + Claude fallback).
+    // Spawns classification in background; returns deterministic results immediately
+    // and upgrades via cache when AI finishes.
+    const { classifyWithXBRL } = await import('../services/ai_classification_service.js');
+    const aiResult = await classifyWithXBRL(pool, {
       tenantId,
-      resolvedEntityId,
-      accounts,
-      { asOfDate }
-    );
+      entityId: resolvedEntityId,
+      closeSessionId: sessionId,
+    });
 
-    const suggestions = unmappedAccounts.map((acc, i) => {
-      const r = results[i];
+    // Build lookup from AI results by accountCode or accountName
+    const aiByCode = new Map<string, (typeof aiResult.coaSuggestions)[0]>();
+    const aiByName = new Map<string, (typeof aiResult.coaSuggestions)[0]>();
+    for (const s of aiResult.coaSuggestions ?? []) {
+      if (s.accountCode) aiByCode.set(s.accountCode, s);
+      if (s.accountName) aiByName.set(s.accountName.toLowerCase(), s);
+    }
+
+    const suggestions = unmappedAccounts.map((acc) => {
+      const ai = aiByCode.get(acc.account_code ?? '') ?? aiByName.get(acc.account_name.toLowerCase());
       return {
         accountCode: acc.account_code,
         accountName: acc.account_name,
-        suggestedLineItemId: r?.fsLineId ?? null,
-        suggestedLineItemName: r?.fsLineCode ?? null,
-        confidence: r?.confidence != null ? (r.confidence >= 0.9 ? 'high' : r.confidence >= 0.7 ? 'medium' : 'low') : 'medium',
-        reasoning: r?.explanation ?? 'No confident match — manual mapping recommended',
+        suggestedLineItemId: ai?.suggestedFsLineId ?? null,
+        suggestedLineItemName: ai?.suggestedFsLineLabel ?? ai?.suggestedFsLineId ?? null,
+        confidence: ai?.confidence != null ? (ai.confidence >= 0.9 ? 'high' : ai.confidence >= 0.7 ? 'medium' : 'low') : 'medium',
+        reasoning: ai?.confidenceBand
+          ? `${ai.tier ?? 'ai'}: ${ai.suggestedFsLineLabel ?? ai.suggestedFsLineId} (${ai.confidenceBand})`
+          : 'No confident match — manual mapping recommended',
       };
     });
 

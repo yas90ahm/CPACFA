@@ -15,15 +15,20 @@ import {
 import { executeBridgeCommand } from '../bridge/index.js';
 import type { AuthRequest } from '../auth/middleware.js';
 import { send500 } from '../lib/errorHandler.js';
+import { getCloseRoleFromReq } from '../lib/closeRole.js';
+import { getTenantId, getTenantPool } from '../lib/tenant_context.js';
 
 const router = Router();
 
-const getTenantId = (req: Request): string => (req as Request & { tenantId?: string }).tenantId ?? 'default';
-const getTenantPool = (req: Request): import('pg').Pool | undefined => (req as Request & { tenantPool?: import('pg').Pool }).tenantPool;
-
 router.post('/connections', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const role = getCloseRoleFromReq(req as AuthRequest);
+    if (role !== 'approver') {
+      res.status(403).json({ error: 'Integration mutations require controller/admin role' });
+      return;
+    }
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     const { provider, name, credentialRef } = req.body ?? {};
     if (!provider || !name || !credentialRef) {
@@ -41,7 +46,8 @@ router.post('/connections', async (req: Request, res: Response) => {
 
 router.get('/connections', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     const list = await listConnections(tenantId, pool);
     res.json(list);
@@ -52,7 +58,13 @@ router.get('/connections', async (req: Request, res: Response) => {
 
 router.delete('/connections/:id', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const role = getCloseRoleFromReq(req as AuthRequest);
+    if (role !== 'approver') {
+      res.status(403).json({ error: 'Integration mutations require controller/admin role' });
+      return;
+    }
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     const id = req.params.id;
     if (!pool) return res.status(400).json({ error: 'Tenant pool required' });
@@ -79,7 +91,8 @@ router.delete('/connections/:id', async (req: Request, res: Response) => {
 
 router.post('/connections/:id/test', async (req: Request, res: Response) => {
   try {
-    const tenantId = getTenantId(req) ?? 'default';
+    const tenantId = getTenantId(req);
+    if (!tenantId) { res.status(400).json({ error: 'Tenant context required' }); return; }
     const pool = getTenantPool(req);
     const id = req.params.id;
     if (!pool) return res.status(400).json({ error: 'Tenant pool required' });
@@ -113,6 +126,11 @@ router.get('/connections/:id', async (req: Request, res: Response) => {
 
 router.post('/sync-trial-balance', async (req: Request, res: Response) => {
   try {
+    const role = getCloseRoleFromReq(req as AuthRequest);
+    if (role !== 'approver') {
+      res.status(403).json({ error: 'Integration mutations require controller/admin role' });
+      return;
+    }
     const { connectionId, asOfDate, periodLabel } = req.body ?? {};
     if (!connectionId) return res.status(400).json({ error: 'connectionId required' });
     const tenantId = getTenantId(req);
@@ -161,6 +179,11 @@ router.post('/sync-trial-balance', async (req: Request, res: Response) => {
 
 router.post('/push-journal-entry', async (req: Request, res: Response) => {
   try {
+    const role = getCloseRoleFromReq(req as AuthRequest);
+    if (role !== 'approver') {
+      res.status(403).json({ error: 'Integration mutations require controller/admin role' });
+      return;
+    }
     const input = req.body;
     if (!input?.connectionId || !input?.date || !Array.isArray(input?.lines)) {
       return res.status(400).json({ error: 'connectionId, date, and lines required' });
@@ -176,6 +199,11 @@ router.post('/push-journal-entry', async (req: Request, res: Response) => {
 
 router.post('/pull-transactions', async (req: Request, res: Response) => {
   try {
+    const role = getCloseRoleFromReq(req as AuthRequest);
+    if (role !== 'approver') {
+      res.status(403).json({ error: 'Integration mutations require controller/admin role' });
+      return;
+    }
     const { connectionId, startDate, endDate, accountCodes } = req.body ?? {};
     if (!connectionId || !startDate || !endDate) {
       return res.status(400).json({ error: 'connectionId, startDate, endDate required' });

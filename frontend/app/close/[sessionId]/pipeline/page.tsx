@@ -508,9 +508,6 @@ export default function ClosePipelinePage() {
 
   return (
     <div className="min-h-screen bg-[#F5F0E8] flex">
-      {/* Sidebar */}
-      <Sidebar sessionId={sessionId} />
-
       {/* Main content */}
       <div className="ml-[260px] flex-1 flex flex-col min-h-screen">
         {/* Top breadcrumb bar */}

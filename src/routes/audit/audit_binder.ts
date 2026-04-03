@@ -28,6 +28,7 @@ import {
   BinderExportRemediation,
 } from '../../constants/binder_export_codes.js';
 import { effectiveAllowLegacyCertifiedSource } from '../../lib/runtime_mode.js';
+import { toPeriodLabel } from '../../utils/period.js';
 
 const router = Router();
 
@@ -213,7 +214,7 @@ router.get('/binder', async (req: Request, res: Response) => {
     if (result.snapshotHashVersion != null) res.setHeader('X-Certified-Snapshot-Hash-Version', String(result.snapshotHashVersion));
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
-    const periodLabel = periodEnd.slice(0, 7);
+    const periodLabel = toPeriodLabel(periodEnd) ?? '';
     if (result.source === 'legacy') {
       log('warn', 'Legacy certified source used', { tenantId: auth.tenantId, closeSessionId });
       await recordLegacyCertifiedSourceUsed(auth.pool, {
@@ -297,7 +298,7 @@ router.get('/binder/export/pdf', async (req: Request, res: Response) => {
     if (result.snapshotHashVersion != null) res.setHeader('X-Certified-Snapshot-Hash-Version', String(result.snapshotHashVersion));
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
-    const periodLabel = periodEnd.slice(0, 7);
+    const periodLabel = toPeriodLabel(periodEnd) ?? '';
     if (result.source === 'legacy') {
       log('warn', 'Legacy certified source used', { tenantId: auth.tenantId, closeSessionId });
       await recordLegacyCertifiedSourceUsed(auth.pool, {
@@ -374,7 +375,7 @@ router.get('/binder/export/csv', async (req: Request, res: Response) => {
     if (result.snapshotHashVersion != null) res.setHeader('X-Certified-Snapshot-Hash-Version', String(result.snapshotHashVersion));
     const periodStart = (req.query.periodStart as string) ?? new Date().toISOString().slice(0, 10);
     const periodEnd = (req.query.periodEnd as string) ?? new Date().toISOString().slice(0, 10);
-    const periodLabel = periodEnd.slice(0, 7);
+    const periodLabel = toPeriodLabel(periodEnd) ?? '';
     if (result.source === 'legacy') {
       log('warn', 'Legacy certified source used', { tenantId: auth.tenantId, closeSessionId });
       await recordLegacyCertifiedSourceUsed(auth.pool, {
