@@ -2,7 +2,6 @@
  * Hash chain integrity: audit ledger append-only, hash chaining, canonical JSON.
  */
 
-import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'crypto';
 

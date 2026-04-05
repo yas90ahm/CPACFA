@@ -2,7 +2,6 @@
  * Certification gates: session readiness gate structure and cert_signing module.
  */
 
-import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 describe('certification — Ed25519 signing module', () => {

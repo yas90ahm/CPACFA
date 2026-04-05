@@ -2,7 +2,6 @@
  * Segregation of duties (SoD): preparer ≠ approver enforcement.
  */
 
-import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { canPerform } from '../../src/services/segregation_service.js';
 import { readFileSync } from 'fs';

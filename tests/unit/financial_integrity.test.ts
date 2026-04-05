@@ -3,7 +3,6 @@
  * normalizeMoney determinism, round2 correctness.
  */
 
-import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { from, round2, sumRound2, minus, plus, mul, div, normalizeMoney } from '../../src/utils/decimal.js';
 import Decimal from 'decimal.js';

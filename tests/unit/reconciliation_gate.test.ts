@@ -290,6 +290,7 @@ describe('Reconciliation Gate — canAdvanceToUnderReview integration', () => {
       noCriticalIssues: true,
       materialJesApproved: true,
       integrityChecksPass: true,
+      jeTotal: 0,
     });
 
     const result = await canAdvanceToUnderReview(mockPool, 't1', session);
@@ -308,6 +309,7 @@ describe('Reconciliation Gate — canAdvanceToUnderReview integration', () => {
       noCriticalIssues: true,
       materialJesApproved: true,
       integrityChecksPass: true,
+      jeTotal: 0,
     });
 
     const result = await canAdvanceToUnderReview(mockPool, 't1', session);

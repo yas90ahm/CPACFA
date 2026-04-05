@@ -111,6 +111,7 @@ describe('Close State Machine — gate enforcement IN_PROGRESS → UNDER_REVIEW'
       noCriticalIssues: false,
       materialJesApproved: false,
       integrityChecksPass: false,
+      jeTotal: 0,
     });
     const res = await advanceSession(mockPool, {
       tenantId: 't1',
@@ -145,6 +146,7 @@ describe('Close State Machine — UNDER_REVIEW → CERTIFIED blocked when valida
       noCriticalIssues: true,
       materialJesApproved: true,
       integrityChecksPass: false,
+      jeTotal: 0,
     });
     await expect(
       certifyCloseSession(
@@ -272,8 +274,8 @@ describe('Close State Machine — re-validation at certification', () => {
   it('canCertify re-validates (uses computeReadiness, not cached)', async () => {
     const session = { ...baseSession, status: 'under_review' as const };
     const computeSpy = jest.spyOn(readiness, 'computeReadiness')
-      .mockResolvedValueOnce({ ready: true, hardBlockers: [], softWarnings: [], checklistComplete: true, cashRecComplete: true, noCriticalIssues: true, materialJesApproved: true, integrityChecksPass: true })
-      .mockResolvedValueOnce({ ready: false, hardBlockers: ['TB invalid'], softWarnings: [], checklistComplete: true, cashRecComplete: true, noCriticalIssues: true, materialJesApproved: true, integrityChecksPass: false });
+      .mockResolvedValueOnce({ ready: true, hardBlockers: [], softWarnings: [], checklistComplete: true, cashRecComplete: true, noCriticalIssues: true, materialJesApproved: true, integrityChecksPass: true, jeTotal: 0 })
+      .mockResolvedValueOnce({ ready: false, hardBlockers: ['TB invalid'], softWarnings: [], checklistComplete: true, cashRecComplete: true, noCriticalIssues: true, materialJesApproved: true, integrityChecksPass: false, jeTotal: 0 });
     const first = await canCertify(mockPool, 't1', session);
     expect(first.allowed).toBe(true);
     const second = await canCertify(mockPool, 't1', session);

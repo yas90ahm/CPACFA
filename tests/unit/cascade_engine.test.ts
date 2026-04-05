@@ -58,6 +58,7 @@ describe('Cascade Engine — AJE posting triggers full cascade', () => {
       noCriticalIssues: true,
       materialJesApproved: true,
       integrityChecksPass: true,
+      jeTotal: 0,
     });
     jest.spyOn(reconRepo, 'listPeriodReconciliationsByPeriod').mockResolvedValue([]);
     jest.spyOn(issueAutoRes, 'runCascade').mockResolvedValue({
@@ -107,6 +108,7 @@ describe('Cascade Engine — cascade does NOT regenerate statements', () => {
       noCriticalIssues: true,
       materialJesApproved: true,
       integrityChecksPass: true,
+      jeTotal: 0,
     });
     jest.spyOn(reconRepo, 'listPeriodReconciliationsByPeriod').mockResolvedValue([]);
     jest.spyOn(issueAutoRes, 'runCascade').mockResolvedValue({
@@ -135,6 +137,7 @@ describe('Cascade Engine — recon_completed trigger', () => {
       noCriticalIssues: true,
       materialJesApproved: true,
       integrityChecksPass: true,
+      jeTotal: 0,
     });
     jest.spyOn(issueAutoRes, 'runCascade').mockResolvedValue({
       issues_auto_verified: ['iss-1'],
@@ -168,6 +171,7 @@ describe('Cascade Engine — recursion guard', () => {
       noCriticalIssues: true,
       materialJesApproved: true,
       integrityChecksPass: true,
+      jeTotal: 0,
     });
     jest.spyOn(issueAutoRes, 'runCascade').mockResolvedValue({
       issues_auto_verified: [],
@@ -221,6 +225,7 @@ describe('Cascade Engine — TB_REINGESTED triggers full cascade', () => {
       noCriticalIssues: true,
       materialJesApproved: true,
       integrityChecksPass: true,
+      jeTotal: 0,
     });
     jest.spyOn(reconRepo, 'listPeriodReconciliationsByPeriod').mockResolvedValue([]);
     jest.spyOn(issueAutoRes, 'runCascade').mockResolvedValue({

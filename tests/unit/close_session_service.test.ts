@@ -246,6 +246,7 @@ describe('Close session — certifyCloseSession', () => {
       noCriticalIssues: true,
       materialJesApproved: true,
       integrityChecksPass: true,
+      jeTotal: 0,
     });
     await expect(
       certifyCloseSession(
@@ -281,6 +282,7 @@ describe('Close session — certifyCloseSession', () => {
       noCriticalIssues: true,
       materialJesApproved: true,
       integrityChecksPass: true,
+      jeTotal: 0,
     });
     await expect(
       certifyCloseSession(
@@ -309,6 +311,7 @@ describe('Close session — certifyCloseSession', () => {
       noCriticalIssues: true,
       materialJesApproved: true,
       integrityChecksPass: true,
+      jeTotal: 0,
     });
     await expect(
       certifyCloseSession(
@@ -348,6 +351,7 @@ describe('Close session — certifyCloseSession', () => {
       noCriticalIssues: true,
       materialJesApproved: true,
       integrityChecksPass: true,
+      jeTotal: 0,
     });
     jest.spyOn(adjustedTb, 'getTrialBalanceForCertification').mockResolvedValue({
       trialBalance: [

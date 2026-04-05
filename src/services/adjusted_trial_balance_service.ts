@@ -276,9 +276,34 @@ export async function getTrialBalanceForCertification(
     };
   }
 
-  const existingTB = await getAdjustedTrialBalance(tenantId, periodLabel, pool, closeSessionId);
+  // No GL data — use uploaded TB + adjustments directly (avoid calling
+  // getAdjustedTrialBalance which would create infinite recursion)
+  const uploaded = await getUnadjustedOrRollup(tenantId, periodLabel, pool);
+  if (!uploaded || uploaded.entries.length === 0) {
+    return { trialBalance: [], source: 'uploaded', hasGL: false };
+  }
+
+  // Layer on posted adjustments + JEs (same logic as getAdjustedTrialBalance)
+  const adjustmentPayloads: TrialBalanceAdjustment[] = [];
+  const adjustments = await listAdjustments({ periodLabel, status: 'posted' }, tenantId, pool);
+  for (const adj of adjustments as CloseAdjustment[]) {
+    adjustmentPayloads.push({ debits: adj.debits ?? [], credits: adj.credits ?? [] });
+  }
+  if (closeSessionId) {
+    try {
+      const jeAdjustments = await getPostableJEAdjustments(pool, tenantId, closeSessionId);
+      for (const jeAdj of jeAdjustments) {
+        adjustmentPayloads.push({ debits: jeAdj.debits, credits: jeAdj.credits });
+      }
+    } catch { /* non-fatal */ }
+  }
+
+  const entries = adjustmentPayloads.length > 0
+    ? mergeAdjustmentsIntoEntries(uploaded.entries, adjustmentPayloads)
+    : uploaded.entries;
+
   return {
-    trialBalance: existingTB,
+    trialBalance: entries as TrialBalanceEntry[],
     source: 'adjusted',
     hasGL: false,
   };

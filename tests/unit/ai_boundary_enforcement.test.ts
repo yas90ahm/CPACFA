@@ -2,7 +2,6 @@
  * AI boundary enforcement: AI advisory context cannot invoke mutation paths.
  */
 
-import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   enterAdvisoryContext,
