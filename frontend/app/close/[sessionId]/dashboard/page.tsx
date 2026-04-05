@@ -805,8 +805,8 @@ export default function CloseDashboardPage() {
               {/* Gate Status Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <GateCard
-                  gateLabel="Gate 1"
-                  title="Trial Balance"
+                  gateLabel={`Gate ${gates.indexOf(tbGate!) + 1 || 1}`}
+                  title={tbGate?.name ?? "Trial Balance"}
                   passing={tbGate?.passing ?? false}
                   detail={tbGate?.detail}
                   metric={tbRows.length === 0 ? 'No data' : (() => {
@@ -820,16 +820,16 @@ export default function CloseDashboardPage() {
                   metricLabel={tbRows.length === 0 ? 'Upload GL to begin' : 'Imbalance'}
                 />
                 <GateCard
-                  gateLabel="Gate 2"
-                  title="Account Mapping"
+                  gateLabel={`Gate ${gates.indexOf(mappingGate!) + 1 || 2}`}
+                  title={mappingGate?.name ?? "Account Mapping"}
                   passing={mappingGate?.passing ?? false}
                   detail={mappingGate?.detail}
                   metric={mappingMetric}
                   metricLabel="Accounts mapped"
                 />
                 <GateCard
-                  gateLabel="Gate 3"
-                  title="Reconciliation"
+                  gateLabel={`Gate ${gates.indexOf(reconGate!) + 1 || 3}`}
+                  title={reconGate?.name ?? "Reconciliation"}
                   passing={reconGate?.passing ?? false}
                   detail={reconGate?.detail}
                   metric={(() => {
@@ -841,8 +841,8 @@ export default function CloseDashboardPage() {
                   metricLabel="Reconciliations complete"
                 />
                 <GateCard
-                  gateLabel="Gate 4"
-                  title="Journal Entries"
+                  gateLabel={`Gate ${gates.indexOf(jeGate!) + 1 || 4}`}
+                  title={jeGate?.name ?? "Journal Entries"}
                   passing={jeGate?.passing ?? false}
                   detail={jeGate?.detail}
                   metric={`${postedJes} posted`}

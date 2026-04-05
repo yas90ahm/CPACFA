@@ -65,11 +65,13 @@ export async function handleResolutionAgent(ctx: JobHandlerContext): Promise<voi
     });
   });
   if (!result.ok) {
-    log('warn', 'Resolution agent job completed with failures', {
+    const errMsg = `Resolution agent failed: ${result.errors?.join('; ') ?? 'unknown error'}`;
+    log('error', errMsg, {
       eventType: packet.eventType,
       attempts: result.attempts,
       errors: result.errors,
     });
+    throw new Error(errMsg);
   }
 }
 

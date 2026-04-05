@@ -10,6 +10,8 @@ import {
   getEvidencePolicy,
   upsertEvidencePolicy,
 } from '../../db/repositories/evidence_policy_repository.js';
+import type { AuthRequest } from '../../auth/middleware.js';
+import { getCloseRoleFromReq } from '../../lib/closeRole.js';
 
 const router = Router();
 const VALID_MODES = ['off', 'warn_only', 'hard_block'];
@@ -34,13 +36,18 @@ router.get('/evidence-policy', async (req: Request, res: Response) => {
   }
 });
 
-/** PUT /api/close/evidence-policy — upsert tenant evidence policy */
+/** PUT /api/close/evidence-policy — upsert tenant evidence policy (requires approver role) */
 router.put('/evidence-policy', async (req: Request, res: Response) => {
   try {
     const pool = getTenantPool(req);
     const tenantId = getTenantId(req);
     if (!pool || !tenantId) {
       res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const role = getCloseRoleFromReq(req as AuthRequest);
+    if (role !== 'approver') {
+      res.status(403).json({ error: 'Insufficient permissions to update evidence policy. Approver role required.' });
       return;
     }
     const body = req.body as {

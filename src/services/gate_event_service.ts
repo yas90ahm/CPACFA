@@ -82,8 +82,8 @@ export async function checkGatesAndAutoAdvance(
         triggeredBy,
       ]
     );
-  } catch {
-    // Gate snapshot table may not exist yet; non-fatal
+  } catch (err) {
+    console.warn('[gate_event] Gate snapshot write failed (non-fatal):', (err as Error).message);
   }
 
   // Auto-complete checklist items that correspond to passing gates

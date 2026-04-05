@@ -91,25 +91,33 @@ export function WorkflowBreadcrumb({
           {WORKFLOW_STEPS.map((step, i) => {
             const status = getStepStatus(step.key, gates);
             const isCurrent = pathname?.includes(`/${step.key}`);
+            // Step is accessible if it's the first step, currently active, or a prior step is done
+            const priorStatus = i > 0 ? getStepStatus(WORKFLOW_STEPS[i - 1].key, gates) : 'done';
+            const isAccessible = i === 0 || isCurrent || priorStatus === 'done' || status === 'done';
+
+            const className = `text-xs font-medium px-1.5 py-0.5 rounded transition-colors flex items-center gap-1 ${
+              isCurrent
+                ? 'bg-[#2C2416] text-[#B8860B]'
+                : status === 'done'
+                  ? 'text-[#2D6A4F] hover:bg-[#E0EDE8]'
+                  : isAccessible
+                    ? 'text-[#8B7A5E] hover:text-[#2C2416]'
+                    : 'text-[#D1C7B7] cursor-not-allowed'
+            }`;
 
             return (
               <div key={step.key} className="flex items-center">
                 <ChevronRight size={12} className="text-[#DDD5C2] mx-0.5" />
-                <Link
-                  href={`/close/${sessionId}/${step.key}`}
-                  className={`text-xs font-medium px-1.5 py-0.5 rounded transition-colors flex items-center gap-1 ${
-                    isCurrent
-                      ? 'bg-[#2C2416] text-[#B8860B]'
-                      : status === 'done'
-                        ? 'text-[#2D6A4F] hover:bg-[#E0EDE8]'
-                        : 'text-[#8B7A5E] hover:text-[#2C2416]'
-                  }`}
-                >
-                  {status === 'done' && !isCurrent && (
-                    <CheckCircle2 size={10} />
-                  )}
-                  {step.short}
-                </Link>
+                {isAccessible ? (
+                  <Link href={`/close/${sessionId}/${step.key}`} className={className}>
+                    {status === 'done' && !isCurrent && <CheckCircle2 size={10} />}
+                    {step.short}
+                  </Link>
+                ) : (
+                  <span className={className}>
+                    {step.short}
+                  </span>
+                )}
               </div>
             );
           })}

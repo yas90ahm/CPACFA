@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { fmtMoney } from '@/lib/money';
@@ -260,6 +259,7 @@ export default function CertificationCeremonyPage() {
   const queryClient = useQueryClient();
   const sessionId = params.sessionId as string;
   const [lockSuccess, setLockSuccess] = useState(false);
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null);
 
   const sessionQuery = useQuery({
     queryKey: ['close-session', sessionId],
@@ -325,6 +325,34 @@ export default function CertificationCeremonyPage() {
   const artifact = artifactQuery.data;
   const statements = statementsQuery.data ?? [];
 
+  /* ---- Lifecycle mutations ---- */
+  const invalidateSession = () => {
+    queryClient.invalidateQueries({ queryKey: ['close-session', sessionId] });
+    queryClient.invalidateQueries({ queryKey: ['close-readiness', sessionId] });
+    queryClient.invalidateQueries({ queryKey: ['certification-artifact', sessionId] });
+    setLifecycleError(null);
+  };
+
+  const advanceMutation = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/close/sessions/${sessionId}/advance`, {
+        method: 'POST',
+        body: {},
+      }),
+    onSuccess: invalidateSession,
+    onError: (err: Error) => setLifecycleError(err.message),
+  });
+
+  const certifyMutation = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/close/sessions/${sessionId}/certify`, {
+        method: 'POST',
+        body: {},
+      }),
+    onSuccess: invalidateSession,
+    onError: (err: Error) => setLifecycleError(err.message),
+  });
+
   const lockMutation = useMutation({
     mutationFn: () =>
       apiFetch(`/api/close/sessions/${sessionId}/lock`, {
@@ -332,20 +360,11 @@ export default function CertificationCeremonyPage() {
         body: {},
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['close-session', sessionId] });
+      invalidateSession();
       setLockSuccess(true);
     },
+    onError: (err: Error) => setLifecycleError(err.message),
   });
-
-  const handleLockPeriod = () => {
-    if (
-      window.confirm(
-        'This action is PERMANENT and cannot be undone. Lock this period?'
-      )
-    ) {
-      lockMutation.mutate();
-    }
-  };
 
   const isLoading = sessionQuery.isLoading || readinessQuery.isLoading;
   const error = sessionQuery.error || readinessQuery.error;
@@ -379,7 +398,7 @@ export default function CertificationCeremonyPage() {
   const equityTotal = findStatementTotal('equity');
 
   const sessionStatus = (session?.state ?? session?.status ?? '').toLowerCase().replace(/-/g, '_');
-  const isCertified = sessionStatus === 'certified' || sessionStatus === 'locked';
+  const isCertified = sessionStatus === 'certified' || sessionStatus === 'subsequent_events_review' || sessionStatus === 'locked';
 
   const _gates = gates;
   const _activeGateIndex = _gates.findIndex((g) => !g.passing);
@@ -450,9 +469,16 @@ export default function CertificationCeremonyPage() {
         {/* Gates Verified */}
         <div className="mb-10">
           <div className="flex items-center justify-center gap-2 mb-5">
-            <CheckCircle2 size={18} className="text-[#2D6A4F]" />
-            <h2 className="text-sm font-medium text-[#A7D7C5] uppercase tracking-wider">
-              All {gatesTotal} Gates Verified
+            <CheckCircle2
+              size={18}
+              className={gatesPassing === gatesTotal && gatesTotal > 0 ? 'text-[#2D6A4F]' : 'text-[#8B7A5E]'}
+            />
+            <h2 className={`text-sm font-medium uppercase tracking-wider ${
+              gatesPassing === gatesTotal && gatesTotal > 0 ? 'text-[#A7D7C5]' : 'text-[#C4B89A]'
+            }`}>
+              {gatesPassing === gatesTotal && gatesTotal > 0
+                ? `All ${gatesTotal} Gates Verified`
+                : `${gatesPassing} of ${gatesTotal} Gates Verified`}
             </h2>
           </div>
           <GateGrid gates={gates} />
@@ -490,86 +516,178 @@ export default function CertificationCeremonyPage() {
           <h2 className="text-sm font-medium text-[#8B7A5E] uppercase tracking-wider text-center mb-5">
             Certified Financial Summary
           </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <SummaryCard
-              icon={FileText}
-              title="Balance Sheet"
-              value={balanceSheetTotal !== '--' ? balanceSheetTotal : '$124.6M'}
-              label="Total Assets"
-            />
-            <SummaryCard
-              icon={TrendingUp}
-              title="Income Statement"
-              value={incomeTotal !== '--' ? incomeTotal : '$6.1M'}
-              label="Net Income"
-            />
-            <SummaryCard
-              icon={DollarSign}
-              title="Cash Flow"
-              value={cashFlowTotal !== '--' ? cashFlowTotal : '$8.2M'}
-              label="Operating Cash Flow"
-            />
-            <SummaryCard
-              icon={Users}
-              title="Stockholders&rsquo; Equity"
-              value={equityTotal !== '--' ? equityTotal : '$57.3M'}
-              label="Total Equity"
-            />
-          </div>
+          {statements.length === 0 ? (
+            <div className="text-center py-8 text-sm text-[#8B7A5E] border border-[#3B2F1E] rounded-xl bg-[#1F1A12]">
+              Generate statements first
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <SummaryCard
+                icon={FileText}
+                title="Balance Sheet"
+                value={balanceSheetTotal}
+                label="Total Assets"
+              />
+              <SummaryCard
+                icon={TrendingUp}
+                title="Income Statement"
+                value={incomeTotal}
+                label="Net Income"
+              />
+              <SummaryCard
+                icon={DollarSign}
+                title="Cash Flow"
+                value={cashFlowTotal}
+                label="Operating Cash Flow"
+              />
+              <SummaryCard
+                icon={Users}
+                title="Stockholders&rsquo; Equity"
+                value={equityTotal}
+                label="Total Equity"
+              />
+            </div>
+          )}
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-          <button
-            type="button"
-            onClick={() =>
-              downloadBlob(
-                `/api/audit/binder?closeSessionId=${sessionId}`,
-                `audit-binder-${sessionId}.pdf`
-              )
-            }
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#B8860B] text-[#1A1510] font-medium text-sm hover:bg-[#D4A017] transition-colors"
-          >
-            <Download size={16} />
-            Download Audit Binder
-          </button>
+        {/* Lifecycle Actions */}
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+            {/* Download Audit Binder — always available */}
+            <button
+              type="button"
+              onClick={() =>
+                downloadBlob(
+                  `/api/audit/binder?closeSessionId=${sessionId}`,
+                  `audit-binder-${sessionId}.pdf`
+                )
+              }
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#2A231A] border border-[#3B2F1E] text-[#C4B89A] text-sm font-medium hover:border-[#B8860B]/40 hover:text-[#E8DCC8] transition-colors"
+            >
+              <Download size={16} />
+              Download Audit Binder
+            </button>
 
-          <button
-            type="button"
-            onClick={handleLockPeriod}
-            disabled={lockMutation.isPending || lockSuccess}
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#C44B2B] text-white font-medium text-sm hover:bg-[#D4553A] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Lock size={16} />
-            {lockMutation.isPending
-              ? 'Locking...'
-              : lockSuccess
-              ? 'Period Locked'
-              : 'Lock Period (Final)'}
-          </button>
+            {/* Lifecycle button — one at a time based on current state */}
+            {sessionStatus === 'open' && (
+              <button
+                type="button"
+                disabled={advanceMutation.isPending}
+                onClick={() => advanceMutation.mutate()}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#B8860B] text-[#1A1510] text-sm font-medium hover:bg-[#D4A017] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {advanceMutation.isPending ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <CheckCircle2 size={16} />
+                )}
+                {advanceMutation.isPending ? 'Advancing...' : 'Begin Close'}
+              </button>
+            )}
 
-          <button
-            type="button"
-            onClick={() => router.push('/verify?session=' + sessionId)}
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#2A231A] border border-[#3B2F1E] text-[#C4B89A] font-medium text-sm hover:border-[#B8860B]/40 hover:text-[#E8DCC8] transition-colors"
-          >
-            <ExternalLink size={16} />
-            Verify Externally
-          </button>
+            {sessionStatus === 'in_progress' && (
+              <button
+                type="button"
+                disabled={advanceMutation.isPending}
+                onClick={() => advanceMutation.mutate()}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#B8860B] text-[#1A1510] text-sm font-medium hover:bg-[#D4A017] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {advanceMutation.isPending ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <Shield size={16} />
+                )}
+                {advanceMutation.isPending ? 'Submitting...' : 'Submit for Review'}
+              </button>
+            )}
+
+            {sessionStatus === 'under_review' && (
+              <button
+                type="button"
+                disabled={certifyMutation.isPending}
+                onClick={() => {
+                  const confirmed = window.confirm(
+                    'You are about to certify this financial close. This attests that all figures are materially correct and complete. Proceed?'
+                  );
+                  if (confirmed) certifyMutation.mutate();
+                }}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#2D6A4F] text-[#F5F0E8] text-sm font-medium hover:bg-[#358B63] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {certifyMutation.isPending ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <Shield size={16} />
+                )}
+                {certifyMutation.isPending ? 'Certifying...' : 'Certify Close'}
+              </button>
+            )}
+
+            {sessionStatus === 'certified' && (
+              <button
+                type="button"
+                disabled={advanceMutation.isPending}
+                onClick={() => advanceMutation.mutate()}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#B8860B] text-[#1A1510] text-sm font-medium hover:bg-[#D4A017] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {advanceMutation.isPending ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <CheckCircle2 size={16} />
+                )}
+                {advanceMutation.isPending ? 'Advancing...' : 'Confirm Subsequent Events'}
+              </button>
+            )}
+
+            {sessionStatus === 'subsequent_events_review' && !lockSuccess && (
+              <button
+                type="button"
+                disabled={lockMutation.isPending}
+                onClick={() => {
+                  const typed = window.prompt(
+                    'This action is PERMANENT and cannot be undone. Type LOCK to confirm.'
+                  );
+                  if (typed === 'LOCK') lockMutation.mutate();
+                }}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#C44B2B] text-[#F5F0E8] text-sm font-medium hover:bg-[#D4553A] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {lockMutation.isPending ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <Lock size={16} />
+                )}
+                {lockMutation.isPending ? 'Locking...' : 'Lock Period (Final)'}
+              </button>
+            )}
+
+            {/* Verify Externally — available once certified or locked */}
+            {(isCertified || sessionStatus === 'subsequent_events_review') && (
+              <button
+                type="button"
+                onClick={() => router.push('/verify?session=' + sessionId)}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#2A231A] border border-[#3B2F1E] text-[#C4B89A] text-sm font-medium hover:border-[#B8860B]/40 hover:text-[#E8DCC8] transition-colors"
+              >
+                <ExternalLink size={16} />
+                Verify Externally
+              </button>
+            )}
+          </div>
+
+          {/* Locked state — no action, informational only */}
+          {(sessionStatus === 'locked' || lockSuccess) && (
+            <div className="flex items-center justify-center gap-2 py-3 text-sm text-[#2D6A4F]">
+              <Lock size={16} />
+              Period is permanently locked
+            </div>
+          )}
+
+          {/* Error display */}
+          {lifecycleError && (
+            <div className="flex items-center justify-center gap-2 text-sm text-[#C44B2B]">
+              <AlertCircle size={16} />
+              {lifecycleError}
+            </div>
+          )}
         </div>
-
-        {lockMutation.isError && (
-          <div className="mt-4 flex items-center justify-center gap-2 text-sm text-[#C44B2B]">
-            <AlertCircle size={16} />
-            {(lockMutation.error as Error)?.message ?? 'Failed to lock period'}
-          </div>
-        )}
-        {lockSuccess && (
-          <div className="mt-4 flex items-center justify-center gap-2 text-sm text-[#2D6A4F]">
-            <CheckCircle2 size={16} />
-            Period has been permanently locked.
-          </div>
-        )}
 
         {/* Footer note */}
         {isCertified && (

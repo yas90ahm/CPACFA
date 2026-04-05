@@ -55,8 +55,9 @@ export async function checkMappingCompleteness(
 ): Promise<MappingCompletenessResult> {
   const session = await getCloseSessionById(pool, tenantId, periodId);
   if (!session) {
+    // Fail-closed: cannot verify completeness without session data
     return {
-      passes: true,
+      passes: false,
       total_accounts: 0,
       mapped_accounts: 0,
       unmapped_accounts: [],
@@ -65,7 +66,7 @@ export async function checkMappingCompleteness(
   const periodLabel = session.periodEnd?.slice(0, 7);
   if (!periodLabel) {
     return {
-      passes: true,
+      passes: false,
       total_accounts: 0,
       mapped_accounts: 0,
       unmapped_accounts: [],
@@ -75,9 +76,10 @@ export async function checkMappingCompleteness(
   let tb;
   try {
     tb = await getTrialBalanceForCertification(pool, tenantId, periodLabel, periodId);
-  } catch {
+  } catch (err) {
+    console.warn('[mapping_completeness_gate] TB retrieval failed, gate fails closed:', (err as Error).message);
     return {
-      passes: true,
+      passes: false,
       total_accounts: 0,
       mapped_accounts: 0,
       unmapped_accounts: [],

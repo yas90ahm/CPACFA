@@ -10,9 +10,44 @@
  * When pool and tenantId are provided, staging is persisted to Postgres (persistence_service); otherwise in-memory.
  */
 
+import { createHmac, timingSafeEqual } from 'crypto';
 import type { Pool } from 'pg';
 import { disallowMemoryStoreInProduction } from '../lib/env.js';
+import { isDeploymentMode } from '../lib/runtime_mode.js';
 import * as persistence from './persistence_service.js';
+
+const HITL_SIGNING_KEY = process.env.HITL_SIGNING_KEY ?? process.env.OAUTH_ENCRYPTION_KEY ?? '';
+
+/** Generate an HMAC signature token for a staging item approval. */
+export function generateApprovalToken(itemId: string, signedBy: string): string {
+  if (!HITL_SIGNING_KEY) return '';
+  return createHmac('sha256', HITL_SIGNING_KEY)
+    .update(`${itemId}:${signedBy}`)
+    .digest('hex');
+}
+
+/** Verify an HMAC signature token. Fail-closed in deployment modes. */
+function verifyApprovalToken(itemId: string, signedBy: string, token: string | undefined): boolean {
+  if (!HITL_SIGNING_KEY) {
+    // In production/staging/demo, signing is mandatory — reject unsigned approvals
+    if (isDeploymentMode()) {
+      console.error('[HITL] CRITICAL: HITL_SIGNING_KEY not set in deployment mode. Rejecting approval.');
+      return false;
+    }
+    // Dev mode only: allow unsigned approvals
+    console.warn('[HITL] Signing key not set — allowing unsigned approval (dev only).');
+    return true;
+  }
+  if (!token) return false;
+  const expected = createHmac('sha256', HITL_SIGNING_KEY)
+    .update(`${itemId}:${signedBy}`)
+    .digest('hex');
+  try {
+    return timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(token, 'hex'));
+  } catch {
+    return false;
+  }
+}
 import type { StagingItemShape } from './persistence_service.js';
 
 /** Map persistence shape (type: string) to StagingItem (type: StagingItemType). */
@@ -190,6 +225,10 @@ export async function receiveHumanApproval(
   params: { id: string; signedBy?: string; signatureToken?: string },
   opts?: { pool?: Pool; tenantId?: string }
 ): Promise<{ ok: boolean; item?: StagingItem; error?: string }> {
+  // Verify signature token when signing key is configured
+  if (!verifyApprovalToken(params.id, params.signedBy ?? '', params.signatureToken)) {
+    return { ok: false, error: 'Invalid or missing signature token — approval rejected' };
+  }
   if (opts?.pool && opts?.tenantId) {
     const existing = await persistence.getStagingItem(opts.pool, opts.tenantId, params.id);
     if (!existing) return { ok: false, error: 'Staging item not found' };

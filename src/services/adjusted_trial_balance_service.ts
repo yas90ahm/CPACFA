@@ -73,12 +73,14 @@ export function mergeAdjustmentsIntoEntries(
     const credits = adj.credits ?? [];
     for (const d of debits) {
       const name = (d.account ?? '').trim() || 'Unknown';
-      const key = name;
+      const code = (d as { accountCode?: string }).accountCode?.trim();
+      const key = accountKey({ accountCode: code, accountName: name });
       const existing = byAccount.get(key);
       if (existing) {
         existing.debit = plus(existing.debit, d.amount ?? 0);
       } else {
         byAccount.set(key, {
+          accountCode: code,
           accountName: name,
           debit: d.amount ?? 0,
           credit: 0,
@@ -87,12 +89,14 @@ export function mergeAdjustmentsIntoEntries(
     }
     for (const c of credits) {
       const name = (c.account ?? '').trim() || 'Unknown';
-      const key = name;
+      const code = (c as { accountCode?: string }).accountCode?.trim();
+      const key = accountKey({ accountCode: code, accountName: name });
       const existing = byAccount.get(key);
       if (existing) {
         existing.credit = plus(existing.credit, c.amount ?? 0);
       } else {
         byAccount.set(key, {
+          accountCode: code,
           accountName: name,
           debit: 0,
           credit: c.amount ?? 0,
@@ -111,9 +115,10 @@ export function mergeAdjustmentsIntoEntries(
 }
 
 /**
- * Get adjusted trial balance for a period: Unadjusted TB (roll-up from months) + posted close adjustments + approved/postable JEs (when closeSessionId provided).
- * When no unadjusted TB exists but GL data exists for the period, derives TB from GL (GL-only flow).
- * Throws if no unadjusted TB and no GL data for period (caller may 404).
+ * Get adjusted trial balance for a period.
+ * Uses the same base TB source as certification (GL-derived priority, uploaded fallback)
+ * to ensure certification and statement generation always agree.
+ * Layers on posted close adjustments + approved/postable JEs.
  */
 export async function getAdjustedTrialBalance(
   tenantId: string,
@@ -121,28 +126,17 @@ export async function getAdjustedTrialBalance(
   pool: Pool | undefined,
   closeSessionId?: string
 ): Promise<TrialBalanceEntry[]> {
-  let result = await getUnadjustedOrRollup(tenantId, periodLabel, pool);
-  if (!result || result.entries.length === 0) {
-    // Fallback: derive from GL when period_trial_balance is empty (GL-only flow)
-    if (pool) {
-      const glLines = await glRepository.getGLForPeriod(pool, tenantId, periodLabel);
-      if (glLines.length > 0) {
-        const derivedTB = await buildDerivedTrialBalance(pool, tenantId, periodLabel);
-        result = {
-          entries: derivedTB.entries.map((e) => ({
-            accountCode: e.account_code,
-            accountName: e.account_name,
-            debit: e.total_debits ?? e.debit ?? 0,
-            credit: e.total_credits ?? e.credit ?? 0,
-            accountType: mapAccountTypeToFinancial(e.account_type),
-          })),
-          source: 'uploaded',
-        };
-      }
-    }
+  // Use the same TB source as certification — ensures cert vs statement agreement
+  let baseEntries: Array<{ accountName: string; debit: number; credit: number; accountCode?: string; accountType?: TrialBalanceEntry['accountType'] }>;
+  if (pool) {
+    const certResult = await getTrialBalanceForCertification(pool, tenantId, periodLabel, closeSessionId);
+    baseEntries = certResult.trialBalance;
+  } else {
+    const result = await getUnadjustedOrRollup(tenantId, periodLabel, pool);
     if (!result || result.entries.length === 0) {
       throw new Error(`No unadjusted trial balance for period ${periodLabel}`);
     }
+    baseEntries = result.entries;
   }
 
   const adjustmentPayloads: TrialBalanceAdjustment[] = [];
@@ -167,10 +161,10 @@ export async function getAdjustedTrialBalance(
   }
 
   if (adjustmentPayloads.length === 0) {
-    return result.entries;
+    return baseEntries as TrialBalanceEntry[];
   }
 
-  return mergeAdjustmentsIntoEntries(result.entries, adjustmentPayloads);
+  return mergeAdjustmentsIntoEntries(baseEntries, adjustmentPayloads);
 }
 
 /**
@@ -188,11 +182,19 @@ export async function enrichWithOpeningBalances(
   if (!priorPeriodLabel) return entries;
 
   try {
-    const priorTB = await getUnadjustedOrRollup(tenantId, priorPeriodLabel, pool);
-    if (!priorTB || priorTB.entries.length === 0) return entries;
+    // Use ADJUSTED TB (includes prior period's posted AJEs) not unadjusted
+    let priorEntries: TrialBalanceEntry[];
+    try {
+      priorEntries = await getAdjustedTrialBalance(tenantId, priorPeriodLabel, pool);
+    } catch {
+      // Adjusted TB unavailable — fall back to unadjusted for first-close scenarios
+      const priorTBRaw = await getUnadjustedOrRollup(tenantId, priorPeriodLabel, pool);
+      priorEntries = priorTBRaw?.entries ?? [];
+    }
+    if (priorEntries.length === 0) return entries;
 
     const priorByAccount = new Map<string, number>();
-    for (const e of priorTB.entries) {
+    for (const e of priorEntries) {
       const key = (e.accountCode ?? e.accountName ?? '').trim() || e.accountName;
       const netBalance = Number(from(e.debit ?? 0).minus(from(e.credit ?? 0)).toFixed(2));
       priorByAccount.set(key, netBalance);
