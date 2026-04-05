@@ -5,9 +5,11 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
+import { useCloseSession } from '@/lib/hooks/useCloseSession';
 import { fmtMoney, sumMoneyStrings } from '@/lib/money';
 import { CloseSidebar } from '@/components/close-sidebar';
 import { WorkflowBreadcrumb } from '@/components/workflow-breadcrumb';
+import PageAIInsight from '@/components/close/PageAIInsight';
 import {
   Loader2,
   AlertCircle,
@@ -115,16 +117,17 @@ export default function TrialBalancePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
 
-  const sessionQuery = useQuery({
-    queryKey: ['session', sessionId],
-    queryFn: () => apiFetch<any>(`/api/close/sessions/${sessionId}`),
-    enabled: !!sessionId,
-  });
-  const readinessQuery = useQuery({
-    queryKey: ['readiness', sessionId],
-    queryFn: () => apiFetch<any>(`/api/close/sessions/${sessionId}/readiness`, { params: { format: 'gates' } }),
-    enabled: !!sessionId,
-  });
+  const {
+    sessionQuery,
+    gates,
+    gatesTotal,
+    activeGateNum,
+    dayElapsed,
+    targetDays,
+    sessionState,
+    periodLabel,
+  } = useCloseSession(sessionId);
+  const activeGateIndex = gates.findIndex((g) => !g.passing);
 
   const { data, isLoading, error } = useQuery<TBResponse>({
     queryKey: ['trial-balance', sessionId, tbType],
@@ -171,8 +174,8 @@ export default function TrialBalancePage() {
       const count = result.entriesInserted ?? result.accountCount ?? result.rowCount ?? 0;
       setUploadSuccess(`GL imported successfully — ${count} entries loaded. Refreshing trial balance...`);
       queryClient.invalidateQueries({ queryKey: ['trial-balance', sessionId] });
-      queryClient.invalidateQueries({ queryKey: ['readiness', sessionId] });
-      queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['close-readiness', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['close-session', sessionId] });
       setTimeout(() => { setShowUpload(false); setUploadSuccess(''); }, 2000);
     } catch (e) {
       setUploadError(e instanceof Error ? e.message : 'Upload failed');
@@ -257,60 +260,49 @@ export default function TrialBalancePage() {
 
       <div className="ml-[260px] flex-1 flex flex-col min-h-screen">
         {/* Workflow Breadcrumb */}
-        <WorkflowBreadcrumb sessionId={sessionId} gates={(readinessQuery.data as any)?.gates ?? []} />
+        <WorkflowBreadcrumb sessionId={sessionId} gates={gates} />
 
         {/* Progress Rail */}
-        {(() => {
-          const _gates = (readinessQuery.data as any)?.gates ?? [];
-          const _gatesTotal = (readinessQuery.data as any)?.gatesTotal ?? _gates.length;
-          const _activeGateIndex = _gates.findIndex((g: any) => !g.passing);
-          const _activeGateNum = _activeGateIndex >= 0 ? _activeGateIndex + 1 : _gatesTotal;
-          const _startedAt = (sessionQuery.data as any)?.startedAt ?? (sessionQuery.data as any)?.createdAt ?? new Date().toISOString();
-          const _dayElapsed = Math.max(1, Math.ceil((Date.now() - new Date(_startedAt).getTime()) / (1000 * 60 * 60 * 24)));
-          const _targetDays = (sessionQuery.data as any)?.closeDayTarget ?? 10;
-          const _sessionState = ((sessionQuery.data as any)?.state ?? 'IN_PROGRESS').replace(/_/g, ' ');
-          const _periodLabel = (sessionQuery.data as any)?.periodLabel ?? '';
-          return _gates.length > 0 ? (
-            <div className="bg-[#2C2416] px-6 py-3 flex items-center justify-between">
-              <div className="flex items-center gap-4 text-sm">
-                <span className="text-[#B8860B] font-medium">
-                  Gate {_activeGateNum} of {_gatesTotal}
-                </span>
-                <span className="text-[#8B7A5E]">
-                  Close Day {_dayElapsed} of {_targetDays}
-                </span>
-                <span className="px-2 py-0.5 rounded text-xs font-medium bg-[#3B1F0A] text-[#B8860B]">
-                  {_sessionState}
-                </span>
-                {_periodLabel && <span className="text-[#8B7A5E]">{_periodLabel}</span>}
-              </div>
-              <div className="flex items-center gap-1.5">
-                {_gates.map((gate: any, i: number) => {
-                  const isActive = i === _activeGateIndex && !gate.passing;
-                  let bg = '#DDD5C2'; // pending (muted light)
-                  if (gate.passing) bg = '#2D6A4F'; // forest green
-                  else if (isActive) bg = '#B8860B'; // gold active
-                  const sizeClass = isActive ? 'w-3 h-3' : 'w-2.5 h-2.5';
-                  return (
-                    <div
-                      key={gate.id}
-                      className={`${sizeClass} rounded-full transition-colors`}
-                      style={{ backgroundColor: bg }}
-                      title={`${gate.label}: ${gate.passing ? 'Passing' : 'Pending'}`}
-                    />
-                  );
-                })}
-              </div>
+        {gates.length > 0 && (
+          <div className="bg-[#2C2416] px-6 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-4 text-sm">
+              <span className="text-[#B8860B] font-medium">
+                Gate {activeGateNum} of {gatesTotal}
+              </span>
+              <span className="text-[#8B7A5E]">
+                Close Day {dayElapsed} of {targetDays}
+              </span>
+              <span className="px-2 py-0.5 rounded text-xs font-medium bg-[#3B1F0A] text-[#B8860B]">
+                {sessionState}
+              </span>
+              {periodLabel && <span className="text-[#8B7A5E]">{periodLabel}</span>}
             </div>
-          ) : null;
-        })()}
+            <div className="flex items-center gap-1.5">
+              {gates.map((gate, i) => {
+                const isActive = i === activeGateIndex && !gate.passing;
+                let bg = '#DDD5C2'; // pending (muted light)
+                if (gate.passing) bg = '#2D6A4F'; // forest green
+                else if (isActive) bg = '#B8860B'; // gold active
+                const sizeClass = isActive ? 'w-3 h-3' : 'w-2.5 h-2.5';
+                return (
+                  <div
+                    key={gate.id}
+                    className={`${sizeClass} rounded-full transition-colors`}
+                    style={{ backgroundColor: bg }}
+                    title={`${gate.label}: ${gate.passing ? 'Passing' : 'Pending'}`}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Page header */}
         <main className="flex-1 px-6 py-6">
           {/* Title row */}
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-medium text-[#2C2416]">
-              Trial Balance{sessionQuery.data?.periodLabel ? ` — ${sessionQuery.data.periodLabel}` : ''}
+              Trial Balance{periodLabel ? ` — ${periodLabel}` : ''}
             </h1>
             <div className="flex items-center gap-3">
               <button
@@ -323,6 +315,29 @@ export default function TrialBalancePage() {
               </button>
             </div>
           </div>
+          {/* AI Insight */}
+          {rows.length > 0 && (() => {
+            const unmapped = rows.filter((r) => r.mappingStatus === 'unmapped').length;
+            if (unmapped > 0) {
+              return (
+                <div className="mb-4">
+                  <PageAIInsight
+                    message={`TB balanced. ${unmapped} account${unmapped !== 1 ? 's' : ''} still need mapping.`}
+                    linkLabel="Go to Mapping"
+                    linkHref={`/close/${sessionId}/mapping`}
+                  />
+                </div>
+              );
+            }
+            return (
+              <div className="mb-4">
+                <PageAIInsight
+                  message={`All ${rows.length} accounts mapped. TB is ${isBalanced ? 'balanced' : 'imbalanced'}.`}
+                  accentColor={isBalanced ? '#2D6A4F' : '#C44B2B'}
+                />
+              </div>
+            );
+          })()}
           <div className="flex items-center gap-2 mb-6">
               <button
                 onClick={() => setTbType('adjusted')}

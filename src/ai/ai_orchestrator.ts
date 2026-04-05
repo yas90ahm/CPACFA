@@ -91,15 +91,20 @@ async function queryKbForJustifier(facts: Record<string, unknown>): Promise<Arra
           }
           return vectorSnippets.slice(0, 7);
         }
-      } catch {
-        // pgvector unavailable, fall through to keyword
+      } catch (vectorErr) {
+        console.warn('[ai_orchestrator] pgvector search failed for justifier, falling through to keyword:',
+          vectorErr instanceof Error ? vectorErr.message : String(vectorErr));
       }
     }
 
     // Fallback: keyword-based queryGlobal
     const entries = await queryGlobal(query, { topK: 5 });
     return kbEntriesToSnippets(entries);
-  } catch { return []; }
+  } catch (err) {
+    console.warn('[ai_orchestrator] KB query failed for justifier (returning empty):',
+      err instanceof Error ? err.message : String(err));
+    return [];
+  }
 }
 
 /** Query KB for policy snippets relevant to shadow audit. */
@@ -113,7 +118,11 @@ async function queryKbForShadowAuditor(facts: Record<string, unknown>): Promise<
       title: r.entry.source + (r.entry.payload?.['topic'] ? `: ${r.entry.payload['topic']}` : ''),
       snippet_markdown: r.entry.text,
     }));
-  } catch { return []; }
+  } catch (err) {
+    console.warn('[ai_orchestrator] KB query failed for shadow auditor (returning empty):',
+      err instanceof Error ? err.message : String(err));
+    return [];
+  }
 }
 
 /** Query KB for firm CoA history relevant to classification. */
@@ -298,14 +307,15 @@ export async function runShadowAudit(params: RunShadowAuditParams): Promise<RunS
     };
   }
 
-  // Fail-open: do not block; record AI_FAILED as warn so humans see it
+  // Fail-CLOSED: Shadow Auditor is a compliance control. Block on AI failure
+  // so potentially non-compliant data cannot pass without human review.
   return {
     ok: false,
-    severity: 'warn',
+    severity: 'block',
     findings: [
       {
         code: AI_FAILED_FINDING_CODE,
-        message: `Shadow audit unavailable. ${result.error ?? 'Unknown error'}. Log id: ${result.callLogId ?? 'unknown'}.`,
+        message: `Shadow audit unavailable — blocking as compliance safeguard. ${result.error ?? 'Unknown error'}. Manual review required. Log id: ${result.callLogId ?? 'unknown'}.`,
         rule_ids: [],
         refs: [subjectId],
       },

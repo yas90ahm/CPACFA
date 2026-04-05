@@ -19,6 +19,8 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react';
+import VarianceReadinessCard from '@/components/close/VarianceReadinessCard';
+import { adaptVariances } from '@/lib/contracts/adapters';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -41,11 +43,15 @@ interface ReadinessResponse {
 interface SessionResponse {
   id: string;
   state: string;
+  status?: string;
   periodLabel: string;
   entityName: string;
   certifiedAt?: string;
   certifiedBy?: string;
   lockedAt?: string;
+  startedAt?: string;
+  createdAt?: string;
+  closeDayTarget?: number;
 }
 
 interface CertificationArtifact {
@@ -302,6 +308,15 @@ export default function CertificationCeremonyPage() {
     enabled: !!sessionId,
   });
 
+  const variancesQuery = useQuery({
+    queryKey: ['variances', sessionId],
+    queryFn: async () => {
+      const data = await apiFetch(`/api/close/sessions/${sessionId}/variances`);
+      return adaptVariances(data);
+    },
+    enabled: !!sessionId,
+  });
+
   // Derived
   const session = sessionQuery.data;
   const gates = readinessQuery.data?.gates ?? [];
@@ -363,32 +378,19 @@ export default function CertificationCeremonyPage() {
   const cashFlowTotal = findStatementTotal('cash');
   const equityTotal = findStatementTotal('equity');
 
-  const isCertified =
-    session?.state === 'CERTIFIED' || session?.state === 'LOCKED';
-
-  const certifiedByName =
-    artifact?.certifiedBy ?? session?.certifiedBy ?? 'CFO';
-  const certifiedAtDate =
-    artifact?.certifiedAt ?? session?.certifiedAt ?? new Date().toISOString();
-
-  // Placeholder artifact for display when no real artifact exists
-  const displayArtifact: CertificationArtifact = artifact ?? {
-    signature:
-      'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855e3b0c44298fc1c149afbf4c8996fb924',
-    documentHash:
-      'a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a',
-    certifiedBy: certifiedByName,
-    certifiedAt: certifiedAtDate,
-    verified: true,
-  };
+  const sessionStatus = (session?.state ?? session?.status ?? '').toLowerCase().replace(/-/g, '_');
+  const isCertified = sessionStatus === 'certified' || sessionStatus === 'locked';
 
   const _gates = gates;
   const _activeGateIndex = _gates.findIndex((g) => !g.passing);
   const _activeGateNum = _activeGateIndex >= 0 ? _activeGateIndex + 1 : gatesTotal;
-  const _startedAt = session?.certifiedAt ?? new Date().toISOString();
-  const _dayElapsed = Math.max(1, Math.ceil((Date.now() - new Date(_startedAt).getTime()) / (1000 * 60 * 60 * 24)));
-  const _targetDays = 10;
-  const _sessionState = (session?.state ?? 'IN_PROGRESS').replace(/_/g, ' ');
+  const _startedAt = session?.certifiedAt ?? session?.startedAt ?? session?.createdAt;
+  const _startDate = _startedAt ? new Date(_startedAt) : null;
+  const _dayElapsed = _startDate && !isNaN(_startDate.getTime())
+    ? Math.max(1, Math.ceil((Date.now() - _startDate.getTime()) / (1000 * 60 * 60 * 24)))
+    : 1;
+  const _targetDays = session?.closeDayTarget ?? 10;
+  const _sessionState = sessionStatus.replace(/_/g, ' ');
 
   return (
     <div className="min-h-screen bg-[#1A1510]">
@@ -462,9 +464,25 @@ export default function CertificationCeremonyPage() {
           )}
         </div>
 
+        {/* Variance Explanation Readiness */}
+        <div className="mb-10">
+          <VarianceReadinessCard
+            variances={variancesQuery.data ?? []}
+            sessionId={sessionId}
+            isLoading={variancesQuery.isLoading}
+          />
+        </div>
+
         {/* Cryptographic Certification */}
         <div className="mb-10">
-          <CryptographicCard artifact={displayArtifact} />
+          {artifact ? (
+            <CryptographicCard artifact={artifact} />
+          ) : (
+            <div className="rounded-xl border-2 border-[#5C4F3A]/40 bg-[#1F1A12] p-6 text-center">
+              <Shield size={20} className="text-[#8B7A5E] mx-auto mb-2" />
+              <div className="text-sm text-[#8B7A5E]">Not yet certified — no cryptographic artifact available</div>
+            </div>
+          )}
         </div>
 
         {/* Financial Summary */}

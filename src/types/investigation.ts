@@ -16,6 +16,32 @@ export interface InvestigationParams {
   closeSessionId?: string;
 }
 
+export interface AnalyticalSignals {
+  /** Changes in related FS lines (e.g., Revenue → also show COGS, AR) */
+  relatedLineChanges: Array<{
+    fsLineId: string;
+    fsLineLabel: string;
+    changeAmount: string;
+    changePercent: string;
+  }>;
+  /** Warning if a single account dominates the change (> 60%) */
+  concentrationWarning: string | null;
+  /** Sum of changeAmount for recurring accounts */
+  recurringChangeAmount: string;
+  /** Sum of changeAmount for non-recurring accounts */
+  nonRecurringChangeAmount: string;
+  /** Accounts new in the current period */
+  newAccountCount: number;
+  /** Accounts that existed in prior but not current */
+  eliminatedAccountCount: number;
+  /** Top keywords from GL memos (deterministic extraction) */
+  topKeywords: string[];
+  /** Accounts whose change direction matches the total direction */
+  accountsMovingWithTotal: number;
+  /** Accounts whose change direction opposes the total direction */
+  accountsMovingAgainstTotal: number;
+}
+
 export interface InvestigationResult {
   fsLineId: string;
   fsLineLabel: string;
@@ -24,6 +50,7 @@ export interface InvestigationResult {
   changeAmount: string;
   changePercent: string;
   contributingAccounts: ContributingAccount[];
+  analyticalSignals?: AnalyticalSignals;
   metadata: {
     accountsAnalyzed: number;
     periodLabel: string;

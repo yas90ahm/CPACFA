@@ -6,6 +6,7 @@
 
 import type { Pool } from 'pg';
 import { generateText } from '../llm/provider.js';
+import { getAIModel } from '../ai/ai_config.js';
 import { enterAdvisoryContext, exitAdvisoryContext } from '../lib/ai_boundary.js';
 import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import type {
@@ -23,6 +24,7 @@ import { disallowMemoryStoreInProduction } from '../lib/env.js';
 import * as justificationsRepo from '../db/repositories/tenant_justifications_repository.js';
 import type { JustificationRelatedType, CreatedByType } from '../db/repositories/tenant_justifications_repository.js';
 import { runJustifier, hashJustifierInputs, type JustifierRelatedType } from '../ai/ai_orchestrator.js';
+import { buildJustificationIracSystemPrompt } from '../ai/prompts/justification_irac.prompt.js';
 
 export interface CreateJustificationFromAIParams {
   tenantId: string;
@@ -94,7 +96,7 @@ export function formatJustificationText(irac: IRACJustification, sourceTag: stri
 
 // --- LLM-generated analysis and conclusion (Claude 3.5 Sonnet) ---
 
-const IRAC_LLM_MODEL = 'claude-sonnet-4-5-20250929';
+const IRAC_LLM_MODEL = getAIModel();
 
 async function generateIRACAnalysisAndConclusion(
   issue: string,
@@ -116,9 +118,7 @@ async function generateIRACAnalysisAndConclusion(
         .join('\n')
     : 'No specific authority chunks. Apply GAAP/IFRS as appropriate.';
 
-  const system = `You are an expert in GAAP/IFRS. Write IRAC-style Analysis and Conclusion for an accounting justification. 
-  Cite the specific FASB ASC or IFRS codifications from the provided authority chunks. Use the exact citation strings (e.g. "FASB ASC 606-10-25-1", "IAS 1.54") when referencing the literature.
-  Output exactly two short paragraphs: first "Analysis:", then "Conclusion:". Do not include section headers in the text; just the paragraphs.`;
+  const system = buildJustificationIracSystemPrompt();
   const prompt = `Issue: ${issue}\n\nRule (from authority): ${ruleText}\n\nRelevant authority chunks:\n${citationsBlock}\n\nUser question / facts: ${question.slice(0, 500)}\n\nWrite Analysis (apply the rule to the facts; cite the codifications above) and Conclusion (state whether the treatment is supported and by which citation).`;
 
   enterAdvisoryContext();

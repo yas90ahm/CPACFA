@@ -1,11 +1,11 @@
 /**
- * Types for accounting software integration (QuickBooks, Xero, NetSuite).
+ * Types for accounting software integration (QuickBooks, Xero, NetSuite, Sage Intacct).
  * Sync TB, push JEs, pull transactions.
  */
 
 import type { TrialBalanceEntry } from './financial.js';
 
-export type AccountingProvider = 'quickbooks' | 'xero' | 'netsuite';
+export type AccountingProvider = 'quickbooks' | 'xero' | 'netsuite' | 'sage_intacct';
 
 export interface AccountingConnection {
   id: string;

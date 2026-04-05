@@ -7,9 +7,7 @@ import type { z } from 'zod';
 import { callClaude } from './adapters/claude_adapter.js';
 import { insertCallLog } from './ai_call_log_repository.js';
 import { enterAdvisoryContext, exitAdvisoryContext } from '../lib/ai_boundary.js';
-
-const AI_MODEL = process.env.AI_MODEL ?? 'claude-sonnet-4-5-20250929';
-const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS ?? '15000', 10) || 15000;
+import { getAIModel, getAITimeoutMs } from './ai_config.js';
 
 export interface CallAIWithSchemaParams<T> {
   pool: Pool;
@@ -52,8 +50,8 @@ async function _callAIWithSchemaImpl<T>(params: CallAIWithSchemaParams<T>): Prom
     requestJson,
   } = params;
 
-  const model = process.env.AI_MODEL ?? AI_MODEL;
-  const timeoutMs = parseInt(process.env.AI_TIMEOUT_MS ?? '', 10) || AI_TIMEOUT_MS;
+  const model = getAIModel();
+  const timeoutMs = getAITimeoutMs();
 
   const adapterOut = await callClaude({
     model,
@@ -85,21 +83,27 @@ async function _callAIWithSchemaImpl<T>(params: CallAIWithSchemaParams<T>): Prom
   const ok = adapterOut.ok && !!parsed && !parseError;
   const error = adapterOut.error ?? parseError ?? null;
 
-  const { id: callLogId } = await insertCallLog(pool, {
-    tenantId,
-    pillar,
-    promptVersion,
-    model,
-    requestJson,
-    responseRaw: adapterOut.rawText ?? null,
-    responseJson,
-    ok,
-    error,
-    latencyMs: adapterOut.latencyMs ?? null,
-    inputTokens: adapterOut.inputTokens ?? null,
-    outputTokens: adapterOut.outputTokens ?? null,
-    estimatedCostUsd: adapterOut.estimatedCostUsd ?? null,
-  });
+  let callLogId: string | undefined;
+  try {
+    const logResult = await insertCallLog(pool, {
+      tenantId,
+      pillar,
+      promptVersion,
+      model,
+      requestJson,
+      responseRaw: adapterOut.rawText ?? null,
+      responseJson,
+      ok,
+      error,
+      latencyMs: adapterOut.latencyMs ?? null,
+      inputTokens: adapterOut.inputTokens ?? null,
+      outputTokens: adapterOut.outputTokens ?? null,
+      estimatedCostUsd: adapterOut.estimatedCostUsd ?? null,
+    });
+    callLogId = logResult.id;
+  } catch (logErr) {
+    console.warn('[ai-client] Failed to insert call log (non-fatal):', (logErr as Error).message);
+  }
 
   return {
     ok,

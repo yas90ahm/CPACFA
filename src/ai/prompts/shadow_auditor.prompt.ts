@@ -2,7 +2,7 @@
  * Shadow Auditor pillar prompt template. Validation/flagging only; no amounts computed or changed.
  */
 
-export const SHADOW_AUDITOR_PROMPT_VERSION = 'shadow_auditor_v1.0.0';
+export const SHADOW_AUDITOR_PROMPT_VERSION = 'shadow_auditor_v2.0.0';
 
 export interface ShadowAuditorContext {
   tenantId: string;
@@ -49,13 +49,13 @@ RULES:
 ## EXAMPLE OUTPUTS
 
 ### Severity: ok
-{"prompt_version":"${SHADOW_AUDITOR_PROMPT_VERSION}","severity":"ok","confidence":0.95,"findings":[{"code":"ROUTINE_DEPRECIATION","message":"Standard monthly depreciation entry of $38,700 to accumulated depreciation. Amount is consistent with prior periods and supported by the fixed asset register.","rule_ids":["ASC 360-10-35-4"],"refs":["fixed_asset_register"]}]}
+{"prompt_version":"${SHADOW_AUDITOR_PROMPT_VERSION}","severity":"ok","confidence":0.95,"findings":[{"code":"ROUTINE_DEPRECIATION","message":"Standard monthly depreciation entry to accumulated depreciation. Amount is consistent with prior periods and supported by the fixed asset register.","rule_ids":["ASC 360-10-35-4"],"refs":["fixed_asset_register"]}]}
 
 ### Severity: warn
-{"prompt_version":"${SHADOW_AUDITOR_PROMPT_VERSION}","severity":"warn","confidence":0.72,"findings":[{"code":"STRUCTURING_RISK","message":"Journal entry #247 posts $49,500 to Consulting Expense. This is $500 below the $50,000 materiality threshold requiring evidence attachment. Pattern is consistent with structuring to avoid evidence requirements.","rule_ids":[],"refs":["JE-247"]}]}
+{"prompt_version":"${SHADOW_AUDITOR_PROMPT_VERSION}","severity":"warn","confidence":0.72,"findings":[{"code":"STRUCTURING_RISK","message":"Journal entry posts to Consulting Expense at an amount just below the materiality threshold requiring evidence attachment. Pattern across multiple periods is consistent with structuring to avoid documentation requirements.","rule_ids":[],"refs":["JE-247"]}]}
 
 ### Severity: block
-{"prompt_version":"${SHADOW_AUDITOR_PROMPT_VERSION}","severity":"block","confidence":0.88,"findings":[{"code":"UNSUPPORTED_REVENUE","message":"Journal entry #312 debits Cash and credits Revenue for $125,000 with memo 'Year-end adjustment.' Revenue recognition on the last day of the period without supporting documentation (invoice, contract, BOL) creates significant audit risk under ASC 606.","rule_ids":["ASC 606-10-25-1"],"refs":["JE-312"]}]}
+{"prompt_version":"${SHADOW_AUDITOR_PROMPT_VERSION}","severity":"block","confidence":0.88,"findings":[{"code":"UNSUPPORTED_REVENUE","message":"Journal entry debits Cash and credits Revenue on the last day of the period with memo 'Year-end adjustment.' Revenue recognition without supporting documentation (invoice, contract, BOL) creates significant audit risk under ASC 606.","rule_ids":["ASC 606-10-25-1"],"refs":["JE-312"]}]}
 
 Context: tenantId=${context.tenantId}, periodLabel=${context.periodLabel}, subjectType=${context.subjectType}, subjectId=${context.subjectId}. ${materialityNote}
 ${context.workflowState ? `Workflow state: ${context.workflowState}.` : ''}
@@ -70,5 +70,23 @@ Respond with the single JSON object only.`;
 }
 
 export function buildShadowAuditorSystemPrompt(): string {
-  return `You are an expert Shadow Auditor. Your only task is to flag potential policy or compliance issues in the provided transaction. You do not edit, compute, or change any amounts. Output strictly valid JSON matching the required schema. Use severity "block" only for clear blocking violations; use "warn" for concerns; use "ok" when nothing to flag.`;
+  return `You are a Shadow Auditor for financial close controls.
+
+Task:
+- Identify policy/compliance risks in the provided payload.
+- Return severity: ok, warn, or block.
+
+Grounding policy:
+- Use only provided payload and standards snippets.
+- Do not invent facts or citations.
+- Do not compute, change, or rebalance amounts.
+- You are advisory-only: do not imply posting, approval, or mutation already occurred.
+
+Decision policy:
+- block only for clear, high-confidence control violations.
+- warn for uncertainty or moderate risk.
+- ok when no actionable risk is identified.
+
+Output policy:
+- Return valid JSON only using the required schema.`;
 }

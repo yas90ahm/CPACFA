@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
+import { useCloseSession } from '@/lib/hooks/useCloseSession';
 import { fmtMoney } from '@/lib/money';
 import {
   FileText,
@@ -12,7 +13,12 @@ import {
   Download,
   FileSpreadsheet,
   Code,
+  Sparkles,
+  TrendingUp,
+  TrendingDown,
 } from 'lucide-react';
+import { adaptVariances } from '@/lib/contracts/adapters';
+import { VarianceExplanationStatus, isVarianceExplained } from '@/lib/contracts/statuses';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -113,23 +119,25 @@ export default function StatementsPage() {
     alert('XBRL export coming soon');
   };
 
-  const sessionQuery = useQuery({
-    queryKey: ['session', sessionId],
-    queryFn: () => apiFetch<any>(`/api/close/sessions/${sessionId}`),
-    enabled: !!sessionId,
-  });
-  const readinessQuery = useQuery({
-    queryKey: ['readiness', sessionId],
-    queryFn: () => apiFetch<any>(`/api/close/sessions/${sessionId}/readiness`, { params: { format: 'gates' } }),
-    enabled: !!sessionId,
-  });
+  const {
+    gates: _gates,
+    gatesTotal: _gatesTotal,
+    activeGateNum: _activeGateNum,
+    dayElapsed: _dayElapsed,
+    targetDays: _targetDays,
+    sessionState: _sessionState,
+    periodLabel: _periodLabel,
+    periodEnd,
+  } = useCloseSession(sessionId);
+
+  const _activeGateIndex = _gates.findIndex((g) => !g.passing);
 
   // Fetch statement packages list
   const { data: packages } = useQuery<StatementPackage[]>({
     queryKey: ['statement-packages', sessionId],
     queryFn: () =>
-      apiFetch<any>(`/api/close/sessions/${sessionId}/statement-packages`).then(
-        (r: any) => r.packages ?? r ?? []
+      apiFetch<{ packages?: StatementPackage[] }>(`/api/close/sessions/${sessionId}/statement-packages`).then(
+        (r) => r.packages ?? []
       ),
     enabled: !!sessionId,
   });
@@ -140,11 +148,24 @@ export default function StatementsPage() {
   const { data: linesData, isLoading } = useQuery<{ lines: StatementLine[]; tieChecks?: TieCheck[] }>({
     queryKey: ['statement-lines', packageId, activeTab],
     queryFn: () =>
-      apiFetch<any>(
+      apiFetch<{ lines: StatementLine[]; tieChecks?: TieCheck[] }>(
         `/api/close/statement-packages/${packageId}/lines?includePrior=true&statementType=${activeTab}`
       ),
     enabled: !!packageId,
   });
+
+  // Fetch variances for inline explanation display
+  const variancesQuery = useQuery({
+    queryKey: ['variances', sessionId],
+    queryFn: async () => {
+      const data = await apiFetch(`/api/close/sessions/${sessionId}/variances`);
+      return adaptVariances(data);
+    },
+    enabled: !!sessionId,
+  });
+  const varianceMap = new Map(
+    (variancesQuery.data ?? []).map((v) => [v.lineItemName?.toLowerCase() ?? '', v])
+  );
 
   const lines = linesData?.lines ?? [];
   const tieChecks = linesData?.tieChecks ?? [
@@ -161,18 +182,7 @@ export default function StatementsPage() {
 
   const passingCount = tieChecks.filter((c) => c.passing).length;
 
-  const _gates = (readinessQuery.data as any)?.gates ?? [];
-  const _gatesTotal = (readinessQuery.data as any)?.gatesTotal ?? _gates.length;
-  const _activeGateIndex = _gates.findIndex((g: any) => !g.passing);
-  const _activeGateNum = _activeGateIndex >= 0 ? _activeGateIndex + 1 : _gatesTotal;
-  const _startedAt = (sessionQuery.data as any)?.startedAt ?? (sessionQuery.data as any)?.createdAt ?? new Date().toISOString();
-  const _dayElapsed = Math.max(1, Math.ceil((Date.now() - new Date(_startedAt).getTime()) / (1000 * 60 * 60 * 24)));
-  const _targetDays = (sessionQuery.data as any)?.closeDayTarget ?? 10;
-  const _sessionState = ((sessionQuery.data as any)?.state ?? 'IN_PROGRESS').replace(/_/g, ' ');
-  const _periodLabel = (sessionQuery.data as any)?.periodLabel ?? '';
-
   // Derive current and prior period labels from session periodEnd
-  const periodEnd = (sessionQuery.data as any)?.periodEnd ?? '';
   const currentPeriodLabel = _periodLabel || 'Current Period';
   const priorPeriodLabel = (() => {
     if (periodEnd && periodEnd.length >= 7) {
@@ -225,7 +235,7 @@ export default function StatementsPage() {
 
       {/* Header */}
       <div className="px-8 pt-8 pb-6">
-        <h1 className="text-2xl font-medium text-[#2C2416]">Financial Statements — {(sessionQuery.data as any)?.periodLabel ?? 'Close Session'}</h1>
+        <h1 className="text-2xl font-medium text-[#2C2416]">Financial Statements — {_periodLabel || 'Close Session'}</h1>
         <p className="text-sm text-[#8B7A5E] mt-1">
           Generated from the adjusted trial balance through deterministic arithmetic.
         </p>
@@ -259,15 +269,16 @@ export default function StatementsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-[#2C2416] text-[#B8860B]">
-                  <th className="text-left px-4 py-3 font-medium w-1/2">Line Item</th>
+                  <th className="text-left px-4 py-3 font-medium w-[40%]">Line Item</th>
                   <th className="text-right px-4 py-3 font-medium">{currentPeriodLabel}</th>
                   <th className="text-right px-4 py-3 font-medium">{priorPeriodLabel}</th>
+                  <th className="text-right px-4 py-3 font-medium w-[22%]">Variance</th>
                 </tr>
               </thead>
               <tbody>
                 {lines.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="px-4 py-8 text-center text-[#8B7A5E]">
+                    <td colSpan={4} className="px-4 py-8 text-center text-[#8B7A5E]">
                       No statement data available. Generate statements from the dashboard.
                     </td>
                   </tr>
@@ -316,6 +327,56 @@ export default function StatementsPage() {
                               ? fmtMoney(line.priorAmount, { dollar: true })
                               : fmtMoney(line.priorAmount)
                             : '--'}
+                        </td>
+                        {/* Variance column */}
+                        <td className="px-4 py-2.5 text-right text-xs">
+                          {(() => {
+                            const v = varianceMap.get(line.lineItem?.toLowerCase() ?? '');
+                            if (!v) {
+                              // Compute display-only variance from amounts
+                              const cur = parseFloat(line.currentAmount ?? '0');
+                              const pri = parseFloat(line.priorAmount ?? '0');
+                              if (!line.priorAmount || isNaN(pri) || isNaN(cur)) return <span className="text-[#8B7A5E]">--</span>;
+                              const diff = cur - pri;
+                              if (Math.abs(diff) < 0.5) return <span className="text-[#8B7A5E]">--</span>;
+                              const pct = pri !== 0 ? (diff / Math.abs(pri)) * 100 : 0;
+                              const color = diff >= 0 ? '#2D6A4F' : '#C44B2B';
+                              const Icon = diff >= 0 ? TrendingUp : TrendingDown;
+                              return (
+                                <span className="flex items-center justify-end gap-1 font-mono tabular-nums" style={{ color }}>
+                                  <Icon size={12} />
+                                  {Math.abs(pct).toFixed(1)}%
+                                </span>
+                              );
+                            }
+                            // Has variance record — show status
+                            const changeNum = parseFloat(v.changeAmount ?? '0');
+                            const color = changeNum >= 0 ? '#2D6A4F' : '#C44B2B';
+                            const Icon = changeNum >= 0 ? TrendingUp : TrendingDown;
+                            return (
+                              <div className="flex flex-col items-end gap-0.5">
+                                <span className="flex items-center gap-1 font-mono tabular-nums" style={{ color }}>
+                                  <Icon size={12} />
+                                  {v.changePercent != null ? `${Math.abs(v.changePercent).toFixed(1)}%` : '--'}
+                                </span>
+                                {v.isMaterial && (
+                                  isVarianceExplained(v.explanationStatus) ? (
+                                    <span className="flex items-center gap-0.5 text-[10px]" style={{ color: '#2D6A4F' }}>
+                                      <CheckCircle2 size={10} /> Explained
+                                    </span>
+                                  ) : v.explanationStatus === VarianceExplanationStatus.AI_DRAFTED || v.explanationStatus === VarianceExplanationStatus.DRAFT_READY ? (
+                                    <span className="flex items-center gap-0.5 text-[10px]" style={{ color: '#3B6EA5' }}>
+                                      <Sparkles size={10} /> AI draft ready
+                                    </span>
+                                  ) : (
+                                    <span className="flex items-center gap-0.5 text-[10px]" style={{ color: '#C44B2B' }}>
+                                      Needs explanation
+                                    </span>
+                                  )
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
                       </tr>
                     );

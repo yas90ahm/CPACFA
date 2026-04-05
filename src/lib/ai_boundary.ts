@@ -31,9 +31,15 @@ export function enterAdvisoryContext(): void {
   const store = getStore();
   if (store) {
     store.depth += 1;
+  } else {
+    // Background job or async chain not wrapped in runInBoundaryScope.
+    // AI boundary tracking is disabled — warn so operators know to add wrapping.
+    console.warn(
+      '[AI_BOUNDARY] enterAdvisoryContext called outside runInBoundaryScope. ' +
+      'AI boundary tracking is disabled for this execution chain. ' +
+      'Wrap background jobs in runInBoundaryScope() to enable mutation prevention.'
+    );
   }
-  // If no store exists (e.g. background job not wrapped in runInBoundaryScope),
-  // fall through silently — the assert check also handles the no-store case.
 }
 
 /**

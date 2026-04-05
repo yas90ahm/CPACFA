@@ -9,9 +9,11 @@
 
 import { createHash } from 'crypto';
 import { generateText } from '../llm/provider.js';
+import { getAIModel } from '../ai/ai_config.js';
 import { enterAdvisoryContext, exitAdvisoryContext } from '../lib/ai_boundary.js';
 import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import { round2, normalizeMoney } from '../utils/decimal.js';
+import { buildExportNarrativePromptHeader } from '../ai/prompts/export_narrative.prompt.js';
 
 /** One step in the Reasoning Chain (Thought or Action from ReAct). */
 export interface ReasoningChainEntry {
@@ -135,7 +137,7 @@ export async function draftNarrativeSections(
     };
   }
 
-  const prompt = `You are drafting the narrative sections for a financial report PDF. Use the following context to write a concise executive summary and optional overview/highlights. Do not invent numbers; use only what is provided.
+  const prompt = `${buildExportNarrativePromptHeader()}
 
 Context:
 - Entity: ${binderSummary.entityName ?? 'Entity'}
@@ -155,7 +157,7 @@ If you omit OVERVIEW or HIGHLIGHTS, write "OVERVIEW: " or "HIGHLIGHTS: " with no
   enterAdvisoryContext();
   try {
     const text = await generateText({
-      model: 'claude-sonnet-4-5-20250929',
+      model: getAIModel(),
       maxTokens: 1024,
       prompt,
     });

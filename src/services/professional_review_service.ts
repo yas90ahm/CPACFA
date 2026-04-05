@@ -53,15 +53,20 @@ export async function runProfessionalReview(
     });
   };
 
-  // QUARANTINED — Judgment services not in MVP architecture
-  // const [substanceFlags, revenueFlags, gipsFlags, goingConcernResult, fraudFlags] = await Promise.all([
-  //   runSubstanceOverForm(input, pool),
-  //   runRevenueRecognition(input, pool),
-  //   runGipsEthics(input, pool),
-  //   runGoingConcern(input, pool),
-  //   runFraudSkepticism(input, pool),
-  // ]);
-  // QUARANTINED — Judgment services not in MVP architecture
+  /**
+   * QUARANTINED PROTOCOLS (4 of 5)
+   *
+   * These protocols are architecturally designed but disabled pending policy finalization:
+   * - substanceOverForm: Identifies form-over-substance transactions (embedded leases, etc.)
+   * - revenueRecognition: ASC 606 multi-element arrangement checks
+   * - fraudSkepticism: AU-C 240 journal entry testing for fraud risk signals
+   * - gipsEthics: AICPA ET Section 0.300 independence checks
+   *
+   * Only goingConcern is active (ASU 2014-15 / IAS 1 liquidity & covenant analysis).
+   *
+   * Impact: Professional review currently only flags going concern risks.
+   * overallRisk defaults to 'low' when no flags are produced by other protocols.
+   */
   const substanceFlags: Array<{ category: string; severity: string; message: string; recommendation: string; citationStandard: string }> = [];
   const revenueFlags: Array<{ category: string; severity: string; message: string; recommendation: string; citationStandard: string }> = [];
   const gipsFlags: Array<{ category: string; severity: string; message: string; recommendation: string; citationStandard: string }> = [];

@@ -14,6 +14,18 @@ import { send500 } from '../lib/errorHandler.js';
 
 const router = Router();
 
+/** Strip prompt injection patterns from user input before embedding in LLM prompts. */
+function sanitizeUserQuestion(raw: string): string {
+  let q = raw.trim();
+  if (q.length > 1000) q = q.slice(0, 1000);
+  q = q
+    .replace(/```[\s\S]*?```/g, '')                  // code blocks
+    .replace(/\b(system|assistant|human|user):/gi, '') // role markers
+    .replace(/<\/?[a-z][^>]*>/gi, '')                  // HTML tags
+    .trim();
+  return q;
+}
+
 /**
  * POST /api/justification/chat
  * Body: { question: string, framework?: "FASB" | "IFRS" }
@@ -22,7 +34,7 @@ const router = Router();
 router.post('/chat', async (req: Request, res: Response) => {
   try {
     const body = req.body as { question?: string; framework?: 'FASB' | 'IFRS' };
-    const question = (body?.question ?? '').trim();
+    const question = sanitizeUserQuestion(body?.question ?? '');
     if (!question) {
       res.status(400).json({ error: 'Missing "question" in body' });
       return;

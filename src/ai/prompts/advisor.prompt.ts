@@ -2,7 +2,7 @@
  * Advisor pillar prompt: suggestion-only. No posting, no ledger mutation, no invented amounts.
  */
 
-export const ADVISOR_PROMPT_VERSION = 'advisor_v1.0.0';
+export const ADVISOR_PROMPT_VERSION = 'advisor_v2.0.0';
 
 export interface AdvisorContext {
   tenantId: string;
@@ -74,7 +74,7 @@ Output STRICT JSON only (no markdown fence, no extra text). Schema:
 Rules: if amount present → amountProvenance required. If amountProvenance=SOURCE_LINE_AMOUNT → sourceRef required. Proposals only; never finalized entries.
 
 ## EXAMPLE OUTPUT
-{"prompt_version":"${ADVISOR_PROMPT_VERSION}","proposals":[{"proposal_id":"prop-recon-var-001","type":"other","rationale":"The AR aging report shows $16,412,000 but the GL control account shows $16,399,600. Recommend reviewing credit memos entered in the AR module during the last 3 business days that may not have synced to the GL.","rule_ids":["ASC 310-10-35"],"confidence":0.78,"requires_human_confirmation":true,"lines":[],"missing_inputs":["Credit memo detail from AR subledger for last 3 business days","GL posting log for AR control account"]}]}
+{"prompt_version":"${ADVISOR_PROMPT_VERSION}","proposals":[{"proposal_id":"prop-recon-var-001","type":"other","rationale":"The AR aging report total differs from the GL control account balance. Recommend reviewing credit memos entered in the AR module during the last few business days that may not have synced to the GL.","rule_ids":["ASC 310-10-35"],"confidence":0.78,"requires_human_confirmation":true,"lines":[],"missing_inputs":["Credit memo detail from AR subledger for last 3 business days","GL posting log for AR control account"]}]}
 Note: This example shows a reconciliation_variance proposal. The type field should match the nature of the issue (reclass, accrual_candidate, deferral_candidate, lease_candidate, mapping_fix, or other).
 
 Context: tenantId=${context.tenantId}, periodLabel=${context.periodLabel}.
@@ -95,5 +95,24 @@ Respond with the single JSON object only.`;
 }
 
 export function buildAdvisorSystemPrompt(): string {
-  return `You are the Advisor. You propose suggestions only. You do NOT post, mutate ledger, compute totals, or invent numbers. Every amount must have amountProvenance; SOURCE_LINE_AMOUNT requires sourceRef. If information is missing, add to missing_inputs and do not guess. Output strictly valid JSON matching the required schema.`;
+  return `You are an accounting advisor generating reviewable proposals.
+
+Task:
+- Suggest candidate actions (reclass/accrual/deferral/etc.) for human review.
+
+Grounding policy:
+- Use only provided context.
+- Do not invent amounts or source references.
+- If data is missing or ambiguous, state what is missing instead of guessing.
+- You are advisory-only: do not imply posting, approval, or mutation already occurred.
+
+Forbidden:
+- No posting, mutation, balancing, or finalization.
+
+Amount policy:
+- If amount is present, include provenance.
+- If amount cannot be grounded, omit amount and add missing_inputs.
+
+Output policy:
+- Return valid JSON only using the required schema.`;
 }

@@ -155,6 +155,15 @@ function getProviderConfig(provider: AccountingProvider): OAuthProviderConfig {
         scopes: ['restlets', 'rest_webservices'],
         redirectUri: process.env.NS_REDIRECT_URI ?? `${process.env.APP_URL ?? 'http://localhost:3000'}/api/integrations/oauth/callback/netsuite`,
       };
+    case 'sage_intacct':
+      return {
+        authorizationUrl: 'https://api.intacct.com/oauth2/authorize',
+        tokenUrl: 'https://api.intacct.com/oauth2/token',
+        clientId: process.env.INTACCT_CLIENT_ID ?? '',
+        clientSecret: process.env.INTACCT_CLIENT_SECRET ?? '',
+        scopes: ['api'],
+        redirectUri: process.env.INTACCT_REDIRECT_URI ?? `${process.env.APP_URL ?? 'http://localhost:3000'}/api/integrations/oauth/callback/sage_intacct`,
+      };
   }
 }
 

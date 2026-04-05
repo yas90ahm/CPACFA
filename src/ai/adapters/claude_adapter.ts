@@ -6,7 +6,8 @@
  */
 
 import { generateTextWithUsage } from '../../llm/provider.js';
-import { aiMock, aiMockClassifier, aiMockAdvisor } from '../../lib/runtime_mode.js';
+import { aiMock, aiMockClassifier, aiMockAdvisor, isDeploymentMode } from '../../lib/runtime_mode.js';
+import { estimateCost as estimateCostFn } from '../ai_config.js';
 import { JUSTIFIER_PROMPT_VERSION } from '../prompts/justifier.prompt.js';
 import { SHADOW_AUDITOR_PROMPT_VERSION } from '../prompts/shadow_auditor.prompt.js';
 import { CLASSIFIER_PROMPT_VERSION } from '../prompts/classifier.prompt.js';
@@ -121,16 +122,22 @@ function getMockAdvisorJson(): string {
 }
 
 export async function callClaude(input: ClaudeAdapterInput): Promise<ClaudeAdapterOutput> {
-  if (aiMockClassifier() && input.pillar === 'classifier') {
-    return { ok: true, rawText: getMockClassifierJson() };
-  }
-  if (aiMockAdvisor() && input.pillar === 'advisor') {
-    return { ok: true, rawText: getMockAdvisorJson() };
-  }
-  if (aiMock()) {
-    const rawText =
-      input.pillar === 'shadow_auditor' ? getMockShadowAuditorJson() : MOCK_JUSTIFIER_JSON;
-    return { ok: true, rawText };
+  // In deployment modes (prod/staging/demo), NEVER return mock data regardless of env vars.
+  if (!isDeploymentMode()) {
+    if (aiMockClassifier() && input.pillar === 'classifier') {
+      console.warn(`[claude_adapter] Returning MOCK data for pillar=classifier. This must not appear in production logs.`);
+      return { ok: true, rawText: getMockClassifierJson() };
+    }
+    if (aiMockAdvisor() && input.pillar === 'advisor') {
+      console.warn(`[claude_adapter] Returning MOCK data for pillar=advisor. This must not appear in production logs.`);
+      return { ok: true, rawText: getMockAdvisorJson() };
+    }
+    if (aiMock()) {
+      console.warn(`[claude_adapter] Returning MOCK data for pillar=${input.pillar ?? 'unknown'}. This must not appear in production logs.`);
+      const rawText =
+        input.pillar === 'shadow_auditor' ? getMockShadowAuditorJson() : MOCK_JUSTIFIER_JSON;
+      return { ok: true, rawText };
+    }
   }
 
   const { model, systemPrompt, userPrompt, timeoutMs } = input;
@@ -151,11 +158,7 @@ export async function callClaude(input: ClaudeAdapterInput): Promise<ClaudeAdapt
     const latencyMs = Date.now() - startTime;
     const inputTokens = result.inputTokens;
     const outputTokens = result.outputTokens;
-    // Claude Sonnet 4 pricing: $3/M input, $15/M output
-    const estimatedCostUsd =
-      inputTokens != null && outputTokens != null
-        ? (inputTokens / 1_000_000) * 3 + (outputTokens / 1_000_000) * 15
-        : undefined;
+    const estimatedCostUsd = estimateCostFn(model, inputTokens, outputTokens);
     return {
       ok: true,
       rawText: result.text?.trim() ?? '',

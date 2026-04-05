@@ -106,10 +106,13 @@ const ALLOWED_KEYS = new Set([
 
 /** Check if a string value contains dollar-amount patterns that indicate AI is producing financial numbers. */
 function stringContainsDollarAmounts(s: string): boolean {
-  // Match $1,234.56 or $1234.56 style
-  if (/\$[\d,]+\.?\d*/.test(s)) return true;
-  // Match formatted numbers like 1,234.56 (at least one comma group)
-  if (/\b\d{1,3}(,\d{3})+\.\d{2}\b/.test(s)) return true;
+  if (/\$[\d,]+\.?\d*/.test(s)) return true;                          // $1,234.56
+  if (/\b\d{1,3}(,\d{3})+\.\d{2}\b/.test(s)) return true;           // 1,234.56
+  if (/\bUSD\s*[\d,]+\.?\d*/i.test(s)) return true;                   // USD 1,234.56
+  if (/\bEUR\s*[\d,]+\.?\d*/i.test(s)) return true;                   // EUR 500
+  if (/\bGBP\s*[\d,]+\.?\d*/i.test(s)) return true;                   // GBP 500
+  if (/[€£¥][\d,]+\.?\d*/.test(s)) return true;                       // €500, £500, ¥500
+  if (/\b\d+(\.\d+)?\s*(million|billion|thousand|mn|bn)\b/i.test(s)) return true; // 1.5 million
   return false;
 }
 
@@ -133,7 +136,7 @@ export function assertNoNumericAmountsInAgentOutput(output: unknown, context?: s
       if (stringContainsDollarAmounts(output)) {
         const msg = context
           ? `Scope violation: agent output string contains dollar amounts. ${context}`
-          : 'Scope violation: agent output string contains dollar amounts. AI must not produce financial numbers.';
+          : 'Scope violation: agent output string contains dollar amounts. AI must not produce, compute, or alter numeric amounts.';
         throw new Error(msg);
       }
       // Also check for AMOUNT_KEYS patterns in the string (e.g. "debit": "1234.56")
@@ -142,7 +145,7 @@ export function assertNoNumericAmountsInAgentOutput(output: unknown, context?: s
         if (pattern.test(output)) {
           const msg = context
             ? `Scope violation: agent output string contains amount key '${key}' with numeric value. ${context}`
-            : `Scope violation: agent output string contains amount key '${key}' with numeric value. AI must not produce financial numbers.`;
+            : `Scope violation: agent output string contains amount key '${key}' with numeric value. AI must not produce, compute, or alter numeric amounts.`;
           throw new Error(msg);
         }
       }
@@ -153,7 +156,7 @@ export function assertNoNumericAmountsInAgentOutput(output: unknown, context?: s
   if (hasNumericAmount(target, '')) {
     const msg = context
       ? `Scope violation: agent output contains numeric amounts (debit/credit/amount). ${context}`
-      : 'Scope violation: agent output contains numeric amounts (debit/credit/amount). AI must not produce numbers; use HITL only.';
+      : 'Scope violation: agent output contains numeric amounts (debit/credit/amount). AI must not produce, compute, or alter numeric amounts.';
     throw new Error(msg);
   }
 }

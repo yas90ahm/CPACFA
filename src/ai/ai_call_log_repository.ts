@@ -24,6 +24,10 @@ export async function insertCallLog(
   pool: Pool,
   params: InsertCallLogParams
 ): Promise<{ id: string }> {
+  if (!params.tenantId || params.tenantId.trim() === '') {
+    console.warn('[ai_call_log] insertCallLog called with empty tenantId, using "unknown"');
+    params = { ...params, tenantId: 'unknown' };
+  }
   const r = await pool.query<{ id: string }>(
     `INSERT INTO ai_call_log (
       tenant_id, pillar, prompt_version, model, request_json,

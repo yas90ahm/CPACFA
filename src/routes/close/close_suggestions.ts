@@ -48,14 +48,17 @@ router.post('/sessions/:closeSessionId/suggestions/generate', async (req: Reques
       return;
     }
 
-    const body = req.body as { accountNames?: string[] } | undefined;
+    const rawBody = req.body as Record<string, unknown> | undefined;
+    const accountNames = Array.isArray(rawBody?.accountNames)
+      ? (rawBody.accountNames as unknown[]).filter((n): n is string => typeof n === 'string').slice(0, 500)
+      : undefined;
     let result;
     try {
       result = await generateClassificationSuggestions(pool, {
         tenantId,
         entityId: session.entityId,
         closeSessionId,
-        accountNames: body?.accountNames,
+        accountNames,
       });
     } catch (slmErr) {
       // SLM/primary pathway unavailable — fall back to autonomous pipeline
@@ -390,7 +393,29 @@ router.get('/sessions/:closeSessionId/suggestions/learning-stats', async (req: R
 
     const { getLearningStats } = await import('../../services/mapping_learning_service.js');
     const stats = await getLearningStats(pool, tenantId, session.entityId);
-    res.json(stats);
+
+    // Aggregate AI call log stats for the cost dashboard
+    let callLog = { totalCalls: 0, totalCost: '$0.00', model: 'N/A', avgLatency: 'N/A', errors: 0 };
+    try {
+      const costRes = await pool.query<{
+        total_calls: string; total_cost: string; avg_latency: string; error_count: string; model: string;
+      }>(`SELECT COUNT(*) AS total_calls, COALESCE(SUM(estimated_cost_usd), 0)::text AS total_cost,
+          COALESCE(AVG(latency_ms), 0)::text AS avg_latency,
+          COUNT(*) FILTER (WHERE ok = false) AS error_count, MAX(model) AS model
+          FROM ai_call_log WHERE tenant_id = $1`, [tenantId]);
+      const row = costRes.rows[0];
+      if (row) {
+        callLog = {
+          totalCalls: Number(row.total_calls),
+          totalCost: `$${Number(row.total_cost).toFixed(4)}`,
+          model: row.model ?? 'N/A',
+          avgLatency: `${Number(row.avg_latency).toFixed(0)}ms`,
+          errors: Number(row.error_count),
+        };
+      }
+    } catch { /* ai_call_log table may not exist yet */ }
+
+    res.json({ ...stats, callLog });
   } catch (e) {
     send500(res, e, 'Learning stats failed');
   }

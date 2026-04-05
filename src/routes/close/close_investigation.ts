@@ -69,12 +69,24 @@ router.post(
       // If question provided, also run conversational layer (Layer 2)
       let explanation;
       if (body.question && typeof body.question === 'string') {
-        const aiPool = getTenantAiPool(req) ?? pool;
-        explanation = await varianceChat.generateVarianceExplanation(aiPool, {
-          question: body.question,
-          investigationResult: investigation,
-          tenantId,
-        });
+        // Skip Claude call if investigation has no data (accounts likely unmapped)
+        const hasData = investigation.contributingAccounts?.length > 0
+          || investigation.currentTotal !== '0' && investigation.currentTotal !== '0.00';
+        if (!hasData) {
+          explanation = {
+            answer: 'Variance investigation is not available for this line item because the underlying GL accounts have not been mapped to the financial statement taxonomy. Complete account mapping in the Mapping tab first.',
+            numbersUsed: [],
+            modelVersion: 'no_mapping',
+            provenanceValid: true,
+          };
+        } else {
+          const aiPool = getTenantAiPool(req) ?? pool;
+          explanation = await varianceChat.generateVarianceExplanation(aiPool, {
+            question: body.question,
+            investigationResult: investigation,
+            tenantId,
+          });
+        }
       }
 
       res.json({ investigation, explanation });

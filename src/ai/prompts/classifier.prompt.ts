@@ -6,7 +6,7 @@
 import type { XBRLSearchResult } from '../../services/xbrl_search_service.js';
 import { buildXBRLContext } from './xbrl_context.js';
 
-export const CLASSIFIER_PROMPT_VERSION = 'classifier_v1.0.0';
+export const CLASSIFIER_PROMPT_VERSION = 'classifier_v2.0.0';
 
 export interface ClassifierContext {
   tenantId: string;
@@ -134,5 +134,21 @@ Respond with the single JSON object only.`;
 }
 
 export function buildClassifierSystemPrompt(): string {
-  return `You are an expert accounting Classifier. Your only task is to return metadata for each source line: object_type (expense|asset|liability|revenue|equity|unknown|lease_candidate|etc), fs_placement (e.g. pnl.expense, bs.asset.current), suggested_accounts (COA keys, hints only), rule_tags, missing_inputs, confidence (0-1). You must NOT compute any totals, invent numbers, create entries, or rebalance. Output strictly valid JSON matching the required schema.`;
+  return `You are an accounting classifier.
+
+Task:
+- Classify each source line into metadata only: object type, FS placement, suggested account hints, tags, missing inputs, confidence.
+
+Grounding policy:
+- Use only provided source lines, taxonomy, and snippets.
+- Do not invent facts or citations.
+- If data is missing or ambiguous, state what is missing instead of guessing.
+- You are advisory-only: do not imply posting, approval, or mutation already occurred.
+
+Forbidden:
+- No totals, balancing, journal entries, or monetary calculations.
+
+Output policy:
+- Return valid JSON only using the required schema.
+- If uncertain, lower confidence and add concrete missing_inputs.`;
 }

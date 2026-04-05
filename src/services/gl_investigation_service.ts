@@ -17,10 +17,25 @@ import type {
   InvestigationParams,
   InvestigationResult,
   ContributingAccount,
+  AnalyticalSignals,
   AccountDrilldownParams,
   AccountDrilldownResult,
   GLEntryDetail,
 } from '../types/investigation.js';
+
+/* ── Related FS Lines Map ──────────────────────────────────────── */
+
+/** Static map of related FS lines for cross-line analysis. */
+const RELATED_LINES: Record<string, string[]> = {
+  'fs_revenue':          ['fs_cogs', 'fs_asset_ar', 'fs_liability_deferred_rev'],
+  'fs_cogs':             ['fs_revenue', 'fs_asset_inventory', 'fs_liability_ap'],
+  'fs_asset_ar':         ['fs_revenue', 'fs_opex_bad_debt'],
+  'fs_liability_ap':     ['fs_cogs', 'fs_asset_inventory'],
+  'fs_asset_cash':       ['fs_asset_ar', 'fs_liability_ap', 'fs_asset_ppe'],
+  'fs_opex_sga':         ['fs_revenue'],
+  'fs_asset_inventory':  ['fs_cogs', 'fs_revenue'],
+  'fs_opex_depreciation': ['fs_asset_ppe'],
+};
 
 /* ── Helpers ──────────────────────────────────────────────────── */
 
@@ -276,6 +291,12 @@ export async function investigateVariance(
     ? round2(div(totalChange * 100, priorTotalNum))
     : 0;
 
+  // 10. Compute analytical signals (deterministic, no AI)
+  const analyticalSignals = await computeAnalyticalSignals(
+    pool, tenantId, entityId, fsLineId, contributingAccounts, totalChange,
+    currentPeriodStart, currentPeriodEnd, priorPeriodStart, priorPeriodEnd, rules
+  );
+
   return {
     fsLineId,
     fsLineLabel,
@@ -284,12 +305,125 @@ export async function investigateVariance(
     changeAmount: ds(totalChange),
     changePercent: ds(lineChangePercent),
     contributingAccounts,
+    analyticalSignals,
     metadata: {
       accountsAnalyzed: balanceResult.rows.length,
       periodLabel: buildPeriodLabel(currentPeriodStart, priorPeriodStart),
       generatedAt: new Date().toISOString(),
       computationMethod: 'gl_detail',
     },
+  };
+}
+
+/* ── Analytical Signals ───────────────────────────────────────── */
+
+/** Compute analytical signals from pre-computed contributing accounts. All Decimal.js, no AI. */
+async function computeAnalyticalSignals(
+  pool: Pool,
+  tenantId: string,
+  entityId: string,
+  fsLineId: string,
+  accounts: ContributingAccount[],
+  totalChange: number,
+  currentPeriodStart: string,
+  currentPeriodEnd: string,
+  priorPeriodStart: string,
+  priorPeriodEnd: string,
+  rules: CoaMappingRule[],
+): Promise<AnalyticalSignals> {
+  // 1. Related line changes
+  const relatedIds = RELATED_LINES[fsLineId] ?? [];
+  const relatedLineChanges: AnalyticalSignals['relatedLineChanges'] = [];
+  if (relatedIds.length > 0) {
+    try {
+      // Fetch TB-level totals for related lines in one query
+      const lineLabels = await taxonomyRepo.listFsTaxonomyLines(pool);
+      const labelMap = new Map(lineLabels.map((l) => [l.id, l.name]));
+      for (const relId of relatedIds.slice(0, 5)) {
+        // Find accounts mapped to this related line
+        const relRules = rules.filter((r) => r.mappedFsLineId === relId);
+        if (relRules.length === 0) continue;
+        const relLabel = labelMap.get(relId) ?? relId;
+        // Collect account number patterns that match this line
+        const codes = relRules.map((r) => r.sourceAccountNumberPattern).filter((c): c is string => !!c);
+        if (codes.length === 0) continue;
+        try {
+          const res = await pool.query<{ cur: string; pri: string }>(`
+            SELECT
+              COALESCE(SUM(CASE WHEN entry_date >= $3::date AND entry_date <= $4::date THEN debit - credit ELSE 0 END), 0)::text AS cur,
+              COALESCE(SUM(CASE WHEN entry_date >= $5::date AND entry_date <= $6::date THEN debit - credit ELSE 0 END), 0)::text AS pri
+            FROM core.general_ledger
+            WHERE tenant_id = $1 AND account_code = ANY($2)
+          `, [tenantId, codes, currentPeriodStart, currentPeriodEnd, priorPeriodStart, priorPeriodEnd]);
+          const cur = parseFloat(res.rows[0]?.cur ?? '0');
+          const pri = parseFloat(res.rows[0]?.pri ?? '0');
+          const chg = round2(cur - pri);
+          const pct = pri !== 0 ? round2(div((cur - pri) * 100, Math.abs(pri))) : 0;
+          relatedLineChanges.push({
+            fsLineId: relId,
+            fsLineLabel: relLabel,
+            changeAmount: ds(chg),
+            changePercent: ds(pct),
+          });
+        } catch { /* skip if query fails */ }
+      }
+    } catch { /* taxonomy query failed, skip related lines */ }
+  }
+
+  // 2. Concentration warning
+  let concentrationWarning: string | null = null;
+  for (const a of accounts) {
+    const share = Math.abs(parseFloat(a.percentOfTotalChange));
+    if (share > 60) {
+      concentrationWarning = `${a.accountName} (${a.accountCode}) represents ${a.percentOfTotalChange}% of the total change`;
+      break;
+    }
+  }
+
+  // 3. Recurring vs non-recurring split
+  let recurringSum = 0;
+  let nonRecurringSum = 0;
+  for (const a of accounts) {
+    const amt = parseFloat(a.changeAmount);
+    if (a.isRecurring) recurringSum = round2(recurringSum + amt);
+    else nonRecurringSum = round2(nonRecurringSum + amt);
+  }
+
+  // 4. New/eliminated accounts
+  const newAccountCount = accounts.filter((a) => a.direction === 'new').length;
+  const eliminatedAccountCount = accounts.filter((a) => a.direction === 'eliminated').length;
+
+  // 5. Top keywords from memos (deterministic — simple word frequency)
+  const allMemos = accounts.flatMap((a) => a.topMemos).join(' ').toLowerCase();
+  const stopWords = new Set(['the', 'and', 'for', 'from', 'with', 'this', 'that', 'was', 'are', 'has', 'had', 'not', 'but']);
+  const words = allMemos.split(/\W+/).filter((w) => w.length > 3 && !stopWords.has(w));
+  const freq = new Map<string, number>();
+  for (const w of words) freq.set(w, (freq.get(w) ?? 0) + 1);
+  const topKeywords = [...freq.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([w]) => w);
+
+  // 6. Directional consistency
+  const totalDir = totalChange >= 0 ? 1 : -1;
+  let withTotal = 0;
+  let againstTotal = 0;
+  for (const a of accounts) {
+    const aDir = parseFloat(a.changeAmount) >= 0 ? 1 : -1;
+    if (aDir === totalDir) withTotal++;
+    else againstTotal++;
+  }
+
+  return {
+    relatedLineChanges,
+    concentrationWarning,
+    recurringChangeAmount: ds(recurringSum),
+    nonRecurringChangeAmount: ds(nonRecurringSum),
+    newAccountCount,
+    eliminatedAccountCount,
+    topKeywords,
+    accountsMovingWithTotal: withTotal,
+    accountsMovingAgainstTotal: againstTotal,
   };
 }
 

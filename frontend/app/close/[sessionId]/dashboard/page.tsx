@@ -5,7 +5,27 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { fmtMoney } from '@/lib/money';
+import {
+  type Gate,
+  type SessionResponse,
+  type ReadinessResponse,
+  type JournalEntryResponse,
+  type NormalizedTBRow,
+  adaptSession,
+  adaptReadiness,
+  adaptTrialBalance,
+  adaptJournalEntries,
+  adaptVariances,
+  adaptReconciliations,
+  adaptIssues,
+  isJEPending,
+  isJEBooked,
+  isReconComplete,
+  isIssueOpen,
+  VarianceExplanationStatus,
+} from '@/lib/contracts';
 import { CloseSidebar } from '@/components/close-sidebar';
+import VarianceHighlightsCard from '@/components/close/VarianceHighlightsCard';
 import { WorkflowBreadcrumb } from '@/components/workflow-breadcrumb';
 import {
   ChevronRight,
@@ -18,94 +38,6 @@ import {
   Clock,
   Loader2,
 } from 'lucide-react';
-
-/* ------------------------------------------------------------------ */
-/*  Types                                                              */
-/* ------------------------------------------------------------------ */
-
-interface Gate {
-  id: string;
-  label: string;
-  passing: boolean;
-  detail?: string;
-}
-
-interface ReadinessResponse {
-  gates: Gate[];
-  gatesPassing: number;
-  gatesTotal: number;
-  canAdvance: boolean;
-}
-
-interface SessionResponse {
-  id: string;
-  state: string;
-  status?: string;
-  periodLabel: string;
-  periodStart?: string;
-  periodEnd?: string;
-  entityName: string;
-  entityId?: string;
-  startedAt: string;
-  createdAt: string;
-  closeDayTarget?: number;
-  statementsGeneratedAt?: string;
-  statementsStale?: boolean;
-}
-
-interface TBRow {
-  accountCode: string;
-  accountName: string;
-  debit?: string;
-  credit?: string;
-  debitBalance?: string;
-  creditBalance?: string;
-  reportingCategory?: string;
-  accountType?: string;
-}
-
-interface TBResponse {
-  rows: TBRow[];
-  totalDebits?: string;
-  totalCredits?: string;
-  balanced?: boolean;
-}
-
-interface JournalEntry {
-  id: string;
-  status: string;
-  amount?: string;
-  memo?: string;
-}
-
-interface Variance {
-  id: string;
-  lineItemName: string;
-  isMaterial: boolean;
-  explanationStatus: string;
-  changePercent?: number;
-  currentAmount?: string;
-  priorAmount?: string;
-}
-
-interface Reconciliation {
-  id: string;
-  accountCode: string;
-  accountName: string;
-  status: string;
-  glBalance: string;
-  sourceBalance: string;
-  variance: string;
-}
-
-interface Issue {
-  id: string;
-  title: string;
-  description: string;
-  severity: string;
-  category: string;
-  status: string;
-}
 
 /* Sidebar imported from @/components/close-sidebar */
 
@@ -148,10 +80,10 @@ function ProgressRail({
   closeDayTarget?: number;
   attentionCount: number;
 }) {
-  const dayElapsed = Math.max(
-    1,
-    Math.ceil((Date.now() - new Date(startedAt).getTime()) / (1000 * 60 * 60 * 24))
-  );
+  const startDate = startedAt ? new Date(startedAt) : null;
+  const dayElapsed = startDate && !isNaN(startDate.getTime())
+    ? Math.max(1, Math.ceil((Date.now() - startDate.getTime()) / (1000 * 60 * 60 * 24)))
+    : null;
   const targetDays = closeDayTarget ?? 10;
 
   // Find the first non-passing gate index for "active" state
@@ -165,7 +97,7 @@ function ProgressRail({
           Gate {activeGateNum} of {gatesTotal}
         </span>
         <span className="text-[#8B7A5E]">
-          Close Day {dayElapsed} of {targetDays}
+          {dayElapsed != null ? `Close Day ${dayElapsed} of ${targetDays}` : 'N/A'}
         </span>
         <span className="px-2 py-0.5 rounded text-xs font-medium bg-[#3B1F0A] text-[#B8860B]">
           {(sessionState ?? '').replace(/_/g, ' ')}
@@ -241,7 +173,7 @@ function GateCard({
 /*  Adjusted Trial Balance Summary                                     */
 /* ------------------------------------------------------------------ */
 
-function TrialBalanceSummary({ rows, sessionId, mappingGate }: { rows: TBRow[]; sessionId: string; mappingGate?: Gate }) {
+function TrialBalanceSummary({ rows, sessionId, mappingGate }: { rows: NormalizedTBRow[]; sessionId: string; mappingGate?: Gate }) {
   // Aggregate by account type — use account code range as primary signal, category as fallback
   let totalAssets = 0;
   let totalLiabilities = 0;
@@ -266,7 +198,7 @@ function TrialBalanceSummary({ rows, sessionId, mappingGate }: { rows: TBRow[]; 
     }
     // Fallback: reporting category or account type from API
     if (!type) {
-      const cat = (row?.reportingCategory ?? row?.accountName ?? '').toLowerCase();
+      const cat = (row?.accountType ?? row?.accountName ?? '').toLowerCase();
       if (cat.includes('asset')) type = 'asset';
       else if (cat.includes('liabilit')) type = 'liability';
       else if (cat.includes('equity') || cat.includes('capital') || cat.includes('retained')) type = 'equity';
@@ -363,15 +295,15 @@ interface AttentionItem {
 }
 
 function buildAttentionItems(
-  jes: JournalEntry[],
-  variances: Variance[],
-  recons: Reconciliation[],
-  issues: Issue[]
+  jes: JournalEntryResponse[],
+  variances: ReturnType<typeof adaptVariances>,
+  recons: ReturnType<typeof adaptReconciliations>,
+  issues: ReturnType<typeof adaptIssues>
 ): AttentionItem[] {
   const items: AttentionItem[] = [];
 
   // Pending JE approvals
-  const pendingJes = jes.filter((j) => j?.status === 'proposed' || j?.status === 'pending_approval');
+  const pendingJes = jes.filter((j) => isJEPending(j?.status ?? ''));
   if (pendingJes.length > 0) {
     items.push({
       id: 'aje-pending',
@@ -383,7 +315,7 @@ function buildAttentionItems(
   }
 
   // Unexplained material variances
-  const unexplained = variances.filter((v) => v?.isMaterial && v?.explanationStatus !== 'explained');
+  const unexplained = variances.filter((v) => v?.isMaterial && v?.explanationStatus !== VarianceExplanationStatus.EXPLAINED);
   if (unexplained.length > 0) {
     items.push({
       id: 'var-unexplained',
@@ -396,7 +328,7 @@ function buildAttentionItems(
 
   // Incomplete reconciliations
   const incompleteRecons = recons.filter(
-    (r) => r?.status !== 'completed' && r?.status !== 'approved'
+    (r) => !isReconComplete(r?.status ?? '')
   );
   if (incompleteRecons.length > 0) {
     items.push({
@@ -410,7 +342,7 @@ function buildAttentionItems(
 
   // AI drafts ready
   const aiReady = variances.filter(
-    (v) => v?.explanationStatus === 'ai_drafted' || v?.explanationStatus === 'draft_ready'
+    (v) => v?.explanationStatus === VarianceExplanationStatus.AI_DRAFTED || v?.explanationStatus === VarianceExplanationStatus.DRAFT_READY
   );
   if (aiReady.length > 0) {
     items.push({
@@ -424,7 +356,7 @@ function buildAttentionItems(
 
   // Issues from the API
   for (const issue of issues) {
-    if (issue?.status === 'open' || issue?.status === 'active') {
+    if (isIssueOpen(issue?.status ?? '')) {
       let badge = 'AUDIT';
       let badgeColor = '#C44B2B';
       let badgeBg = '#F5E4DE';
@@ -438,7 +370,7 @@ function buildAttentionItems(
         badge,
         badgeColor,
         badgeBg,
-        text: issue.title || issue.description,
+        text: issue.title || issue.description || 'Issue requires attention',
       });
     }
   }
@@ -679,37 +611,42 @@ export default function CloseDashboardPage() {
 
   const sessionQuery = useQuery({
     queryKey: ['close-session', sessionId],
-    queryFn: () => apiFetch<SessionResponse>(`/api/close/sessions/${sessionId}`),
+    queryFn: async () => {
+      const data = await apiFetch(`/api/close/sessions/${sessionId}`);
+      return adaptSession(data);
+    },
     enabled: !!sessionId,
   });
 
   const readinessQuery = useQuery({
     queryKey: ['close-readiness', sessionId],
-    queryFn: () =>
-      apiFetch<ReadinessResponse>(`/api/close/sessions/${sessionId}/readiness`, {
+    queryFn: async () => {
+      const data = await apiFetch(`/api/close/sessions/${sessionId}/readiness`, {
         params: { format: 'gates' },
-      }),
+      });
+      return adaptReadiness(data);
+    },
     enabled: !!sessionId,
   });
 
   const tbQuery = useQuery({
     queryKey: ['trial-balance', sessionId, 'adjusted'],
-    queryFn: () =>
-      apiFetch<TBResponse>(`/api/close/sessions/${sessionId}/trial-balance`, {
+    queryFn: async () => {
+      const data = await apiFetch(`/api/close/sessions/${sessionId}/trial-balance`, {
         params: { type: 'adjusted' },
-      }),
+      });
+      return adaptTrialBalance(data);
+    },
     enabled: !!sessionId,
   });
 
   const jesQuery = useQuery({
     queryKey: ['journal-entries', sessionId],
     queryFn: async () => {
-      const data = await apiFetch<{ journalEntries?: JournalEntry[]; entries?: JournalEntry[] } | JournalEntry[]>(
-        `/api/close/journal-entries`,
-        { params: { closeSessionId: sessionId } }
-      );
-      if (Array.isArray(data)) return data;
-      return data.journalEntries ?? data.entries ?? [];
+      const data = await apiFetch(`/api/close/journal-entries`, {
+        params: { closeSessionId: sessionId },
+      });
+      return adaptJournalEntries(data);
     },
     enabled: !!sessionId,
   });
@@ -717,10 +654,8 @@ export default function CloseDashboardPage() {
   const variancesQuery = useQuery({
     queryKey: ['variances', sessionId],
     queryFn: async () => {
-      const data = await apiFetch<Variance[] | { variances?: Variance[] }>(
-        `/api/close/sessions/${sessionId}/variances`
-      );
-      return Array.isArray(data) ? data : data.variances ?? [];
+      const data = await apiFetch(`/api/close/sessions/${sessionId}/variances`);
+      return adaptVariances(data);
     },
     enabled: !!sessionId,
   });
@@ -728,10 +663,8 @@ export default function CloseDashboardPage() {
   const reconsQuery = useQuery({
     queryKey: ['reconciliations', sessionId],
     queryFn: async () => {
-      const data = await apiFetch<Reconciliation[] | { reconciliations?: Reconciliation[] }>(
-        `/api/close/sessions/${sessionId}/reconciliations`
-      );
-      return Array.isArray(data) ? data : data.reconciliations ?? [];
+      const data = await apiFetch(`/api/close/sessions/${sessionId}/reconciliations`);
+      return adaptReconciliations(data);
     },
     enabled: !!sessionId,
   });
@@ -740,10 +673,8 @@ export default function CloseDashboardPage() {
     queryKey: ['issues', sessionId],
     queryFn: async () => {
       try {
-        const data = await apiFetch<{ issues?: Issue[] } | Issue[]>(
-          `/api/close/sessions/${sessionId}/issues`
-        );
-        return Array.isArray(data) ? data : data.issues ?? [];
+        const data = await apiFetch(`/api/close/sessions/${sessionId}/issues`);
+        return adaptIssues(data);
       } catch {
         // issues endpoint may not exist yet -- degrade gracefully
         return [];
@@ -758,24 +689,19 @@ export default function CloseDashboardPage() {
   const gates = readinessQuery.data?.gates ?? [];
   const gatesPassing = readinessQuery.data?.gatesPassing ?? 0;
   const gatesTotal = readinessQuery.data?.gatesTotal ?? 0;
-  const tbRows = (tbQuery.data?.rows ?? []).map((r) => ({
-    ...r,
-    debit: r.debit ?? r.debitBalance ?? '0',
-    credit: r.credit ?? r.creditBalance ?? '0',
-    reportingCategory: r.reportingCategory ?? r.accountType ?? '',
-  }));
+  const tbRows = tbQuery.data?.rows ?? [];
   const jes = jesQuery.data ?? [];
   const variances = variancesQuery.data ?? [];
   const recons = reconsQuery.data ?? [];
   const issues = issuesQuery.data ?? [];
 
-  const pendingJes = jes.filter((j) => j?.status === 'proposed' || j?.status === 'pending_approval').length;
-  const postedJes = jes.filter((j) => j?.status === 'posted').length;
+  const pendingJes = jes.filter((j) => isJEPending(j?.status ?? '')).length;
+  const postedJes = jes.filter((j) => isJEBooked(j?.status ?? '')).length;
   const aiDrafts = variances.filter(
-    (v) => v?.explanationStatus === 'ai_drafted' || v?.explanationStatus === 'draft_ready'
+    (v) => v?.explanationStatus === VarianceExplanationStatus.AI_DRAFTED || v?.explanationStatus === VarianceExplanationStatus.DRAFT_READY
   ).length;
 
-  const completedRecons = recons.filter((r) => r?.status === 'completed' || r?.status === 'approved').length;
+  const completedRecons = recons.filter((r) => isReconComplete(r?.status ?? '')).length;
 
   const attentionItems = buildAttentionItems(jes, variances, recons, issues);
 
@@ -831,7 +757,7 @@ export default function CloseDashboardPage() {
     ? formatTimeAgo(new Date(session.statementsGeneratedAt))
     : session?.startedAt
     ? formatTimeAgo(new Date(session.startedAt))
-    : 'just now';
+    : '';
 
   return (
     <div className="min-h-screen bg-[#F5F0E8] flex">
@@ -851,8 +777,8 @@ export default function CloseDashboardPage() {
             gates={gates}
             gatesPassing={gatesPassing}
             gatesTotal={gatesTotal}
-            sessionState={session?.state ?? 'IN_PROGRESS'}
-            startedAt={session?.startedAt ?? session?.createdAt ?? new Date().toISOString()}
+            sessionState={session?.status ?? session?.state ?? 'IN_PROGRESS'}
+            startedAt={session?.startedAt ?? session?.createdAt ?? ''}
             closeDayTarget={session?.closeDayTarget}
             attentionCount={attentionItems.length}
           />
@@ -924,12 +850,20 @@ export default function CloseDashboardPage() {
                 />
               </div>
 
+              {/* AI: Material Variance Highlights */}
+              <VarianceHighlightsCard
+                variances={variances}
+                sessionId={sessionId}
+                isLoading={variancesQuery.isLoading}
+                onRefresh={() => variancesQuery.refetch()}
+              />
+
               {/* Two-column: TB Summary + Attention */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <TrialBalanceSummary rows={tbRows} sessionId={sessionId} mappingGate={mappingGate} />
                 <AttentionList
                   items={attentionItems}
-                  sessionState={session?.state ?? session?.status}
+                  sessionState={session?.status ?? session?.state}
                   tbRowCount={tbRows.length}
                   unmappedCount={(() => {
                     const d = mappingGate?.detail ?? '';

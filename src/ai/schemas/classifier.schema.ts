@@ -12,8 +12,8 @@ export const ClassifierResultItemSchema = z.object({
     'unknown', 'lease_candidate',
   ]),
   fs_placement: z.string().regex(
-    /^(pnl\.|bs\.|cf\.|oci\.|unknown)/,
-    'Must start with statement prefix (pnl., bs., cf., oci., or unknown)'
+    /^(pnl|bs|cf|oci)\.\w+(\.\w+)*$|^unknown$/,
+    'Must be statement.category[.subcategory] (e.g. pnl.revenue, bs.asset.current) or "unknown"'
   ),
   suggested_accounts: z.array(z.string()),
   rule_tags: z.array(z.string()),

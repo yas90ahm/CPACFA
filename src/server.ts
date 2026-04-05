@@ -56,13 +56,12 @@ import auditRouter from './routes/audit/index.js';
 import exportRouter from './routes/export.js';
 import financialMemoryRouter from './routes/financial_memory.js';
 import vectorStoreRouter from './routes/vector_store.js';
-// QUARANTINED — Automated ingestion infrastructure not in MVP architecture
+// TODO: Wire when implemented — bank pipeline, AP/AR aging, payroll accrual, ingestion scheduler
 // import ingestionRouter from './routes/ingestion.js';
+// import pipelinesRouter from './routes/pipelines.js';
 import hitlRouter from './routes/hitl.js';
 import memoryRouter from './routes/memory.js';
 import integrationsRouter from './routes/integrations.js';
-// QUARANTINED — Bank pipeline, AP/AR aging, payroll accrual not in MVP architecture
-// import pipelinesRouter from './routes/pipelines.js';
 import closeRouter from './routes/close/index.js';
 import precheckRouter from './routes/precheck.js';
 import configRouter from './routes/config.js';
@@ -84,7 +83,7 @@ import devDiagnosticsRouter from './routes/dev_diagnostics.js';
 import fxCurrencyRouter from './routes/fx_currency.js';
 import consolidationRouter from './routes/consolidation.js';
 import xbrlRouter from './routes/xbrl.js';
-// QUARANTINED — Automated ingestion infrastructure not in MVP architecture
+// TODO: Wire when implemented — ingestion scheduler for automated ERP sync
 // import { startIngestionScheduler } from './services/ingestion_scheduler.js';
 import { runWorkerLoop } from './services/job_worker.js';
 import { send500 } from './lib/errorHandler.js';

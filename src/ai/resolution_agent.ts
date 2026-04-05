@@ -22,9 +22,10 @@ import { submitToStaging } from '../services/hitl_orchestrator.js';
 import { appendEntry } from '../db/repositories/audit_ledger_repository.js';
 import type { FinancialEventPacket, FinancialEventType } from '../events/financial_event_emitter.js';
 import { log } from '../lib/logger.js';
+import { buildResolutionAgentSystemPrompt } from './prompts/resolution_agent.prompt.js';
 
 const MAX_RETRIES = 3;
-const RESOLUTION_AGENT_VERSION = 'resolution-agent-v1';
+const RESOLUTION_AGENT_VERSION = 'resolution-agent-v2';
 
 // --- Zod schema for AI response ---
 
@@ -97,19 +98,7 @@ async function execute(
   event: FinancialEventPacket,
   planResult: PlanResult
 ): Promise<ResolutionProposal | null> {
-  const systemPrompt = `You are a financial resolution agent for a CPA close automation system.
-Given a financial event (variance, reconciliation issue, policy violation, etc.), generate a Resolution Proposal.
-
-RULES:
-- NEVER output dollar amounts or numeric values. All amounts come from the deterministic engine.
-- Use IRAC format (Issue, Rule, Analysis, Conclusion).
-- Cite specific GAAP/IFRS standards (e.g., "ASC 606-10-25", "IAS 16.30").
-- Only reference account codes that exist in the entity's Chart of Accounts.
-- proposalType must match the event type (see valid types in the event context).
-- Be specific and actionable in your recommendation.
-- Confidence: 0.0-1.0 reflecting how certain you are in this proposal.
-
-${planResult.priorErrors.length > 0 ? `PREVIOUS ATTEMPT FAILED with these errors — fix them:\n${planResult.priorErrors.map((e, i) => `  ${i + 1}. ${e}`).join('\n')}` : ''}`;
+  const systemPrompt = buildResolutionAgentSystemPrompt(planResult.priorErrors.length > 0 ? planResult.priorErrors : undefined);
 
   const userPrompt = `Generate a resolution proposal for:
 
@@ -203,6 +192,15 @@ export async function runResolutionAgent(input: ResolutionAgentInput): Promise<R
 
   while (attempts < MAX_RETRIES) {
     attempts++;
+
+    // Exponential backoff with jitter on retries (skip first attempt)
+    if (attempts > 1) {
+      const base = 1000;
+      const max = 10000;
+      const exponential = Math.min(max, base * Math.pow(2, attempts - 2));
+      const jitter = exponential * (0.5 + Math.random() * 0.5);
+      await new Promise(resolve => setTimeout(resolve, Math.round(jitter)));
+    }
 
     // 1. Plan
     const planResult = await plan(event, eventData, priorErrors);

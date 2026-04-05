@@ -19,19 +19,12 @@ const SourceRefSchema = z.object({
 const ProposalLineSchema = z.object({
   dr_account_key: z.string(),
   cr_account_key: z.string(),
-  amount: z.number().optional(),
+  // amount field intentionally omitted — AI must not produce amounts.
+  // Amounts are populated by the deterministic engine or human after approval.
   amountProvenance: AmountProvenanceSchema,
   sourceRef: SourceRefSchema.optional(),
   note: z.string().optional(),
 }).refine(
-  (data) => {
-    if (data.amount != null && data.amount !== undefined) {
-      return data.amountProvenance != null;
-    }
-    return true;
-  },
-  { message: 'If amount present, amountProvenance is required', path: ['amountProvenance'] }
-).refine(
   (data) => {
     if (data.amountProvenance === 'SOURCE_LINE_AMOUNT') {
       return data.sourceRef != null && (data.sourceRef?.ledgerLineId != null || data.sourceRef?.tbRowId != null);

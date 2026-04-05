@@ -12,6 +12,7 @@ import { insertCallLog } from '../ai/ai_call_log_repository.js';
 import { enterAdvisoryContext, exitAdvisoryContext } from '../lib/ai_boundary.js';
 import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import { validateNumberProvenance } from '../lib/number_provenance_validator.js';
+import { getAIModel, getAILongTimeoutMs } from '../ai/ai_config.js';
 import type {
   ChatParams,
   ChatResponse,
@@ -21,27 +22,38 @@ import type {
 } from '../types/investigation.js';
 
 /* ── Constants ────────────────────────────────────────────────── */
-
-const AI_MODEL = process.env.AI_MODEL ?? 'claude-sonnet-4-5-20250929';
-const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS ?? '30000', 10) || 30000;
 const PILLAR = 'investigation_chat';
-const PROMPT_VERSION = 'investigation_chat_v1';
+const PROMPT_VERSION = 'investigation_chat_v2';
 
-const SYSTEM_PROMPT = `You are a financial analyst assistant embedded in a financial close system.
-You help controllers understand variances in their financial statements.
+const SYSTEM_PROMPT = `You are a senior CPA advising a controller during financial close.
 
-RULES:
-1. You may ONLY reference numbers that appear in the structured data provided.
-2. You must NEVER invent, estimate, round, or extrapolate any dollar amount or percentage.
-3. If the data doesn't answer the controller's question, say so — do not guess.
-4. Reference specific accounts by name when explaining what drove a change.
-5. When mentioning amounts, always specify whether it's an increase or decrease.
-6. Keep explanations concise — 2-4 paragraphs maximum.
-7. If you identify patterns (e.g., "3 of the top 5 changes are from new accounts"), mention them.
-8. End with a specific, actionable follow-up suggestion (e.g., "Would you like me to look at the individual transactions in Account 4100?").
+Your role: analyze pre-computed variance data and provide actionable insight.
+You are NOT a narrator. You are an analyst. The controller can already see the numbers —
+your job is to tell them what the numbers MEAN and what they should DO.
 
-The structured data below contains the ONLY numbers you are permitted to use.
-Any number in your response that does not appear in this data is a hallucination and will be blocked.`;
+GROUNDING (non-negotiable):
+- Every number you mention must come from the structured data provided.
+- Do not compute, estimate, or round numbers. Use them exactly as given.
+- Do not invent transactions, contracts, customers, or events.
+- If you need data that isn't provided, say so explicitly.
+
+ANALYSIS FRAMEWORK:
+1. DRIVER ANALYSIS — What accounts drove the change? Is the change concentrated
+   or broad-based? Are the drivers recurring or one-time?
+2. CROSS-LINE RELATIONSHIPS — Do related line items move consistently?
+   (e.g., Revenue up but AR flat could mean better collections or cash sales shift)
+   Use the relatedLineChanges data to make these connections.
+3. ANOMALY FLAGS — What doesn't make sense? What's inconsistent?
+   (e.g., COGS up 30% but Revenue only up 10% means margin compression — investigate)
+4. FOLLOW-UP — What specific action should the controller take next?
+   (e.g., "Pull the AR aging for Account 1100 to check if the increase
+   represents collectible receivables")
+
+TONE: Direct, analytical, like a senior colleague reviewing the workpaper.
+Not robotic. Not verbose. No filler. Use account names, not just codes.
+
+FORMAT: 2-4 focused paragraphs. No bullet lists unless listing specific accounts.
+End with ONE specific follow-up action, not a generic "review further."`;
 
 /* ── Helpers ──────────────────────────────────────────────────── */
 
@@ -51,47 +63,109 @@ function buildUserMessage(
   drilldown?: AccountDrilldownResult,
 ): string {
   const parts: string[] = [
-    `Controller's question: "${question}"`,
+    `Controller asks: "${question}"`,
     '',
-    '--- STRUCTURED INVESTIGATION DATA (source of truth for all numbers) ---',
+    '=== VARIANCE SUMMARY (all numbers pre-computed, use as-is) ===',
+    `Line: ${investigation.fsLineLabel}`,
+    `Current: ${investigation.currentTotal} | Prior: ${investigation.priorTotal}`,
+    `Change: ${investigation.changeAmount} (${investigation.changePercent}%)`,
+    `Period: ${investigation.metadata.periodLabel}`,
     '',
-    JSON.stringify(investigation, null, 2),
+    '=== CONTRIBUTING ACCOUNTS (sorted by impact) ===',
   ];
-  if (drilldown) {
-    parts.push('', '--- ACCOUNT DRILLDOWN DATA ---', '', JSON.stringify(drilldown, null, 2));
+
+  for (const a of investigation.contributingAccounts) {
+    parts.push(
+      `${a.accountName} (${a.accountCode}): ${a.direction} ${a.changeAmount} ` +
+      `(${a.changePercent}%), ${a.percentOfTotalChange}% of total change. ` +
+      `${a.isRecurring ? 'Recurring' : 'Non-recurring'}. ` +
+      `${a.transactionCount ?? 0} transactions. ` +
+      `Memos: ${a.topMemos.join('; ') || 'none'}`
+    );
   }
-  return parts.join('\n');
-}
 
-/** Generate a safe template-based fallback when AI provenance fails. */
-function buildTemplateFallback(investigation: InvestigationResult): string {
-  const { fsLineLabel, currentTotal, priorTotal, changeAmount, changePercent, contributingAccounts } = investigation;
-  const direction = parseFloat(changeAmount) >= 0 ? 'increased' : 'decreased';
-  const lines: string[] = [
-    `${fsLineLabel} ${direction} by $${formatNumber(changeAmount)} (${changePercent}%), ` +
-    `from $${formatNumber(priorTotal)} to $${formatNumber(currentTotal)}.`,
-  ];
+  // Analytical signals
+  const signals = investigation.analyticalSignals;
+  if (signals) {
+    parts.push('', '=== ANALYTICAL SIGNALS (pre-computed, use for cross-line analysis) ===');
 
-  const top = contributingAccounts.slice(0, 5);
-  if (top.length > 0) {
-    lines.push('');
-    lines.push('Top contributing accounts:');
-    for (const a of top) {
-      const dir = parseFloat(a.changeAmount) >= 0 ? 'increase' : 'decrease';
-      lines.push(
-        `- ${a.accountName} (${a.accountCode}): $${formatNumber(a.changeAmount)} ${dir} ` +
-        `(${a.percentOfTotalChange}% of total change)`,
-      );
+    if (signals.relatedLineChanges.length > 0) {
+      parts.push('Related line items:');
+      for (const r of signals.relatedLineChanges) {
+        parts.push(`  ${r.fsLineLabel}: change ${r.changeAmount} (${r.changePercent}%)`);
+      }
+    }
+
+    if (signals.concentrationWarning) {
+      parts.push(`Concentration: ${signals.concentrationWarning}`);
+    }
+
+    parts.push(`Recurring change total: ${signals.recurringChangeAmount}`);
+    parts.push(`Non-recurring change total: ${signals.nonRecurringChangeAmount}`);
+
+    if (signals.newAccountCount > 0) parts.push(`New accounts in period: ${signals.newAccountCount}`);
+    if (signals.eliminatedAccountCount > 0) parts.push(`Accounts eliminated: ${signals.eliminatedAccountCount}`);
+
+    parts.push(
+      `Directional consistency: ${signals.accountsMovingWithTotal} accounts moved with total, ` +
+      `${signals.accountsMovingAgainstTotal} moved against`
+    );
+
+    if (signals.topKeywords.length > 0) {
+      parts.push(`Common memo keywords: ${signals.topKeywords.join(', ')}`);
     }
   }
 
-  const newAccounts = contributingAccounts.filter((a) => a.direction === 'new');
-  if (newAccounts.length > 0) {
-    lines.push('');
-    lines.push(`${newAccounts.length} new account(s) appeared in the current period.`);
+  if (drilldown) {
+    parts.push('', '=== ACCOUNT DRILLDOWN (individual GL entries) ===', JSON.stringify(drilldown, null, 2));
   }
 
-  return lines.join('\n');
+  return parts.join('\n');
+}
+
+/** Generate an analytical template-based fallback when AI is unavailable or provenance fails. */
+function buildTemplateFallback(investigation: InvestigationResult): string {
+  const { fsLineLabel, changeAmount, changePercent, contributingAccounts, analyticalSignals } = investigation;
+  const direction = parseFloat(changeAmount) >= 0 ? 'increased' : 'decreased';
+  const parts: string[] = [];
+
+  // Lead with the change
+  parts.push(`${fsLineLabel} ${direction} ${changePercent}% period-over-period.`);
+
+  // Top driver
+  const top = contributingAccounts[0];
+  if (top) {
+    parts.push(
+      `The primary driver was ${top.accountName} (${top.direction} ${top.percentOfTotalChange}% of total change, ` +
+      `${top.isRecurring ? 'recurring' : 'non-recurring'}).`
+    );
+  }
+
+  // Cross-line insight from analytical signals
+  if (analyticalSignals?.relatedLineChanges?.length) {
+    const related = analyticalSignals.relatedLineChanges[0];
+    const relDir = parseFloat(related.changeAmount) >= 0 ? 'increased' : 'decreased';
+    parts.push(`Related line ${related.fsLineLabel} ${relDir} ${related.changePercent}%.`);
+  }
+
+  // Concentration
+  if (analyticalSignals?.concentrationWarning) {
+    parts.push(analyticalSignals.concentrationWarning + '.');
+  }
+
+  // Counter-directional accounts
+  if (analyticalSignals && analyticalSignals.accountsMovingAgainstTotal > 0) {
+    parts.push(
+      `${analyticalSignals.accountsMovingAgainstTotal} account(s) moved against the overall direction — review for offsetting entries.`
+    );
+  }
+
+  // Suggested action
+  if (top?.topMemos?.length) {
+    parts.push(`Review GL entries for ${top.accountName} — recent memos include: "${top.topMemos[0]}".`);
+  }
+
+  return parts.join(' ');
 }
 
 function formatNumber(value: string): string {
@@ -112,8 +186,8 @@ async function callAIForText(
 ): Promise<{ ok: boolean; rawText?: string; error?: string; callLogId?: string }> {
   enterAdvisoryContext();
   try {
-    const model = process.env.AI_MODEL ?? AI_MODEL;
-    const timeoutMs = parseInt(process.env.AI_TIMEOUT_MS ?? '', 10) || AI_TIMEOUT_MS;
+    const model = getAIModel();
+    const timeoutMs = getAILongTimeoutMs();
 
     const result = await callClaude({
       model,
@@ -123,21 +197,27 @@ async function callAIForText(
       pillar: PILLAR,
     });
 
-    const { id: callLogId } = await insertCallLog(pool, {
-      tenantId,
-      pillar: PILLAR,
-      promptVersion: PROMPT_VERSION,
-      model,
-      requestJson,
-      responseRaw: result.rawText ?? null,
-      responseJson: null,
-      ok: result.ok,
-      error: result.error ?? null,
-      latencyMs: result.latencyMs ?? null,
-      inputTokens: result.inputTokens ?? null,
-      outputTokens: result.outputTokens ?? null,
-      estimatedCostUsd: result.estimatedCostUsd ?? null,
-    });
+    let callLogId: string | undefined;
+    try {
+      const logResult = await insertCallLog(pool, {
+        tenantId,
+        pillar: PILLAR,
+        promptVersion: PROMPT_VERSION,
+        model,
+        requestJson,
+        responseRaw: result.rawText ?? null,
+        responseJson: null,
+        ok: result.ok,
+        error: result.error ?? null,
+        latencyMs: result.latencyMs ?? null,
+        inputTokens: result.inputTokens ?? null,
+        outputTokens: result.outputTokens ?? null,
+        estimatedCostUsd: result.estimatedCostUsd ?? null,
+      });
+      callLogId = logResult.id;
+    } catch (logErr) {
+      console.warn('[variance-chat] Failed to insert call log (non-fatal):', (logErr as Error).message);
+    }
 
     return {
       ok: result.ok,
@@ -202,7 +282,7 @@ export async function generateVarianceExplanation(
       return {
         answer: firstResult.rawText,
         numbersUsed: provenance.numbersFound,
-        modelVersion: process.env.AI_MODEL ?? AI_MODEL,
+        modelVersion: getAIModel(),
         provenanceValid: true,
       };
     }
@@ -231,7 +311,7 @@ export async function generateVarianceExplanation(
         return {
           answer: retryResult.rawText,
           numbersUsed: retryProvenance.numbersFound,
-          modelVersion: process.env.AI_MODEL ?? AI_MODEL,
+          modelVersion: getAIModel(),
           provenanceValid: true,
         };
       }

@@ -9,6 +9,9 @@ import { getTenantId } from '../lib/tenant_context.js';
 import { getTenantPool } from '../db/index.js';
 import { send500 } from '../lib/errorHandler.js';
 import { signState, verifyAndParseState } from '../services/oauth_service.js';
+import { getCloseRoleFromReq } from '../lib/closeRole.js';
+import { canPerform } from '../services/segregation_service.js';
+import type { AuthRequest } from '../auth/middleware.js';
 import type { AccountingProvider } from '../types/accounting_integration.js';
 
 const router = Router();
@@ -27,6 +30,11 @@ router.get('/google/start', (req: Request, res: Response) => {
   const tenantId = getTenantId(req);
   if (!tenantId) {
     res.status(403).json({ error: 'Tenant context required', message: 'Authenticate with a valid token to start OAuth.' });
+    return;
+  }
+  const actorRole = getCloseRoleFromReq(req as AuthRequest);
+  if (!canPerform(actorRole, 'close_checklist_complete')) {
+    res.status(403).json({ error: 'Insufficient role: connecting integrations requires reviewer or above' });
     return;
   }
   if (!GOOGLE_CLIENT_ID || !GOOGLE_REDIRECT_URI) {
@@ -118,8 +126,12 @@ router.get('/oauth/start/:provider', async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
     if (!tenantId) { res.status(403).json({ error: 'Tenant context required' }); return; }
+    const actorRole = getCloseRoleFromReq(req as AuthRequest);
+    if (!canPerform(actorRole, 'close_checklist_complete')) {
+      res.status(403).json({ error: 'Insufficient role: connecting integrations requires reviewer or above' }); return;
+    }
     const provider = req.params.provider as AccountingProvider;
-    if (!['quickbooks', 'xero', 'netsuite'].includes(provider)) {
+    if (!['quickbooks', 'xero', 'netsuite', 'sage_intacct'].includes(provider)) {
       res.status(400).json({ error: `Unsupported provider: ${provider}` }); return;
     }
     const { getAuthorizationUrl } = await import('../services/oauth_service.js');
@@ -134,7 +146,7 @@ router.get('/oauth/start/:provider', async (req: Request, res: Response) => {
 router.get('/oauth/callback/:provider', async (req: Request, res: Response) => {
   try {
     const provider = req.params.provider as AccountingProvider;
-    if (!['quickbooks', 'xero', 'netsuite'].includes(provider)) {
+    if (!['quickbooks', 'xero', 'netsuite', 'sage_intacct'].includes(provider)) {
       res.status(400).json({ error: `Unsupported provider: ${provider}` }); return;
     }
     const code = req.query.code as string | undefined;
@@ -162,6 +174,10 @@ router.post('/oauth/revoke/:provider', async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
     if (!tenantId) { res.status(403).json({ error: 'Tenant context required' }); return; }
+    const actorRole = getCloseRoleFromReq(req as AuthRequest);
+    if (!canPerform(actorRole, 'close_checklist_complete')) {
+      res.status(403).json({ error: 'Insufficient role: revoking integrations requires reviewer or above' }); return;
+    }
     const provider = req.params.provider as AccountingProvider;
     const connectionId = req.body?.connectionId as string;
     if (!connectionId) { res.status(400).json({ error: 'connectionId required' }); return; }

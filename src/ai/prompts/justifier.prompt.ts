@@ -2,7 +2,7 @@
  * Justifier pillar prompt template. Text-only IRAC memo; no amounts computed or changed.
  */
 
-export const JUSTIFIER_PROMPT_VERSION = 'justifier_v1.0.0';
+export const JUSTIFIER_PROMPT_VERSION = 'justifier_v2.0.0';
 
 export interface JustifierContext {
   tenantId: string;
@@ -41,7 +41,7 @@ HARD RULES:
 
 ## EXAMPLE OUTPUT
 Below is a complete example of the expected IRAC JSON output:
-{"prompt_version":"${JUSTIFIER_PROMPT_VERSION}","irac":{"issue":"Whether the $45,000 reclassification from Operating Expense to Prepaid Expense is appropriate under GAAP.","rule":"ASC 720-15 and ASC 340-10 require that advance payments for goods or services not yet received are recognized as prepaid expenses rather than current-period expenses.","analysis":"The facts show a 12-month insurance premium paid in full. Six months of coverage remain as of period end. The reclassification from OpEx to Prepaid is consistent with the matching principle and ASC 340-10-25.","conclusion":"The reclassification is appropriate. The prepaid asset should be amortized monthly over the remaining coverage period."},"memo_markdown":"## Issue\\nWhether the $45,000 reclassification from Operating Expense to Prepaid Expense is appropriate under GAAP.\\n\\n## Rule\\nASC 720-15 and ASC 340-10 require that advance payments for goods or services not yet received are recognized as prepaid expenses rather than current-period expenses.\\n\\n## Analysis\\nThe facts show a 12-month insurance premium paid in full. Six months of coverage remain as of period end. The reclassification from OpEx to Prepaid is consistent with the matching principle and ASC 340-10-25.\\n\\n## Conclusion\\nThe reclassification is appropriate. The prepaid asset should be amortized monthly over the remaining coverage period.","rule_ids":["ASC 720-15","ASC 340-10-25"],"facts_used":["12-month insurance premium paid in full","Six months of coverage remain at period end"]}
+{"prompt_version":"${JUSTIFIER_PROMPT_VERSION}","irac":{"issue":"Whether the reclassification from Operating Expense to Prepaid Expense is appropriate under GAAP.","rule":"ASC 720-15 and ASC 340-10 require that advance payments for goods or services not yet received are recognized as prepaid expenses rather than current-period expenses.","analysis":"The facts show a multi-month insurance premium paid in full. Remaining coverage extends beyond period end. The reclassification from OpEx to Prepaid is consistent with the matching principle and ASC 340-10-25.","conclusion":"The reclassification is appropriate. The prepaid asset should be amortized monthly over the remaining coverage period."},"memo_markdown":"## Issue\\nWhether the reclassification from Operating Expense to Prepaid Expense is appropriate under GAAP.\\n\\n## Rule\\nASC 720-15 and ASC 340-10 require that advance payments for goods or services not yet received are recognized as prepaid expenses rather than current-period expenses.\\n\\n## Analysis\\nThe facts show a multi-month insurance premium paid in full. Remaining coverage extends beyond period end. The reclassification from OpEx to Prepaid is consistent with the matching principle and ASC 340-10-25.\\n\\n## Conclusion\\nThe reclassification is appropriate. The prepaid asset should be amortized monthly over the remaining coverage period.","rule_ids":["ASC 720-15","ASC 340-10-25"],"facts_used":["Multi-month insurance premium paid in full","Remaining coverage extends beyond period end"]}
 
 Context: tenant=${context.tenantId}, period=${context.periodLabel}, relatedType=${context.relatedType}, relatedId=${context.relatedId}
 
@@ -55,5 +55,16 @@ Respond with the single JSON object only.`;
 }
 
 export function buildJustifierSystemPrompt(): string {
-  return `You are an expert CPA. Your only task is to write a brief IRAC memo (Issue, Rule, Analysis, Conclusion) for the provided facts and standards. Do not invent facts or change any numbers. Output strictly valid JSON matching the required schema.`;
+  return `You are an expert CPA writing an IRAC memo for close-support documentation.
+
+Grounding policy:
+- Use only provided facts and standards snippets.
+- Do not invent facts, citations, or numbers.
+- Do not compute or alter amounts.
+- You are advisory-only: do not imply posting, approval, or mutation already occurred.
+
+Output policy:
+- Return valid JSON only.
+- Follow the exact schema provided by the caller.
+- If facts are insufficient, state that in analysis and provide a conservative conclusion.`;
 }

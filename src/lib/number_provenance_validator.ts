@@ -118,6 +118,21 @@ function buildLookupSet(
     }
   }
 
+  // Analytical signals
+  if (investigation.analyticalSignals) {
+    const sig = investigation.analyticalSignals;
+    add(sig.recurringChangeAmount);
+    add(sig.nonRecurringChangeAmount);
+    add(sig.newAccountCount);
+    add(sig.eliminatedAccountCount);
+    add(sig.accountsMovingWithTotal);
+    add(sig.accountsMovingAgainstTotal);
+    for (const r of sig.relatedLineChanges) {
+      add(r.changeAmount);
+      add(r.changePercent);
+    }
+  }
+
   // Pre-compute common sums: top N contributing accounts combined
   const accounts = investigation.contributingAccounts;
   for (let n = 2; n <= Math.min(accounts.length, 5); n++) {
@@ -214,4 +229,56 @@ export function validateNumberProvenance(
     numbersUnverified,
     totalNumbersInResponse: numbersFound.length + numbersUnverified.length,
   };
+}
+
+/* ── Attribution validator ───────────────────────────────────────── */
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractContextAroundMatch(text: string, needle: string, windowChars: number): string {
+  const idx = text.toLowerCase().indexOf(needle.toLowerCase());
+  if (idx === -1) return '';
+  const start = Math.max(0, idx - windowChars);
+  const end = Math.min(text.length, idx + needle.length + windowChars);
+  return text.slice(start, end);
+}
+
+/**
+ * Validate that when AI mentions an account name with a percentage, the percentage
+ * matches the actual changePercent or percentOfTotalChange for that account.
+ * Catches misattribution (right numbers, wrong account).
+ */
+export function validateAttribution(
+  response: string,
+  investigation: InvestigationResult,
+): { valid: boolean; issues: string[] } {
+  const issues: string[] = [];
+
+  for (const account of investigation.contributingAccounts) {
+    const namePattern = new RegExp(escapeRegex(account.accountName), 'i');
+    if (!namePattern.test(response)) continue;
+
+    // Extract percentages near the account name mention
+    const context = extractContextAroundMatch(response, account.accountName, 120);
+    const pctMatches = context.match(/[\d.]+%/g);
+    if (!pctMatches) continue;
+
+    for (const pctStr of pctMatches) {
+      const pctVal = parseFloat(pctStr);
+      if (isNaN(pctVal)) continue;
+      const actualPct = Math.abs(parseFloat(account.changePercent));
+      const actualShare = Math.abs(parseFloat(account.percentOfTotalChange));
+      // Allow if it matches either the change% or the share% (within 0.5% tolerance)
+      if (Math.abs(pctVal - actualPct) > 0.5 && Math.abs(pctVal - actualShare) > 0.5) {
+        issues.push(
+          `${account.accountName}: AI mentioned ${pctStr} but actual change is ${account.changePercent}% ` +
+          `and share of total is ${account.percentOfTotalChange}%`
+        );
+      }
+    }
+  }
+
+  return { valid: issues.length === 0, issues };
 }

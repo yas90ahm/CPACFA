@@ -1,5 +1,5 @@
 /**
- * Accounting software integration: QuickBooks, Xero, NetSuite.
+ * Accounting software integration: QuickBooks, Xero, NetSuite, Sage Intacct.
  * Adapter interface: sync TB, push JEs, pull transactions.
  * Uses tenant pool when DATABASE_URL is set and pool is provided; in production no in-memory fallback.
  */
@@ -48,7 +48,7 @@ export interface IAccountingAdapter {
 
 /** Mock TB entries for demo sync */
 function mockTrialBalanceEntries(asOfDate: string, provider: AccountingProvider): TrialBalanceEntry[] {
-  const prefix = provider === 'quickbooks' ? 'QB' : provider === 'xero' ? 'X' : 'NS';
+  const prefix = provider === 'quickbooks' ? 'QB' : provider === 'xero' ? 'X' : provider === 'sage_intacct' ? 'SI' : 'NS';
   return [
     { accountCode: `${prefix}-1000`, accountName: 'Cash', debit: 50000, credit: 0 },
     { accountCode: `${prefix}-1200`, accountName: 'Accounts Receivable', debit: 25000, credit: 0 },
@@ -91,6 +91,7 @@ const mockAdapters: Record<AccountingProvider, IAccountingAdapter> = {
   quickbooks: new MockAccountingAdapter('quickbooks'),
   xero: new MockAccountingAdapter('xero'),
   netsuite: new MockAccountingAdapter('netsuite'),
+  sage_intacct: new MockAccountingAdapter('sage_intacct' as AccountingProvider),
 };
 
 /** Real adapter instances — lazy-initialized per pool+tenant */
@@ -124,6 +125,12 @@ function getAdapter(provider: AccountingProvider, pool?: Pool, tenantId?: string
       if (provider === 'netsuite') {
         const { NetSuiteAdapter } = require('../adapters/netsuite_adapter.js');
         const adapter = new NetSuiteAdapter(pool, tenantId);
+        realAdapterCache.set(cacheKey, adapter);
+        return adapter;
+      }
+      if (provider === 'sage_intacct') {
+        const { SageIntacctAdapter } = require('../adapters/sage_intacct_adapter.js');
+        const adapter = new SageIntacctAdapter(pool, tenantId);
         realAdapterCache.set(cacheKey, adapter);
         return adapter;
       }

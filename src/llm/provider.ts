@@ -5,6 +5,7 @@
 
 import { aiMock } from '../lib/runtime_mode.js';
 import { enterAdvisoryContext, exitAdvisoryContext } from '../lib/ai_boundary.js';
+import { getAIModel } from '../ai/ai_config.js';
 
 export type LLMProvider = 'anthropic' | 'openai' | 'mistral';
 
@@ -78,7 +79,7 @@ export async function generateTextWithUsage(input: TextGenerationInput): Promise
       const { default: Anthropic } = await import('@anthropic-ai/sdk');
       const client = new Anthropic({ apiKey });
       const response = await client.messages.create({
-        model: input.model ?? 'claude-sonnet-4-5-20250929',
+        model: input.model ?? getAIModel(),
         max_tokens: maxTokens,
         system: system || undefined,
         messages: [{ role: 'user', content: prompt }],
@@ -167,7 +168,7 @@ export async function generateText(input: TextGenerationInput): Promise<string> 
     const { default: Anthropic } = await import('@anthropic-ai/sdk');
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
-      model: input.model ?? 'claude-sonnet-4-5-20250929',
+      model: input.model ?? getAIModel(),
       max_tokens: maxTokens,
       system: system || undefined,
       messages: [{ role: 'user', content: prompt }],
