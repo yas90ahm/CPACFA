@@ -35,16 +35,18 @@ describe('OAuth Service', () => {
       expect(decrypt(e2)).toBe(token);
     });
 
-    it('encrypted format is iv:authTag:ciphertext', () => {
+    it('encrypted format is salt:iv:authTag:ciphertext', () => {
       const encrypted = encrypt('test');
       const parts = encrypted.split(':');
-      expect(parts).toHaveLength(3);
-      // IV is 16 bytes = 32 hex chars
+      expect(parts).toHaveLength(4);
+      // Salt is 16 bytes = 32 hex chars
       expect(parts[0]).toHaveLength(32);
-      // Auth tag is 16 bytes = 32 hex chars
+      // IV is 16 bytes = 32 hex chars
       expect(parts[1]).toHaveLength(32);
+      // Auth tag is 16 bytes = 32 hex chars
+      expect(parts[2]).toHaveLength(32);
       // Ciphertext should be non-empty
-      expect(parts[2].length).toBeGreaterThan(0);
+      expect(parts[3].length).toBeGreaterThan(0);
     });
 
     it('throws on tampered ciphertext', () => {
@@ -72,8 +74,9 @@ describe('OAuth Service', () => {
       expect(url).toContain('accounting.transactions');
       expect(url).toContain('accounting.reports.read');
 
-      // State should be base64url-encoded JSON
-      const decoded = JSON.parse(Buffer.from(state, 'base64url').toString());
+      // State is payload.signature (HMAC-signed base64url)
+      const payload = state.substring(0, state.lastIndexOf('.'));
+      const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString());
       expect(decoded.tenantId).toBe('tenant-1');
       expect(decoded.connectionId).toBe('conn-1');
       expect(decoded.provider).toBe('xero');
@@ -88,7 +91,8 @@ describe('OAuth Service', () => {
       expect(url).toContain('restlets');
       expect(url).toContain('rest_webservices');
 
-      const decoded = JSON.parse(Buffer.from(state, 'base64url').toString());
+      const payload = state.substring(0, state.lastIndexOf('.'));
+      const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString());
       expect(decoded.provider).toBe('netsuite');
     });
 
@@ -103,8 +107,10 @@ describe('OAuth Service', () => {
       const { state: s1 } = getAuthorizationUrl('xero', 'tenant-1', 'conn-1');
       const { state: s2 } = getAuthorizationUrl('xero', 'tenant-1', 'conn-1');
 
-      const d1 = JSON.parse(Buffer.from(s1, 'base64url').toString());
-      const d2 = JSON.parse(Buffer.from(s2, 'base64url').toString());
+      const p1 = s1.substring(0, s1.lastIndexOf('.'));
+      const p2 = s2.substring(0, s2.lastIndexOf('.'));
+      const d1 = JSON.parse(Buffer.from(p1, 'base64url').toString());
+      const d2 = JSON.parse(Buffer.from(p2, 'base64url').toString());
       expect(d1.nonce).not.toBe(d2.nonce);
     });
   });
@@ -161,9 +167,9 @@ describe('OAuth Service', () => {
       const encryptedAccess = values[4] as string;
       const encryptedRefresh = values[5] as string;
 
-      // Should be encrypted (iv:authTag:ciphertext format)
-      expect(encryptedAccess.split(':')).toHaveLength(3);
-      expect(encryptedRefresh.split(':')).toHaveLength(3);
+      // Should be encrypted (salt:iv:authTag:ciphertext format)
+      expect(encryptedAccess.split(':')).toHaveLength(4);
+      expect(encryptedRefresh.split(':')).toHaveLength(4);
 
       // Should decrypt to the fixture token values
       expect(decrypt(encryptedAccess)).toBe(oauthTokenFixture.access_token);

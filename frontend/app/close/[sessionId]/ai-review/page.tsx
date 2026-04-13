@@ -132,47 +132,20 @@ export default function AIReviewPage() {
       const ls = learningStats.status === 'fulfilled' ? learningStats.value : null;
 
       return {
-        classifierLayers: ls?.classifierLayers ?? [
-          { name: 'Curated Patterns', input: 148, matched: 89, avgConfidence: 0.99 },
-          { name: 'XBRL Taxonomy Match', input: 59, matched: 31, avgConfidence: 0.94 },
-          { name: 'Claude Classification', input: 28, matched: 22, avgConfidence: 0.87 },
-          { name: 'RAG Batch Lookup', input: 6, matched: 4, avgConfidence: 0.82 },
-          { name: 'Fallback Heuristic', input: 2, matched: 1, avgConfidence: 0.65 },
-          { name: 'Manual Assignment', input: 1, matched: 1, avgConfidence: 1.0 },
-        ],
-        moduleProposals: ls?.moduleProposals ?? [
-          { moduleName: 'Payroll Accrual', status: 'approved', proposalCount: 3, approvedCount: 3 },
-          { moduleName: 'Debt Accrual', status: 'approved', proposalCount: 2, approvedCount: 2 },
-          { moduleName: 'Deferred Tax', status: 'pending', proposalCount: 4, approvedCount: 1 },
-          { moduleName: 'Prepaid Amortization', status: 'approved', proposalCount: 2, approvedCount: 2 },
-          { moduleName: 'Fixed Asset Depreciation', status: 'approved', proposalCount: 1, approvedCount: 1 },
-          { moduleName: 'Lease Accounting', status: 'approved', proposalCount: 3, approvedCount: 3 },
-          { moduleName: 'Inventory Reserve', status: 'pending', proposalCount: 2, approvedCount: 0 },
-          { moduleName: 'Stock Compensation', status: 'approved', proposalCount: 1, approvedCount: 1 },
-          { moduleName: 'Revenue Recognition', status: 'approved', proposalCount: 2, approvedCount: 2 },
-          { moduleName: 'AR Aging', status: 'approved', proposalCount: 1, approvedCount: 1 },
-          { moduleName: 'AP Aging', status: 'approved', proposalCount: 1, approvedCount: 1 },
-          { moduleName: 'Bank Reconciliation', status: 'approved', proposalCount: 2, approvedCount: 2 },
-          { moduleName: 'Intercompany', status: 'skipped', proposalCount: 0, approvedCount: 0 },
-        ],
-        shadowChecks: ls?.shadowChecks ?? [
-          { jeId: 'JE-001', entryNumber: 'AJE-2026-001', description: 'Payroll accrual March 2026', result: 'PASS' as const, detail: 'Debits equal credits. Accounts valid.' },
-          { jeId: 'JE-002', entryNumber: 'AJE-2026-002', description: 'Depreciation expense March 2026', result: 'PASS' as const, detail: 'Amount within 2% of prior period.' },
-          { jeId: 'JE-003', entryNumber: 'AJE-2026-003', description: 'Lease liability adjustment', result: 'WARN' as const, detail: 'Amount 15% higher than prior period. Manual review recommended.' },
-          { jeId: 'JE-004', entryNumber: 'AJE-2026-004', description: 'Stock comp expense Q1 trueup', result: 'PASS' as const, detail: 'Vesting schedule validated.' },
-          { jeId: 'JE-005', entryNumber: 'AJE-2026-005', description: 'Inventory reserve adjustment', result: 'BLOCK' as const, detail: 'Missing memo. Required for material JE.' },
-        ],
+        classifierLayers: ls?.classifierLayers ?? [],
+        moduleProposals: ls?.moduleProposals ?? [],
+        shadowChecks: ls?.shadowChecks ?? [],
         justifierStats: ls?.justifierStats ?? {
-          aiDrafted: 8,
-          humanWritten: 3,
-          pendingAttest: 2,
-          attested: 9,
+          aiDrafted: 0,
+          humanWritten: 0,
+          pendingAttest: 0,
+          attested: 0,
         },
         callLog: ls?.callLog ?? {
-          totalCalls: 47,
-          totalCost: '$0.71',
-          model: 'claude-sonnet-4-6',
-          avgLatency: '1.2s',
+          totalCalls: 0,
+          totalCost: '$0.00',
+          model: '--',
+          avgLatency: '--',
           errors: 0,
         },
       };
@@ -280,6 +253,9 @@ export default function AIReviewPage() {
               </tr>
             </thead>
             <tbody>
+              {data.classifierLayers.length === 0 && (
+                <tr><td colSpan={4} className="px-4 py-8 text-center text-[#8B7A5E] text-sm">No classifier data available for this session yet.</td></tr>
+              )}
               {data.classifierLayers.map((layer, i) => (
                 <tr
                   key={layer.name}
@@ -322,6 +298,9 @@ export default function AIReviewPage() {
           </h2>
         </div>
         <div className="grid grid-cols-3 gap-3">
+          {data.moduleProposals.length === 0 && (
+            <div className="col-span-3 bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-8 text-center text-[#8B7A5E] text-sm">No module proposals available for this session yet.</div>
+          )}
           {data.moduleProposals.map((mod) => (
             <div
               key={mod.moduleName}
@@ -358,6 +337,9 @@ export default function AIReviewPage() {
               </tr>
             </thead>
             <tbody>
+              {data.shadowChecks.length === 0 && (
+                <tr><td colSpan={4} className="px-4 py-8 text-center text-[#8B7A5E] text-sm">No shadow auditor checks for this session yet.</td></tr>
+              )}
               {data.shadowChecks.map((check) => (
                 <tr
                   key={check.jeId}

@@ -168,17 +168,7 @@ export default function StatementsPage() {
   );
 
   const lines = linesData?.lines ?? [];
-  const tieChecks = linesData?.tieChecks ?? [
-    { label: 'Assets = Liabilities + Equity', passing: true },
-    { label: 'Beginning Equity + Net Income - Dividends = Ending Equity', passing: true },
-    { label: 'Net Income ties to Income Statement', passing: true },
-    { label: 'Cash from Operations + Investing + Financing = Net Change in Cash', passing: true },
-    { label: 'Ending Cash ties to Balance Sheet', passing: true },
-    { label: 'Retained Earnings ties to Equity Statement', passing: true },
-    { label: 'Depreciation ties to Fixed Asset schedule', passing: true },
-    { label: 'Tax Provision ties to Deferred Tax schedule', passing: true },
-    { label: 'Stock Comp ties to Equity Statement', passing: true },
-  ];
+  const tieChecks = linesData?.tieChecks ?? [];
 
   const passingCount = tieChecks.filter((c) => c.passing).length;
 
@@ -389,30 +379,32 @@ export default function StatementsPage() {
       </div>
 
       {/* Cross-Statement Tie Checks */}
-      <div className="px-8 mb-8">
-        <h2 className="text-sm font-medium text-[#8B7A5E] uppercase tracking-wide mb-3">
-          Cross-Statement Tie Checks
-        </h2>
-        <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <CheckCircle2 size={16} className="text-[#2D6A4F]" />
-            <span className="text-sm font-medium text-[#2D6A4F]">
-              {passingCount} of {tieChecks.length} Passing
-            </span>
-          </div>
-          <div className="space-y-2">
-            {tieChecks.map((check, i) => (
-              <div key={i} className="flex items-center gap-3">
-                <CheckCircle2
-                  size={14}
-                  className={check.passing ? 'text-[#2D6A4F]' : 'text-[#C44B2B]'}
-                />
-                <span className="text-sm text-[#2C2416]">{check.label}</span>
-              </div>
-            ))}
+      {tieChecks.length > 0 && (
+        <div className="px-8 mb-8">
+          <h2 className="text-sm font-medium text-[#8B7A5E] uppercase tracking-wide mb-3">
+            Cross-Statement Tie Checks
+          </h2>
+          <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <CheckCircle2 size={16} className="text-[#2D6A4F]" />
+              <span className="text-sm font-medium text-[#2D6A4F]">
+                {passingCount} of {tieChecks.length} Passing
+              </span>
+            </div>
+            <div className="space-y-2">
+              {tieChecks.map((check, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <CheckCircle2
+                    size={14}
+                    className={check.passing ? 'text-[#2D6A4F]' : 'text-[#C44B2B]'}
+                  />
+                  <span className="text-sm text-[#2C2416]">{check.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Export Buttons */}
       <div className="px-8 pb-8 flex items-center gap-4">
