@@ -234,9 +234,7 @@ While the AI boundary prevents AI from writing to financial tables, a prompt inj
 
 The file `C:\Users\yasir\CPACFA\.env` contains:
 
-```
-DATABASE_URL=postgresql://postgres:trMuY5TLhdI6hbeb@db.mfognnfycoqoyzwykjab.supabase.co:5432/postgres
-ANTHROPIC_API_KEY=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
+
 ```
 
 While `.env` is listed in `.gitignore`, the file is present on disk and accessible to anyone with access to the development machine or any backup of this directory. If this `.env` file was **ever** committed to git history (even if later removed), the credentials are permanently exposed.
