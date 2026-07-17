@@ -46,9 +46,9 @@ Supporting domains include database migrations, deterministic financial logic, e
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Latest GitHub Actions run | Fail | Run `24010894220`, 5 April 2026 |
+| Latest GitHub Actions run | Fail | Audit-branch run `29603971758`, 17 July 2026 |
 | Failure stage | TypeScript type check | Dependency installation passed; build, tests and Docker jobs were skipped |
-| Exact compiler errors | Unavailable | GitHub has expired the detailed log; the retained job metadata identifies only the failed step |
+| Exact compiler errors | Eight errors | Seven imports point to missing modules; `src/routes/accounting_integration.ts:335` also has an implicit `any` parameter |
 | Integration-test enforcement | Broken | CI runs `npm run test:integration || echo "Integration tests completed"`, so failures do not fail the job |
 | Root test scope | Partial | Root Jest configuration matches adapter tests rather than the full suite |
 | Frontend validation | Missing from root CI | Root workflow does not install and build the separate frontend package |
@@ -56,6 +56,18 @@ Supporting domains include database migrations, deterministic financial logic, e
 | Local rerun | Not performed | Full installation would require multiple services and databases; first fix secret handling and define an authoritative validation command |
 
 Jest versions also drift: the root uses Jest 30 with `ts-jest` 29, while the separate tests package uses Jest 29. Until ownership and versions are consolidated, a single “all tests pass” claim is not credible.
+
+The missing imports reported by the current clean runner are:
+
+- `src/ai/prompts/resolution_agent.prompt.js`
+- `src/services/erp_sync_staging_service.js`
+- `src/services/erp_sync_promote_service.js`
+- `src/db/repositories/sync_staging_delta_repository.js`
+- `src/db/repositories/sync_snapshot_repository.js`
+- `src/ai/prompts/export_narrative.prompt.js`
+- `src/ai/prompts/justification_irac.prompt.js`
+
+These are source references, not missing packages. They must be restored, renamed or removed before the backend can typecheck.
 
 ## 5. Documentation problems
 
