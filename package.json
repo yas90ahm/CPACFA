@@ -1,7 +1,7 @@
 {
   "name": "sabit",
   "version": "0.1.0",
-  "description": "Sabit — Enterprise-grade financial close automation engine",
+  "description": "Financial close software with deterministic accounting checks and reviewable AI assistance.",
   "private": true,
   "scripts": {
     "build": "tsc",
@@ -19,8 +19,8 @@
     "demo:report": "tsx scripts/generate_demo_report.ts",
     "keygen": "tsx src/crypto/keygen.ts",
     "seed:demo": "tsx src/scripts/seed_demo.ts",
-    "test": "node --experimental-vm-modules node_modules/.bin/jest",
-    "test:adapters": "node --experimental-vm-modules node_modules/.bin/jest --testPathPattern=tests/adapters",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test:adapters": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern=tests/adapters",
     "test:integration": "tsx scripts/test_gl_certification.ts",
     "test:integration:dev": "cross-env BASE_URL=http://localhost:3000 tsx scripts/test_gl_certification.ts",
     "docker:build": "docker build -t sovereign-cpa-engine .",
@@ -31,7 +31,7 @@
     "worker": "tsx src/worker.ts"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

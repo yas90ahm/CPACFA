@@ -1,6 +1,6 @@
-# Sovereign CPA Engine — Multi-stage production build
+# Sabit multi-stage production build
 # Stage 1: Build TypeScript
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -15,7 +15,7 @@ RUN npm run build
 RUN npm prune --production
 
 # Stage 2: Production runtime
-FROM node:20-alpine AS production
+FROM node:22-alpine AS production
 
 WORKDIR /app
 

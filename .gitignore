@@ -6,6 +6,7 @@
 
 # Dependencies
 node_modules/
+.npm-cache/
 
 # Build / output
 dist/
@@ -44,6 +45,8 @@ npm-debug.log*
 # Generated investigation / audit reports (keep locally, do not commit)
 *_ENDPOINT_REPORT.md
 *_REPORT.md
+!CLEANUP_REPORT.md
 STATE_OF_THE_APP.md
 tmp_login.json
 data/evidence/
+data/evidence-test/

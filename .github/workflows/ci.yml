@@ -98,13 +98,38 @@ jobs:
           DATABASE_URL: postgresql://sovereign:sovereign_test@localhost:5432/sovereign_test
         run: npm run db:migrate
 
+      - name: Seed integration data
+        env:
+          DATABASE_URL: postgresql://sovereign:sovereign_test@localhost:5432/sovereign_test
+          JWT_SECRET: test-secret-do-not-use-in-prod
+          NODE_ENV: test
+          MODE: dev
+        run: npm run seed:demo
+
       - name: Integration test
         env:
           DATABASE_URL: postgresql://sovereign:sovereign_test@localhost:5432/sovereign_test
           JWT_SECRET: test-secret-do-not-use-in-prod
           NODE_ENV: test
           MODE: dev
-        run: npm run test:integration || echo "Integration tests completed"
+        run: |
+          node dist/server.js > server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+
+          for attempt in {1..30}; do
+            if curl --fail --silent http://localhost:3000/health > /dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          if ! curl --fail --silent http://localhost:3000/health > /dev/null; then
+            cat server.log
+            exit 1
+          fi
+
+          npm run test:integration
 
   docker:
     runs-on: ubuntu-latest
