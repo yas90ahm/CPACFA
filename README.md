@@ -1,200 +1,207 @@
-# Sovereign CPA Engine
+# Sabit
 
-Backend-only deterministic close and certification engine. Trial balance in → human-in-the-loop for imbalances and overrides → period lock → close session certification → draft or certified export and audit binder. All math is enforced (Truth Gate); certified outputs require session status `certified`, audit-ledger chain verification, and final integrity check (balance + plug detection). A hash-chained audit trail records overrides and material events. AI pillars exist in code as: **Classifier** (suggestions for imbalanced TB, stored in staging payload); **Advisor** (proposals to `tenant_ai_proposals`); **Shadow Auditor** (blocks JE post and resolve-ingest when severity is `block`; findings in `tenant_shadow_audit_findings`); **Justifier** (memo/IRAC for posted JEs in `tenant_justifications`). All AI uses strict JSON outputs, is logged, and does not compute or post amounts—provenance required for adjustments.
+Sabit is my attempt at a financial close system where the math stays boring.
 
----
+The application can use AI to read, classify and explain. It cannot decide the numbers, create an unexplained adjustment or post an entry on its own. Balancing, approvals, period state and certification stay in deterministic code.
 
-## Quick Start — Demo in 5 Minutes
+This repository is a prototype. It includes a large TypeScript backend, a Next.js web app, database migrations and a few Python services. Some parts are well tested. Other parts were built quickly and the repository accumulated far too many reports saying “complete” while disagreeing with one another.
 
-### Option 1: Docker (recommended)
+So the current status is stated here, without the ceremony.
 
-```bash
-git clone https://github.com/yas90ahm/CPACFA.git
-cd CPACFA
-docker-compose -f docker-compose.yml -f docker-compose.demo.yml up --build
-# Open http://localhost:3000
-# Login: demo@cloudmetrics.io / DemoPass2026!
+## Current status
+
+The backend now passes TypeScript checking and builds on a clean dependency install. The root Jest suite passes 44 tests. The frontend also completes a production build after two missing shared files were restored from an existing review branch.
+
+That does not make the prototype production-ready. The database-backed integration suite still needs a live PostgreSQL run, and CI no longer hides an integration failure behind `|| echo`. The frontend remains on an end-of-life Next.js 14 release with known security advisories and needs a planned framework upgrade before deployment.
+
+An unfinished staged ERP sync had routes but no implementation modules or database schema. Those dead routes are removed for now. `/sync-trial-balance` returns `501` for staged mode; direct sync must be requested explicitly with `staged: false`.
+
+The old review packs are under `docs/archive/audits/`. They are kept as history, not presented as current proof.
+
+## What is here
+
+- an Express and PostgreSQL backend for trial balance, close workflow, journal entries, evidence and audit records
+- a Next.js interface for onboarding, close work, review and portfolio views
+- deterministic balance and certification checks using Decimal.js
+- a hash-chained audit ledger and evidence storage
+- AI adapters for suggestions, classification and explanation
+- ERP and MCP connector experiments
+- a Python classification service
+
+This is more than a backend. The earlier README said “backend-only” because it described an older point in the build.
+
+## The boundary around AI
+
+AI output is advisory data. It should be structured, logged and tied to its source.
+
+The accounting path is supposed to keep these rules outside the model:
+
+- debits equal credits
+- assets equal liabilities plus equity
+- adjustments carry an amount source
+- journal entries follow the approval path
+- certified output requires the server-side integrity gates
+
+If a model output and the deterministic ledger disagree, the ledger wins. That is not a product slogan. It is the only arrangement I am comfortable with for financial statements.
+
+## Core workflow
+
+1. Upload a trial balance.
+2. Save a balanced file or send an imbalance to staging.
+3. A person reviews the proposed resolution and its amount source.
+4. Journal entries move through draft, proposal, approval and posting.
+5. Close sessions move through `OPEN`, `IN_PROGRESS`, `UNDER_REVIEW`, `CERTIFIED`, `SUBSEQUENT_EVENTS_REVIEW` and `LOCKED`.
+6. Certified exports and binders run the audit-chain and final-integrity checks.
+
+Period lock and close-session state are related controls, not the same status field. The old README mixed them together.
+
+## Repository map
+
+```text
+src/                    TypeScript API, worker, database and services
+frontend/               Next.js web application
+slm/                    Python classification service
+mcp_server/             Python MCP and webhook work
+connectors/              ERP and MCP connectors
+shared/                 shared configuration and types
+migrations/             PostgreSQL migration history
+tests/                  separate test package and integration suites
+data/                   taxonomy and runtime data paths
+docs/product/           intended workflows and interface documents
+docs/operations/        setup and operating notes
+docs/security/          current security inventory
+docs/archive/audits/    historical reviews and completion reports
 ```
 
-### Option 2: Local Development
+Runtime evidence does not belong in Git. Generated tenant-labelled evidence files were removed; named test fixtures remain under `tests/`.
+
+## Local setup
+
+Use Node 22 or newer. The package and both container builds now use that baseline.
+
+Install the backend:
 
 ```bash
 git clone https://github.com/yas90ahm/CPACFA.git
 cd CPACFA
 npm install
 cp .env.example .env
-# Edit .env: set DATABASE_URL to your Postgres instance
-npm run db:migrate
-npm run keygen          # generates Ed25519 keypair, prints to stdout
-# Copy the keys into .env as CERT_SIGNING_PRIVATE_KEY and CERT_SIGNING_PUBLIC_KEY
-npm run seed:demo       # seeds demo tenant and sample data
-npm run dev             # starts server on port 3000
 ```
 
-### Running Tests
+At minimum, configure:
+
+| Variable | Purpose |
+| --- | --- |
+| `MODE` | `development`, `demo` or `production` |
+| `PORT` | API port; set it explicitly because old code paths disagree on the fallback |
+| `DATABASE_URL` | PostgreSQL connection |
+| `JWT_SECRET` | Session/token signing |
+
+Production certification also needs signing keys. `npm run keygen` prints the values in the format expected by the current certificate code. Do not paste real keys into a document, issue or test result.
+
+Optional model providers use environment variables such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `MISTRAL_API_KEY`. The deterministic path should continue to work without a live model provider where the feature allows it.
+
+Run database setup:
+
+```bash
+npm run db:migrate
+npm run db:verify
+npm run seed:demo
+```
+
+Run the backend:
+
+```bash
+npm run dev
+```
+
+`src/server.ts` currently defaults to port 3000. Set `PORT=3000` explicitly until the startup-validation fallback is reconciled.
+
+## Web app
+
+The frontend has its own package:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The development server uses port 3002. A production `next start` uses port 3000 unless changed.
+
+The current frontend pins Next.js 14.2.3. Next.js 14 is now end of life, so this needs a planned migration to a supported release rather than another small 14.x patch.
+
+## Build and tests
+
+Backend checks:
+
+```bash
+npx tsc --noEmit
+npm run build
+npm test
+```
+
+Typecheck and build now pass. The root Jest suite also passes, though it still reports warnings about `ts-jest` configuration and JSON import attributes.
+
+The main test program also has its own package:
 
 ```bash
 cd tests
-cp .env.example .env    # configure DATABASE_URL
-npm test                # runs all unit + integration tests
-```
-
-### Required Environment Variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| DATABASE_URL | Yes | — | PostgreSQL connection string |
-| JWT_SECRET | Yes | — | Secret for JWT signing |
-| PORT | No | 3000 | Server port |
-| APP_MODE | No | development | development, demo, production |
-| CERT_SIGNING_PRIVATE_KEY | Prod only | auto-generated in dev | Ed25519 private key (hex) |
-| CERT_SIGNING_PUBLIC_KEY | Prod only | auto-generated in dev | Ed25519 public key (hex) |
-| STORAGE_ADAPTER | No | local | Evidence storage: local or s3 |
-| EVIDENCE_S3_BUCKET | If s3 | — | S3 bucket for evidence |
-| EVIDENCE_S3_REGION | If s3 | — | S3 region |
-
----
-
-## Key capabilities
-
-- Ingest trial balance (CSV/XLSX); balanced TB saved to period ledger; imbalanced TB staged for HITL.
-- Forge/staging: imbalanced uploads create staging items; human resolves via adjustment with amount provenance.
-- Protocol Bridge: single mutation path—SaveTrialBalance, ApplyHitlAdjustmentToTrialBalance, CreateDraftJE, ProposeJE, ApproveJE, PostJE, LockPeriod (period lock asserted before mutations).
-- Deterministic math: debits = credits and Assets = Liabilities + Equity enforced; imbalance throws 422.
-- Close workflow: session status draft → … → locked → certified; certify requires no hard blockers and approver role.
-- Certified export and audit binder: require `closeSessionId` + session `certified`, export gate (chain + materiality from DB), final integrity check.
-- Draft export: optional; can allow imbalanced with watermark via env.
-- Audit chain: verifyChain before certified export; overrides and material events appended hash-chained.
-
----
-
-## Core workflow
-
-1. **Ingest** — Upload TB; if imbalanced, staging item created (Classifier/Advisor run, fail-open).
-2. **Forge/HITL** — Review staging; for trial-balance ingest, POST adjustment to resolve-ingest (balance check, Shadow Auditor, then bridge apply).
-3. **Adjust** — Close adjustments and JEs via bridge; JE lifecycle: draft → propose → approve → post (Shadow blocks on severity=block); Justifier runs after post.
-4. **Shadow Audit** — Runs before JE post and before resolve-ingest apply; blocks only when severity=block.
-5. **Lock** — POST period-lock (approver); further TB/JE mutations for that period blocked.
-6. **Certify** — POST close session certify (from locked, no hard blockers, approver).
-7. **Export** — Certified PDF/CSV: gates + final integrity; draft: optional imbalance with watermark.
-8. **Binder** — GET binder (certified-only): requireCertifiedSession + same gates, then build binder.
-
----
-
-## Architecture at a glance
-
-- **Deterministic TypeScript core** — Balance and integrity in `integrity_gate_service`, `financialStatements`; no AI in the math path.
-- **Protocol Bridge** (`src/bridge/protocol_bridge.ts`) — All TB/JE/lock mutations go through bridge; period lock asserted; Zod schemas.
-- **Audit chain + verification** — `audit_ledger_service` / `audit_ledger_repository`; `verifyChain` used by export gate.
-- **Draft vs certified export gating** — Certified: session certified + checkExportGate + finalIntegrityCheck; production ignores bypass flag.
-- **AI layer** — Strict JSON schemas; calls logged; no AI math; adjustment amounts require amountProvenance (ledger_exact | engine_calculation | human_entered).
-
----
-
-## Quickstart (local)
-
-**Environment variables** (infer from code):
-
-- `DATABASE_URL` — Postgres connection (required for DB, migrations, and integration tests).
-- `PORT` — API port (default 3001).
-- `JWT_SECRET` — Required in production.
-- `NODE_ENV` — `production` disables in-memory fallbacks and auth bypass.
-- Optional: `AI_MODEL`, `AI_TIMEOUT_MS`, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `MISTRAL_API_KEY` for AI pillars; `AI_MOCK_CLASSIFIER`, `AI_MOCK_ADVISOR`, `AI_MOCK` for mocks.
-- Optional: `CORS_ORIGIN` / `CORS_ORIGINS`, `REQUIRE_AUTH`, `ALLOW_IMBALANCED_DRAFT_EXPORT`, `CPA_ENABLED`.
-
-**Setup:**
-
-```bash
 npm install
-cp .env.example .env   # edit with DATABASE_URL, etc.
-npm run db:migrate     # run migrations (uses DATABASE_URL)
-npm run db:verify      # verify schema (exits 1 if missing tables/columns)
-npm run build         # compile TypeScript
-npm run dev            # or: npm run start (node dist/server.js)
+npm test
 ```
 
-Reset DB (destructive, use with care):
+Integration tests need PostgreSQL and the expected schema. A test that skips because `DATABASE_URL` is absent is not the same as a passing integration test.
+
+Useful commands from the root:
 
 ```bash
-ALLOW_DB_RESET=true npm run db:reset   # or NODE_ENV=test npm run db:reset
-```
-Without `ALLOW_DB_RESET=true` or `NODE_ENV=test`, `db:reset` refuses to run.
-
-**Tests:** See “Running tests” below. Certification pipeline and other integration tests require `DATABASE_URL`; when missing they skip (CI guard).
-
----
-
-## Running tests
-
-Tests are in the `tests/` directory with their own `package.json`. From repo root:
-
-```bash
-cd tests && npm install && npm test
-```
-
-- **When `DATABASE_URL` is not set:** Integration tests that depend on DB (e.g. certification pipeline) skip; no failure. Suited for CI without a database.
-- **When `DATABASE_URL` is set:** Full integration runs; certification pipeline test: imbalanced TB → staging → resolve-ingest → lock → certify → export gates → binder; DB artifacts and audit chain verified.
-
-Integration-only:
-
-```bash
-cd tests && npm run test:integration
-```
-
-Smoke (no DB required by default):
-
-```bash
-cd tests && npm run test:smoke
-```
-
-Schema verification (DB required):
-
-```bash
+npm run test:adapters
+npm run test:integration
 npm run db:verify
 ```
 
----
+The Jest and `ts-jest` versions are currently out of alignment between the root and `tests/`. Consolidating that setup is part of the next phase.
 
-## Safety & invariants
+## Docker demo
 
-- **Truth Gate** — Rounding tolerance from `shared/config/financial_rules.json` (default 0.01). Debits = credits and Assets = Liabilities + Equity enforced; failure → 422 MathematicalIntegrityError.
-- **Certified-only “official” outputs** — Certified export and binder require session status `certified` and server-side gates; draft export is explicitly draft and can be watermarked when imbalanced.
-- **Hash-chained audit trail** — Overrides and material events appended; chain verified before certified export.
-- **AI cannot compute or post** — All posting and balance math are deterministic; adjustment lines require amountProvenance; AI suggests only (Classifier/Advisor) or blocks (Shadow) or documents (Justifier).
+The repository contains Compose files for a local demo:
 
----
+```bash
+docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build
+```
 
-## API overview (core workflow)
+Treat demo credentials as local fixtures. Do not reuse them anywhere else.
 
-Only key mounted routes; not an exhaustive list.
+The production build excludes `data/evidence/` and `data/evidence-test/`. The container creates an empty writable evidence directory at runtime.
 
-| Base path | Purpose |
-|-----------|--------|
-| `GET /health`, `GET /health/ready` | Health and readiness (ready checks DB). |
-| `POST /api/auth/login`, `POST /api/auth/register` | Auth. |
-| `POST /api/trial-balance/ingest` | Upload TB CSV/XLSX; balanced → save; imbalanced → staging. |
-| `GET /api/hitl/staging`, `POST /api/hitl/resolve`, `POST /api/hitl/resolve-ingest` | Staging list; approve/reject; apply adjustment for imbalanced ingest. |
-| `POST /api/close/journal-entries`, `POST /api/close/journal-entries/:id/propose`, `:id/approve`, `:id/post` | JE lifecycle (via bridge). |
-| `POST /api/close/period-lock` | Lock period (bridge). |
-| `POST /api/close/sessions/:id/certify` | Certify close session. |
-| `POST /api/export/pdf`, `POST /api/export/csv` | Export (draft vs certified by body/query; certified requires session + gates). |
-| `GET /api/audit/binder`, `GET /api/audit/binder/export/pdf`, `.../csv` | Audit binder (certified-only; requireCertifiedSession + gates). |
+## Services outside the Node app
 
-Other mounted prefixes: `/api/justification`, `/api/audit` (reconciliation, todos, GAAP consistency, etc.), `/api/close/*` (sessions, issues, adjustments, checklist, etc.), `/api/coa-mapping`, `/api/onboarding`, `/api/tenants`, `/api/knowledge-base`, `/api/vector-store`, `/api/ingestion`, `/api/memory`, `/api/integrations`, `/api/pipelines`, `/api/data-quality`, `/api/approvals`, `/api/accounting-integration`. Dev-only: `/api-dev` only when `ENABLE_DEV_API=true` and `NODE_ENV !== 'production'` and `DEMO_MODE !== 'true'` (never in DEMO or production).
+The Python services are not packaged consistently yet.
 
----
+- `slm/server.py` is the classification service.
+- `mcp_server/server.py` and `mcp_server/webhook_server.py` are MCP/webhook experiments.
+- `connectors/mcp_erp_server.py` is an ERP connector experiment.
 
-## Repo structure
+Read the service-specific requirements before running them. The older instruction `pip install -e .` from the repository root is wrong because the root is not a Python package.
 
-- `src/` — Backend: `routes/` (API), `services/` (business logic), `db/` (migrate, repositories, schema_verify, verify_schema, reset_and_bootstrap), `bridge/` (protocol_bridge), `ai/` (orchestrator, adapters, prompts, schemas), `auth/`, `lib/`, `middleware/`, `types/`.
-- `migrations/` — SQL migrations.
-- `tests/` — Unit and integration tests; `tests/integration/` includes certification pipeline; `tests/smoke/` for smoke tests.
-- `shared/config/` — e.g. financial_rules.json (rounding tolerance, materiality).
+## Documentation
 
----
+Start here, then use:
 
-## What this is NOT
+- [`PROJECT_STATUS.md`](./PROJECT_STATUS.md) for the checks run during this cleanup
+- [`CLEANUP_REPORT.md`](./CLEANUP_REPORT.md) for moved and deleted files
+- [`docs/product/`](./docs/product/) for intended workflows and interface decisions
+- [`docs/operations/`](./docs/operations/) for setup notes
+- [`docs/security/`](./docs/security/) for the current attack-surface inventory
+- [`docs/archive/audits/`](./docs/archive/audits/) for point-in-time reviews
 
-- Not an ERP (no GL/AP/AR/inventory).
-- Not forecasting or FP&A.
-- Not payments or banking core.
+The archive contains useful findings and a lot of confident language. Neither makes it current.
+
+## Security note
+
+A provider credential was previously copied into a public review document. The current tree now contains only a shortened placeholder, but the original value remains in Git history. Treat that key as compromised, rotate it and review provider usage. History cleanup needs a separate, coordinated decision because it affects every clone.
+
+## License
+
+There is no license file in this public repository today. Until one is added, do not assume the code is licensed for reuse.
