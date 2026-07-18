@@ -1,24 +1,24 @@
 # Sabit
 
-Sabit is financial close software I have been working on.
+Sabit started with something I kept noticing in finance work. During a close, files move around and people have to be chased. After all that, you still have to know whether the number in front of you is the right one.
 
-The idea is simple. AI can help read, classify and explain. It should not decide the numbers, invent an adjustment or approve its own work. Balancing, approvals, period state and certification stay in deterministic code.
+I wanted to see where AI could actually help. It can read a file and classify an exception. It can also explain what looks wrong. I do not trust it with the number itself. So the balancing rules and approvals sit in ordinary code, along with the close state and certification.
 
-This is a working prototype, not a production-ready accounting system. There is a large TypeScript backend, a Next.js interface, PostgreSQL migrations and a few smaller Python services. Some areas are tested properly. Some still need work.
+If the model and the ledger disagree, the ledger wins.
 
-## What it does
+This is a working prototype. I have been building it for more than a year and it has become a fairly large system, with a TypeScript backend, a Next.js interface, PostgreSQL migrations and some smaller Python services. Parts of it are in good shape. Other parts are still experiments.
+
+## What works today
 
 - ingests trial balances and general-ledger files
 - checks that accounting data balances before it moves forward
-- sends exceptions through a human review path
-- supports draft, approval, posting, close and certification states
-- stores evidence and maintains an audit trail
-- uses AI for suggestions and explanations, behind deterministic accounting controls
+- sends exceptions to a person for review
+- moves work through draft, approval, posting, close and certification
+- keeps the evidence and the audit trail
+- uses AI for suggestions and explanations, while accounting controls stay in code
 - includes experimental ERP and MCP connectors
 
-If a model output and the ledger disagree, the ledger wins.
-
-## What is in this repository
+## What is here
 
 ```text
 src/          Backend, worker, database access and services
@@ -33,7 +33,7 @@ scripts/      Setup, verification and maintenance scripts
 data/         GAAP taxonomy input; runtime evidence is ignored
 ```
 
-The repository contains code, the files needed to build and test it, and this README. Generated evidence, review packs, architecture essays and completion reports do not belong here.
+I have kept this repository to the code and files needed to run and test it. The README is the only document. Generated evidence and old project documents are left out.
 
 ## Setup
 
@@ -55,7 +55,7 @@ At minimum, set:
 | `DATABASE_URL` | PostgreSQL connection |
 | `JWT_SECRET` | Token signing |
 
-Production certification also needs persistent Ed25519 signing keys. `npm run keygen` prints values in the format the current certificate code expects.
+Production certification also needs persistent Ed25519 signing keys. `npm run keygen` prints them in the format the certificate code expects.
 
 Run the database setup:
 
@@ -79,7 +79,7 @@ npm install
 npm run dev
 ```
 
-## Checks
+## Check it
 
 ```bash
 npx tsc --noEmit
@@ -87,14 +87,14 @@ npm run build
 npm test
 ```
 
-The database integration flow also needs PostgreSQL and the migrated schema. GitHub Actions runs that path with a disposable database.
+The database integration flow also needs PostgreSQL with the migrated schema. GitHub Actions runs that path with a temporary database.
 
-## Current limits
+## What is unfinished
 
-- the frontend is still on Next.js 14 and needs a planned upgrade
-- staged ERP synchronization is not available; direct synchronization must be requested explicitly
-- the Python services are not packaged consistently yet
-- dependency audit findings still need a separate upgrade pass
-- there is no license file, so do not assume the code is licensed for reuse
+- the frontend is on Next.js 14 and needs an upgrade
+- staged ERP synchronization is not available yet; direct synchronization has to be requested explicitly
+- the Python services still need one consistent packaging setup
+- some dependencies need an upgrade pass
+- there is no licence file, so the code should not be treated as licensed for reuse
 
-One provider credential appeared in the repository's old history. It is not in the current tree, but it should still be treated as compromised, rotated and checked for use.
+One provider credential appeared in the old Git history. It is gone from the current files, but it should still be rotated and checked for use.
