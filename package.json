@@ -23,7 +23,7 @@
     "test:adapters": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern=tests/adapters",
     "test:integration": "tsx scripts/test_gl_certification.ts",
     "test:integration:dev": "cross-env BASE_URL=http://localhost:3000 tsx scripts/test_gl_certification.ts",
-    "docker:build": "docker build -t sovereign-cpa-engine .",
+    "docker:build": "docker build -t sabit .",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f app",
