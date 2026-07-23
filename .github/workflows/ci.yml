@@ -118,7 +118,7 @@ jobs:
           DATABASE_URL: postgresql://sovereign:sovereign_test@localhost:5432/sovereign_test
           JWT_SECRET: test-secret-do-not-use-in-prod
           NODE_ENV: development
-          MODE: dev
+          MODE: demo
         run: |
           node dist/server.js > server.log 2>&1 &
           server_pid=$!
