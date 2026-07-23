@@ -4,7 +4,12 @@
  */
 
 import { describe, it, expect, afterEach } from '@jest/globals';
-import { encrypt, decrypt, getAuthorizationUrl } from '../../src/services/oauth_service.js';
+import {
+  encrypt,
+  decrypt,
+  getAuthorizationUrl,
+  parseOAuthState,
+} from '../../src/services/oauth_service.js';
 import { installMockFetch } from './helpers/mock_fetch.js';
 import { createMockPool } from './helpers/mock_pool.js';
 
@@ -35,24 +40,25 @@ describe('OAuth Service', () => {
       expect(decrypt(e2)).toBe(token);
     });
 
-    it('encrypted format is iv:authTag:ciphertext', () => {
+    it('encrypted format is salt:iv:authTag:ciphertext', () => {
       const encrypted = encrypt('test');
       const parts = encrypted.split(':');
-      expect(parts).toHaveLength(3);
-      // IV is 16 bytes = 32 hex chars
+      expect(parts).toHaveLength(4);
+      // Salt and IV are each 16 bytes = 32 hex chars
       expect(parts[0]).toHaveLength(32);
-      // Auth tag is 16 bytes = 32 hex chars
       expect(parts[1]).toHaveLength(32);
+      // Auth tag is 16 bytes = 32 hex chars
+      expect(parts[2]).toHaveLength(32);
       // Ciphertext should be non-empty
-      expect(parts[2].length).toBeGreaterThan(0);
+      expect(parts[3].length).toBeGreaterThan(0);
     });
 
     it('throws on tampered ciphertext', () => {
       const encrypted = encrypt('secret-token');
       // Flip a character in the ciphertext
       const parts = encrypted.split(':');
-      const lastChar = parts[2].slice(-1);
-      parts[2] = parts[2].slice(0, -1) + (lastChar === 'a' ? 'b' : 'a');
+      const lastChar = parts[3].slice(-1);
+      parts[3] = parts[3].slice(0, -1) + (lastChar === 'a' ? 'b' : 'a');
       const tampered = parts.join(':');
 
       expect(() => decrypt(tampered)).toThrow();
@@ -72,12 +78,12 @@ describe('OAuth Service', () => {
       expect(url).toContain('accounting.transactions');
       expect(url).toContain('accounting.reports.read');
 
-      // State should be base64url-encoded JSON
-      const decoded = JSON.parse(Buffer.from(state, 'base64url').toString());
-      expect(decoded.tenantId).toBe('tenant-1');
-      expect(decoded.connectionId).toBe('conn-1');
-      expect(decoded.provider).toBe('xero');
-      expect(decoded.nonce).toBeDefined();
+      const decoded = parseOAuthState(state);
+      expect(decoded).not.toBeNull();
+      expect(decoded!.tenantId).toBe('tenant-1');
+      expect(decoded!.connectionId).toBe('conn-1');
+      expect(decoded!.provider).toBe('xero');
+      expect(decoded!.nonce).toBeDefined();
     });
 
     it('generates correct NetSuite authorization URL', () => {
@@ -88,8 +94,9 @@ describe('OAuth Service', () => {
       expect(url).toContain('restlets');
       expect(url).toContain('rest_webservices');
 
-      const decoded = JSON.parse(Buffer.from(state, 'base64url').toString());
-      expect(decoded.provider).toBe('netsuite');
+      const decoded = parseOAuthState(state);
+      expect(decoded).not.toBeNull();
+      expect(decoded!.provider).toBe('netsuite');
     });
 
     it('generates correct QuickBooks authorization URL', () => {
@@ -103,9 +110,11 @@ describe('OAuth Service', () => {
       const { state: s1 } = getAuthorizationUrl('xero', 'tenant-1', 'conn-1');
       const { state: s2 } = getAuthorizationUrl('xero', 'tenant-1', 'conn-1');
 
-      const d1 = JSON.parse(Buffer.from(s1, 'base64url').toString());
-      const d2 = JSON.parse(Buffer.from(s2, 'base64url').toString());
-      expect(d1.nonce).not.toBe(d2.nonce);
+      const d1 = parseOAuthState(s1);
+      const d2 = parseOAuthState(s2);
+      expect(d1).not.toBeNull();
+      expect(d2).not.toBeNull();
+      expect(d1!.nonce).not.toBe(d2!.nonce);
     });
   });
 
@@ -161,9 +170,9 @@ describe('OAuth Service', () => {
       const encryptedAccess = values[4] as string;
       const encryptedRefresh = values[5] as string;
 
-      // Should be encrypted (iv:authTag:ciphertext format)
-      expect(encryptedAccess.split(':')).toHaveLength(3);
-      expect(encryptedRefresh.split(':')).toHaveLength(3);
+      // Should be encrypted (salt:iv:authTag:ciphertext format)
+      expect(encryptedAccess.split(':')).toHaveLength(4);
+      expect(encryptedRefresh.split(':')).toHaveLength(4);
 
       // Should decrypt to the fixture token values
       expect(decrypt(encryptedAccess)).toBe(oauthTokenFixture.access_token);
