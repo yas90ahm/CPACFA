@@ -590,6 +590,43 @@ async function explainAllVariances(): Promise<boolean> {
   return true;
 }
 
+async function markUnresolvedModulesNotApplicable(): Promise<boolean> {
+  const listRes = await makeRequest('GET', `/api/close/sessions/${closeSessionId}/module-proposals`);
+  if (listRes.status !== 200) {
+    throw new Error(`Could not list module proposals: ${listRes.status} ${JSON.stringify(listRes.data)}`);
+  }
+
+  const proposals = (listRes.data as {
+    proposals?: Array<{ id: string; moduleName?: string; status?: string }>;
+  })?.proposals ?? [];
+  const unresolvedStatuses = new Set(['failed', 'needs_review', 'pending', 'proposed']);
+  const unresolved = proposals.filter(proposal => unresolvedStatuses.has(proposal.status ?? ''));
+
+  if (unresolved.length === 0) {
+    console.log('   No unresolved module proposals');
+    return true;
+  }
+
+  for (const proposal of unresolved) {
+    const moduleName = proposal.moduleName ?? proposal.id;
+    const resolutionRes = await makeRequest(
+      'POST',
+      `/api/close/sessions/${closeSessionId}/module-proposals/${proposal.id}/not-applicable`,
+      {
+        reason: `Synthetic integration fixture does not include data or configuration for ${moduleName}`,
+      }
+    );
+    if (resolutionRes.status !== 200) {
+      throw new Error(
+        `Could not mark module ${moduleName} not applicable: ${resolutionRes.status} ${JSON.stringify(resolutionRes.data)}`
+      );
+    }
+  }
+
+  console.log(`   Marked ${unresolved.length} module proposal(s) not applicable`);
+  return true;
+}
+
 async function testAdvanceToLocked(): Promise<boolean> {
   console.log('\n=== STEP 6: Advance through state machine (open → in_progress → under_review) ===');
   try {
@@ -634,6 +671,11 @@ async function testAdvanceToLocked(): Promise<boolean> {
     // Step 6e3: Explain all material variances (readiness gate requires variance explanations)
     console.log('   6e3 explaining variances...');
     await explainAllVariances();
+
+    // Step 6e4: Resolve module proposals through the governed API. The synthetic
+    // fixture intentionally has no subledger data/configuration for these modules.
+    console.log('   6e4 resolving module proposals...');
+    await markUnresolvedModulesNotApplicable();
 
     // Step 6f: Resolve all open issues, then attempt advance (loop up to 3 times
     // because cascades can create new issues after resolution)
