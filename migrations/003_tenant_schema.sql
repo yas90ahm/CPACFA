@@ -1,7 +1,7 @@
 -- FinOS Agent: tenant DB schema only (no tenants/users; for customer-held DB).
 -- Run on tenant DB via: npm run migrate:tenant -- <DATABASE_URL> or on first getTenantPool.
 
-CREATE TABLE IF NOT EXISTS schema_migrations (
+CREATE TABLE IF NOT EXISTS public.schema_migrations (
   version INTEGER PRIMARY KEY,
   applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
