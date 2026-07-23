@@ -71,11 +71,11 @@ export function validateEnv(): StartupValidationResult {
   if (process.env.ALLOW_SAME_USER_APPROVE === '1' || process.env.ALLOW_SAME_USER_APPROVE === 'true') {
     if (profile.appMode === 'prod' || profile.appMode === 'staging') {
       warnings.push(
-        'ALLOW_SAME_USER_APPROVE is set but ignored in production/staging. Segregation of duties is always enforced.'
+        'The same-user approval override is set but ignored in production/staging. Segregation of duties is always enforced.'
       );
     } else {
       warnings.push(
-        'ALLOW_SAME_USER_APPROVE is enabled. Segregation of duties is relaxed for development.'
+        'The same-user approval override is enabled. Segregation of duties is relaxed for development.'
       );
     }
   }
