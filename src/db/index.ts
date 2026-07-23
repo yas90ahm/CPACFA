@@ -357,6 +357,7 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 216, file: '216_move_ai_suggestion_tables_to_ai_schema.sql' },
   { version: 217, file: '217_je_lines_immutable_when_certified.sql' },
   { version: 218, file: '218_module_proposal_na_reason.sql' },
+  { version: 219, file: '219_audit_checkpoint_entry_id_text.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 const TENANT_MIGRATION_LOCK_KEY = 0x53414249; // "SABI"
