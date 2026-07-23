@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [master]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   typecheck-and-build:
     runs-on: ubuntu-latest
@@ -114,6 +118,7 @@ jobs:
         run: npm run seed:demo
 
       - name: Integration test
+        timeout-minutes: 5
         env:
           DATABASE_URL: postgresql://sovereign:sovereign_test@localhost:5432/sovereign_test
           JWT_SECRET: test-secret-do-not-use-in-prod
