@@ -8,7 +8,6 @@
     "dev": "tsx watch src/server.ts",
     "prestart": "npm run build",
     "start": "node dist/server.js",
-    "lint": "eslint src --ext .ts",
     "migrate": "tsx src/db/migrate.ts",
     "migrate:tenant": "tsx src/db/migrate.ts --tenant",
     "db:reset": "cross-env tsx src/db/reset_and_bootstrap.ts",

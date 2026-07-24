@@ -5,6 +5,8 @@ node_modules
 *.md
 frontend/
 GAAP Taxonomy/
+data/evidence/
+data/evidence-test/
 *.log
 coverage/
 .next/
