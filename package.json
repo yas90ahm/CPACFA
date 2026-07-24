@@ -20,7 +20,7 @@
     "keygen": "tsx src/crypto/keygen.ts",
     "seed:demo": "tsx src/scripts/seed_demo.ts",
     "test": "node --experimental-vm-modules node_modules/.bin/jest",
-    "test:adapters": "node --experimental-vm-modules node_modules/.bin/jest --testPathPattern=tests/adapters",
+    "test:adapters": "node --experimental-vm-modules node_modules/.bin/jest --testPathPatterns=tests/adapters",
     "test:integration": "tsx scripts/test_gl_certification.ts",
     "test:integration:dev": "cross-env BASE_URL=http://localhost:3000 tsx scripts/test_gl_certification.ts",
     "docker:build": "docker build -t sovereign-cpa-engine .",

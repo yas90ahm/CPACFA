@@ -457,20 +457,10 @@ export async function certifyCloseSession(
     const existingArtifact = await certArtifactRepo.existsForCloseSession(client, input.tenantId, input.closeSessionId);
     await client.query('RELEASE SAVEPOINT check_existing');
     if (!existingArtifact) {
-      await client.query('SAVEPOINT verify_chain');
-      const auditChainResult = await verifyChain(client, input.tenantId);
-      await client.query('RELEASE SAVEPOINT verify_chain');
-      const auditChainVerified = auditChainResult.valid;
-      let aiMetadata;
-      try {
-        await client.query('SAVEPOINT ai_metadata');
-        aiMetadata = await gatherAiMetadata(client, input.tenantId, input.closeSessionId);
-        await client.query('RELEASE SAVEPOINT ai_metadata');
-      } catch (aiMetaErr) {
-        await client.query('ROLLBACK TO SAVEPOINT ai_metadata').catch(() => {});
-        console.warn('[CERTIFY] AI metadata gather failed (non-fatal):', (aiMetaErr as Error).message);
-      }
-      // Capture gate snapshot at certification moment
+      // Capture the gate snapshot before verifyChain updates the checkpoint in this
+      // transaction. getReadinessGates uses the pool and verifies the chain on a
+      // separate connection; running it afterward would wait on our uncommitted
+      // checkpoint row while this transaction waits for the gate query.
       let gateSnapshot;
       try {
         const gatesResult = await getReadinessGates(pool, input.tenantId, session);
@@ -485,6 +475,20 @@ export async function certifyCloseSession(
         };
       } catch (gateErr) {
         console.warn('[CERTIFY] Gate snapshot capture failed (non-fatal):', (gateErr as Error).message);
+      }
+
+      await client.query('SAVEPOINT verify_chain');
+      const auditChainResult = await verifyChain(client, input.tenantId);
+      await client.query('RELEASE SAVEPOINT verify_chain');
+      const auditChainVerified = auditChainResult.valid;
+      let aiMetadata;
+      try {
+        await client.query('SAVEPOINT ai_metadata');
+        aiMetadata = await gatherAiMetadata(client, input.tenantId, input.closeSessionId);
+        await client.query('RELEASE SAVEPOINT ai_metadata');
+      } catch (aiMetaErr) {
+        await client.query('ROLLBACK TO SAVEPOINT ai_metadata').catch(() => {});
+        console.warn('[CERTIFY] AI metadata gather failed (non-fatal):', (aiMetaErr as Error).message);
       }
 
       const { artifact, artifactHash, signatureB64, publicKeyB64, alg } = buildCertificationArtifact({

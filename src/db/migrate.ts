@@ -22,7 +22,9 @@ const CONTROL_MIGRATION_FILES = [
 
 async function getAppliedVersionsControl(): Promise<number[]> {
   try {
-    const r = await queryControl<{ version: number }>('SELECT version FROM schema_migrations ORDER BY version');
+    const r = await queryControl<{ version: number }>(
+      'SELECT version FROM public.schema_migrations ORDER BY version'
+    );
     return r.rows.map((row) => row.version);
   } catch {
     return [];
@@ -31,7 +33,7 @@ async function getAppliedVersionsControl(): Promise<number[]> {
 
 async function ensureMigrationsTable(): Promise<void> {
   await queryControl(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
+    CREATE TABLE IF NOT EXISTS public.schema_migrations (
       version INTEGER PRIMARY KEY,
       applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
@@ -53,7 +55,10 @@ export async function runMigrations(): Promise<void> {
     const sql = readFileSync(join(MIGRATIONS_DIR, file), 'utf8');
     console.log(`Running control migration ${file} (version ${version})...`);
     await pool.query(sql);
-    await queryControl('INSERT INTO schema_migrations (version) VALUES ($1)', [version]);
+    await queryControl(
+      'INSERT INTO public.schema_migrations (version) VALUES ($1) ON CONFLICT (version) DO NOTHING',
+      [version]
+    );
   }
   console.log('Control migrations complete.');
 

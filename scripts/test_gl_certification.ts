@@ -590,6 +590,43 @@ async function explainAllVariances(): Promise<boolean> {
   return true;
 }
 
+async function markUnresolvedModulesNotApplicable(): Promise<boolean> {
+  const listRes = await makeRequest('GET', `/api/close/sessions/${closeSessionId}/module-proposals`);
+  if (listRes.status !== 200) {
+    throw new Error(`Could not list module proposals: ${listRes.status} ${JSON.stringify(listRes.data)}`);
+  }
+
+  const proposals = (listRes.data as {
+    proposals?: Array<{ id: string; moduleName?: string; status?: string }>;
+  })?.proposals ?? [];
+  const unresolvedStatuses = new Set(['failed', 'needs_review', 'pending', 'proposed']);
+  const unresolved = proposals.filter(proposal => unresolvedStatuses.has(proposal.status ?? ''));
+
+  if (unresolved.length === 0) {
+    console.log('   No unresolved module proposals');
+    return true;
+  }
+
+  for (const proposal of unresolved) {
+    const moduleName = proposal.moduleName ?? proposal.id;
+    const resolutionRes = await makeRequest(
+      'POST',
+      `/api/close/sessions/${closeSessionId}/module-proposals/${proposal.id}/not-applicable`,
+      {
+        reason: `Synthetic integration fixture does not include data or configuration for ${moduleName}`,
+      }
+    );
+    if (resolutionRes.status !== 200) {
+      throw new Error(
+        `Could not mark module ${moduleName} not applicable: ${resolutionRes.status} ${JSON.stringify(resolutionRes.data)}`
+      );
+    }
+  }
+
+  console.log(`   Marked ${unresolved.length} module proposal(s) not applicable`);
+  return true;
+}
+
 async function testAdvanceToLocked(): Promise<boolean> {
   console.log('\n=== STEP 6: Advance through state machine (open → in_progress → under_review) ===');
   try {
@@ -634,6 +671,11 @@ async function testAdvanceToLocked(): Promise<boolean> {
     // Step 6e3: Explain all material variances (readiness gate requires variance explanations)
     console.log('   6e3 explaining variances...');
     await explainAllVariances();
+
+    // Step 6e4: Resolve module proposals through the governed API. The synthetic
+    // fixture intentionally has no subledger data/configuration for these modules.
+    console.log('   6e4 resolving module proposals...');
+    await markUnresolvedModulesNotApplicable();
 
     // Step 6f: Resolve all open issues, then attempt advance (loop up to 3 times
     // because cascades can create new issues after resolution)
@@ -754,28 +796,23 @@ async function testLock(): Promise<boolean> {
   try {
     // State machine: certified → subsequent_events_review → locked
     // Step 8a: Advance to subsequent_events_review
-    let advRes = await makeRequest('POST', `/api/close/sessions/${closeSessionId}/advance-to-subsequent-events-review`, {});
-    if (advRes.status !== 200) {
-      // Fallback: try PUT status
-      advRes = await makeRequest('PUT', `/api/close/sessions/${closeSessionId}/status`, { status: 'subsequent_events_review' });
-    }
+    const advRes = await makeRequest('POST', `/api/close/sessions/${closeSessionId}/advance-to-subsequent-events-review`, {});
     const advD = advRes.data as { status?: string; statusAfter?: string };
     const newStatus = advD.status ?? advD.statusAfter;
     console.log(`   8a. Advance to subsequent_events_review: ${advRes.status} → ${newStatus ?? '?'}`);
-    if (newStatus !== 'subsequent_events_review') {
-      console.log('   ⚠️  Cannot reach subsequent_events_review — skipping lock test');
-      results.push({ step: 'Lock', status: 'PASS', message: 'Lock skipped: cannot advance to subsequent_events_review' });
-      console.log('✅ PASS: Lock skipped');
-      return true;
+    if (advRes.status !== 200 || newStatus !== 'subsequent_events_review') {
+      results.push({ step: 'Lock', status: 'FAIL', message: 'Could not advance to subsequent_events_review', data: advRes.data });
+      console.log(`❌ FAIL: Could not advance to subsequent_events_review: ${JSON.stringify(advRes.data)}`);
+      return false;
     }
 
     // Step 8b: Confirm no subsequent events (ASC 855 review)
     const confirmRes = await makeRequest('POST', `/api/close/sessions/${closeSessionId}/confirm-no-subsequent-events`, {});
     console.log(`   8b. Confirm no subsequent events: ${confirmRes.status}`);
     if (confirmRes.status !== 200) {
-      console.log('   ⚠️  Confirm no subsequent events failed, skipping lock');
-      results.push({ step: 'Lock', status: 'PASS', message: 'Lock skipped: confirm-no-subsequent-events failed' });
-      return true;
+      results.push({ step: 'Lock', status: 'FAIL', message: 'Could not confirm subsequent-events review', data: confirmRes.data });
+      console.log(`❌ FAIL: Could not confirm subsequent-events review: ${JSON.stringify(confirmRes.data)}`);
+      return false;
     }
     const res = await makeRequest(
       'POST',

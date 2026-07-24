@@ -4,8 +4,10 @@
  */
 
 import { describe, it, expect, afterEach } from '@jest/globals';
+import jwt from 'jsonwebtoken';
 import { installMockFetch } from './helpers/mock_fetch.js';
 import { createMockPool } from './helpers/mock_pool.js';
+import { app } from '../../src/server.js';
 import type { IAccountingAdapter } from '../../src/services/accounting_integration_service.js';
 import type {
   AccountingConnection,
@@ -51,6 +53,57 @@ describe('Accounting Integration Service (route-level)', () => {
       expect(adapter.syncTrialBalance).toBeInstanceOf(Function);
       expect(adapter.pushJournalEntry).toBeInstanceOf(Function);
       expect(adapter.pullTransactions).toBeInstanceOf(Function);
+    });
+  });
+
+  describe('staged ERP sync', () => {
+    it('fails closed until the staging services are implemented', async () => {
+      const authToken = jwt.sign(
+        {
+          userId: 'test-user',
+          tenantId: 'tenant-1',
+          email: 'test@example.com',
+          role: 'approver',
+        },
+        process.env.JWT_SECRET ?? 'test_secret_key',
+        { expiresIn: '1h' }
+      );
+      const server = app.listen(0, '127.0.0.1');
+
+      try {
+        await new Promise<void>((resolve, reject) => {
+          server.once('listening', resolve);
+          server.once('error', reject);
+        });
+
+        const address = server.address();
+        if (!address || typeof address === 'string') {
+          throw new Error('Test server did not bind to a TCP port');
+        }
+
+        const response = await fetch(
+          `http://127.0.0.1:${address.port}/api/accounting-integration/sync-trial-balance`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              connectionId: 'unused-while-staging-is-disabled',
+              periodLabel: '2025-02',
+            }),
+          }
+        );
+        const body = await response.json() as { error?: string };
+
+        expect(response.status).toBe(501);
+        expect(body.error).toMatch(/not available.*staged: false/i);
+      } finally {
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => error ? reject(error) : resolve());
+        });
+      }
     });
   });
 

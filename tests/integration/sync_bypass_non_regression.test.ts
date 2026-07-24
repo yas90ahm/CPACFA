@@ -29,11 +29,11 @@ describe('Sync bypass non-regression', () => {
   let connectionId: string;
 
   beforeAll(async () => {
+    authToken = getTestAuthTokenWithRole(TEST_TENANT_ID, 'approver');
     if (!isDbConfigured()) {
       console.warn('Sync bypass non-regression: DATABASE_URL not set; skipping.');
       return;
     }
-    authToken = getTestAuthTokenWithRole(TEST_TENANT_ID, 'approver');
     await queryControl(
       'INSERT INTO tenants (id, name, database_url) VALUES ($1, $2, NULL) ON CONFLICT (id) DO NOTHING',
       [TEST_TENANT_ID, `Test ${TEST_TENANT_ID}`]
@@ -56,6 +56,22 @@ describe('Sync bypass non-regression', () => {
     expect(connectionId).toBeDefined();
   });
 
+  describe('Staged ERP sync availability', () => {
+    it('fails closed until staged sync is implemented', async () => {
+      const res = await request(app)
+        .post('/api/accounting-integration/sync-trial-balance')
+        .set('Authorization', `Bearer ${authToken}`)
+        .set('Content-Type', 'application/json')
+        .send({
+          connectionId: 'unused-while-staging-is-disabled',
+          periodLabel: PERIOD_LABEL,
+        });
+
+      expect(res.status).toBe(501);
+      expect(res.body?.error).toMatch(/not available.*staged: false/i);
+    });
+  });
+
   describe('A) Happy path', () => {
     it('sync-trial-balance succeeds and writes via bridge with source=synced', async () => {
       if (!isDbConfigured()) return;
@@ -68,6 +84,7 @@ describe('Sync bypass non-regression', () => {
           connectionId,
           periodLabel: PERIOD_LABEL,
           asOfDate: '2025-02-28',
+          staged: false,
         });
 
       expect(res.status).toBe(200);
@@ -112,7 +129,7 @@ describe('Sync bypass non-regression', () => {
         .post('/api/accounting-integration/sync-trial-balance')
         .set('Authorization', `Bearer ${authToken}`)
         .set('Content-Type', 'application/json')
-        .send({ connectionId, periodLabel: PERIOD_LABEL });
+        .send({ connectionId, periodLabel: PERIOD_LABEL, staged: false });
       expect(syncRes1.status).toBe(200);
 
       const tbBeforeLock = await getUnadjusted(pool, TEST_TENANT_ID, PERIOD_LABEL);
@@ -133,7 +150,7 @@ describe('Sync bypass non-regression', () => {
         .post('/api/accounting-integration/sync-trial-balance')
         .set('Authorization', `Bearer ${authToken}`)
         .set('Content-Type', 'application/json')
-        .send({ connectionId, periodLabel: PERIOD_LABEL });
+        .send({ connectionId, periodLabel: PERIOD_LABEL, staged: false });
 
       expect(syncRes2.status).toBe(409);
       expect(syncRes2.body?.code).toBe('PERIOD_LOCKED');

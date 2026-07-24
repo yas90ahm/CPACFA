@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [master]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   typecheck-and-build:
     runs-on: ubuntu-latest
@@ -93,18 +97,54 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Run adapter test suite
+        env:
+          JWT_SECRET: test-secret-do-not-use-in-prod
+          NODE_ENV: test
+          MODE: dev
+        run: npm test -- --runInBand
+
       - name: Run migrations
         env:
           DATABASE_URL: postgresql://sovereign:sovereign_test@localhost:5432/sovereign_test
         run: npm run db:migrate
 
-      - name: Integration test
+      - name: Seed integration data
         env:
           DATABASE_URL: postgresql://sovereign:sovereign_test@localhost:5432/sovereign_test
           JWT_SECRET: test-secret-do-not-use-in-prod
           NODE_ENV: test
           MODE: dev
-        run: npm run test:integration || echo "Integration tests completed"
+        run: npm run seed:demo
+
+      - name: Integration test
+        timeout-minutes: 5
+        env:
+          DATABASE_URL: postgresql://sovereign:sovereign_test@localhost:5432/sovereign_test
+          JWT_SECRET: test-secret-do-not-use-in-prod
+          NODE_ENV: development
+          MODE: demo
+        run: |
+          node dist/server.js > server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          for attempt in {1..30}; do
+            if curl --fail --silent http://localhost:3000/health > /dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          if ! curl --fail --silent http://localhost:3000/health > /dev/null; then
+            cat server.log
+            exit 1
+          fi
+
+          if ! npm run test:integration; then
+            cat server.log
+            exit 1
+          fi
 
   docker:
     runs-on: ubuntu-latest

@@ -502,9 +502,9 @@ async function verifyChainInternal(
     try {
       await pool.query(
         `INSERT INTO audit_chain_checkpoints (tenant_id, last_verified_entry_id, last_verified_hash, entries_verified, verified_at)
-         VALUES ($1, $2::uuid, $3, $4, $5)
+         VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (tenant_id) DO UPDATE SET
-           last_verified_entry_id = $2::uuid,
+           last_verified_entry_id = $2,
            last_verified_hash = $3,
            entries_verified = $4,
            verified_at = $5`,

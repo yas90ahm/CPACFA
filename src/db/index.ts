@@ -357,12 +357,17 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 216, file: '216_move_ai_suggestion_tables_to_ai_schema.sql' },
   { version: 217, file: '217_je_lines_immutable_when_certified.sql' },
   { version: 218, file: '218_module_proposal_na_reason.sql' },
+  { version: 219, file: '219_audit_checkpoint_entry_id_text.sql' },
+  { version: 220, file: '220_close_session_status_constraint.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
+const TENANT_MIGRATION_LOCK_KEY = 0x53414249; // "SABI"
 
-async function getTenantAppliedVersion(pool: pg.Pool): Promise<number[]> {
+async function getTenantAppliedVersion(client: pg.PoolClient): Promise<number[]> {
   try {
-    const r = await pool.query<{ version: number }>('SELECT version FROM schema_migrations ORDER BY version');
+    const r = await client.query<{ version: number }>(
+      'SELECT version FROM public.schema_migrations ORDER BY version'
+    );
     return r.rows.map((row) => row.version);
   } catch {
     return [];
@@ -373,12 +378,33 @@ async function getTenantAppliedVersion(pool: pg.Pool): Promise<number[]> {
  * Run tenant schema migrations (003, 004, ...) on the given pool if not already applied.
  */
 export async function runTenantMigrations(pool: pg.Pool): Promise<void> {
-  const applied = await getTenantAppliedVersion(pool);
-  for (const { version, file } of TENANT_MIGRATION_FILES) {
-    if (applied.includes(version)) continue;
-    const sql = readFileSync(join(MIGRATIONS_DIR, file), 'utf8');
-    await pool.query(sql);
-    await pool.query('INSERT INTO schema_migrations (version) VALUES ($1)', [version]);
+  const client = await pool.connect();
+  let lockAcquired = false;
+  try {
+    // Startup validation, the worker, and the first request can all reach this
+    // path together. Use a database-scoped lock so only one runner migrates.
+    await client.query('SELECT pg_advisory_lock($1)', [TENANT_MIGRATION_LOCK_KEY]);
+    lockAcquired = true;
+
+    const applied = new Set(await getTenantAppliedVersion(client));
+    for (const { version, file } of TENANT_MIGRATION_FILES) {
+      if (applied.has(version)) continue;
+      const sql = readFileSync(join(MIGRATIONS_DIR, file), 'utf8');
+      await client.query(sql);
+      await client.query(
+        'INSERT INTO public.schema_migrations (version) VALUES ($1) ON CONFLICT (version) DO NOTHING',
+        [version]
+      );
+      applied.add(version);
+    }
+  } finally {
+    try {
+      if (lockAcquired) {
+        await client.query('SELECT pg_advisory_unlock($1)', [TENANT_MIGRATION_LOCK_KEY]);
+      }
+    } finally {
+      client.release();
+    }
   }
 }
 
