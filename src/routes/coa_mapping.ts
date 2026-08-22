@@ -228,7 +228,7 @@ router.get('/taxonomy', async (req: Request, res: Response) => {
             const SearchSchema = z.object({ fsLineIds: z.array(z.string()), reasoning: z.string() });
             const result = await callAIWithSchema({
               pool, tenantId, pillar: 'taxonomy_search', promptVersion: 'v3',
-              systemPrompt: 'You are an expert US GAAP accountant matching GL account terminology to financial statement lines. Respond with JSON only. No markdown fences.',
+              systemPrompt: 'You are a financial reporting accountant matching GL account terminology to presentation line labels. Do not infer recognition or measurement policy, and do not assume a U.S. framework. Respond with JSON only. No markdown fences.',
               userPrompt: `A user searched for "${search}" in the financial statement taxonomy.
 
 Available lines (id: name):

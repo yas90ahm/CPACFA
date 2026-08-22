@@ -74,3 +74,28 @@ export async function apiFetch<T>(path: string, options: ApiOptions = {}): Promi
 
   return res.json() as Promise<T>;
 }
+
+/** Upload multipart data without overriding the browser-generated boundary. */
+export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
+  const url = new URL(`${getBaseUrl()}${path.startsWith('/') ? path : '/' + path}`);
+  const headers: Record<string, string> = {};
+  const token = getAuthToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(url.toString(), {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+    body: formData,
+  });
+
+  if (res.status === 401) {
+    authExpiredHandler?.();
+    throw new ApiError(401, 'Unauthorized');
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Upload failed' }));
+    throw new ApiError(res.status, err.error ?? err.message ?? 'Upload failed', err.code);
+  }
+  return res.json() as Promise<T>;
+}

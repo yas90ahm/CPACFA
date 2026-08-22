@@ -3,10 +3,10 @@
 
 -- accounting_connections: provider constraint
 DO $$ BEGIN
-  ALTER TABLE accounting_connections DROP CONSTRAINT IF EXISTS accounting_connections_provider_check;
+  ALTER TABLE core.accounting_connections DROP CONSTRAINT IF EXISTS accounting_connections_provider_check;
 EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
-ALTER TABLE accounting_connections ADD CONSTRAINT accounting_connections_provider_check
+ALTER TABLE core.accounting_connections ADD CONSTRAINT accounting_connections_provider_check
   CHECK (provider IN ('quickbooks', 'xero', 'netsuite', 'sage_intacct'));
 
 -- tenant_oauth_tokens: provider constraint (may not exist)

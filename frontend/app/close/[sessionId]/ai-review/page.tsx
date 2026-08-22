@@ -1,453 +1,368 @@
 'use client';
 
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/lib/api';
 import {
-  Brain,
-  Layers,
-  ShieldCheck,
-  FileText,
   Activity,
-  CheckCircle2,
-  XCircle,
+  AlertCircle,
   AlertTriangle,
-  Loader2,
+  Bot,
+  CheckCircle2,
+  ChevronRight,
+  Clock3,
   Cpu,
-  Zap,
   DollarSign,
-  Clock,
-  Ban,
+  Loader2,
+  ShieldCheck,
 } from 'lucide-react';
+import { ApiError, apiFetch } from '@/lib/api';
 
-/* ------------------------------------------------------------------ */
-/*  Types                                                              */
-/* ------------------------------------------------------------------ */
-
-interface ClassifierLayer {
-  name: string;
-  input: number;
-  matched: number;
-  avgConfidence: number;
+interface LearningStats {
+  totalCorrections: number;
+  uniquePatterns: number;
+  crossTenantSignals: number;
+  topCorrectedAccounts: Array<{
+    pattern: string;
+    count: number;
+    currentMapping: string;
+  }>;
+  callLog: {
+    totalCalls: number;
+    totalCost: string;
+    model: string;
+    avgLatency: string;
+    errors: number;
+  };
 }
+
+type ModuleStatus = 'needs_review' | 'approved' | 'skipped' | 'not_applicable' | 'failed';
 
 interface ModuleProposal {
+  id: string;
   moduleName: string;
-  status: 'approved' | 'pending' | 'rejected' | 'skipped';
-  proposalCount: number;
-  approvedCount: number;
+  standard?: string;
+  status: ModuleStatus;
+  jeId?: string;
+  dataQualityFlags?: Array<{ message?: string; severity?: string }>;
 }
 
-interface ShadowCheck {
-  jeId: string;
-  entryNumber?: string;
-  description: string;
-  result: 'PASS' | 'BLOCK' | 'WARN';
-  detail: string;
-}
-
-interface JustifierStats {
-  aiDrafted: number;
-  humanWritten: number;
-  pendingAttest: number;
-  attested: number;
-}
-
-interface CallLogStats {
-  totalCalls: number;
-  totalCost: string;
-  model: string;
-  avgLatency: string;
-  errors: number;
-}
-
-interface AIReviewData {
-  classifierLayers: ClassifierLayer[];
-  moduleProposals: ModuleProposal[];
-  shadowChecks: ShadowCheck[];
-  justifierStats: JustifierStats;
-  callLog: CallLogStats;
-}
-
-/* ------------------------------------------------------------------ */
-/*  Sub-components                                                     */
-/* ------------------------------------------------------------------ */
-
-function ResultBadge({ result }: { result: 'PASS' | 'BLOCK' | 'WARN' }) {
-  const styles = {
-    PASS: 'bg-[#E0EDE8] text-[#2D6A4F]',
-    BLOCK: 'bg-[#FDEAE6] text-[#C44B2B]',
-    WARN: 'bg-[#F0E8D0] text-[#8B6914]',
+interface ModuleProposalResponse {
+  proposals: ModuleProposal[];
+  summary: {
+    total: number;
+    needsReview: number;
+    approved: number;
+    skipped: number;
+    notApplicable: number;
+    failed: number;
   };
-  const icons = {
-    PASS: <CheckCircle2 size={12} />,
-    BLOCK: <XCircle size={12} />,
-    WARN: <AlertTriangle size={12} />,
+}
+
+type TaskStatus =
+  | 'pending'
+  | 'queued'
+  | 'running'
+  | 'waiting_human'
+  | 'blocked'
+  | 'completed'
+  | 'failed'
+  | 'skipped';
+
+interface RunbookTask {
+  id: string;
+  taskCode: string;
+  status: TaskStatus;
+  blockedReason?: string;
+  taskSnapshot: {
+    title: string;
+    capability: string;
+    executionMode: 'deterministic' | 'agent_assisted' | 'human_review';
+    approvalRequired: boolean;
   };
+  result?: {
+    agentWorkpaper?: {
+      unavailable?: boolean;
+      advisoryOnly?: boolean;
+      conclusion?: string;
+      callLogId?: string;
+    };
+  };
+}
+
+interface RunbookExecutionView {
+  execution: {
+    id: string;
+    status: 'pending' | 'running' | 'blocked' | 'completed' | 'failed' | 'cancelled';
+  };
+  tasks: RunbookTask[];
+  summary: {
+    total: number;
+    completed: number;
+    waitingHuman: number;
+    blocked: number;
+    active: number;
+    pending: number;
+  };
+}
+
+const MODULE_STATUS: Record<ModuleStatus, { label: string; className: string }> = {
+  needs_review: { label: 'Review required', className: 'bg-[#F0E8D0] text-[#8B6914]' },
+  approved: { label: 'Approved', className: 'bg-[#E0EDE8] text-[#2D6A4F]' },
+  skipped: { label: 'Skipped', className: 'bg-[#EDE6D6] text-[#5C4F3A]' },
+  not_applicable: { label: 'Not applicable', className: 'bg-[#EDE6D6] text-[#5C4F3A]' },
+  failed: { label: 'Failed', className: 'bg-[#F5E4DE] text-[#C44B2B]' },
+};
+
+const TASK_STATUS: Record<TaskStatus, { label: string; className: string }> = {
+  pending: { label: 'Pending', className: 'bg-[#EDE6D6] text-[#5C4F3A]' },
+  queued: { label: 'Queued', className: 'bg-[#E0EAF5] text-[#3B6EA5]' },
+  running: { label: 'Running', className: 'bg-[#E0EAF5] text-[#3B6EA5]' },
+  waiting_human: { label: 'Review required', className: 'bg-[#F0E8D0] text-[#8B6914]' },
+  blocked: { label: 'Blocked', className: 'bg-[#F5E4DE] text-[#C44B2B]' },
+  completed: { label: 'Completed', className: 'bg-[#E0EDE8] text-[#2D6A4F]' },
+  failed: { label: 'Failed', className: 'bg-[#F5E4DE] text-[#C44B2B]' },
+  skipped: { label: 'Not applicable', className: 'bg-[#EDE6D6] text-[#5C4F3A]' },
+};
+
+function MetricCard({ label, value, tone = 'neutral' }: {
+  label: string;
+  value: string | number;
+  tone?: 'neutral' | 'good' | 'warn' | 'bad';
+}) {
+  const color = tone === 'good' ? '#2D6A4F' : tone === 'warn' ? '#8B6914' : tone === 'bad' ? '#C44B2B' : '#2C2416';
   return (
-    <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded ${styles[result]}`}>
-      {icons[result]} {result}
-    </span>
+    <div className="rounded-lg border border-[#DDD5C2] bg-[#EDE6D6] p-4">
+      <div className="text-[10px] font-medium uppercase tracking-wider text-[#8B7A5E]">{label}</div>
+      <div className="mt-2 font-mono text-2xl font-medium" style={{ color }}>{value}</div>
+    </div>
   );
 }
 
-function ModuleStatusBadge({ status }: { status: string }) {
-  const map: Record<string, { bg: string; text: string; label: string }> = {
-    approved: { bg: 'bg-[#E0EDE8]', text: 'text-[#2D6A4F]', label: 'Approved' },
-    pending: { bg: 'bg-[#F0E8D0]', text: 'text-[#8B6914]', label: 'Pending' },
-    rejected: { bg: 'bg-[#FDEAE6]', text: 'text-[#C44B2B]', label: 'Rejected' },
-    skipped: { bg: 'bg-[#F5F0E8]', text: 'text-[#8B7A5E]', label: 'Skipped' },
-  };
-  const s = map[status] ?? map.pending;
+function ErrorPanel({ message }: { message: string }) {
   return (
-    <span className={`text-xs font-medium px-2 py-0.5 rounded ${s.bg} ${s.text}`}>{s.label}</span>
+    <div className="flex items-start gap-3 rounded-lg border border-[#C44B2B]/30 bg-[#F5E4DE] p-4 text-sm text-[#C44B2B]">
+      <AlertCircle size={17} className="mt-0.5 shrink-0" />
+      <span>{message}</span>
+    </div>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  Main Page                                                          */
-/* ------------------------------------------------------------------ */
 
 export default function AIReviewPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
 
-  const sessionQuery = useQuery({
-    queryKey: ['session', sessionId],
-    queryFn: () => apiFetch<any>(`/api/close/sessions/${sessionId}`),
-    enabled: !!sessionId,
-  });
-  const readinessQuery = useQuery({
-    queryKey: ['readiness', sessionId],
-    queryFn: () => apiFetch<any>(`/api/close/sessions/${sessionId}/readiness`, { params: { format: 'gates' } }),
-    enabled: !!sessionId,
+  const learningQuery = useQuery({
+    queryKey: ['ai-learning-stats', sessionId],
+    queryFn: () => apiFetch<LearningStats>(`/api/close/sessions/${sessionId}/suggestions/learning-stats`),
+    enabled: Boolean(sessionId),
   });
 
-  const { data, isLoading, error } = useQuery<AIReviewData>({
-    queryKey: ['ai-review', sessionId],
-    queryFn: async () => {
-      const [learningStats] = await Promise.allSettled([
-        apiFetch<any>(`/api/close/sessions/${sessionId}/suggestions/learning-stats`),
-      ]);
+  const modulesQuery = useQuery({
+    queryKey: ['module-proposals', sessionId],
+    queryFn: () => apiFetch<ModuleProposalResponse>(`/api/close/sessions/${sessionId}/module-proposals`),
+    enabled: Boolean(sessionId),
+  });
 
-      const ls = learningStats.status === 'fulfilled' ? learningStats.value : null;
-
-      return {
-        classifierLayers: ls?.classifierLayers ?? [
-          { name: 'Curated Patterns', input: 148, matched: 89, avgConfidence: 0.99 },
-          { name: 'XBRL Taxonomy Match', input: 59, matched: 31, avgConfidence: 0.94 },
-          { name: 'Claude Classification', input: 28, matched: 22, avgConfidence: 0.87 },
-          { name: 'RAG Batch Lookup', input: 6, matched: 4, avgConfidence: 0.82 },
-          { name: 'Fallback Heuristic', input: 2, matched: 1, avgConfidence: 0.65 },
-          { name: 'Manual Assignment', input: 1, matched: 1, avgConfidence: 1.0 },
-        ],
-        moduleProposals: ls?.moduleProposals ?? [
-          { moduleName: 'Payroll Accrual', status: 'approved', proposalCount: 3, approvedCount: 3 },
-          { moduleName: 'Debt Accrual', status: 'approved', proposalCount: 2, approvedCount: 2 },
-          { moduleName: 'Deferred Tax', status: 'pending', proposalCount: 4, approvedCount: 1 },
-          { moduleName: 'Prepaid Amortization', status: 'approved', proposalCount: 2, approvedCount: 2 },
-          { moduleName: 'Fixed Asset Depreciation', status: 'approved', proposalCount: 1, approvedCount: 1 },
-          { moduleName: 'Lease Accounting', status: 'approved', proposalCount: 3, approvedCount: 3 },
-          { moduleName: 'Inventory Reserve', status: 'pending', proposalCount: 2, approvedCount: 0 },
-          { moduleName: 'Stock Compensation', status: 'approved', proposalCount: 1, approvedCount: 1 },
-          { moduleName: 'Revenue Recognition', status: 'approved', proposalCount: 2, approvedCount: 2 },
-          { moduleName: 'AR Aging', status: 'approved', proposalCount: 1, approvedCount: 1 },
-          { moduleName: 'AP Aging', status: 'approved', proposalCount: 1, approvedCount: 1 },
-          { moduleName: 'Bank Reconciliation', status: 'approved', proposalCount: 2, approvedCount: 2 },
-          { moduleName: 'Intercompany', status: 'skipped', proposalCount: 0, approvedCount: 0 },
-        ],
-        shadowChecks: ls?.shadowChecks ?? [
-          { jeId: 'JE-001', entryNumber: 'AJE-2026-001', description: 'Payroll accrual March 2026', result: 'PASS' as const, detail: 'Debits equal credits. Accounts valid.' },
-          { jeId: 'JE-002', entryNumber: 'AJE-2026-002', description: 'Depreciation expense March 2026', result: 'PASS' as const, detail: 'Amount within 2% of prior period.' },
-          { jeId: 'JE-003', entryNumber: 'AJE-2026-003', description: 'Lease liability adjustment', result: 'WARN' as const, detail: 'Amount 15% higher than prior period. Manual review recommended.' },
-          { jeId: 'JE-004', entryNumber: 'AJE-2026-004', description: 'Stock comp expense Q1 trueup', result: 'PASS' as const, detail: 'Vesting schedule validated.' },
-          { jeId: 'JE-005', entryNumber: 'AJE-2026-005', description: 'Inventory reserve adjustment', result: 'BLOCK' as const, detail: 'Missing memo. Required for material JE.' },
-        ],
-        justifierStats: ls?.justifierStats ?? {
-          aiDrafted: 8,
-          humanWritten: 3,
-          pendingAttest: 2,
-          attested: 9,
-        },
-        callLog: ls?.callLog ?? {
-          totalCalls: 47,
-          totalCost: '$0.71',
-          model: 'claude-sonnet-4-6',
-          avgLatency: '1.2s',
-          errors: 0,
-        },
-      };
+  const runbookQuery = useQuery({
+    queryKey: ['runbook-execution', sessionId],
+    queryFn: async (): Promise<RunbookExecutionView | null> => {
+      try {
+        return await apiFetch<RunbookExecutionView>(`/api/close/runbook-executions/session/${sessionId}`);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) return null;
+        throw error;
+      }
     },
-    enabled: !!sessionId,
+    enabled: Boolean(sessionId),
   });
 
-  if (isLoading) {
-    return (
-      <div className="ml-[260px] min-h-screen bg-[#F5F0E8] flex items-center justify-center">
-        <Loader2 size={32} className="animate-spin text-[#B8860B]" />
-      </div>
-    );
-  }
-
-  if (error || !data) {
-    return (
-      <div className="min-h-screen bg-[#F5F0E8] flex items-center justify-center">
-        <div className="text-[#C44B2B] text-sm">Failed to load AI review data.</div>
-      </div>
-    );
-  }
-
-  const _gates = (readinessQuery.data as any)?.gates ?? [];
-  const _gatesTotal = (readinessQuery.data as any)?.gatesTotal ?? _gates.length;
-  const _activeGateIndex = _gates.findIndex((g: any) => !g.passing);
-  const _activeGateNum = _activeGateIndex >= 0 ? _activeGateIndex + 1 : _gatesTotal;
-  const _startedAt = (sessionQuery.data as any)?.startedAt ?? (sessionQuery.data as any)?.createdAt ?? new Date().toISOString();
-  const _dayElapsed = Math.max(1, Math.ceil((Date.now() - new Date(_startedAt).getTime()) / (1000 * 60 * 60 * 24)));
-  const _targetDays = (sessionQuery.data as any)?.closeDayTarget ?? 10;
-  const _sessionState = ((sessionQuery.data as any)?.state ?? 'IN_PROGRESS').replace(/_/g, ' ');
-  const _periodLabel = (sessionQuery.data as any)?.periodLabel ?? '';
+  const isLoading = learningQuery.isLoading || modulesQuery.isLoading || runbookQuery.isLoading;
+  const runbook = runbookQuery.data;
+  const agentTasks = runbook?.tasks.filter((task) => task.taskSnapshot.executionMode === 'agent_assisted') ?? [];
+  const workpapers = agentTasks.filter((task) => task.result?.agentWorkpaper && !task.result.agentWorkpaper.unavailable).length;
 
   return (
-    <div className="min-h-screen bg-[#F5F0E8]">
-      {/* Progress Rail */}
-      {_gates.length > 0 && (
-        <div className="bg-[#2C2416] px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-4 text-sm">
-            <span className="text-[#B8860B] font-medium">
-              Gate {_activeGateNum} of {_gatesTotal}
-            </span>
-            <span className="text-[#8B7A5E]">
-              Close Day {_dayElapsed} of {_targetDays}
-            </span>
-            <span className="px-2 py-0.5 rounded text-xs font-medium bg-[#3B1F0A] text-[#B8860B]">
-              {_sessionState}
-            </span>
-            {_periodLabel && <span className="text-[#8B7A5E]">{_periodLabel}</span>}
-          </div>
-          <div className="flex items-center gap-1.5">
-            {_gates.map((gate: any, i: number) => {
-              let bg = '#5C4F3A';
-              if (gate.passing) bg = '#2D6A4F';
-              else if (i === _activeGateIndex) bg = '#B8860B';
-              return (
-                <div
-                  key={gate.id}
-                  className="w-2.5 h-2.5 rounded-full transition-colors"
-                  style={{ backgroundColor: bg }}
-                  title={`${gate.label}: ${gate.passing ? 'Passing' : 'Pending'}`}
-                />
-              );
-            })}
-          </div>
+    <div className="ml-[260px] min-h-screen bg-[#F5F0E8]">
+      <div className="flex h-12 items-center border-b border-[#DDD5C2] bg-[#EDE6D6] px-6">
+        <div className="flex items-center gap-2 text-sm">
+          <Link href={`/close/${sessionId}/dashboard`} className="text-[#8B7A5E] hover:text-[#5C4F3A]">Dashboard</Link>
+          <ChevronRight size={14} className="text-[#8B7A5E]" />
+          <span className="font-medium text-[#2C2416]">Agent activity</span>
         </div>
-      )}
-
-      {/* Header */}
-      <div className="px-8 pt-8 pb-6">
-        <h1 className="text-2xl font-medium text-[#2C2416]">AI Activity Review — 4 Pillars</h1>
-        <p className="text-sm text-[#8B7A5E] mt-1">
-          Complete transparency into every AI action taken during this close cycle.
-        </p>
       </div>
 
-      {/* Constraint Banner */}
-      <div className="px-8 mb-8">
-        <div className="bg-[#2C2416] rounded-lg px-6 py-4 flex items-center gap-3">
-          <ShieldCheck size={16} className="text-[#B8860B] flex-shrink-0" />
-          <p className="text-sm text-[#8B7A5E]">
-            <span className="text-[#B8860B] font-medium">AI CONSTRAINT</span> — AI is advisory only. AI
-            never computes dollar amounts or writes to financial tables. Every AI suggestion requires
-            human confirmation before taking effect.
+      <main className="mx-auto max-w-[1180px] space-y-8 px-8 py-8">
+        <header>
+          <h1 className="text-2xl font-medium text-[#2C2416]">Agent & control activity</h1>
+          <p className="mt-1 text-sm text-[#8B7A5E]">
+            Persisted runbook outcomes, controller decisions, and recorded model usage. Missing data is shown as unavailable—never estimated.
+          </p>
+        </header>
+
+        <div className="flex items-start gap-3 rounded-lg bg-[#2C2416] px-5 py-4">
+          <ShieldCheck size={17} className="mt-0.5 shrink-0 text-[#B8860B]" />
+          <p className="text-sm text-[#C9BCA5]">
+            Frontier-model workpapers are advisory. Deterministic controls calculate and validate accounting results; required human approvals and ERP posting controls remain enforceable.
           </p>
         </div>
-      </div>
 
-      {/* Section 1: Classifier */}
-      <div className="px-8 mb-8">
-        <div className="flex items-center gap-2 mb-3">
-          <Layers size={16} className="text-[#B8860B]" />
-          <h2 className="text-sm font-medium text-[#8B7A5E] uppercase tracking-wide">
-            Pillar 1: Classifier — 6-Layer Pipeline
-          </h2>
-        </div>
-        <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-[#2C2416] text-[#B8860B]">
-                <th className="text-left px-4 py-3 font-medium">Layer</th>
-                <th className="text-right px-4 py-3 font-medium">Input</th>
-                <th className="text-right px-4 py-3 font-medium">Matched</th>
-                <th className="text-right px-4 py-3 font-medium">Avg Confidence</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.classifierLayers.map((layer, i) => (
-                <tr
-                  key={layer.name}
-                  className="border-t border-[#DDD5C2] hover:bg-[#F5F0E8] transition-colors"
-                >
-                  <td className="px-4 py-3">
-                    <span className="text-[#8B7A5E] text-xs mr-2">L{i + 1}</span>
-                    <span className="text-[#2C2416] font-medium">{layer.name}</span>
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono text-[#2C2416]">{layer.input}</td>
-                  <td className="px-4 py-3 text-right font-mono text-[#2C2416]">{layer.matched}</td>
-                  <td className="px-4 py-3 text-right">
-                    <span
-                      className="font-mono"
-                      style={{
-                        color:
-                          layer.avgConfidence >= 0.9
-                            ? '#2D6A4F'
-                            : layer.avgConfidence >= 0.7
-                              ? '#8B6914'
-                              : '#C44B2B',
-                      }}
-                    >
-                      {(layer.avgConfidence * 100).toFixed(0)}%
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+        {isLoading && (
+          <div className="flex items-center justify-center py-16 text-[#8B7A5E]">
+            <Loader2 size={24} className="mr-2 animate-spin" /> Loading recorded activity…
+          </div>
+        )}
 
-      {/* Section 2: Advisor — Module Proposals */}
-      <div className="px-8 mb-8">
-        <div className="flex items-center gap-2 mb-3">
-          <Brain size={16} className="text-[#B8860B]" />
-          <h2 className="text-sm font-medium text-[#8B7A5E] uppercase tracking-wide">
-            Pillar 2: Advisor — 13 Module Proposals
-          </h2>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          {data.moduleProposals.map((mod) => (
-            <div
-              key={mod.moduleName}
-              className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-4"
-            >
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-[#2C2416]">{mod.moduleName}</span>
-                <ModuleStatusBadge status={mod.status} />
+        {!isLoading && (
+          <>
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Bot size={17} className="text-[#B8860B]" />
+                <h2 className="text-sm font-medium uppercase tracking-wide text-[#5C4F3A]">Close runbook agents</h2>
               </div>
-              <div className="text-xs text-[#8B7A5E]">
-                {mod.approvedCount}/{mod.proposalCount} proposals approved
+              {runbookQuery.error ? (
+                <ErrorPanel message={(runbookQuery.error as Error).message} />
+              ) : !runbook ? (
+                <div className="rounded-lg border border-[#DDD5C2] bg-[#EDE6D6] p-5 text-sm text-[#5C4F3A]">
+                  No runbook execution is recorded for this close session. Configure and activate a runbook, or open the runbook page to start an eligible existing close.
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
+                    <MetricCard label="All tasks" value={runbook.summary.total} />
+                    <MetricCard label="Completed" value={runbook.summary.completed} tone="good" />
+                    <MetricCard label="Running" value={runbook.summary.active} />
+                    <MetricCard label="Human review" value={runbook.summary.waitingHuman} tone={runbook.summary.waitingHuman ? 'warn' : 'good'} />
+                    <MetricCard label="Blocked" value={runbook.summary.blocked} tone={runbook.summary.blocked ? 'bad' : 'good'} />
+                    <MetricCard label="Agent workpapers" value={workpapers} />
+                  </div>
+                  <div className="overflow-hidden rounded-lg border border-[#DDD5C2] bg-[#EDE6D6]">
+                    <div className="border-b border-[#DDD5C2] px-4 py-3 text-xs text-[#8B7A5E]">
+                      Agent-assisted tasks only. Full deterministic and human task graph is available in the <Link className="font-medium text-[#3B6EA5] hover:underline" href={`/close/${sessionId}/runbook`}>runbook controller</Link>.
+                    </div>
+                    {agentTasks.length === 0 ? (
+                      <div className="p-5 text-sm text-[#5C4F3A]">This approved runbook contains no agent-assisted tasks.</div>
+                    ) : (
+                      <div className="divide-y divide-[#DDD5C2]">
+                        {agentTasks.map((task) => {
+                          const status = TASK_STATUS[task.status];
+                          const workpaper = task.result?.agentWorkpaper;
+                          return (
+                            <div key={task.id} className="grid gap-3 px-4 py-4 md:grid-cols-[1fr_auto]">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-mono text-xs text-[#8B7A5E]">{task.taskCode}</span>
+                                  <span className="text-sm font-medium text-[#2C2416]">{task.taskSnapshot.title}</span>
+                                  <span className={`rounded px-2 py-0.5 text-[10px] font-medium ${status.className}`}>{status.label}</span>
+                                </div>
+                                <p className="mt-1 text-xs text-[#8B7A5E]">
+                                  Capability: {task.taskSnapshot.capability.replace(/_/g, ' ')}
+                                  {task.taskSnapshot.approvalRequired ? ' · reviewer sign-off required' : ''}
+                                </p>
+                                {task.blockedReason && <p className="mt-2 text-xs text-[#C44B2B]">{task.blockedReason}</p>}
+                                {workpaper?.unavailable && <p className="mt-2 text-xs text-[#8B6914]">Model workpaper unavailable; deterministic result remains recorded.</p>}
+                                {workpaper?.conclusion && <p className="mt-2 text-xs text-[#5C4F3A]">{workpaper.conclusion}</p>}
+                              </div>
+                              <div className="text-right text-[10px] text-[#8B7A5E]">
+                                {workpaper?.callLogId ? <>Call log<br /><span className="font-mono">{workpaper.callLogId.slice(0, 12)}…</span></> : 'No model call recorded'}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </section>
+
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 size={17} className="text-[#B8860B]" />
+                <h2 className="text-sm font-medium uppercase tracking-wide text-[#5C4F3A]">Accounting module proposals</h2>
               </div>
-            </div>
-          ))}
-        </div>
-      </div>
+              {modulesQuery.error ? (
+                <ErrorPanel message={(modulesQuery.error as Error).message} />
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
+                    <MetricCard label="Recorded" value={modulesQuery.data?.summary.total ?? 0} />
+                    <MetricCard label="Approved" value={modulesQuery.data?.summary.approved ?? 0} tone="good" />
+                    <MetricCard label="Review required" value={modulesQuery.data?.summary.needsReview ?? 0} tone={(modulesQuery.data?.summary.needsReview ?? 0) ? 'warn' : 'good'} />
+                    <MetricCard label="Failed" value={modulesQuery.data?.summary.failed ?? 0} tone={(modulesQuery.data?.summary.failed ?? 0) ? 'bad' : 'good'} />
+                    <MetricCard label="Skipped" value={modulesQuery.data?.summary.skipped ?? 0} />
+                    <MetricCard label="Not applicable" value={modulesQuery.data?.summary.notApplicable ?? 0} />
+                  </div>
+                  {(modulesQuery.data?.proposals.length ?? 0) === 0 ? (
+                    <div className="rounded-lg border border-[#DDD5C2] bg-[#EDE6D6] p-5 text-sm text-[#5C4F3A]">No module proposals are recorded for this session.</div>
+                  ) : (
+                    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                      {modulesQuery.data?.proposals.map((proposal) => {
+                        const status = MODULE_STATUS[proposal.status];
+                        const flagCount = Array.isArray(proposal.dataQualityFlags) ? proposal.dataQualityFlags.length : 0;
+                        return (
+                          <div key={proposal.id} className="rounded-lg border border-[#DDD5C2] bg-[#EDE6D6] p-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-medium text-[#2C2416]">{proposal.moduleName.replace(/_/g, ' ')}</div>
+                                {proposal.standard && <div className="mt-1 text-xs text-[#8B7A5E]">{proposal.standard}</div>}
+                              </div>
+                              <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-medium ${status.className}`}>{status.label}</span>
+                            </div>
+                            <div className="mt-3 text-xs text-[#8B7A5E]">
+                              {proposal.jeId ? `Journal entry ${proposal.jeId}` : 'No journal entry linked'} · {flagCount} data-quality flag{flagCount === 1 ? '' : 's'}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+            </section>
 
-      {/* Section 3: Shadow Auditor */}
-      <div className="px-8 mb-8">
-        <div className="flex items-center gap-2 mb-3">
-          <ShieldCheck size={16} className="text-[#B8860B]" />
-          <h2 className="text-sm font-medium text-[#8B7A5E] uppercase tracking-wide">
-            Pillar 3: Shadow Auditor — Pre/Post Checks
-          </h2>
-        </div>
-        <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-[#2C2416] text-[#B8860B]">
-                <th className="text-left px-4 py-3 font-medium">JE ID</th>
-                <th className="text-left px-4 py-3 font-medium">Description</th>
-                <th className="text-left px-4 py-3 font-medium">Result</th>
-                <th className="text-left px-4 py-3 font-medium">Detail</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.shadowChecks.map((check) => (
-                <tr
-                  key={check.jeId}
-                  className="border-t border-[#DDD5C2] hover:bg-[#F5F0E8] transition-colors"
-                >
-                  <td className="px-4 py-3 font-mono text-[#2C2416]">{check.entryNumber || check.jeId}</td>
-                  <td className="px-4 py-3 text-[#2C2416]">{check.description}</td>
-                  <td className="px-4 py-3">
-                    <ResultBadge result={check.result} />
-                  </td>
-                  <td className="px-4 py-3 text-[#8B7A5E] text-xs">{check.detail}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Section 4: Justifier */}
-      <div className="px-8 mb-8">
-        <div className="flex items-center gap-2 mb-3">
-          <FileText size={16} className="text-[#B8860B]" />
-          <h2 className="text-sm font-medium text-[#8B7A5E] uppercase tracking-wide">
-            Pillar 4: Justifier — Variance Explanation Attestations
-          </h2>
-        </div>
-        <div className="grid grid-cols-4 gap-4">
-          <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-5">
-            <div className="text-xs text-[#8B7A5E] uppercase tracking-wide mb-2">AI Drafted</div>
-            <div className="text-2xl font-medium font-mono text-[#3B6EA5]">
-              {data.justifierStats.aiDrafted}
-            </div>
-          </div>
-          <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-5">
-            <div className="text-xs text-[#8B7A5E] uppercase tracking-wide mb-2">Human Written</div>
-            <div className="text-2xl font-medium font-mono text-[#2C2416]">
-              {data.justifierStats.humanWritten}
-            </div>
-          </div>
-          <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-5">
-            <div className="text-xs text-[#8B7A5E] uppercase tracking-wide mb-2">Pending Attest</div>
-            <div className="text-2xl font-medium font-mono text-[#8B6914]">
-              {data.justifierStats.pendingAttest}
-            </div>
-          </div>
-          <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-5">
-            <div className="text-xs text-[#8B7A5E] uppercase tracking-wide mb-2">Attested</div>
-            <div className="text-2xl font-medium font-mono text-[#2D6A4F]">
-              {data.justifierStats.attested}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Section 5: AI Call Log */}
-      <div className="px-8 pb-8">
-        <div className="flex items-center gap-2 mb-3">
-          <Activity size={16} className="text-[#B8860B]" />
-          <h2 className="text-sm font-medium text-[#8B7A5E] uppercase tracking-wide">
-            AI Call Log
-          </h2>
-        </div>
-        <div className="bg-[#2C2416] rounded-lg px-6 py-4 flex items-center gap-8">
-          <div className="flex items-center gap-2">
-            <Cpu size={14} className="text-[#8B7A5E]" />
-            <span className="text-sm text-[#8B7A5E]">Total Calls:</span>
-            <span className="text-sm font-mono text-[#B8860B]">{data.callLog.totalCalls}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <DollarSign size={14} className="text-[#8B7A5E]" />
-            <span className="text-sm text-[#8B7A5E]">Cost:</span>
-            <span className="text-sm font-mono text-[#B8860B]">{data.callLog.totalCost}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Zap size={14} className="text-[#8B7A5E]" />
-            <span className="text-sm text-[#8B7A5E]">Model:</span>
-            <span className="text-sm font-mono text-[#B8860B]">{data.callLog.model}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Clock size={14} className="text-[#8B7A5E]" />
-            <span className="text-sm text-[#8B7A5E]">Avg Latency:</span>
-            <span className="text-sm font-mono text-[#B8860B]">{data.callLog.avgLatency}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Ban size={14} className="text-[#8B7A5E]" />
-            <span className="text-sm text-[#8B7A5E]">Errors:</span>
-            <span className="text-sm font-mono text-[#2D6A4F]">{data.callLog.errors}</span>
-          </div>
-        </div>
-      </div>
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Activity size={17} className="text-[#B8860B]" />
+                <h2 className="text-sm font-medium uppercase tracking-wide text-[#5C4F3A]">Recorded model usage & mapping learning</h2>
+              </div>
+              {learningQuery.error || !learningQuery.data ? (
+                <ErrorPanel message={(learningQuery.error as Error | undefined)?.message ?? 'Recorded AI activity is unavailable.'} />
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+                    <MetricCard label="Mapping corrections" value={learningQuery.data.totalCorrections} />
+                    <MetricCard label="Unique patterns" value={learningQuery.data.uniquePatterns} />
+                    <MetricCard label="Session AI calls" value={learningQuery.data.callLog.totalCalls} />
+                    <MetricCard label="Recorded cost" value={learningQuery.data.callLog.totalCost} />
+                    <MetricCard label="Errors" value={learningQuery.data.callLog.errors} tone={learningQuery.data.callLog.errors ? 'bad' : 'good'} />
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <div className="flex items-center gap-3 rounded-lg border border-[#DDD5C2] bg-[#2C2416] px-4 py-3 text-sm">
+                      <Cpu size={15} className="text-[#B8860B]" />
+                      <span className="text-[#C9BCA5]">Latest model</span>
+                      <span className="ml-auto font-mono text-[#B8860B]">{learningQuery.data.callLog.model}</span>
+                    </div>
+                    <div className="flex items-center gap-3 rounded-lg border border-[#DDD5C2] bg-[#2C2416] px-4 py-3 text-sm">
+                      <Clock3 size={15} className="text-[#B8860B]" />
+                      <span className="text-[#C9BCA5]">Average latency</span>
+                      <span className="ml-auto font-mono text-[#B8860B]">{learningQuery.data.callLog.avgLatency}</span>
+                    </div>
+                    <div className="flex items-center gap-3 rounded-lg border border-[#DDD5C2] bg-[#2C2416] px-4 py-3 text-sm">
+                      <DollarSign size={15} className="text-[#B8860B]" />
+                      <span className="text-[#C9BCA5]">Usage scope</span>
+                      <span className="ml-auto text-xs text-[#B8860B]">This close</span>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2 text-xs text-[#8B7A5E]">
+                    <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                    Session totals include model calls carrying an explicit close-session key. Historical calls created before session provenance was added remain excluded rather than inferred.
+                  </div>
+                </>
+              )}
+            </section>
+          </>
+        )}
+      </main>
     </div>
   );
 }

@@ -1,13 +1,7 @@
 /**
- * STATUS: UNWIRED — This service compiles but is not imported by any active route.
- * It exists as potential future functionality.
- * Last verified: 2026-02-25
- * To activate: Create a route file that imports this service and register it in server.ts
- */
-
-/**
- * Job queue service: enqueue with id generation and idempotency.
- * Uses control DB jobs table; workers poll via job_repository.
+ * Durable job queue service used by close scheduling, runbook task execution,
+ * statement generation, ERP writeback, and other background workflows.
+ * Jobs live in the control database and are claimed by job_worker.
  */
 
 import { randomUUID } from 'crypto';

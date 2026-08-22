@@ -64,9 +64,11 @@ export async function enqueue(
       return { id: existing.rows[0].id, inserted: false };
     }
   }
-  await pool.query(
+  const inserted = await pool.query<{ id: string }>(
     `INSERT INTO jobs (id, type, payload, status, attempts, max_attempts, idempotency_key, run_at)
-     VALUES ($1, $2, $3, 'pending', 0, $4, $5, $6)`,
+     VALUES ($1, $2, $3, 'pending', 0, $4, $5, $6)
+     ON CONFLICT (id) DO NOTHING
+     RETURNING id`,
     [
       input.id,
       input.type,
@@ -76,7 +78,7 @@ export async function enqueue(
       input.runAt ?? null,
     ]
   );
-  return { id: input.id, inserted: true };
+  return { id: input.id, inserted: (inserted.rowCount ?? inserted.rows.length) === 1 };
 }
 
 /** Stale lock threshold: jobs locked longer than this are reclaimable (worker crash recovery). */

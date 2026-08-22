@@ -4,7 +4,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { sumRound2, from as decimalFrom } from '../utils/decimal.js';
 import type {
   JournalEntry,
@@ -25,6 +25,8 @@ import { JUSTIFIER_PROMPT_VERSION } from '../ai/prompts/justifier.prompt.js';
 import { executeCascade, CascadeTriggerType } from './cascade_engine.js';
 import { financialEvents, buildEventPacket } from '../events/financial_event_emitter.js';
 import { createIssueForSession } from './issue_service.js';
+
+type Queryable = Pool | PoolClient;
 
 /** Maximum amount that fits NUMERIC(20,2): 99_999_999_999_999.99 */
 const MAX_AMOUNT = 99_999_999_999_999.99;
@@ -93,7 +95,7 @@ export class JournalEntryError extends Error {
 }
 
 /** Create a draft JE with lines. Enforces amount provenance at API and persists on each line. */
-export async function createDraftJE(pool: Pool, input: CreateDraftJEInput): Promise<JournalEntry> {
+export async function createDraftJE(pool: Queryable, input: CreateDraftJEInput): Promise<JournalEntry> {
   const memo = input.memo?.trim() ?? '';
   if (!memo) {
     throw new JournalEntryError('Journal entry memo/description is required', 'VALIDATION');
@@ -168,7 +170,7 @@ export async function createDraftJE(pool: Pool, input: CreateDraftJEInput): Prom
 }
 
 /** Propose a draft JE (draft → proposed). */
-export async function proposeJE(pool: Pool, tenantId: string, id: string): Promise<JournalEntry> {
+export async function proposeJE(pool: Queryable, tenantId: string, id: string): Promise<JournalEntry> {
   const je = await repo.getJournalEntryById(pool, id, tenantId);
   if (!je) throw new JournalEntryError('Journal entry not found', 'NOT_FOUND');
   if (je.status !== 'draft') {
@@ -466,6 +468,7 @@ export async function postJE(pool: Pool, tenantId: string, id: string, aiPool?: 
     pool,
     aiPool,
     tenantId,
+    closeSessionId: je.closeSessionId ?? undefined,
     periodLabel: pl,
     relatedType: 'journal_entry',
     relatedId: id,

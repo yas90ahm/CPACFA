@@ -7,6 +7,7 @@ import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { send500 } from '../../lib/errorHandler.js';
 import { guardSessionWritable } from '../../lib/session_write_guard.js';
+import { requireSessionAccountingFramework } from '../../lib/session_framework_guard.js';
 import { getCloseSessionById } from '../../db/repositories/close_session_repository.js';
 import {
   listLeases,
@@ -21,6 +22,9 @@ import {
 } from '../../services/lease_accounting_service.js';
 
 const router = Router();
+const requireUsGaapLeaseEngine = requireSessionAccountingFramework(['US_GAAP'], 'ASC 842 lease calculation');
+router.use('/sessions/:sessionId/leases/propose-entries', requireUsGaapLeaseEngine);
+router.use('/sessions/:sessionId/leases/disclosure', requireUsGaapLeaseEngine);
 
 /** GET /sessions/:sessionId/leases — List all leases for tenant. */
 router.get('/sessions/:sessionId/leases', async (req: Request, res: Response) => {

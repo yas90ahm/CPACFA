@@ -50,7 +50,7 @@ export async function checkReconCompleteness(
   const session = await getCloseSessionById(pool, tenantId, periodId);
   if (!session) {
     return {
-      passes: true,
+      passes: false,
       total_required: 0,
       completed: 0,
       approved: 0,
@@ -67,7 +67,7 @@ export async function checkReconCompleteness(
   const required = requirements.filter((r) => r.isRequired);
   if (required.length === 0) {
     return {
-      passes: true,
+      passes: false,
       total_required: 0,
       completed: 0,
       approved: 0,
@@ -75,7 +75,12 @@ export async function checkReconCompleteness(
       in_progress: 0,
       over_tolerance_unexplained: 0,
       awaiting_approval: 0,
-      blockers: [],
+      blockers: [{
+        recon_id: '',
+        account_code: '',
+        account_name: 'Reconciliation population',
+        reason: 'No required reconciliation accounts are configured for this entity',
+      }],
     };
   }
 

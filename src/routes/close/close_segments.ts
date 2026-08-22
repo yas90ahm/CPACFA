@@ -7,6 +7,7 @@ import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { send500 } from '../../lib/errorHandler.js';
 import { guardSessionWritable } from '../../lib/session_write_guard.js';
+import { requireSessionAccountingFramework } from '../../lib/session_framework_guard.js';
 import { getCloseSessionById } from '../../db/repositories/close_session_repository.js';
 import {
   listSegments,
@@ -21,6 +22,10 @@ import {
 } from '../../services/segment_service.js';
 
 const router = Router();
+router.use(
+  '/sessions/:sessionId/segments/reportability-check',
+  requireSessionAccountingFramework(['US_GAAP', 'IFRS'], 'Segment reportability threshold calculation')
+);
 
 /** GET /sessions/:sessionId/segments — List operating segments. */
 router.get('/sessions/:sessionId/segments', async (req: Request, res: Response) => {

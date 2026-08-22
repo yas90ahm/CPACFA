@@ -4,6 +4,13 @@ node_modules
 .env.*
 *.md
 frontend/
+demo/
+examples/
+samples/
+tests/
+test_data/
+uat/
+slm/
 GAAP Taxonomy/
 data/evidence/
 data/evidence-test/

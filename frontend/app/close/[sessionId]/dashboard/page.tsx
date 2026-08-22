@@ -7,12 +7,8 @@ import { apiFetch } from '@/lib/api';
 import { fmtMoney } from '@/lib/money';
 import {
   type Gate,
-  type SessionResponse,
-  type ReadinessResponse,
   type JournalEntryResponse,
   type NormalizedTBRow,
-  adaptSession,
-  adaptReadiness,
   adaptTrialBalance,
   adaptJournalEntries,
   adaptVariances,
@@ -24,7 +20,7 @@ import {
   isIssueOpen,
   VarianceExplanationStatus,
 } from '@/lib/contracts';
-import { CloseSidebar } from '@/components/close-sidebar';
+import { closeQueryKeys, useCloseSession } from '@/lib/hooks/useCloseSession';
 import VarianceHighlightsCard from '@/components/close/VarianceHighlightsCard';
 import { WorkflowBreadcrumb } from '@/components/workflow-breadcrumb';
 import {
@@ -38,8 +34,6 @@ import {
   Clock,
   Loader2,
 } from 'lucide-react';
-
-/* Sidebar imported from @/components/close-sidebar */
 
 /* ------------------------------------------------------------------ */
 /*  Top Bar                                                            */
@@ -606,28 +600,10 @@ function ErrorBanner({ message }: { message: string }) {
 export default function CloseDashboardPage() {
   const params = useParams();
   const sessionId = params.sessionId as string;
+  const closeSession = useCloseSession(sessionId);
+  const { sessionQuery, readinessQuery } = closeSession;
 
   // --- Data fetching ---
-
-  const sessionQuery = useQuery({
-    queryKey: ['close-session', sessionId],
-    queryFn: async () => {
-      const data = await apiFetch(`/api/close/sessions/${sessionId}`);
-      return adaptSession(data);
-    },
-    enabled: !!sessionId,
-  });
-
-  const readinessQuery = useQuery({
-    queryKey: ['close-readiness', sessionId],
-    queryFn: async () => {
-      const data = await apiFetch(`/api/close/sessions/${sessionId}/readiness`, {
-        params: { format: 'gates' },
-      });
-      return adaptReadiness(data);
-    },
-    enabled: !!sessionId,
-  });
 
   const tbQuery = useQuery({
     queryKey: ['trial-balance', sessionId, 'adjusted'],
@@ -641,7 +617,7 @@ export default function CloseDashboardPage() {
   });
 
   const jesQuery = useQuery({
-    queryKey: ['journal-entries', sessionId],
+    queryKey: closeQueryKeys.journalEntries(sessionId),
     queryFn: async () => {
       const data = await apiFetch(`/api/close/journal-entries`, {
         params: { closeSessionId: sessionId },
@@ -652,7 +628,7 @@ export default function CloseDashboardPage() {
   });
 
   const variancesQuery = useQuery({
-    queryKey: ['variances', sessionId],
+    queryKey: closeQueryKeys.variances(sessionId),
     queryFn: async () => {
       const data = await apiFetch(`/api/close/sessions/${sessionId}/variances`);
       return adaptVariances(data);
@@ -685,10 +661,10 @@ export default function CloseDashboardPage() {
 
   // --- Derived state ---
 
-  const session = sessionQuery.data;
-  const gates = readinessQuery.data?.gates ?? [];
-  const gatesPassing = readinessQuery.data?.gatesPassing ?? 0;
-  const gatesTotal = readinessQuery.data?.gatesTotal ?? 0;
+  const session = closeSession.session;
+  const gates = closeSession.gates;
+  const gatesPassing = closeSession.gatesPassing;
+  const gatesTotal = closeSession.gatesTotal;
   const tbRows = tbQuery.data?.rows ?? [];
   const jes = jesQuery.data ?? [];
   const variances = variancesQuery.data ?? [];

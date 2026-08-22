@@ -73,7 +73,9 @@ class MockAccountingAdapter implements IAccountingAdapter {
     if (from(sumDebit).minus(sumCredit).abs().greaterThan(0.01)) {
       return { success: false, errors: ['Journal entry must balance (debits = credits)'] };
     }
-    const externalId = `${conn.provider}-je-${Date.now()}`;
+    const externalId = input.idempotencyKey
+      ? `${conn.provider}-je-${input.idempotencyKey}`
+      : `${conn.provider}-je-${Date.now()}`;
     return { success: true, externalId, externalRef: externalId, errors: [] };
   }
 

@@ -11,8 +11,9 @@ import { useQuery } from '@tanstack/react-query';
 import { Sparkles, AlertTriangle, CheckCircle2, FileText, X } from 'lucide-react';
 import { useState } from 'react';
 import { apiFetch } from '@/lib/api';
-import { adaptVariances } from '@/lib/contracts/adapters';
+import { adaptReadiness, adaptVariances } from '@/lib/contracts/adapters';
 import { VarianceExplanationStatus, isVarianceExplained } from '@/lib/contracts/statuses';
+import { closeQueryKeys } from '@/lib/hooks/useCloseSession';
 
 interface SabitAssistantStripProps {
   sessionId: string;
@@ -29,7 +30,7 @@ export default function SabitAssistantStrip({ sessionId }: SabitAssistantStripPr
   const [dismissed, setDismissed] = useState(false);
 
   const variancesQuery = useQuery({
-    queryKey: ['variances-strip', sessionId],
+    queryKey: closeQueryKeys.variances(sessionId),
     queryFn: async () => {
       const data = await apiFetch(`/api/close/sessions/${sessionId}/variances`);
       return adaptVariances(data);
@@ -40,12 +41,12 @@ export default function SabitAssistantStrip({ sessionId }: SabitAssistantStripPr
   });
 
   const readinessQuery = useQuery({
-    queryKey: ['readiness-strip', sessionId],
+    queryKey: closeQueryKeys.readiness(sessionId),
     queryFn: async () => {
-      const data = await apiFetch<{ gatesPassing?: number; gatesTotal?: number; canAdvance?: boolean }>(
+      const data = await apiFetch<unknown>(
         `/api/close/sessions/${sessionId}/readiness?format=gates`
       );
-      return data;
+      return adaptReadiness(data);
     },
     enabled: !!sessionId,
     staleTime: 60_000,

@@ -1,15 +1,13 @@
 /**
  * Close checklist items: per-session required controls for readiness gating.
- * Codes: CASH_REC, NO_CRITICAL_ISSUES, MATERIAL_JES_APPROVED, INTEGRITY_CHECKS.
+ * Codes are sourced from the active accounting close profile.
  */
+
+import type { CanadianAspeRequirementCode } from './accounting_close_profile.js';
 
 export type CloseChecklistItemStatus = 'pending' | 'in_progress' | 'completed' | 'skipped';
 
-export type CloseChecklistItemCode =
-  | 'CASH_REC'
-  | 'NO_CRITICAL_ISSUES'
-  | 'MATERIAL_JES_APPROVED'
-  | 'INTEGRITY_CHECKS';
+export type CloseChecklistItemCode = CanadianAspeRequirementCode;
 
 export interface CloseChecklistItem {
   id: string;
@@ -34,6 +32,9 @@ export interface CloseReadinessResult {
   noCriticalIssues: boolean;
   materialJesApproved: boolean;
   integrityChecksPass: boolean;
+  /** Persisted approved-runbook gate; absent only on legacy mocked callers. */
+  runbookComplete?: boolean;
+  runbookDetail?: string;
   /** Total journal entries count (0 means none posted) */
   jeTotal: number;
 }

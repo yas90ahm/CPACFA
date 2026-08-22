@@ -25,6 +25,7 @@ import { validateTrialBalanceAndBalanceSheet } from './integrity_gate_service.js
 import { verifyChain } from './audit_ledger_service.js';
 import { finalIntegrityCheck } from './integrity_check.js';
 import { buildCertifiedStatementsFromSnapshot } from './certified_statements_service.js';
+import { verifySnapshotHash } from './ledger_snapshot_service.js';
 import { getLatestSnapshotByCloseSessionId, getLedgerSnapshotById } from '../db/repositories/ledger_snapshot_repository.js';
 import { extractGLFromSnapshot } from './snapshot_gl_helpers.js';
 import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
@@ -178,6 +179,7 @@ export async function getCertifiedStatementsForBinder(
       ? await getLedgerSnapshotById(pool, tenantId, snapshotId)
       : await getLatestSnapshotByCloseSessionId(pool, tenantId, closeSessionId);
     if (snapshot) {
+      if (!verifySnapshotHash(snapshot)) return null;
       try {
         const statements = buildCertifiedStatementsFromSnapshot(snapshot.snapshotPayloadJson);
         const glData = extractGLFromSnapshot(snapshot);

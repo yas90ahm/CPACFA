@@ -232,7 +232,7 @@ export async function runBuildFinancialStatements(
     const classifiedEntries = result.classifiedEntries;
     const standardMetadata = 'standardMetadata' in result ? result.standardMetadata : undefined;
 
-    const pev = runPlanExecuteVerify({ trialBalance, balanceSheet, profitAndLoss });
+    const pev = runPlanExecuteVerify({ trialBalance, balanceSheet, profitAndLoss, standard });
     if (!pev.verification.passed) {
       return {
         success: false,

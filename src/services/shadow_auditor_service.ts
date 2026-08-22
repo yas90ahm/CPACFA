@@ -11,6 +11,7 @@ import type { JournalEntryLine } from '../types/journal_entry.js';
 import * as findingsRepo from '../db/repositories/tenant_shadow_audit_findings_repository.js';
 import type { ShadowAuditFindingItem } from '../db/repositories/tenant_shadow_audit_findings_repository.js';
 import { runShadowAudit } from '../ai/ai_orchestrator.js';
+import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
 
 export type ShadowAuditSeverity = 'ok' | 'warn' | 'block';
 
@@ -142,15 +143,20 @@ export async function runPrePostChecksAndStore(input: PrePostCheckInput): Promis
     approvedBy: journalEntry.approvedBy,
     lines: lines.map((l) => ({ accountRef: l.accountRef, debit: l.debit, credit: l.credit, description: l.description })),
   };
+  const reportingFramework = journalEntry.closeSessionId
+    ? (await getCloseSessionById(pool, tenantId, journalEntry.closeSessionId))?.standard
+    : undefined;
 
   const aiResult = await runShadowAudit({
     pool,
     tenantId,
+    closeSessionId: journalEntry.closeSessionId ?? undefined,
     periodLabel,
     subjectType: 'journal_entry',
     subjectId: journalEntryId,
     facts,
     materialityThreshold: getMaterialityThreshold() ?? undefined,
+    reportingFramework,
   });
 
   const mergedSeverity: ShadowAuditSeverity =

@@ -254,7 +254,7 @@ router.post('/demo-reset', async (req: Request, res: Response) => {
     const tables = [
       'audit_ledger', 'close_audit_trail', 'certification_artifacts', 'ledger_snapshots',
       'statement_generations', 'tenant_variance_analysis', 'evidence_links', 'evidence_records',
-      'journal_entries', 'tenant_aje_template_applications',
+      'journal_entry_erp_writebacks', 'journal_entries', 'tenant_aje_template_applications',
       'reconciliation_resolutions', 'reconciliation_todos',
       'tenant_recon_source_data', 'tenant_period_reconciliations',
       'tenant_close_issue_history', 'tenant_close_issues',
@@ -277,6 +277,8 @@ router.post('/demo-reset', async (req: Request, res: Response) => {
       { table: 'journal_entries', trigger: 'je_immutable_after_post' },
       { table: 'journal_entries', trigger: 'je_no_delete_after_post' },
       { table: 'journal_entries', trigger: 'je_balance_check_before_post' },
+      { table: 'journal_entry_erp_writebacks', trigger: 'erp_writeback_immutable_after_post' },
+      { table: 'journal_entry_erp_writebacks', trigger: 'erp_writeback_no_delete_after_post' },
       { table: 'evidence_records', trigger: 'prevent_evidence_record_delete_retention' },
       { table: 'general_ledger', trigger: 'general_ledger_immutable_after_certification_update' },
       { table: 'general_ledger', trigger: 'general_ledger_immutable_after_certification_delete' },

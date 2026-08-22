@@ -71,6 +71,22 @@ describe('Job queue — idempotency', () => {
     expect(query).toHaveBeenCalledTimes(1);
     expect(query).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO jobs'), expect.any(Array));
   });
+
+  it('a deterministic job id is a database-enforced duplicate guard', async () => {
+    const { pool, query } = mockPool({
+      query: jest.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
+    });
+    const result = await repo.enqueue(pool, {
+      id: 'close-cycle-stable-id',
+      type: 'close_cycle_kickoff',
+      payload: { tenantId: 't1', periodLabel: '2026-01' },
+    });
+    expect(result).toEqual({ id: 'close-cycle-stable-id', inserted: false });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('ON CONFLICT (id) DO NOTHING'),
+      expect.any(Array)
+    );
+  });
 });
 
 describe('Job queue — retry and dead-letter behavior', () => {

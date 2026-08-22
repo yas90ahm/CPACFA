@@ -6,7 +6,12 @@ import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { getPeriodEndDate } from '../../services/close_context.js';
 import { isPeriodLocked, getPeriodLock, listLockedPeriods } from '../../services/period_lock_service.js';
-import { getCloseCalendarConfig, setCloseCalendarConfig } from '../../services/close_calendar_config_service.js';
+import {
+  CloseCalendarConfigError,
+  getCloseCalendarConfig,
+  setCloseCalendarConfig,
+  type SetCloseCalendarConfigInput,
+} from '../../services/close_calendar_config_service.js';
 import { setCloseDueDate, getPeriodEntry, listPeriods } from '../../services/close_calendar_service.js';
 import { getCloseRoleFromReq } from '../../lib/closeRole.js';
 import { periodLockBodySchema } from '../../schemas/closeSchemas.js';
@@ -17,6 +22,7 @@ import { listAdjustments } from '../../services/close_adjustments_service.js';
 import { getUnadjustedMeta } from '../../services/trial_balance_store_service.js';
 import { buildCloseReadiness } from '../../services/close_readiness_service.js';
 import { computeCloseStage } from '../../services/close_status_service.js';
+import { CANADIAN_ASPE_PROFILE_ID } from '../../types/accounting_close_profile.js';
 
 const router = Router();
 
@@ -119,7 +125,18 @@ router.get('/calendar-config', async (req: Request, res: Response) => {
       return;
     }
     const config = await getCloseCalendarConfig(tenantId, pool);
-    res.json(config ?? { tenantId, closeDueOffsetDays: 5, reminderDays: undefined });
+    res.json(config ?? {
+      tenantId,
+      closeDueOffsetDays: 5,
+      reminderDays: undefined,
+      profileId: CANADIAN_ASPE_PROFILE_ID,
+      frequency: 'monthly',
+      autoStartEnabled: false,
+      approvedErpWritebackEnabled: false,
+      startOffsetDays: 1,
+      startTimeLocal: '06:00',
+      timezone: 'America/Toronto',
+    });
   } catch (e) {
     send500(res, e, 'Get calendar config failed');
   }
@@ -130,14 +147,25 @@ router.patch('/calendar-config', async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
     const pool = getTenantPool(req);
-    const body = req.body as { closeDueOffsetDays?: number; reminderDays?: number };
+    const body = req.body as SetCloseCalendarConfigInput;
     if (!tenantId || !pool) {
       res.status(400).json({ error: 'Tenant context required' });
       return;
     }
+    if (getCloseRoleFromReq(req as AuthRequest) !== 'approver') {
+      res.status(403).json({
+        error: 'Close calendar automation can only be configured by a controller, CFO, or administrator.',
+        code: 'INSUFFICIENT_ROLE',
+      });
+      return;
+    }
     const config = await setCloseCalendarConfig(tenantId, body, pool);
-    res.json(config ?? { tenantId, closeDueOffsetDays: body.closeDueOffsetDays ?? 5, reminderDays: body.reminderDays });
+    res.json(config);
   } catch (e) {
+    if (e instanceof CloseCalendarConfigError) {
+      res.status(400).json({ error: e.message, code: 'VALIDATION' });
+      return;
+    }
     send500(res, e, 'Set calendar config failed');
   }
 });

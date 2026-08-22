@@ -28,6 +28,8 @@ import { listFsTaxonomyLines, getFsTaxonomyLineById } from '../db/repositories/f
 import { detectSuspects, type MappingSuspect } from './mapping_validation_agent.js';
 import { minus } from '../utils/decimal.js';
 import { assertNoAiMutationContext } from '../lib/ai_boundary.js';
+import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
+import type { AccountingStandard } from '../constants/accounting/standards_registry.js';
 
 // ---------- Prompt sanitization (H7 fix) ----------
 
@@ -64,6 +66,8 @@ export interface GenerateSuggestionsInput {
   closeSessionId: string;
   /** If provided, only classify these accounts. Otherwise, classify all unmapped. */
   accountNames?: string[];
+  /** Optional explicit framework; otherwise resolved from the close session. */
+  standard?: AccountingStandard;
 }
 
 export interface CoaSuggestion {
@@ -118,6 +122,22 @@ export async function classifyWithXBRL(
   input: GenerateSuggestionsInput
 ): Promise<GenerateSuggestionsResult> {
   const { tenantId, entityId, closeSessionId } = input;
+  const session = await getCloseSessionById(pool, tenantId, closeSessionId);
+  const rawStandard = input.standard ?? session?.standard;
+  const standard: AccountingStandard = rawStandard?.toUpperCase() === 'ASPE'
+    ? 'ASPE'
+    : rawStandard?.toUpperCase() === 'IFRS'
+      ? 'IFRS'
+      : rawStandard?.toUpperCase() === 'FRS102'
+        ? 'FRS102'
+        : 'US_GAAP';
+  const frameworkLabel = standard === 'ASPE'
+    ? 'Canadian ASPE'
+    : standard === 'FRS102'
+      ? 'UK FRS 102'
+      : standard === 'IFRS'
+        ? 'IFRS'
+        : 'U.S. GAAP';
 
   // Resolve unmapped accounts
   let unmappedAccounts: Array<{ account_code: string | null; account_name: string; account_type?: string }> = [];
@@ -500,17 +520,18 @@ export async function classifyWithXBRL(
         const ClassifySchema = z.object({
           fsLineId: z.string(),
           fsLineName: z.string(),
-          confidence: z.number(),
+          confidence: z.number().min(0).max(1),
           reasoning: z.string(),
-          ascCitation: z.string().optional(),
+          frameworkReference: z.string().optional(),
         });
 
         const claudeResult = await callAIWithSchema({
           pool,
           tenantId,
+          closeSessionId,
           pillar: 'classifier_layer3',
           promptVersion: 'direct_classify_v1',
-          systemPrompt: 'You are an expert US GAAP accountant. Classify the GL account to the correct financial statement line. Respond with ONLY valid JSON.',
+          systemPrompt: `You are an expert ${frameworkLabel} financial reporting accountant. Classify the GL account to the correct presentation line without inventing recognition or measurement conclusions. Respond with ONLY valid JSON.`,
           userPrompt: `GL Account: "${acc.account_name}"
 Account Code: ${acc.account_code ?? 'unknown'}
 GL Type: ${accountType}
@@ -522,7 +543,7 @@ ${linesList}
 Pick the single best line. If this is a non-English/non-standard name (e.g. "Trade Debtors" = Accounts Receivable, "Bank - RBC" = Cash), recognize it.
 
 Respond with JSON only:
-{"fsLineId":"id_from_list","fsLineName":"name","confidence":0.95,"reasoning":"one sentence","ascCitation":"ASC XXX"}`,
+{"fsLineId":"id_from_list","fsLineName":"name","confidence":0.95,"reasoning":"one sentence","frameworkReference":"optional ${frameworkLabel} reference"}`,
           schema: ClassifySchema,
           requestJson: { pillar: 'classifier_layer3', accountName: acc.account_name, currentConfidence: bestConfidence },
         });
@@ -536,7 +557,7 @@ Respond with JSON only:
             bestFsLineName = pick.fsLineName;
             bestConfidence = Math.min(0.95, pick.confidence);
             bestXbrlId = null;
-            bestXbrlLabel = pick.ascCitation ?? null;
+            bestXbrlLabel = pick.frameworkReference ?? null;
           }
         }
       } catch {
@@ -597,7 +618,7 @@ ${candidateLines || '  (no strong candidates)'}${xbrlOnlyLines ? '\n' + xbrlOnly
     const userPrompt = `You are an expert CPA mapping accounts to financial statement line items.
 
 For each account below, pick the single best Sabit reporting line from the candidates provided.
-The candidates come from XBRL US GAAP taxonomy matching — they are strong hints but not always correct.
+The candidates use XBRL U.S. taxonomy labels only as vocabulary hints. They are not recognition or measurement authority for ${frameworkLabel} and may be rejected.
 If none of the candidates fit well, pick from the full Sabit taxonomy list.
 
 Rules:
@@ -615,21 +636,22 @@ ${sabitLines}
 Respond with JSON only. One object per account. Shape:
 {"picks":[{"account_name":"...","fs_line_id":"...","confidence":0.0-1.0}]}`;
 
-    const systemPrompt = `You are an expert US GAAP accountant. You classify GL accounts to financial statement reporting lines. You NEVER produce dollar amounts, balances, or calculations. You ONLY output the JSON mapping. Be precise with contra accounts and account subtypes.`;
+    const systemPrompt = `You are an expert ${frameworkLabel} financial reporting accountant. You classify GL accounts to presentation lines. You NEVER produce dollar amounts, balances, calculations, or framework-incompatible citations. You ONLY output the JSON mapping. Be precise with contra accounts and account subtypes.`;
 
     const PicksSchema = z.object({
       picks: z.array(z.object({
         account_name: z.string(),
         fs_line_id: z.string(),
-        confidence: z.number(),
+        confidence: z.number().min(0).max(1),
       })),
     });
 
     const result = await callAIWithSchema({
       pool,
       tenantId,
+      closeSessionId,
       pillar: 'classifier',
-      promptVersion: 'xbrl_rag_v1',
+      promptVersion: 'framework_mapping_v2',
       systemPrompt,
       userPrompt,
       schema: PicksSchema,
@@ -643,7 +665,7 @@ Respond with JSON only. One object per account. Shape:
     if (result.ok && result.parsed) {
       // Layer 3 guardrail: verify no dollar amounts leaked into AI output
       assertNoNumericAmountsInAgentOutput(JSON.stringify(result.parsed), 'ai_classification_xbrl_rag');
-      modelVersion = 'xbrl_rag_ai_v1';
+      modelVersion = `framework_mapping_v2_${standard.toLowerCase()}`;
       for (const pick of result.parsed.picks) {
         // Validate the fs_line_id exists in our taxonomy
         if (fsById.has(pick.fs_line_id)) {

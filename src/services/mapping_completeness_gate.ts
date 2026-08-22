@@ -89,7 +89,7 @@ export async function checkMappingCompleteness(
   const entries = tb.trialBalance ?? [];
   if (entries.length === 0) {
     return {
-      passes: true,
+      passes: false,
       total_accounts: 0,
       mapped_accounts: 0,
       unmapped_accounts: [],

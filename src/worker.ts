@@ -12,6 +12,7 @@
 import 'dotenv/config';
 import { isDbConfigured } from './db/index.js';
 import { runWorkerLoop, requestStop } from './services/job_worker.js';
+import { registerEventHandlers } from './events/event_handlers.js';
 
 async function main(): Promise<void> {
   if (!isDbConfigured()) {
@@ -21,6 +22,8 @@ async function main(): Promise<void> {
 
   const pollIntervalMs = Number(process.env.JOB_WORKER_POLL_MS ?? 2000);
   const backoffBaseMs = Number(process.env.JOB_WORKER_BACKOFF_BASE_MS ?? 60_000);
+  const closeCycleSchedulerEnabled = (process.env.CLOSE_CYCLE_SCHEDULER_ENABLED ?? 'true') === 'true';
+  const closeCycleScanIntervalMs = Number(process.env.CLOSE_CYCLE_SCAN_MS ?? 60_000);
 
   console.log(`[worker] Starting standalone job worker (poll=${pollIntervalMs}ms, backoff_base=${backoffBaseMs}ms)`);
 
@@ -32,7 +35,13 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  await runWorkerLoop({ pollIntervalMs, backoffBaseMs });
+  registerEventHandlers();
+  await runWorkerLoop({
+    pollIntervalMs,
+    backoffBaseMs,
+    closeCycleSchedulerEnabled,
+    closeCycleScanIntervalMs,
+  });
 
   console.log('[worker] Worker loop exited. Process will terminate.');
   process.exit(0);

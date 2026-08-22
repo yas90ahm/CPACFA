@@ -17,6 +17,7 @@ import { getSession } from './close_session_service.js';
 import { recordMaterialEvent } from './audit_service.js';
 import { financialEvents } from '../events/financial_event_emitter.js';
 import { log } from '../lib/logger.js';
+import type { CloseChecklistItemCode } from '../types/close_checklist_item.js';
 
 export interface GateCheckResult {
   sessionId: string;
@@ -90,11 +91,15 @@ export async function checkGatesAndAutoAdvance(
   try {
     const { getChecklistItems, completeChecklistItem } = await import('./close_checklist_readiness_service.js');
     const checklistItems = await getChecklistItems(pool, tenantId, sessionId);
-    const gateToChecklistMap: Record<string, string> = {
+    const gateToChecklistMap: Record<string, CloseChecklistItemCode> = {
       'cash_rec_complete': 'CASH_REC',
       'no_blocking_issues': 'NO_CRITICAL_ISSUES',
       'material_jes_approved': 'MATERIAL_JES_APPROVED',
       'tb_balanced': 'INTEGRITY_CHECKS',
+      'all_accounts_mapped': 'MAPPING_COMPLETENESS',
+      'recons_complete': 'BALANCE_SHEET_RECONCILIATIONS',
+      'variances_explained': 'MATERIAL_VARIANCE_REVIEW',
+      'evidence_policy': 'EVIDENCE_COMPLETE',
     };
     for (const gate of gatesResult.gates) {
       if (!gate.passing) continue;

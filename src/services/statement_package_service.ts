@@ -21,8 +21,12 @@ import { computeVariances } from './variance_analysis_service.js';
 import { getEntitySettings } from './entity_settings_service.js';
 import { from as decimalFrom, sumRound2, normalizeMoney } from '../utils/decimal.js';
 import { financialEvents, buildEventPacket } from '../events/financial_event_emitter.js';
+import {
+  applyPresentationReferences,
+  normalizeAccountingStandard,
+} from '../constants/accounting/presentation_references.js';
 
-const ENGINE_VERSION = 'financialStatements.v1';
+const ENGINE_VERSION = 'financialStatements.framework.v2';
 const TOLERANCE = 0.01;
 
 /** Get prior period adjusted TB for the same entity (period_end < current). Returns null if first close or no prior TB data. */
@@ -34,7 +38,10 @@ async function getPriorPeriodAdjustedTB(
 ): Promise<TrialBalanceResult | null> {
   const sessions = await listSessions(pool, { tenantId, entityId });
   const prior = sessions
-    .filter((s) => s.periodEnd < currentPeriodEnd)
+    .filter((s) =>
+      s.periodEnd < currentPeriodEnd &&
+      ['certified', 'subsequent_events_review', 'locked'].includes(s.status)
+    )
     .sort((a, b) => (b.periodEnd as string).localeCompare(a.periodEnd as string))[0];
   if (!prior) return null;
   const priorPeriodLabel = (prior.periodEnd as string).slice(0, 7);
@@ -71,6 +78,17 @@ function runCrossStatementValidation(
   const results: ValidationResult[] = [];
   const d = (n: number) => decimalFrom(n).toDecimalPlaces(2);
 
+  const balanceSheetEquation = d(balanceSheet.totalAssets).equals(
+    d(balanceSheet.totalLiabilities).plus(d(balanceSheet.totalEquity))
+  );
+  results.push({
+    check: 'balance_sheet_equation',
+    passed: balanceSheetEquation,
+    message: balanceSheetEquation
+      ? undefined
+      : `Assets ${balanceSheet.totalAssets} != liabilities plus equity ${balanceSheet.totalLiabilities + balanceSheet.totalEquity}`,
+  });
+
   const isNetIncome = profitAndLoss.netIncome;
   const equityNetIncome = equityStatement.changes.find((c) => /net income/i.test(c.label))?.amount ?? isNetIncome;
   const netIncomeTie = d(isNetIncome).equals(d(equityNetIncome));
@@ -89,12 +107,55 @@ function runCrossStatementValidation(
     message: cashTie ? undefined : `CF ending cash ${cfEndingCash} != BS cash ${bsCash}`,
   });
 
+  const cashFlowSections = sumRound2([
+    ...cashFlowStatement.operating.map((line) => line.amount),
+    ...cashFlowStatement.investing.map((line) => line.amount),
+    ...cashFlowStatement.financing.map((line) => line.amount),
+  ]);
+  const cashFlowSectionsTie = d(cashFlowSections).equals(d(cashFlowStatement.netChangeInCash));
+  results.push({
+    check: 'cash_flow_sections_tie',
+    passed: cashFlowSectionsTie,
+    message: cashFlowSectionsTie
+      ? undefined
+      : `Cash-flow sections ${cashFlowSections} != net change in cash ${cashFlowStatement.netChangeInCash}`,
+  });
+
+  const cashRollforwardTie = cashFlowStatement.beginningCash != null && cashFlowStatement.endingCash != null
+    ? d(cashFlowStatement.beginningCash)
+        .plus(d(cashFlowStatement.netChangeInCash))
+        .equals(d(cashFlowStatement.endingCash))
+    : false;
+  results.push({
+    check: 'cash_rollforward_tie',
+    passed: cashRollforwardTie,
+    message: cashRollforwardTie
+      ? undefined
+      : 'Beginning cash plus net change does not equal ending cash.',
+  });
+
+  results.push({
+    check: 'cash_flow_comparative_source',
+    passed: cashFlowStatement.estimated !== true,
+    message: cashFlowStatement.estimated
+      ? 'No prior certified trial balance is available; cash flow remains an estimate and cannot complete the statement control.'
+      : undefined,
+  });
+
   const closingEquity = equityStatement.closingEquity ?? balanceSheet.totalEquity;
   const reTie = d(closingEquity).equals(d(balanceSheet.totalEquity));
   results.push({
     check: 'equity_tie',
     passed: reTie,
     message: reTie ? undefined : `Equity statement closing ${closingEquity} != BS total equity ${balanceSheet.totalEquity}`,
+  });
+
+  results.push({
+    check: 'equity_comparative_source',
+    passed: equityStatement.estimated !== true,
+    message: equityStatement.estimated
+      ? 'No prior certified balance sheet is available; the changes-in-equity roll-forward remains an estimate.'
+      : undefined,
   });
 
   return results;
@@ -105,9 +166,18 @@ function periodLabelFromSession(session: { periodEnd: string }): string {
 }
 
 /** Canonical hash of inputs that determine statement output (deterministic). */
-function hashStatementInput(closeSessionId: string, entries: Array<{ accountName: string; debit?: number; credit?: number }>): string {
+function hashStatementInput(
+  closeSessionId: string,
+  standard: string,
+  entries: Array<{ accountName: string; debit?: number; credit?: number }>
+): string {
   const canonical = JSON.stringify(
-    { closeSessionId, entries: entries.map((e) => ({ n: e.accountName, d: e.debit ?? 0, c: e.credit ?? 0 })).sort((a, b) => a.n.localeCompare(b.n)) },
+    {
+      closeSessionId,
+      standard,
+      engineVersion: ENGINE_VERSION,
+      entries: entries.map((e) => ({ n: e.accountName, d: e.debit ?? 0, c: e.credit ?? 0 })).sort((a, b) => a.n.localeCompare(b.n)),
+    },
     null,
     0
   );
@@ -409,7 +479,12 @@ export async function generateStatements(
     balances: decimalFrom(totalDebits).minus(totalCredits).abs().lessThanOrEqualTo(TOLERANCE),
     errors: [],
   };
-  const result = buildValidatedStatements(trialBalance);
+  const rawResult = buildValidatedStatements(trialBalance);
+  const standard = normalizeAccountingStandard(session.standard);
+  const result = {
+    ...rawResult,
+    ...applyPresentationReferences(standard, rawResult.balanceSheet, rawResult.profitAndLoss),
+  };
   const priorTB = await getPriorPeriodAdjustedTB(pool, tenantId, session.entityId, session.periodEnd);
   const priorBS = priorTB ? buildBalanceSheet(priorTB.entries) : undefined;
   const cashFlowStatement = buildCashFlowStatement(trialBalance, result.profitAndLoss, priorTB ?? undefined);
@@ -420,7 +495,7 @@ export async function generateStatements(
     cashFlowStatement,
     equityStatement
   );
-  const inputHash = hashStatementInput(closeSessionId, entries);
+  const inputHash = hashStatementInput(closeSessionId, standard, entries);
   const pkg = await withTransaction(pool, async (client) => {
     const tx = client as unknown as Pool;
     const nextVersion = (await repo.getMaxVersionByCloseSessionId(tx, tenantId, closeSessionId)) + 1;
@@ -432,7 +507,11 @@ export async function generateStatements(
       generatedBy: opts?.generatedBy,
       status: opts?.status ?? 'draft',
       engineVersion: ENGINE_VERSION,
-      ruleVersionsSnapshot: opts?.ruleVersionsSnapshot,
+      ruleVersionsSnapshot: {
+        ...(opts?.ruleVersionsSnapshot ?? {}),
+        accountingStandard: standard,
+        presentationReferences: true,
+      },
       validationResults,
     });
     const lines = flattenToLines(id, result.balanceSheet, result.profitAndLoss, cashFlowStatement, equityStatement);
@@ -595,6 +674,7 @@ async function getPriorPeriodStatementPackage(
      JOIN close_sessions cs ON cs.id = sp.close_session_id
      WHERE cs.tenant_id = $1 AND cs.entity_id = $2
        AND cs.period_end < $3
+       AND cs.status IN ('certified', 'subsequent_events_review', 'locked')
      ORDER BY cs.period_end DESC, sp.generated_at DESC
      LIMIT 1`,
     [tenantId, entityId, currentPeriodEnd]
@@ -609,10 +689,11 @@ export async function getStatementPackageWithLines(
   tenantId: string,
   id: string,
   includePrior?: boolean
-): Promise<{ package: StatementPackage; lines: StatementLine[] } | null> {
+): Promise<{ package: StatementPackage; lines: StatementLine[]; priorPackageId?: string } | null> {
   const pkg = await repo.getStatementPackageById(pool, tenantId, id);
   if (!pkg) return null;
   const lines = await repo.listStatementLinesByPackageId(pool, id);
+  let priorPackageId: string | undefined;
 
   if (includePrior) {
     const session = await getSession(pool, tenantId, pkg.closeSessionId);
@@ -626,31 +707,28 @@ export async function getStatementPackageWithLines(
       const priorLines = priorPkg
         ? await repo.listStatementLinesByPackageId(pool, priorPkg.id)
         : [];
+      priorPackageId = priorPkg?.id;
       const priorByFs = new Map(priorLines.map((l) => [l.fsLineId, l]));
-      for (const line of lines) {
-        const prior = priorByFs.get(line.fsLineId);
-        const priorAmount = prior ? normalizeMoney(prior.amount) : '0.00';
-        const current = decimalFrom(line.amount);
-        const priorDec = decimalFrom(priorAmount);
-        const changeAmount = current.minus(priorDec).toDecimalPlaces(2).toString();
-        const changePercent =
-          priorDec.isZero() || priorDec.abs().isZero()
-            ? null
-            : current.minus(priorDec).div(priorDec.abs()).times(100).toDecimalPlaces(2).toString();
-        (line as StatementLine & { priorAmount?: string; changeAmount?: string; changePercent?: string | null }).priorAmount = priorAmount;
-        (line as StatementLine & { priorAmount?: string; changeAmount?: string; changePercent?: string | null }).changeAmount = changeAmount;
-        (line as StatementLine & { priorAmount?: string; changeAmount?: string; changePercent?: string | null }).changePercent = changePercent;
-      }
-    } else {
-      for (const line of lines) {
-        (line as StatementLine & { priorAmount?: string; changeAmount?: string; changePercent?: string | null }).priorAmount = '0.00';
-        (line as StatementLine & { priorAmount?: string; changeAmount?: string; changePercent?: string | null }).changeAmount = normalizeMoney(line.amount);
-        (line as StatementLine & { priorAmount?: string; changeAmount?: string; changePercent?: string | null }).changePercent = null;
+      if (priorPkg) {
+        for (const line of lines) {
+          const prior = priorByFs.get(line.fsLineId);
+          const priorAmount = prior ? normalizeMoney(prior.amount) : '0.00';
+          const current = decimalFrom(line.amount);
+          const priorDec = decimalFrom(priorAmount);
+          const changeAmount = current.minus(priorDec).toDecimalPlaces(2).toString();
+          const changePercent =
+            priorDec.isZero() || priorDec.abs().isZero()
+              ? null
+              : current.minus(priorDec).div(priorDec.abs()).times(100).toDecimalPlaces(2).toString();
+          (line as StatementLine & { priorAmount?: string; changeAmount?: string; changePercent?: string | null }).priorAmount = priorAmount;
+          (line as StatementLine & { priorAmount?: string; changeAmount?: string; changePercent?: string | null }).changeAmount = changeAmount;
+          (line as StatementLine & { priorAmount?: string; changeAmount?: string; changePercent?: string | null }).changePercent = changePercent;
+        }
       }
     }
   }
 
-  return { package: pkg, lines };
+  return { package: pkg, lines, ...(priorPackageId && { priorPackageId }) };
 }
 
 export async function listStatementPackages(

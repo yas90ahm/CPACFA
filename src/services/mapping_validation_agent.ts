@@ -21,6 +21,11 @@ import type { Pool } from 'pg';
 import { assertNoNumericAmountsInAgentOutput } from '../llm/guardrails.js';
 import { searchXBRL } from './xbrl_search_service.js';
 import { listFsTaxonomyLines } from '../db/repositories/fs_taxonomy_repository.js';
+import { getCloseSessionById } from '../db/repositories/close_session_repository.js';
+import {
+  normalizeAccountingStandard,
+} from '../constants/accounting/presentation_references.js';
+import type { AccountingStandard } from '../constants/accounting/standards_registry.js';
 
 // ── Types ──
 
@@ -57,7 +62,7 @@ export interface CorrectionProposal {
   mismatchEvidence: string;
   reasoning: string;
   confidence: number;
-  ascReference: string | null;
+  frameworkReference: string | null;
   xbrlElementId: string | null;
   xbrlLabel: string | null;
   status: 'pending';
@@ -249,6 +254,14 @@ export async function runValidationAgent(
     };
   }
 
+  const closeSession = await getCloseSessionById(pool, tenantId, closeSessionId);
+  if (!closeSession) {
+    throw new Error(`Close session ${closeSessionId} not found for mapping validation`);
+  }
+  const standard = normalizeAccountingStandard(closeSession.standard);
+  const frameworkLabel = frameworkName(standard);
+  const referenceExample = frameworkReferenceExample(standard);
+
   // Build taxonomy lookup
   const fsLines = await listFsTaxonomyLines(pool);
   const fsById = new Map(fsLines.map((l) => [l.id, l]));
@@ -318,7 +331,7 @@ export async function runValidationAgent(
   }
 
   // Step 3: AI batch proposal (words only, no amounts)
-  let aiProposals = new Map<string, { fsLineId: string; reasoning: string; confidence: number; ascRef: string | null }>();
+  let aiProposals = new Map<string, { fsLineId: string; reasoning: string; confidence: number; frameworkRef: string | null }>();
 
   try {
     const { callAIWithSchema } = await import('../ai/ai_client.js');
@@ -349,13 +362,13 @@ ${xbrlCandidates || '    (none)'}${hints.length > 0 ? '\n  Hints:\n' + hints.map
       .map((l) => `${l.id}: "${l.name}" (${l.statement}, ${l.normalBalance}-normal)`)
       .join('\n');
 
-    const userPrompt = `You are an expert CPA reviewing account mappings for a financial close.
+    const userPrompt = `You are an expert ${frameworkLabel} accountant reviewing account mappings for a financial close.
 
 Each account below has a MISMATCH between its current mapping and its actual balance behavior.
 Your job is to:
-1. Explain WHY the current mapping is wrong (cite the specific accounting principle)
+1. Explain WHY the current mapping is wrong using only ${frameworkLabel} concepts
 2. Propose the CORRECT mapping from the Sabit taxonomy
-3. Provide your confidence level
+3. Provide your confidence level and, only when relevant, a ${frameworkLabel} reference
 
 Accounting rules to apply:
 - Assets have debit-normal balances (A=L+E, debits on left)
@@ -374,17 +387,17 @@ SABIT TAXONOMY (pick proposed_fs_line_id from these):
 ${taxonomyBlock}
 
 Respond with JSON only:
-{"proposals":[{"account_code":"...","proposed_fs_line_id":"...","reasoning":"...","confidence":0.0-1.0,"asc_reference":"ASC xxx-xx-xx-xx or null"}]}`;
+{"proposals":[{"account_code":"...","proposed_fs_line_id":"...","reasoning":"...","confidence":0.0-1.0,"framework_reference":"${referenceExample} or null"}]}`;
 
-    const systemPrompt = `You are a US GAAP expert CPA. You review account-to-reporting-line mappings and correct mismatches. You NEVER produce dollar amounts. You ONLY output JSON with corrected mappings and accounting reasoning. Be specific about which ASC codification supports your correction.`;
+    const systemPrompt = `You are an expert ${frameworkLabel} accountant. You review account-to-reporting-line mappings and correct mismatches. You NEVER produce dollar amounts. You ONLY output JSON with corrected mappings and accounting reasoning. Do not cite or apply a different reporting framework.`;
 
     const ProposalSchema = z.object({
       proposals: z.array(z.object({
         account_code: z.string(),
         proposed_fs_line_id: z.string(),
         reasoning: z.string(),
-        confidence: z.number(),
-        asc_reference: z.string().nullable(),
+        confidence: z.number().min(0).max(1),
+        framework_reference: z.string().nullable(),
       })),
     });
 
@@ -392,13 +405,15 @@ Respond with JSON only:
       pool,
       tenantId,
       pillar: 'mapping_agent',
-      promptVersion: 'mapping_validation_agent_v1',
+      promptVersion: 'mapping_validation_agent_v2',
       systemPrompt,
       userPrompt,
       schema: ProposalSchema,
+      closeSessionId,
       requestJson: {
         pillar: 'mapping_validation_agent',
         suspectCount: suspects.length,
+        accountingStandard: standard,
       },
     });
 
@@ -406,12 +421,15 @@ Respond with JSON only:
       // Layer 3 guardrail: verify no dollar amounts leaked into AI output
       assertNoNumericAmountsInAgentOutput(JSON.stringify(result.parsed), 'mapping_validation_agent');
       for (const p of result.parsed.proposals) {
-        if (fsById.has(p.proposed_fs_line_id)) {
+        if (
+          fsById.has(p.proposed_fs_line_id)
+          && isFrameworkCompatibleAgentText(standard, p.reasoning, p.framework_reference)
+        ) {
           aiProposals.set(p.account_code, {
             fsLineId: p.proposed_fs_line_id,
             reasoning: p.reasoning,
             confidence: p.confidence,
-            ascRef: p.asc_reference,
+            frameworkRef: p.framework_reference,
           });
         }
       }
@@ -432,7 +450,7 @@ Respond with JSON only:
     let proposedFsLineName: string | null;
     let reasoning: string;
     let confidence: number;
-    let ascRef: string | null = null;
+    let frameworkRef: string | null = null;
     let xbrlId: string | null = null;
     let xbrlLabel: string | null = null;
 
@@ -442,7 +460,7 @@ Respond with JSON only:
       proposedFsLineName = fsById.get(aiPick.fsLineId)?.name ?? null;
       reasoning = aiPick.reasoning;
       confidence = aiPick.confidence;
-      ascRef = aiPick.ascRef;
+      frameworkRef = aiPick.frameworkRef;
     } else if (learningPick) {
       // Learning loop has a correction
       proposedFsLineId = learningPick.fsLineId;
@@ -485,7 +503,7 @@ Respond with JSON only:
       mismatchEvidence: s.evidence,
       reasoning,
       confidence,
-      ascReference: ascRef,
+      frameworkReference: frameworkRef,
       xbrlElementId: xbrlId,
       xbrlLabel,
       status: 'pending',
@@ -507,7 +525,7 @@ Respond with JSON only:
           s.currentFsLineId, s.currentFsLineName,
           proposedFsLineId, proposedFsLineName,
           s.mismatchType, s.evidence,
-          reasoning, confidence, ascRef,
+          reasoning, confidence, frameworkRef,
           xbrlId, xbrlLabel,
         ]
       );
@@ -522,6 +540,32 @@ Respond with JSON only:
     accountsValidated: mappedAccounts.length,
     issuesFound: suspects.length,
   };
+}
+
+function frameworkName(standard: AccountingStandard): string {
+  if (standard === 'ASPE') return 'Canadian ASPE';
+  if (standard === 'IFRS') return 'IFRS';
+  if (standard === 'FRS102') return 'UK FRS 102';
+  return 'U.S. GAAP';
+}
+
+function frameworkReferenceExample(standard: AccountingStandard): string {
+  if (standard === 'ASPE') return 'ASPE Section 1521';
+  if (standard === 'IFRS') return 'IAS 1';
+  if (standard === 'FRS102') return 'FRS 102 Section 4';
+  return 'ASC 210';
+}
+
+export function isFrameworkCompatibleAgentText(
+  standard: AccountingStandard,
+  reasoning: string,
+  reference: string | null
+): boolean {
+  const text = `${reasoning} ${reference ?? ''}`;
+  if (standard === 'ASPE') return !/\b(?:ASC|FASB|IAS|IFRS|FRS\s*102)\b/i.test(text);
+  if (standard === 'IFRS') return !/\b(?:ASC|FASB|ASPE|FRS\s*102)\b/i.test(text);
+  if (standard === 'FRS102') return !/\b(?:ASC|FASB|ASPE|IAS|IFRS)\b/i.test(text);
+  return !/\b(?:ASPE|IAS|IFRS|FRS\s*102)\b/i.test(text);
 }
 
 /** Normalize account name for pattern matching: lowercase, strip numbers and special chars */

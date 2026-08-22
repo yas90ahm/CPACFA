@@ -150,6 +150,7 @@ describe('NetSuiteAdapter', () => {
         connectionId: 'conn-ns-1',
         date: '2024-03-31',
         memo: 'Monthly depreciation entry',
+        idempotencyKey: 'sabit-approved-je-1',
         lines: [
           { accountCode: '6000', accountName: 'Depreciation', debit: 12500, credit: 0, description: 'Fixed asset' },
           { accountCode: '1500', accountName: 'Accum Depr', debit: 0, credit: 12500, description: 'Fixed asset' },
@@ -169,6 +170,7 @@ describe('NetSuiteAdapter', () => {
       expect(body.line.items[0].account.number).toBe('6000');
       expect(body.line.items[0].debit).toBe(12500);
       expect(body.line.items[1].credit).toBe(12500);
+      expect(reqs[0].headers['X-NetSuite-idempotency-key']).toBe('sabit-approved-je-1');
     });
 
     it('returns error on 400 validation failure', async () => {

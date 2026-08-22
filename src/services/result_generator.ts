@@ -221,7 +221,12 @@ export async function step1CPA(
         };
       }
       const res = await generateStatements(trialBalance, standard, stmtOpts);
-      const pev = runPlanExecuteVerify({ trialBalance, balanceSheet: res.balanceSheet, profitAndLoss: res.profitAndLoss });
+      const pev = runPlanExecuteVerify({
+        trialBalance,
+        balanceSheet: res.balanceSheet,
+        profitAndLoss: res.profitAndLoss,
+        standard,
+      });
       if (!pev.verification.passed) {
         throw new Error(`Verification failed: ${pev.verification.checks.join('; ')}. Statements cannot be returned.`);
       }

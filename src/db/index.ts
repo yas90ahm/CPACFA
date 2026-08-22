@@ -359,6 +359,13 @@ const TENANT_MIGRATION_FILES: { version: number; file: string }[] = [
   { version: 218, file: '218_module_proposal_na_reason.sql' },
   { version: 219, file: '219_audit_checkpoint_entry_id_text.sql' },
   { version: 220, file: '220_close_session_status_constraint.sql' },
+  { version: 222, file: '222_erp_mapping_profiles.sql' },
+  { version: 223, file: '223_erp_mapping_templates.sql' },
+  { version: 224, file: '224_sage_intacct_provider.sql' },
+  { version: 225, file: '225_close_cycle_automation.sql' },
+  { version: 226, file: '226_approved_erp_je_writeback.sql' },
+  { version: 227, file: '227_governed_close_runbooks.sql' },
+  { version: 228, file: '228_recursive_accounting_memory.sql' },
 ];
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 const TENANT_MIGRATION_LOCK_KEY = 0x53414249; // "SABI"

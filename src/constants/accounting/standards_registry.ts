@@ -58,8 +58,8 @@ export const ASPE_REGISTRY: StandardsRegistryEntry = {
   leaseAccounting: [
     {
       id: 'aspe-lease-1',
-      title: 'Operating vs finance lease classification',
-      description: 'Lessees classify leases as operating or finance. Operating leases are off-balance-sheet (rent expense). No single-model capitalization like IFRS 16.',
+      title: 'Operating vs capital lease classification',
+      description: 'Lessees classify leases as operating or capital leases under the risks-and-rewards model. The engine must not apply the IFRS 16 single-lessee model to an ASPE entity.',
       citation: 'ASPE 3065 Leases',
     },
     {
@@ -72,14 +72,14 @@ export const ASPE_REGISTRY: StandardsRegistryEntry = {
   depreciation: [
     {
       id: 'aspe-dep-1',
-      title: 'Simplified depreciation logic',
-      description: 'Straight-line is common; other methods (declining balance, units of production) permitted. Management chooses method and useful life; no mandatory component approach.',
+      title: 'Systematic amortization over useful life',
+      description: 'Management documents the useful life, residual value, and amortization method that reflects the expected consumption pattern. The engine does not infer these accounting estimates.',
       citation: 'ASPE 3061.09–.12',
     },
     {
       id: 'aspe-dep-2',
-      title: 'No component depreciation required',
-      description: 'Components of an asset may be depreciated as a single unit; component-level depreciation is optional.',
+      title: 'Policy inputs and review required',
+      description: 'Asset components and amortization periods are applied from the approved fixed-asset policy and register and remain subject to reviewer approval.',
       citation: 'ASPE 3061',
     },
   ],
@@ -291,7 +291,8 @@ export function requiresLeaseLiabilityCalculation(standard: AccountingStandard):
   return standard === 'IFRS' || standard === 'US_GAAP';
 }
 
-/** Check if the standard uses simplified depreciation (ASPE-style). */
+/** @deprecated No framework should cause the engine to invent a depreciation policy. */
 export function usesSimplifiedDepreciation(standard: AccountingStandard): boolean {
-  return standard === 'ASPE';
+  void standard;
+  return false;
 }

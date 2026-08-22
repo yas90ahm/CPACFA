@@ -47,5 +47,6 @@ npm-debug.log*
 *_REPORT.md
 STATE_OF_THE_APP.md
 tmp_login.json
+demo/meridian_*.csv
 data/evidence/
 data/evidence-test/

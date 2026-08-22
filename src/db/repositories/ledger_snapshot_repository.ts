@@ -97,3 +97,32 @@ export async function getLatestSnapshotByCloseSessionId(
   if (r.rows.length === 0) return null;
   return rowToSnapshot(r.rows[0]);
 }
+
+/**
+ * Return the immediately preceding certified snapshot for the same tenant and
+ * entity. Draft, reopened, and cross-entity periods are intentionally excluded.
+ */
+export async function getPriorCertifiedSnapshotForEntity(
+  pool: Queryable,
+  tenantId: string,
+  entityId: string,
+  currentPeriodEnd: string
+): Promise<LedgerSnapshot | null> {
+  const r = await pool.query<LedgerSnapshotRow>(
+    `SELECT ls.id, ls.tenant_id, ls.period_label, ls.created_at, ls.created_by, ls.source,
+      ls.snapshot_payload_json, ls.snapshot_hash, ls.hash_version, ls.close_session_id
+     FROM close_sessions cs
+     JOIN ledger_snapshots ls
+       ON ls.id = cs.certified_snapshot_id AND ls.tenant_id = cs.tenant_id
+     WHERE cs.tenant_id = $1
+       AND cs.entity_id = $2
+       AND cs.period_end < $3
+       AND cs.status IN ('certified', 'subsequent_events_review', 'locked')
+       AND cs.certified_snapshot_id IS NOT NULL
+     ORDER BY cs.period_end DESC
+     LIMIT 1`,
+    [tenantId, entityId, currentPeriodEnd]
+  );
+  const row = r.rows[0];
+  return row ? rowToSnapshot(row) : null;
+}

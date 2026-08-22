@@ -12,6 +12,7 @@ import { getAIModel, getAITimeoutMs } from './ai_config.js';
 export interface CallAIWithSchemaParams<T> {
   pool: Pool;
   tenantId: string;
+  closeSessionId?: string;
   pillar: string;
   promptVersion: string;
   systemPrompt: string;
@@ -87,6 +88,7 @@ async function _callAIWithSchemaImpl<T>(params: CallAIWithSchemaParams<T>): Prom
   try {
     const logResult = await insertCallLog(pool, {
       tenantId,
+      closeSessionId: params.closeSessionId,
       pillar,
       promptVersion,
       model,

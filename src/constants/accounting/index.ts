@@ -23,6 +23,12 @@ export {
   getFxTopicStandard,
   resolveLeaseStandard,
 } from './topic_standard_map.js';
+export {
+  applyEntryPresentationReferences,
+  applyPresentationReferences,
+  getPresentationReferences,
+  normalizeAccountingStandard,
+} from './presentation_references.js';
 export type {
   LeaseTopicStandard,
   RevenueTopicStandard,

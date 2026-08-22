@@ -7,6 +7,7 @@ import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { send500 } from '../../lib/errorHandler.js';
 import { guardSessionWritable } from '../../lib/session_write_guard.js';
+import { requireSessionAccountingFramework } from '../../lib/session_framework_guard.js';
 import { getCloseSessionById } from '../../db/repositories/close_session_repository.js';
 import {
   listGrants,
@@ -21,6 +22,10 @@ import {
 } from '../../services/stock_compensation_service.js';
 
 const router = Router();
+router.use(
+  '/sessions/:sessionId/stock-compensation/compute',
+  requireSessionAccountingFramework(['US_GAAP'], 'Legacy ASC 718 stock-compensation calculation')
+);
 
 /** GET /sessions/:sessionId/stock-compensation/grants — List all grants. */
 router.get('/sessions/:sessionId/stock-compensation/grants', async (req: Request, res: Response) => {

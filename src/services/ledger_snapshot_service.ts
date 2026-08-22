@@ -30,6 +30,7 @@ import {
   HASH_VERSION_CANONICAL_MONEY,
   HASH_VERSION_WITH_EVIDENCE_MANIFEST,
   HASH_VERSION_WITH_GL,
+  HASH_VERSION_WITH_CERTIFIED_CONTEXT,
 } from '../lib/snapshot_hash.js';
 import { canonicalStringifyKeysOnly } from '../lib/canonical_json.js';
 import { round2 } from '../utils/decimal.js';
@@ -41,6 +42,8 @@ export const SNAPSHOT_PAYLOAD_ALLOWED_TOP_LEVEL_KEYS = new Set<string>([
   'entries',
   'evidenceManifest',
   'generalLedger',
+  'comparativeTrialBalance',
+  'accountingContext',
 ]);
 
 /** Required top-level key; every payload must have trialBalance. */
@@ -81,6 +84,21 @@ export function buildSnapshotPayloadFromInput(input: CreateLedgerSnapshotInput):
   if (input.generalLedger != null && input.generalLedger.length > 0) {
     payload.generalLedger = input.generalLedger;
   }
+  if (input.comparativeTrialBalance != null) {
+    payload.comparativeTrialBalance = {
+      periodLabel: input.comparativeTrialBalance.periodLabel,
+      sourceSnapshotId: input.comparativeTrialBalance.sourceSnapshotId,
+      sourceSnapshotHash: input.comparativeTrialBalance.sourceSnapshotHash,
+      entries: input.comparativeTrialBalance.entries.map(toSnapshotEntry),
+      totalDebits: round2(input.comparativeTrialBalance.totalDebits),
+      totalCredits: round2(input.comparativeTrialBalance.totalCredits),
+    };
+  }
+  if (input.accountingContext != null) {
+    payload.accountingContext = {
+      standard: String(input.accountingContext.standard).trim(),
+    };
+  }
   return payload;
 }
 
@@ -93,7 +111,12 @@ export async function createSnapshotFromTrialBalanceAndEntries(
 ): Promise<LedgerSnapshot> {
   const payload = buildSnapshotPayloadFromInput(input);
   const hasGL = payload.generalLedger != null && payload.generalLedger.length > 0;
-  const hashVersion = hasGL ? 4 : getHashVersionForStorage();
+  const hasCertifiedContext = payload.comparativeTrialBalance != null || payload.accountingContext != null;
+  const hashVersion = hasCertifiedContext
+    ? HASH_VERSION_WITH_CERTIFIED_CONTEXT
+    : hasGL
+      ? HASH_VERSION_WITH_GL
+      : getHashVersionForStorage();
   const snapshotHash = hashSnapshotPayload(payload, { hashVersion });
 
   return insertLedgerSnapshot(client, {
@@ -119,7 +142,8 @@ export function verifySnapshotHash(snapshot: LedgerSnapshot): boolean {
     v !== HASH_VERSION_LEGACY &&
     v !== HASH_VERSION_CANONICAL_MONEY &&
     v !== HASH_VERSION_WITH_EVIDENCE_MANIFEST &&
-    v !== HASH_VERSION_WITH_GL
+    v !== HASH_VERSION_WITH_GL &&
+    v !== HASH_VERSION_WITH_CERTIFIED_CONTEXT
   ) {
     return false;
   }
@@ -149,4 +173,3 @@ export function recomputeAndVerifySnapshotHash(snapshot: LedgerSnapshot): {
   const hashMatches = verifySnapshotHash(snapshot);
   return { recomputedHash, hashMatches };
 }
-

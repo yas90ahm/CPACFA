@@ -27,10 +27,11 @@ export type CashFlowCategory = 'operating' | 'investing' | 'financing' | 'not_ap
  * cash_flow_class from coa_mapping_rules. Null/undefined means use inference.
  */
 export type CfClassificationMap = Map<string, CashFlowClass>;
+type NormalBalance = 'debit' | 'credit';
 
 /**
- * Indirect method cash flow per ASC 230 (Statement of Cash Flows) / IAS 7.
- * Non-cash adjustments (D&A, DTA/DTL, unrealized FX, SBC) follow ASC 230-10-45-28.
+ * Indirect-method cash-flow construction from current and comparative ledgers.
+ * The calculation is framework-neutral; presentation references are applied elsewhere.
  *
  * When cfClassificationMap is provided, entries with an explicit classification
  * are separated first and placed into the correct section. Remaining entries
@@ -42,9 +43,12 @@ export function buildCashFlowStatement(
   priorTrialBalance?: TrialBalanceResult,
   cfClassificationMap?: CfClassificationMap
 ): CashFlowStatement {
-  const endingCash = getNetAmount(trialBalance.entries, /cash|bank/i);
-  // First close: no prior period → beginning cash is $0 (GAAP: company starts with zero cash)
-  const beginningCash = priorTrialBalance ? getNetAmount(priorTrialBalance.entries, /cash|bank/i) : 0;
+  const endingCash = getNetAmount(trialBalance.entries, /cash|bank/i, 'debit');
+  // A missing comparative balance is not evidence that the entity began with zero cash.
+  // The statement is marked estimated below and downstream close controls must not treat it as complete.
+  const beginningCash = priorTrialBalance
+    ? getNetAmount(priorTrialBalance.entries, /cash|bank/i, 'debit')
+    : 0;
   const netIncome = profitAndLoss.netIncome ?? 0;
 
   // --- Explicit cf_classification overrides ---
@@ -95,23 +99,23 @@ export function buildCashFlowStatement(
     : undefined;
 
   const depreciation = sumPLExpense(profitAndLoss, /depreciation|amort/i);
-  // ASC 230-10-45-28: deferred tax (DTA/DTL) — change in balance; reversal sign for operating reconciliation
+  // Deferred tax change: reverse the non-cash balance movement in the operating reconciliation.
   const changeDeferredTax = filteredPriorTB
     ? deltaByRegex(filteredPriorTB, filteredTB, /deferred tax|DTA|DTL|tax asset|tax liability/i)
     : undefined;
-  // ASC 230-10-45-28: unrealized FX — add back expense (reverse P&L effect)
+  // Unrealized FX: reverse the non-cash profit-or-loss effect.
   const unrealizedFX = sumPLExpense(
     profitAndLoss,
     /foreign exchange|fx|currency|translation|unrealized.*gain|unrealized.*loss/i
   );
-  // ASC 230-10-45-28: stock-based compensation — non-cash add-back
+  // Share-based compensation: non-cash add-back.
   const sbc = sumPLExpense(profitAndLoss, /stock.comp|option|RSU|restricted stock|SBC|share.based/i);
 
-  const changeAR = filteredPriorTB ? deltaByRegex(filteredPriorTB, filteredTB, /receivable/i) : undefined;
-  const changeInv = filteredPriorTB ? deltaByRegex(filteredPriorTB, filteredTB, /inventory/i) : undefined;
-  const changeAP = filteredPriorTB ? deltaByRegex(filteredPriorTB, filteredTB, /payable/i) : undefined;
+  const changeAR = filteredPriorTB ? deltaByRegex(filteredPriorTB, filteredTB, /receivable/i, 'debit') : undefined;
+  const changeInv = filteredPriorTB ? deltaByRegex(filteredPriorTB, filteredTB, /inventory/i, 'debit') : undefined;
+  const changeAP = filteredPriorTB ? deltaByRegex(filteredPriorTB, filteredTB, /payable/i, 'credit') : undefined;
 
-  // Operating section: ASC 230 indirect method — Net income, then non-cash adjustments, then working capital
+  // Operating section: net income, non-cash adjustments, then working-capital movements.
   const operating: CashFlowStatement['operating'] = [
     { label: 'Net income', amount: netIncome },
   ];
@@ -130,21 +134,21 @@ export function buildCashFlowStatement(
   const investing: CashFlowStatement['investing'] = [];
   const financing: CashFlowStatement['financing'] = [];
   if (filteredPriorTB) {
-    const changePPE = deltaByRegex(filteredPriorTB, filteredTB, /property|plant|equipment|fixed asset|capital/i);
+    const changePPE = deltaByRegex(filteredPriorTB, filteredTB, /property|plant|equipment|fixed asset/i, 'debit');
     if (changePPE !== 0) {
       investing.push({
         label: changePPE > 0 ? 'Capital expenditures' : 'Proceeds from asset sales',
         amount: -changePPE,
       });
     }
-    const changeDebt = deltaByRegex(filteredPriorTB, filteredTB, /loan|note|debt|credit line|mortgage/i);
+    const changeDebt = deltaByRegex(filteredPriorTB, filteredTB, /loan|note|debt|credit line|mortgage/i, 'credit');
     if (changeDebt !== 0) {
       financing.push({
         label: changeDebt > 0 ? 'Borrowings' : 'Debt repayments',
         amount: changeDebt,
       });
     }
-    const changeEquity = deltaByRegex(filteredPriorTB, filteredTB, /equity|capital|contribution|share/i);
+    const changeEquity = deltaByRegex(filteredPriorTB, filteredTB, /equity|capital|contribution|share/i, 'credit');
     if (changeEquity !== 0) {
       financing.push({
         label: changeEquity > 0 ? 'Equity issued' : 'Distributions / buybacks',
@@ -213,28 +217,38 @@ function sumPLExpense(pl: ProfitAndLoss, re: RegExp): number {
   return sumRound2(pl.expenses.filter((e) => re.test(e.label ?? '')).map((e) => e.amount));
 }
 
-function getNetAmount(entries: TrialBalanceEntry[], re: RegExp): number | undefined {
+function getNetAmount(
+  entries: TrialBalanceEntry[],
+  re: RegExp,
+  fallbackNormalBalance?: NormalBalance
+): number | undefined {
   const match = entries.filter((e) => re.test(e.accountName ?? ''));
   if (!match.length) return undefined;
-  return sumRound2(match.map((e) => normalizeNet(e)));
+  return sumRound2(match.map((e) => normalizeNet(e, fallbackNormalBalance)));
 }
 
 function deltaByRegex(
   prior: TrialBalanceResult,
   current: TrialBalanceResult,
-  re: RegExp
+  re: RegExp,
+  fallbackNormalBalance?: NormalBalance
 ): number {
-  const priorAmt = getNetAmount(prior.entries, re) ?? 0;
-  const currAmt = getNetAmount(current.entries, re) ?? 0;
+  const priorAmt = getNetAmount(prior.entries, re, fallbackNormalBalance) ?? 0;
+  const currAmt = getNetAmount(current.entries, re, fallbackNormalBalance) ?? 0;
   return minus(currAmt, priorAmt);
 }
 
-function normalizeNet(e: TrialBalanceEntry): number {
+function normalizeNet(e: TrialBalanceEntry, fallbackNormalBalance?: NormalBalance): number {
   const net = minus(e.debit, e.credit);
-  if (e.accountType === 'LIABILITY' || e.accountType === 'EQUITY' || e.accountType === 'REVENUE') {
+  const creditNormal =
+    e.accountType === 'LIABILITY' ||
+    e.accountType === 'EQUITY' ||
+    e.accountType === 'REVENUE' ||
+    (e.accountType == null && fallbackNormalBalance === 'credit') ||
+    (e.accountType == null && fallbackNormalBalance == null &&
+      /payable|liabilit|debt|loan|mortgage|equity|capital|retained earnings|revenue|unearned/i.test(e.accountName ?? ''));
+  if (creditNormal) {
     return round2(-net);
   }
   return net;
 }
-
-

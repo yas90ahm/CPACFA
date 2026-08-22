@@ -2,8 +2,7 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { fmtMoney } from '@/lib/money';
 import {
@@ -11,11 +10,8 @@ import {
   AlertCircle,
   AlertTriangle,
   ShieldAlert,
-  Info,
   Pencil,
-  ShieldOff,
   ArrowLeft,
-  Loader2,
   CheckCircle2,
 } from 'lucide-react';
 
@@ -36,6 +32,7 @@ interface Finding {
   severity: 'BLOCK' | 'WARNING' | 'INFO';
   title: string;
   description: string;
+  frameworkReference?: string;
   ascReference?: string;
   recommendation?: string;
 }
@@ -100,11 +97,7 @@ function PageSkeleton() {
 export default function ShadowAuditorPage() {
   const params = useParams();
   const router = useRouter();
-  const queryClient = useQueryClient();
   const sessionId = params.sessionId as string;
-
-  const [showOverride, setShowOverride] = useState(false);
-  const [justification, setJustification] = useState('');
 
   const sessionQuery = useQuery({
     queryKey: ['session', sessionId],
@@ -121,11 +114,11 @@ export default function ShadowAuditorPage() {
   const jesQuery = useQuery({
     queryKey: ['journal-entries', sessionId],
     queryFn: async () => {
-      const data = await apiFetch<{ entries?: JournalEntry[] } | JournalEntry[]>(
+      const data = await apiFetch<{ journalEntries?: JournalEntry[] } | JournalEntry[]>(
         '/api/close/journal-entries',
         { params: { closeSessionId: sessionId } }
       );
-      return Array.isArray(data) ? data : data.entries ?? [];
+      return Array.isArray(data) ? data : data.journalEntries ?? [];
     },
     enabled: !!sessionId,
   });
@@ -157,23 +150,10 @@ export default function ShadowAuditorPage() {
     if (findings.length === 0) {
       findings.push({
         severity: 'BLOCK',
-        title: 'Vesting Schedule Mismatch Detected',
-        description:
-          'The computed stock compensation expense does not align with the vesting schedule on file. ' +
-          'The engine calculated expense based on a 4-year graded vesting schedule, but the grant agreement ' +
-          'specifies cliff vesting at 12 months with monthly vesting thereafter. This results in a potential ' +
-          'overstatement of the current period expense.',
-        ascReference: 'ASC 718-10-30-2',
+        title: 'Posting Control Blocked',
+        description: 'The persisted pre-post control returned a blocking result. Review the journal-entry support and linked close issue before retrying.',
         recommendation:
-          'Adjust the computation to reflect the cliff vesting terms from the grant agreement. ' +
-          'Recompute using the correct schedule before posting.',
-      });
-      findings.push({
-        severity: 'INFO',
-        title: 'Peer Benchmark Note',
-        description:
-          'Stock compensation expense as a percentage of revenue (2.3%) is within the normal range ' +
-          'for PE-backed mid-market SaaS companies (1.5% - 4.0%).',
+          'Correct the source data or support, resolve the associated issue, and run the controlled posting check again.',
       });
     }
   }
@@ -182,34 +162,8 @@ export default function ShadowAuditorPage() {
   const infoFindings = findings.filter((f) => f.severity !== 'BLOCK');
 
   // Module label from the blocked JE
-  const moduleBadge = blockedJe?.moduleRef ?? blockedJe?.sourceModule ?? 'Stock Comp';
-  const jeLabel = blockedJe ? `AJE-${blockedJe.id.slice(0, 3).toUpperCase()}` : 'AJE-026';
-
-  // Override mutation
-  const overrideMutation = useMutation({
-    mutationFn: async () => {
-      if (!blockedJe) return;
-      await apiFetch('/api/close/decision-records', {
-        method: 'POST',
-        body: {
-          closeSessionId: sessionId,
-          journalEntryId: blockedJe.id,
-          decision: 'override',
-          justification,
-          type: 'shadow_auditor_override',
-        },
-      });
-      // Also try to approve the JE
-      try {
-        await apiFetch(`/api/close/journal-entries/${blockedJe.id}/approve`, { method: 'POST' });
-      } catch {
-        // May require additional steps
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['journal-entries', sessionId] });
-    },
-  });
+  const moduleBadge = blockedJe?.moduleRef ?? blockedJe?.sourceModule ?? 'Manual Entry';
+  const jeLabel = blockedJe ? `AJE-${blockedJe.id.slice(0, 3).toUpperCase()}` : 'Journal entry';
 
   return (
     <div className="ml-[260px] min-h-screen bg-[#F5F0E8]">
@@ -282,7 +236,7 @@ export default function ShadowAuditorPage() {
             Severity: BLOCK
           </span>
           <span className="text-sm text-[#F5F0E8]/80">
-            CFO override required
+            Source correction and re-review required
           </span>
         </div>
       )}
@@ -346,7 +300,7 @@ export default function ShadowAuditorPage() {
                       </span>
                     </div>
                     <p className="text-xs text-[#8B7A5E] mt-0.5">
-                      {blockedJe.memo ?? blockedJe.description ?? 'Stock-based compensation expense recognition'}
+                      {blockedJe.memo ?? blockedJe.description ?? 'Journal entry awaiting resolution'}
                     </p>
                   </div>
                 </div>
@@ -424,9 +378,9 @@ export default function ShadowAuditorPage() {
                       <p className="text-xs text-[#2C2416] leading-relaxed mb-2">
                         {finding.description}
                       </p>
-                      {finding.ascReference && (
+                      {(finding.frameworkReference || finding.ascReference) && (
                         <p className="text-xs text-[#8B7A5E] mb-2">
-                          Reference: <span className="font-mono">{finding.ascReference}</span>
+                          Reference: <span className="font-mono">{finding.frameworkReference ?? finding.ascReference}</span>
                         </p>
                       )}
                       {finding.recommendation && (
@@ -494,86 +448,21 @@ export default function ShadowAuditorPage() {
                   </p>
                 </Link>
 
-                {/* CFO Override */}
-                <button
-                  onClick={() => setShowOverride(true)}
-                  className="p-4 rounded-lg border-2 border-[#C44B2B] text-left hover:bg-[#F5E4DE] transition-colors"
+                {/* Review the persisted issue; blocking controls are not bypassable. */}
+                <Link
+                  href={`/close/${sessionId}/review`}
+                  className="p-4 rounded-lg border-2 border-[#8B6914] bg-[#F0E8D0] hover:bg-[#E8DDBF] transition-colors"
                 >
                   <div className="flex items-center gap-2 mb-2">
-                    <ShieldOff size={16} className="text-[#C44B2B]" />
-                    <span className="text-sm font-medium text-[#2C2416]">CFO Override (Requires Justification)</span>
+                    <AlertCircle size={16} className="text-[#8B6914]" />
+                    <span className="text-sm font-medium text-[#2C2416]">Review Linked Close Issue</span>
                   </div>
                   <p className="text-xs text-[#8B7A5E] mt-2">
-                    Override the Shadow Auditor finding and force-post the entry as-is. This action is irreversible.
+                    Document the remediation and resolve the linked issue before the entry is submitted through the posting control again.
                   </p>
-                </button>
+                </Link>
               </div>
             </div>
-
-            {/* Override justification form */}
-            {showOverride && (
-              <div className="bg-[#EDE6D6] border-2 border-[#C44B2B] rounded-lg overflow-hidden">
-                <div className="bg-[#F5E4DE] px-5 py-3 border-b border-[#C44B2B]/20">
-                  <h2 className="text-sm font-medium text-[#C44B2B]">CFO Override Justification</h2>
-                </div>
-                <div className="p-5 space-y-4">
-                  <div>
-                    <label className="block text-xs font-medium text-[#2C2416] mb-1.5">
-                      Written justification (required)
-                    </label>
-                    <textarea
-                      value={justification}
-                      onChange={(e) => setJustification(e.target.value)}
-                      rows={4}
-                      className="w-full border border-[#DDD5C2] rounded-md px-3 py-2 text-sm text-[#2C2416] bg-[#F5F0E8] placeholder:text-[#8B7A5E] focus:outline-none focus:border-[#C44B2B]"
-                      placeholder="Explain why this entry should be posted despite the Shadow Auditor finding..."
-                    />
-                  </div>
-
-                  <div className="flex items-start gap-2 px-3 py-2.5 rounded-md bg-[#F5E4DE]">
-                    <Info size={14} className="text-[#C44B2B] shrink-0 mt-0.5" />
-                    <span className="text-xs text-[#C44B2B]">
-                      This override will be recorded in the tamper-evident audit ledger. The justification, timestamp,
-                      and identity of the approver will be permanently and immutably logged.
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => overrideMutation.mutate()}
-                      disabled={!justification.trim() || overrideMutation.isPending}
-                      className="px-4 py-2 rounded-md text-sm font-medium bg-[#C44B2B] text-[#F5F0E8] hover:bg-[#A33D24] transition-colors disabled:opacity-50 flex items-center gap-2"
-                    >
-                      {overrideMutation.isPending && <Loader2 size={14} className="animate-spin" />}
-                      Override & Post Entry
-                    </button>
-                    <button
-                      onClick={() => {
-                        setShowOverride(false);
-                        setJustification('');
-                      }}
-                      className="px-4 py-2 rounded-md text-sm text-[#8B7A5E] hover:text-[#2C2416] transition-colors"
-                    >
-                      Go Back
-                    </button>
-                  </div>
-
-                  {overrideMutation.isSuccess && (
-                    <div className="px-4 py-2.5 rounded-md bg-[#E0EDE8] text-[#2D6A4F] text-xs font-medium flex items-center gap-2">
-                      <CheckCircle2 size={14} />
-                      Override recorded. Entry posted to the ledger.
-                    </div>
-                  )}
-
-                  {overrideMutation.isError && (
-                    <div className="px-4 py-2.5 rounded-md bg-[#F5E4DE] text-[#C44B2B] text-xs font-medium flex items-center gap-2">
-                      <AlertCircle size={14} />
-                      Failed to record override: {(overrideMutation.error as Error).message}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
         )}
       </main>

@@ -177,6 +177,46 @@ describe('ledger snapshot hash', () => {
     const hWithId = hashSnapshotPayload(withId);
     expect(hNormal).toBe(hWithId);
   });
+
+  it('hash v5 covers the comparative certified TB and reporting framework', () => {
+    const withComparative: LedgerSnapshotPayload = {
+      ...payload(),
+      accountingContext: { standard: 'ASPE' },
+      comparativeTrialBalance: {
+        periodLabel: '2026-06',
+        sourceSnapshotId: 'snapshot-prior',
+        sourceSnapshotHash: 'a'.repeat(64),
+        entries: [
+          { accountName: 'Cash', debit: 900, credit: 0 },
+          { accountName: 'Equity', debit: 0, credit: 900 },
+        ],
+        totalDebits: 900,
+        totalCredits: 900,
+      },
+    };
+    const changedComparative: LedgerSnapshotPayload = {
+      ...withComparative,
+      comparativeTrialBalance: {
+        ...withComparative.comparativeTrialBalance!,
+        entries: [
+          { accountName: 'Cash', debit: 800, credit: 0 },
+          { accountName: 'Equity', debit: 0, credit: 800 },
+        ],
+        totalDebits: 800,
+        totalCredits: 800,
+      },
+    };
+
+    expect(hashSnapshotPayload(withComparative, { hashVersion: 5 })).not.toBe(
+      hashSnapshotPayload(changedComparative, { hashVersion: 5 })
+    );
+    expect(hashSnapshotPayload(withComparative, { hashVersion: 5 })).not.toBe(
+      hashSnapshotPayload(
+        { ...withComparative, accountingContext: { standard: 'IFRS' } },
+        { hashVersion: 5 }
+      )
+    );
+  });
 });
 
 describe('snapshot payload structure (drift protection)', () => {
@@ -234,6 +274,36 @@ describe('snapshot payload structure (drift protection)', () => {
     const p = buildSnapshotPayloadFromInput(input);
     assertPayloadTopLevelKeys(p as unknown as Record<string, unknown>);
     expect(Object.keys(p).sort()).toEqual(['entries', 'trialBalance']);
+  });
+
+  it('preserves certified comparative and accounting context in the snapshot payload', () => {
+    const input: CreateLedgerSnapshotInput = {
+      tenantId: 't',
+      periodLabel: '2026-07',
+      source: 'close_session',
+      trialBalance: {
+        entries: [{ accountName: 'Cash', debit: 1000, credit: 0 }],
+        totalDebits: 1000,
+        totalCredits: 1000,
+      },
+      accountingContext: { standard: 'ASPE' },
+      comparativeTrialBalance: {
+        periodLabel: '2026-06',
+        sourceSnapshotId: 'prior',
+        sourceSnapshotHash: 'b'.repeat(64),
+        entries: [{ accountName: 'Cash', debit: 900, credit: 0 }],
+        totalDebits: 900,
+        totalCredits: 900,
+      },
+    };
+    const p = buildSnapshotPayloadFromInput(input);
+
+    assertPayloadTopLevelKeys(p as unknown as Record<string, unknown>);
+    expect(p.accountingContext).toEqual({ standard: 'ASPE' });
+    expect(p.comparativeTrialBalance).toEqual(expect.objectContaining({
+      sourceSnapshotId: 'prior',
+      totalDebits: 900,
+    }));
   });
 
   it('no additional unexpected top-level keys in payload', () => {

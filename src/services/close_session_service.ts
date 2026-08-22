@@ -7,7 +7,7 @@
  * IN_PROGRESS: Active close work (recons, AJEs, statement generation)
  * UNDER_REVIEW: All work complete, senior reviewer examining package
  * CERTIFIED: Human has attested to correctness, snapshot created
- * SUBSEQUENT_EVENTS_REVIEW: ASC 855 review of post-balance-sheet-date events
+ * SUBSEQUENT_EVENTS_REVIEW: framework-specific review of post-balance-sheet-date events
  * LOCKED: Permanent immutability, terminal state
  *
  * Key transitions:
@@ -29,12 +29,15 @@ import { computeReadiness } from './close_checklist_readiness_service.js';
 import { canPerform } from './segregation_service.js';
 import { recordMaterialEvent } from './audit_service.js';
 import { getTrialBalanceForCertification } from './adjusted_trial_balance_service.js';
-import { createSnapshotFromTrialBalanceAndEntries } from './ledger_snapshot_service.js';
+import { createSnapshotFromTrialBalanceAndEntries, verifySnapshotHash } from './ledger_snapshot_service.js';
 import * as glRepository from '../db/repositories/general_ledger_repository.js';
 import { buildEvidenceManifest } from './evidence_manifest_service.js';
 import { checkEvidencePolicyForCertification } from './evidence_policy_service.js';
 import { withTransaction } from '../db/transaction.js';
-import { buildCertifiedStatementsFromSnapshot } from './certified_statements_service.js';
+import {
+  buildCertifiedStatementsFromSnapshot,
+  snapshotPayloadToTrialBalanceResult,
+} from './certified_statements_service.js';
 import { runCrossStatementValidationForCertification } from './cross_statement_validation.js';
 import { buildCertificationArtifact, gatherAiMetadata } from './certification_artifact_service.js';
 import * as certArtifactRepo from '../db/repositories/certification_artifact_repository.js';
@@ -42,7 +45,10 @@ import { verifyChain } from '../db/repositories/audit_ledger_repository.js';
 import { getReadinessGates } from './session_readiness_gates_service.js';
 import { sumRound2 } from '../utils/decimal.js';
 import type { LedgerSnapshotPayload } from '../types/ledger_snapshot.js';
-import { getLedgerSnapshotById } from '../db/repositories/ledger_snapshot_repository.js';
+import {
+  getLedgerSnapshotById,
+  getPriorCertifiedSnapshotForEntity,
+} from '../db/repositories/ledger_snapshot_repository.js';
 import { assertNoAiMutationContext } from '../lib/ai_boundary.js';
 import { createIssue } from './issue_service.js';
 import { getEntitySettings } from './entity_settings_service.js';
@@ -157,7 +163,8 @@ export async function ensureSessionForPeriod(
   pool: Pool,
   tenantId: string,
   entityId: string,
-  periodLabel: string
+  periodLabel: string,
+  options?: { basis?: CreateCloseSessionInput['basis']; standard?: CreateCloseSessionInput['standard'] }
 ): Promise<EnsureSessionForPeriodResult> {
   const bounds = periodLabelToPeriodBounds(periodLabel);
   if (!bounds) {
@@ -168,6 +175,8 @@ export async function ensureSessionForPeriod(
     entityId,
     periodStart: bounds.periodStart,
     periodEnd: bounds.periodEnd,
+    basis: options?.basis,
+    standard: options?.standard,
     status: 'open',
   });
   return result;
@@ -329,10 +338,17 @@ export async function certifyCloseSession(
       );
       adjustedEntries = tbResult.trialBalance;
       hasGL = tbResult.hasGL;
+      if (adjustedEntries.length === 0) {
+        throw new CloseSessionError(
+          'The session-anchored trial balance contains no accounts; certification cannot proceed.',
+          'SESSION_DATA_MISSING'
+        );
+      }
       if (process.env.NODE_ENV !== 'test') {
         console.log(`Certification using TB source: ${tbResult.source}, hasGL: ${hasGL}`);
       }
-    } catch (_e) {
+    } catch (error) {
+      if (error instanceof CloseSessionError) throw error;
       throw new CloseSessionError(
         'No trial balance anchored to session period; run ingest or resolve staging before certifying.',
         'SESSION_DATA_MISSING'
@@ -340,6 +356,21 @@ export async function certifyCloseSession(
     }
     const totalDebits = sumRound2(adjustedEntries.map((e) => e.debit ?? 0));
     const totalCredits = sumRound2(adjustedEntries.map((e) => e.credit ?? 0));
+    const priorCertifiedSnapshot = await getPriorCertifiedSnapshotForEntity(
+      client,
+      input.tenantId,
+      session.entityId,
+      session.periodEnd
+    );
+    if (priorCertifiedSnapshot && !verifySnapshotHash(priorCertifiedSnapshot)) {
+      throw new CloseSessionError(
+        'The prior certified ledger snapshot failed hash verification; comparative statements cannot be certified.',
+        'VALIDATION'
+      );
+    }
+    const priorTrialBalance = priorCertifiedSnapshot
+      ? snapshotPayloadToTrialBalanceResult(priorCertifiedSnapshot.snapshotPayloadJson)
+      : undefined;
     const snapshotPayload: LedgerSnapshotPayload = {
       trialBalance: {
         entries: adjustedEntries.map((e) => ({
@@ -353,6 +384,24 @@ export async function certifyCloseSession(
         totalDebits,
         totalCredits,
       },
+      accountingContext: { standard: session.standard },
+      ...(priorCertifiedSnapshot && priorTrialBalance && {
+        comparativeTrialBalance: {
+          periodLabel: priorCertifiedSnapshot.periodLabel,
+          sourceSnapshotId: priorCertifiedSnapshot.id,
+          sourceSnapshotHash: priorCertifiedSnapshot.snapshotHash,
+          entries: priorTrialBalance.entries.map((entry) => ({
+            accountName: entry.accountName,
+            debit: entry.debit ?? 0,
+            credit: entry.credit ?? 0,
+            ...(entry.accountCode != null && { accountCode: entry.accountCode }),
+            ...(entry.accountType != null && { accountType: entry.accountType }),
+            ...(entry.lineId != null && entry.lineId !== '' && { lineId: entry.lineId }),
+          })),
+          totalDebits: priorTrialBalance.totalDebits,
+          totalCredits: priorTrialBalance.totalCredits,
+        },
+      }),
     };
     let statements;
     try {
@@ -367,7 +416,12 @@ export async function certifyCloseSession(
     // Fetch prior period retained earnings for RE continuity check (non-critical if lookup fails)
     let priorRetainedEarnings: number | null = null;
     try {
-      priorRetainedEarnings = await certArtifactRepo.getPriorPeriodRetainedEarnings(pool, input.tenantId, periodLabel);
+      priorRetainedEarnings = await certArtifactRepo.getPriorPeriodRetainedEarnings(
+        pool,
+        input.tenantId,
+        session.entityId,
+        periodLabel
+      );
     } catch (priorREErr) {
       console.warn('[CERTIFY] Prior period RE lookup failed (non-fatal):', (priorREErr as Error).message);
     }
@@ -411,16 +465,16 @@ export async function certifyCloseSession(
     }
 
     let evidenceManifest: EvidenceManifest | undefined;
-    let evidenceManifestComplete = true;
     try {
       await client.query('SAVEPOINT evidence_manifest');
       evidenceManifest = await buildEvidenceManifest(client, input.tenantId, input.closeSessionId);
       await client.query('RELEASE SAVEPOINT evidence_manifest');
     } catch (manifestErr) {
       await client.query('ROLLBACK TO SAVEPOINT evidence_manifest').catch(() => {});
-      console.warn('[CERTIFY] Evidence manifest build failed (non-fatal):', (manifestErr as Error).message);
-      evidenceManifest = { journalEntries: [] };
-      evidenceManifestComplete = false;
+      throw new CloseSessionError(
+        `Evidence manifest could not be verified and bound to the certified snapshot: ${(manifestErr as Error).message}`,
+        'VALIDATION'
+      );
     }
     let snapshot;
     try {
@@ -444,6 +498,10 @@ export async function certifyCloseSession(
       },
       evidenceManifest,
       ...(generalLedger != null && generalLedger.length > 0 && { generalLedger }),
+      accountingContext: snapshotPayload.accountingContext,
+      ...(snapshotPayload.comparativeTrialBalance && {
+        comparativeTrialBalance: snapshotPayload.comparativeTrialBalance,
+      }),
     });
     } catch (snapErr) {
       console.error('[CERTIFY] Snapshot creation failed:', (snapErr as Error).message, (snapErr as Error).stack?.split('\n').slice(0, 3).join('\n'));
@@ -480,6 +538,12 @@ export async function certifyCloseSession(
       await client.query('SAVEPOINT verify_chain');
       const auditChainResult = await verifyChain(client, input.tenantId);
       await client.query('RELEASE SAVEPOINT verify_chain');
+      if (!auditChainResult.valid) {
+        throw new CloseSessionError(
+          `Audit ledger integrity verification failed during certification: ${auditChainResult.message ?? 'hash chain mismatch'}`,
+          'VALIDATION'
+        );
+      }
       const auditChainVerified = auditChainResult.valid;
       let aiMetadata;
       try {
@@ -510,7 +574,7 @@ export async function certifyCloseSession(
         })),
         aiMetadata,
         gateSnapshot,
-        evidenceManifestComplete,
+        evidenceManifestComplete: true,
         auditChainVerified,
       });
       const inserted = await certArtifactRepo.insertCertificationArtifact(client, {
@@ -1066,6 +1130,7 @@ export async function advanceSession(
           const priorRE = await certArtifactRepo.getPriorPeriodRetainedEarnings(
             client as unknown as Pool,
             input.tenantId,
+            currentSession.entityId,
             periodLabel
           );
           if (priorRE !== null) {
@@ -1109,8 +1174,14 @@ export async function advanceSession(
       return currentSession;
     });
 
-    // Auto-propose accounting modules AFTER transaction commits (non-fatal failures must not roll back status change)
-    if (current.status === 'in_progress' && session.status === 'open') {
+    // Auto-propose the existing ASC-based accounting modules only for GAAP sessions.
+    // ASPE/IFRS sessions still receive framework-neutral close setup above, but must
+    // never inherit U.S.-specific recognition rules or tax-rate fallbacks.
+    if (
+      current.status === 'in_progress' &&
+      session.status === 'open' &&
+      current.standard.toUpperCase() === 'GAAP'
+    ) {
       try {
         await autoProposModules(
           pool,
@@ -1376,11 +1447,13 @@ async function autoProposModules(
   ];
 
   let proposed = 0;
-  let skipped = 0;
+  let notApplicable = 0;
+  let failed = 0;
   for (const mod of modules) {
     try {
       const result = await mod.fn();
-      proposed++;
+      if (result === null) notApplicable++;
+      else proposed++;
 
       // Store module proposal with computation inputs for HITL review
       try {
@@ -1401,7 +1474,7 @@ async function autoProposModules(
         console.warn('[close] non-fatal: store module proposal failed:', err instanceof Error ? err.message : String(err));
       }
     } catch (e) {
-      skipped++;
+      failed++;
       console.warn(`[autoProposModules] ${mod.name} failed (non-fatal):`, e instanceof Error ? e.message : String(e));
       // Store failed proposal so controller sees it
       try {
@@ -1418,7 +1491,7 @@ async function autoProposModules(
       }
     }
   }
-  console.log(`[autoProposModules] ${proposed} modules proposed, ${skipped} skipped`);
+  console.log(`[autoProposModules] ${proposed} proposed, ${notApplicable} not applicable, ${failed} failed`);
 
   // Emit cascade so readiness gates refresh
   try {
@@ -1429,7 +1502,7 @@ async function autoProposModules(
       entity_id: entityId,
       triggered_by: 'autoProposModules',
       affected_accounts: [],
-      details: { proposed, skipped },
+      details: { proposed, notApplicable, failed },
     });
   } catch (err) {
     console.warn('[close] non-fatal: post-module cascade failed:', err instanceof Error ? err.message : String(err));
@@ -1443,7 +1516,7 @@ function getModuleStandard(name: string): string {
     debt_accrual: 'Debt', deferred_tax: 'ASC 740', leases: 'ASC 842',
     inventory_reserve: 'ASC 330', stock_compensation: 'ASC 718',
     impairment: 'ASC 350', ap_aging: 'ASC 405', ar_aging: 'ASC 326',
-    segments: 'ASC 280', revenue: 'ASC 606',
+    segments: 'ASC 280', revenue_recognition: 'ASC 606',
   };
   return map[name] ?? '';
 }

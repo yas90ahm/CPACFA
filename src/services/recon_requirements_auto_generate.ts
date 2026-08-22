@@ -9,6 +9,7 @@ import type { Pool } from 'pg';
 import * as coaRepo from '../db/repositories/coa_repository.js';
 import * as reqRepo from '../db/repositories/recon_requirements_repository.js';
 import type { ReconRequirement } from '../types/period_reconciliation.js';
+import { from } from '../utils/decimal.js';
 
 const BALANCE_SHEET_TYPES = ['Asset', 'Liability', 'Equity'] as const;
 
@@ -86,7 +87,7 @@ function inferTolerance(
   accountType: string,
   accountName: string,
   accountCode: string,
-  materialityThreshold: number
+  materialityThreshold: number | string
 ): number {
   const name = (accountName ?? '').toLowerCase();
   const code = (accountCode ?? '').toLowerCase();
@@ -106,13 +107,17 @@ function inferTolerance(
     combined.includes('ar ') ||
     combined.includes('ap ')
   ) {
-    return Math.min(500, Math.max(0, materialityThreshold * 0.01));
+    const tolerance = from(materialityThreshold).times('0.01');
+    if (!tolerance.isFinite() || tolerance.isNegative()) throw new Error('Invalid reconciliation materiality');
+    return (tolerance.greaterThan(500) ? from(500) : tolerance).toDecimalPlaces(2).toNumber();
   }
   if (
     combined.includes('inventory') ||
     combined.includes('stock')
   ) {
-    return Math.min(1000, Math.max(0, materialityThreshold * 0.02));
+    const tolerance = from(materialityThreshold).times('0.02');
+    if (!tolerance.isFinite() || tolerance.isNegative()) throw new Error('Invalid reconciliation materiality');
+    return (tolerance.greaterThan(1000) ? from(1000) : tolerance).toDecimalPlaces(2).toNumber();
   }
   if (
     combined.includes('fixed asset') ||
@@ -122,7 +127,9 @@ function inferTolerance(
   ) {
     return 0;
   }
-  return Math.max(0, materialityThreshold * 0.01);
+  const tolerance = from(materialityThreshold).times('0.01');
+  if (!tolerance.isFinite() || tolerance.isNegative()) throw new Error('Invalid reconciliation materiality');
+  return tolerance.toDecimalPlaces(2).toNumber();
 }
 
 /**
@@ -134,7 +141,7 @@ export async function autoGenerateReconRequirements(
   pool: Pool,
   tenantId: string,
   entityId: string,
-  materialityThreshold: number
+  materialityThreshold: number | string
 ): Promise<ReconRequirement[]> {
   const accounts = await coaRepo.getAccountsByTenant(pool, tenantId);
   const balanceSheet = accounts.filter((a) => isBalanceSheet(a.account_type));

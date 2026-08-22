@@ -10,6 +10,7 @@ import { isSigningConfigured, getPublicKeyB64 } from '../../lib/cert_signing.js'
 import { computeArtifactHash } from '../../services/certification_artifact_service.js';
 import { verifyArtifactHash } from '../../lib/cert_signing.js';
 import { getLedgerSnapshotById } from '../../db/repositories/ledger_snapshot_repository.js';
+import { verifySnapshotHash } from '../../services/ledger_snapshot_service.js';
 import { verifyChain } from '../../db/repositories/audit_ledger_repository.js';
 import type { CertificationArtifactV1 } from '../../types/certification_artifact.js';
 
@@ -92,7 +93,7 @@ router.post('/verify', async (req: Request, res: Response) => {
   if (snapshotHashVersion === 'v1') {
     hashVersionWarnings.push(
       'This artifact was signed under hash version v1 which uses JavaScript floating-point representation. ' +
-      'Float drift may affect hash determinism. Consider re-certification under v4 for maximum integrity.'
+      'Float drift may affect hash determinism. Consider re-certification under the current hash version.'
     );
   }
   if (snapshotHashVersion === 'v2') {
@@ -118,7 +119,8 @@ router.post('/verify', async (req: Request, res: Response) => {
       const snapshot = await getLedgerSnapshotById(pool, tenantId, body.artifact.snapshot.snapshotId);
       if (snapshot) {
         result.snapshotHashMatches =
-          snapshot.snapshotHash === body.artifact.snapshot.snapshotHash;
+          snapshot.snapshotHash === body.artifact.snapshot.snapshotHash &&
+          verifySnapshotHash(snapshot);
       }
       const chainResult = await verifyChain(pool, tenantId);
       result.auditChainVerified =

@@ -316,7 +316,19 @@ router.post('/sessions/:closeSessionId/suggestions/validate-mappings', async (re
     try {
       tbResult = await getTrialBalanceForCertification(pool, tenantId, periodLabel, closeSessionId);
     } catch {
-      res.json({ agent: { suspects: [], proposals: [], accountsValidated: 0, issuesFound: 0 }, crossValidation: { passes: true, issues: [], summary: { totalChecks: 0, passed: 0, critical: 0, warning: 0 } } });
+      res.json({
+        agent: { suspects: [], proposals: [], accountsValidated: 0, issuesFound: 1 },
+        crossValidation: {
+          passes: false,
+          issues: [{
+            check: 'trial_balance_available',
+            severity: 'critical',
+            message: 'Mapping validation could not run because the session trial balance is unavailable.',
+            details: { closeSessionId },
+          }],
+          summary: { totalChecks: 1, passed: 0, critical: 1, warning: 0 },
+        },
+      });
       return;
     }
 
@@ -394,15 +406,18 @@ router.get('/sessions/:closeSessionId/suggestions/learning-stats', async (req: R
     const { getLearningStats } = await import('../../services/mapping_learning_service.js');
     const stats = await getLearningStats(pool, tenantId, session.entityId);
 
-    // Aggregate AI call log stats for the cost dashboard
+    // Aggregate only calls explicitly anchored to this close session. Historical
+    // unanchored rows are intentionally excluded rather than guessed by period.
     let callLog = { totalCalls: 0, totalCost: '$0.00', model: 'N/A', avgLatency: 'N/A', errors: 0 };
     try {
       const costRes = await pool.query<{
         total_calls: string; total_cost: string; avg_latency: string; error_count: string; model: string;
       }>(`SELECT COUNT(*) AS total_calls, COALESCE(SUM(estimated_cost_usd), 0)::text AS total_cost,
           COALESCE(AVG(latency_ms), 0)::text AS avg_latency,
-          COUNT(*) FILTER (WHERE ok = false) AS error_count, MAX(model) AS model
-          FROM ai_call_log WHERE tenant_id = $1`, [tenantId]);
+          COUNT(*) FILTER (WHERE ok = false) AS error_count,
+          COALESCE((ARRAY_AGG(model ORDER BY created_at DESC))[1], 'N/A') AS model
+          FROM ai_call_log WHERE tenant_id = $1 AND close_session_id = $2`,
+        [tenantId, closeSessionId]);
       const row = costRes.rows[0];
       if (row) {
         callLog = {

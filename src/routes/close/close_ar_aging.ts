@@ -7,6 +7,7 @@ import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { send500 } from '../../lib/errorHandler.js';
 import { guardSessionWritable } from '../../lib/session_write_guard.js';
+import { requireSessionAccountingFramework } from '../../lib/session_framework_guard.js';
 import {
   importAgingFromFile,
   getSnapshots,
@@ -18,6 +19,10 @@ import {
 } from '../../services/ar_aging_service.js';
 
 const router = Router();
+const requireUsGaapCecl = requireSessionAccountingFramework(['US_GAAP'], 'CECL allowance calculation');
+router.use('/sessions/:sessionId/cecl-config', requireUsGaapCecl);
+router.use('/sessions/:sessionId/ar-aging/:snapshotId/cecl-compute', requireUsGaapCecl);
+router.use('/sessions/:sessionId/cecl/:computationId/propose', requireUsGaapCecl);
 
 /** GET /sessions/:sessionId/ar-aging — List AR aging snapshots. */
 router.get('/sessions/:sessionId/ar-aging', async (req: Request, res: Response) => {

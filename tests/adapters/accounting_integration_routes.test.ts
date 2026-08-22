@@ -4,10 +4,10 @@
  */
 
 import { describe, it, expect, afterEach } from '@jest/globals';
-import jwt from 'jsonwebtoken';
 import { installMockFetch } from './helpers/mock_fetch.js';
 import { createMockPool } from './helpers/mock_pool.js';
 import { app } from '../../src/server.js';
+import { signToken } from '../../src/auth/index.js';
 import type { IAccountingAdapter } from '../../src/services/accounting_integration_service.js';
 import type {
   AccountingConnection,
@@ -58,16 +58,12 @@ describe('Accounting Integration Service (route-level)', () => {
 
   describe('staged ERP sync', () => {
     it('fails closed until the staging services are implemented', async () => {
-      const authToken = jwt.sign(
-        {
-          userId: 'test-user',
-          tenantId: 'tenant-1',
-          email: 'test@example.com',
-          role: 'approver',
-        },
-        process.env.JWT_SECRET ?? 'test_secret_key',
-        { expiresIn: '1h' }
-      );
+      const authToken = signToken({
+        userId: 'test-user',
+        tenantId: 'tenant-1',
+        email: 'test@example.com',
+        role: 'approver',
+      });
       const server = app.listen(0, '127.0.0.1');
 
       try {

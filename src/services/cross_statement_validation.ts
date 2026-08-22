@@ -54,8 +54,55 @@ export function runCrossStatementValidationForCertification(
       check_name: 'equity_statement_exists',
       check_type: 'hard',
       passes: false,
-      message: 'Statement of Stockholders Equity has not been generated',
+      message: 'Statement of changes in equity has not been generated',
     });
+  }
+
+  if (cf) {
+    const sectionTotal = d(sumRound2([
+      ...cf.operating.map((line) => line.amount),
+      ...cf.investing.map((line) => line.amount),
+      ...cf.financing.map((line) => line.amount),
+    ]));
+    const reportedNetChangeValue = Number(cf.netChangeInCash);
+    const reportedNetChangeIsValid = Number.isFinite(reportedNetChangeValue);
+    const reportedNetChange = d(reportedNetChangeIsValid ? reportedNetChangeValue : 0);
+    const sectionVariance = sectionTotal.minus(reportedNetChange).abs();
+    const sectionsTie = reportedNetChangeIsValid && sectionVariance.lte(TOLERANCE);
+    checks.push({
+      check_name: 'cash_flow_sections_tie',
+      check_type: 'hard',
+      passes: sectionsTie,
+      message: sectionsTie
+        ? null
+        : !reportedNetChangeIsValid
+          ? 'Cash-flow statement is missing a valid net change in cash.'
+          : `Cash-flow sections total $${sectionTotal.toFixed(2)} but reported net change is $${reportedNetChange.toFixed(2)}; variance $${sectionVariance.toFixed(2)}`,
+    });
+
+    if (reportedNetChangeIsValid && cf.beginningCash != null && cf.endingCash != null) {
+      const expectedEnding = d(cf.beginningCash).plus(reportedNetChange).toDecimalPlaces(2);
+      const endingCash = d(cf.endingCash);
+      const rollforwardVariance = expectedEnding.minus(endingCash).abs();
+      const rollforwardTies = rollforwardVariance.lte(TOLERANCE);
+      checks.push({
+        check_name: 'cash_rollforward_tie',
+        check_type: 'hard',
+        passes: rollforwardTies,
+        message: rollforwardTies
+          ? null
+          : `Beginning cash $${d(cf.beginningCash).toFixed(2)} plus net change $${reportedNetChange.toFixed(2)} does not equal ending cash $${endingCash.toFixed(2)}; variance $${rollforwardVariance.toFixed(2)}`,
+      });
+    }
+
+    if (cf.estimated) {
+      checks.push({
+        check_name: 'cash_flow_estimation_warning',
+        check_type: 'soft',
+        passes: false,
+        message: 'Cash-flow statement is estimated from trial-balance data and requires reviewer reconciliation to source cash activity.',
+      });
+    }
   }
 
   // 1. A = L + E
@@ -130,7 +177,7 @@ export function runCrossStatementValidationForCertification(
     });
   }
 
-  // 6. Net income tie: IS net income → SCF operating section start (ASC 230 indirect method)
+  // 6. Net income tie: income-statement net income → indirect cash-flow operating section start.
   if (cf && cf.operating.length > 0) {
     const isNI = d(pl.netIncome);
     const scfNILine = cf.operating.find((line) => /net income/i.test(line.label));

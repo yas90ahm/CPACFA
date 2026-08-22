@@ -42,7 +42,11 @@ export type AuditLedgerEventType =
   | 'subsequent_event_created'
   | 'subsequent_event_disposition_set'
   | 'subsequent_events_confirmed_none'
-  | 'fx_rounding_adjustment';
+  | 'fx_rounding_adjustment'
+  | 'accounting_correction'
+  | 'accounting_memory_change'
+  | 'close_orchestrator_event'
+  | 'audit_log_action';
 
 /** Payload for appending one ledger entry (append-only). */
 export interface AuditLedgerEntryInput {

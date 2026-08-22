@@ -224,6 +224,7 @@ export async function listByTenantAndPeriod(
     timestamp: string;
     beforeState: unknown;
     afterState: unknown;
+    metadata: Record<string, unknown>;
     hash: string;
     previousHash: string | null;
   }>
@@ -266,22 +267,30 @@ export async function listByTenantAndPeriod(
     user_prompt_rationale: string;
     created_by: string | null;
     created_at: string | Date;
+    deterministic_flag_snapshot: unknown;
     before_state: unknown;
     after_state: unknown;
     entry_hash: string;
     previous_entry_hash: string | null;
   }>(sql, params);
-  return r.rows.map((row) => ({
-    id: row.id,
-    eventType: row.event_type,
-    description: row.user_prompt_rationale ?? row.event_type,
-    userId: row.created_by,
-    timestamp: typeof row.created_at === 'string' ? row.created_at : (row.created_at as Date).toISOString(),
-    beforeState: row.before_state,
-    afterState: row.after_state,
-    hash: row.entry_hash,
-    previousHash: row.previous_entry_hash,
-  }));
+  return r.rows.map((row) => {
+    const metadata = row.deterministic_flag_snapshot && typeof row.deterministic_flag_snapshot === 'object'
+      ? row.deterministic_flag_snapshot as Record<string, unknown>
+      : {};
+    const recordedDetail = typeof metadata.detail === 'string' ? metadata.detail : null;
+    return {
+      id: row.id,
+      eventType: row.event_type,
+      description: recordedDetail ?? row.user_prompt_rationale ?? row.event_type,
+      userId: row.created_by,
+      timestamp: typeof row.created_at === 'string' ? row.created_at : (row.created_at as Date).toISOString(),
+      beforeState: row.before_state,
+      afterState: row.after_state,
+      metadata,
+      hash: row.entry_hash,
+      previousHash: row.previous_entry_hash,
+    };
+  });
 }
 
 /** Count ledger entries for tenant/period (for pagination total). */

@@ -18,6 +18,11 @@ import { buildEquityChangesStatement } from './equityChanges.js';
 import { finalIntegrityCheck } from './integrity_check.js';
 import { getRoundingTolerance } from './rules_registry.js';
 import { sumRound2, plus, from, absLt } from '../utils/decimal.js';
+import {
+  applyEntryPresentationReferences,
+  applyPresentationReferences,
+  normalizeAccountingStandard,
+} from '../constants/accounting/presentation_references.js';
 
 /** Thrown when snapshot payload fails final integrity check (Truth Gate). */
 export class CertifiedIntegrityError extends Error {
@@ -71,7 +76,20 @@ export function snapshotPayloadToTrialBalanceResult(payload: LedgerSnapshotPaylo
  */
 export function buildCertifiedStatementsFromSnapshot(payload: LedgerSnapshotPayload): FinancialStatementsOutput {
   const trialBalanceResult = snapshotPayloadToTrialBalanceResult(payload);
-  const result = buildValidatedStatements(trialBalanceResult);
+  const rawResult = buildValidatedStatements(trialBalanceResult);
+  const standard = payload.accountingContext?.standard
+    ? normalizeAccountingStandard(payload.accountingContext.standard)
+    : undefined;
+  const presented = standard
+    ? applyPresentationReferences(standard, rawResult.balanceSheet, rawResult.profitAndLoss)
+    : { balanceSheet: rawResult.balanceSheet, profitAndLoss: rawResult.profitAndLoss };
+  const result = {
+    ...rawResult,
+    ...presented,
+    classifiedEntries: standard
+      ? applyEntryPresentationReferences(standard, rawResult.classifiedEntries)
+      : rawResult.classifiedEntries,
+  };
 
   const tolerance = getRoundingTolerance();
   // totalEquity from buildBalanceSheet already includes Net Income (Revenue - Expense)
@@ -115,9 +133,36 @@ export function buildCertifiedStatementsFromSnapshot(payload: LedgerSnapshotPayl
     throw new CertifiedIntegrityError(finalCheck.error ?? 'Integrity check failed.', 'TRIAL_BALANCE_IMBALANCED');
   }
 
-  // Build Cash Flow and Equity statements for cross-statement validation
-  const cashFlow = buildCashFlowStatement(trialBalanceResult, result.profitAndLoss);
-  const equityChanges = buildEquityChangesStatement(result.balanceSheet, undefined, result.profitAndLoss);
+  // Build comparative roll-forwards only from the entity-scoped certified TB embedded in the snapshot.
+  const comparative = payload.comparativeTrialBalance;
+  const priorTrialBalance: TrialBalanceResult | undefined = comparative
+    ? {
+        entries: comparative.entries.map(snapshotEntryToTrialBalanceEntry),
+        totalDebits: comparative.totalDebits,
+        totalCredits: comparative.totalCredits,
+        balances: absLt(comparative.totalDebits, comparative.totalCredits, tolerance),
+        errors: [],
+      }
+    : undefined;
+  if (priorTrialBalance && !priorTrialBalance.balances) {
+    throw new CertifiedIntegrityError(
+      'Comparative certified trial balance does not balance.',
+      'TRIAL_BALANCE_IMBALANCED'
+    );
+  }
+  const priorBalanceSheet = priorTrialBalance
+    ? buildValidatedStatements(priorTrialBalance).balanceSheet
+    : undefined;
+  const cashFlow = buildCashFlowStatement(
+    trialBalanceResult,
+    result.profitAndLoss,
+    priorTrialBalance
+  );
+  const equityChanges = buildEquityChangesStatement(
+    result.balanceSheet,
+    priorBalanceSheet,
+    result.profitAndLoss
+  );
 
   const now = new Date().toISOString();
   return {
@@ -132,6 +177,7 @@ export function buildCertifiedStatementsFromSnapshot(payload: LedgerSnapshotPayl
     profitAndLoss: result.profitAndLoss,
     cashFlow,
     equityChanges,
+    ...(standard && { standard }),
     reasoningChain: {
       plan: 'certified_snapshot',
       executedAt: now,

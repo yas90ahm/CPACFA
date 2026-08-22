@@ -78,7 +78,7 @@ export async function runAutonomousMapping(
     return {
       totalAccounts: 0, autoAccepted: 0, needsReview: 0,
       reviewRequired: [], correctionProposals: 0,
-      crossValidationPasses: true, crossValidationIssues: 0,
+      crossValidationPasses: false, crossValidationIssues: 1,
       learningSignalsUsed: 0,
     };
   }
@@ -112,8 +112,10 @@ export async function runAutonomousMapping(
 
   let agentSuspectCodes = new Set<string>();
   let correctionProposalCount = 0;
-  let crossValidationPasses = true;
-  let crossValidationIssueCount = 0;
+  // Fail closed: suggestions cannot become auto-recommended until the mapped
+  // trial balance has actually passed the structural validation layer.
+  let crossValidationPasses = false;
+  let crossValidationIssueCount = 1;
 
   try {
     const session = await getCloseSessionById(pool, tenantId, closeSessionId);
@@ -163,7 +165,7 @@ export async function runAutonomousMapping(
              confidence = $3, model_version = 'layer3_ai_validated', tier = $4
              WHERE id = $5 AND tenant_id = $6`,
             [proposal.proposedFsLineId, proposal.proposedFsLineName, proposal.confidence,
-             proposal.ascReference ? `asc:${proposal.ascReference}` : null,
+             proposal.frameworkReference ? `framework:${proposal.frameworkReference}` : null,
              matchingSuggestion.id, tenantId]
           ).catch(() => {});
           // Remove from suspect set since agent corrected it
@@ -187,7 +189,8 @@ export async function runAutonomousMapping(
       crossValidationIssueCount = crossResult.issues.length;
     }
   } catch {
-    // TB not available yet — skip validation layers
+    // TB not available or validation failed — retain the failed default so
+    // every suggestion remains in human review.
   }
 
   // Auto-accept logic: use entity-configured threshold, fallback to 0.80

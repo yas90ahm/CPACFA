@@ -97,5 +97,48 @@ describe('ledger_snapshot_service', () => {
       };
       expect(verifySnapshotHash(s2)).toBe(true);
     });
+
+    it('verifies v5 snapshots and detects comparative TB tampering', () => {
+      const payload = {
+        trialBalance: {
+          entries: [{ accountName: 'Cash', debit: 1000, credit: 0 }, { accountName: 'Equity', debit: 0, credit: 1000 }],
+          totalDebits: 1000,
+          totalCredits: 1000,
+        },
+        accountingContext: { standard: 'ASPE' },
+        comparativeTrialBalance: {
+          periodLabel: '2026-06',
+          sourceSnapshotId: 'prior',
+          sourceSnapshotHash: 'a'.repeat(64),
+          entries: [{ accountName: 'Cash', debit: 900, credit: 0 }, { accountName: 'Equity', debit: 0, credit: 900 }],
+          totalDebits: 900,
+          totalCredits: 900,
+        },
+      };
+      const hashVersion = 5;
+      const s: LedgerSnapshot = {
+        id: 'current',
+        tenantId: 'tenant-1',
+        periodLabel: '2026-07',
+        createdAt: new Date().toISOString(),
+        source: 'close_session',
+        snapshotPayloadJson: payload,
+        snapshotHash: hashSnapshotPayload(payload, { hashVersion }),
+        hashVersion,
+      };
+      expect(verifySnapshotHash(s)).toBe(true);
+
+      const tampered: LedgerSnapshot = {
+        ...s,
+        snapshotPayloadJson: {
+          ...payload,
+          comparativeTrialBalance: {
+            ...payload.comparativeTrialBalance,
+            totalDebits: 901,
+          },
+        },
+      };
+      expect(verifySnapshotHash(tampered)).toBe(false);
+    });
   });
 });

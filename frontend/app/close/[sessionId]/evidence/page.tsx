@@ -1,479 +1,281 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useRef, useState } from 'react';
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
+import type {
+  EvidenceIntegrityStatus,
+  SessionEvidenceFile,
+  SessionEvidenceManifest,
+} from '@/lib/contracts';
 import {
-  FileText,
-  Upload,
-  ShieldCheck,
   AlertTriangle,
   CheckCircle2,
-  XCircle,
-  Loader2,
-  Link as LinkIcon,
+  ChevronRight,
+  FileText,
   Hash,
-  User,
-  Calendar,
-  Lock,
+  Loader2,
+  Paperclip,
+  ScrollText,
+  Upload,
 } from 'lucide-react';
 
-/* ------------------------------------------------------------------ */
-/*  Types                                                              */
-/* ------------------------------------------------------------------ */
+type UploadTarget = { kind: 'reconciliation' | 'journal_entry'; id: string };
 
-interface EvidenceFile {
-  id: string;
-  fileName: string;
-  sha256: string;
-  uploadedBy: string;
-  uploadedAt: string;
-  verified: boolean;
-  category: string;
-  fileUrl?: string;
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-interface ReconEvidence {
-  reconId: string;
-  accountCode: string;
-  accountName: string;
-  file?: EvidenceFile;
-  status: 'verified' | 'upload_required' | 'pending';
-}
-
-interface JEEvidence {
-  jeId: string;
-  entryNumber?: string;
-  description: string;
-  amount: string;
-  isMaterial: boolean;
-  file?: EvidenceFile;
-  status: 'verified' | 'upload_required' | 'pending';
-}
-
-interface EvidenceManifest {
-  files: EvidenceFile[];
-  reconEvidence: ReconEvidence[];
-  jeEvidence: JEEvidence[];
-  stats: {
-    required: number;
-    uploaded: number;
-    missing: number;
-    hashVerified: number;
-    totalFiles: number;
-  };
-}
-
-/* ------------------------------------------------------------------ */
-/*  Stat Card                                                          */
-/* ------------------------------------------------------------------ */
-
-function StatCard({
-  label,
-  value,
-  sub,
-  color,
-  icon: Icon,
-}: {
-  label: string;
-  value: string | number;
-  sub?: string;
-  color?: string;
-  icon: React.ElementType;
-}) {
-  return (
-    <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-5">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-xs text-[#8B7A5E] font-medium uppercase tracking-wide">{label}</span>
-        <Icon size={16} className="text-[#8B7A5E]" />
-      </div>
-      <div className="text-2xl font-medium font-mono" style={{ color: color || '#2C2416' }}>
-        {value}
-      </div>
-      {sub && <div className="text-xs text-[#8B7A5E] mt-1">{sub}</div>}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Status Badge                                                       */
-/* ------------------------------------------------------------------ */
-
-function StatusBadge({ status }: { status: string }) {
+function IntegrityBadge({ status }: { status: EvidenceIntegrityStatus }) {
   if (status === 'verified') {
     return (
-      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded bg-[#E0EDE8] text-[#2D6A4F]">
-        <CheckCircle2 size={12} /> Verified
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-[#2D6A4F]">
+        <CheckCircle2 size={13} /> Re-hash matched
       </span>
     );
   }
-  if (status === 'upload_required') {
+  if (status === 'failed') {
     return (
-      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded bg-[#FDEAE6] text-[#C44B2B]">
-        <XCircle size={12} /> Upload Required
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-[#C44B2B]">
+        <AlertTriangle size={13} /> Integrity failed
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded bg-[#F0E8D0] text-[#8B6914]">
-      <AlertTriangle size={12} /> Pending
+    <span className="inline-flex items-center gap-1 text-xs font-medium text-[#8B6914]">
+      <Hash size={13} /> Hash recorded only
     </span>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Main Page                                                          */
-/* ------------------------------------------------------------------ */
+function FileList({ files }: { files: SessionEvidenceFile[] }) {
+  if (files.length === 0) {
+    return <span className="text-xs text-[#8B7A5E]">No evidence linked</span>;
+  }
+  return (
+    <div className="space-y-2">
+      {files.map((file) => (
+        <div key={file.id} className="rounded border border-[#DDD5C2] bg-[#F5F0E8] px-3 py-2">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="truncate text-sm text-[#2C2416]" title={file.fileName}>{file.fileName}</div>
+              <div className="mt-0.5 text-xs text-[#8B7A5E]">
+                {formatBytes(file.sizeBytes)} · {file.uploadedBy} ·{' '}
+                {new Date(file.createdAt).toLocaleDateString('en-CA')}
+              </div>
+            </div>
+            <IntegrityBadge status={file.integrityStatus} />
+          </div>
+          <code className="mt-1 block truncate font-mono text-[10px] text-[#B8860B]" title={file.sha256Hash}>
+            {file.sha256Hash}
+          </code>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatCard({ label, value, icon: Icon }: {
+  label: string;
+  value: string | number;
+  icon: React.ElementType;
+}) {
+  return (
+    <div className="rounded-lg border border-[#DDD5C2] bg-[#EDE6D6] p-4">
+      <div className="flex items-center justify-between text-xs font-medium uppercase tracking-wide text-[#8B7A5E]">
+        {label}<Icon size={15} />
+      </div>
+      <div className="mt-3 font-mono text-2xl text-[#2C2416]">{value}</div>
+    </div>
+  );
+}
 
 export default function EvidenceUploadPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
-  const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isDragOver, setIsDragOver] = useState(false);
+  const [uploadTarget, setUploadTarget] = useState<UploadTarget | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const handleFileUpload = useCallback(async (file: File, reconId?: string, jeId?: string) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    if (reconId) formData.append('reconId', reconId);
-    if (jeId) formData.append('jeId', jeId);
+  const manifestQuery = useQuery<SessionEvidenceManifest>({
+    queryKey: ['evidence-manifest', sessionId],
+    queryFn: () => apiFetch<SessionEvidenceManifest>(
+      `/api/close/sessions/${sessionId}/evidence-manifest`
+    ),
+    enabled: Boolean(sessionId),
+  });
+
+  function chooseFile(target: UploadTarget): void {
+    setUploadError(null);
+    setUploadTarget(target);
+    fileInputRef.current?.click();
+  }
+
+  async function uploadSelectedFile(file: File, target: UploadTarget): Promise<void> {
+    const form = new FormData();
+    form.append('file', file);
+    let endpoint: string;
+    if (target.kind === 'reconciliation') {
+      endpoint = `/api/close/sessions/${sessionId}/reconciliations/${target.id}/evidence`;
+    } else {
+      endpoint = `/api/close/journal-entries/${target.id}/evidence/upload`;
+      form.append('assertionType', 'other');
+      form.append('role', 'support');
+      form.append('requiredness', 'optional');
+    }
 
     const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
     const token = localStorage.getItem('cpa_auth_token');
-    const endpoint = reconId
-      ? `${baseUrl}/api/close/sessions/${sessionId}/reconciliations/${reconId}/evidence`
-      : `${baseUrl}/api/close/sessions/${sessionId}/evidence`;
-    const res = await fetch(endpoint, {
+    const response = await fetch(`${baseUrl}${endpoint}`, {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       credentials: 'include',
-      body: formData,
+      body: form,
     });
-    if (res.ok) {
-      queryClient.invalidateQueries({ queryKey: ['evidence-zones', sessionId] });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({})) as { error?: string; message?: string };
+      throw new Error(body.message ?? body.error ?? `Upload failed (${response.status})`);
     }
-  }, [sessionId, queryClient]);
+  }
 
-  const handleDrop = useCallback(async (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDragOver(false);
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length === 0) return;
-    setUploading(true);
-    try {
-      for (const file of files) {
-        await handleFileUpload(file);
-      }
-    } finally {
-      setUploading(false);
-    }
-  }, [handleFileUpload]);
-
-  const handleFileInputChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    if (files.length === 0) return;
-    setUploading(true);
-    try {
-      for (const file of files) {
-        await handleFileUpload(file);
-      }
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  }, [handleFileUpload]);
-
-  const sessionQuery = useQuery({
-    queryKey: ['session', sessionId],
-    queryFn: () => apiFetch<any>(`/api/close/sessions/${sessionId}`),
-    enabled: !!sessionId,
-  });
-  const readinessQuery = useQuery({
-    queryKey: ['readiness', sessionId],
-    queryFn: () => apiFetch<any>(`/api/close/sessions/${sessionId}/readiness`, { params: { format: 'gates' } }),
-    enabled: !!sessionId,
-  });
-
-  const { data, isLoading, error } = useQuery<EvidenceManifest>({
-    queryKey: ['evidence-zones', sessionId],
-    queryFn: async () => {
-      const manifest = await apiFetch<any>(`/api/close/sessions/${sessionId}/evidence-manifest`);
-      return manifest;
-    },
-    enabled: !!sessionId,
-  });
-
-  if (isLoading) {
+  if (manifestQuery.isLoading) {
     return (
-      <div className="ml-[260px] min-h-screen bg-[#F5F0E8] flex items-center justify-center">
-        <Loader2 size={32} className="animate-spin text-[#B8860B]" />
+      <div className="ml-[260px] flex min-h-screen items-center justify-center bg-[#F5F0E8]">
+        <Loader2 size={30} className="animate-spin text-[#B8860B]" />
       </div>
     );
   }
 
-  if (error) {
+  if (manifestQuery.error || !manifestQuery.data) {
     return (
-      <div className="min-h-screen bg-[#F5F0E8] flex items-center justify-center">
-        <div className="text-[#C44B2B] text-sm">Failed to load evidence data.</div>
+      <div className="ml-[260px] flex min-h-screen items-center justify-center bg-[#F5F0E8] px-6">
+        <div className="text-sm text-[#C44B2B]">
+          {manifestQuery.error instanceof Error
+            ? manifestQuery.error.message
+            : 'Evidence data is unavailable.'}
+        </div>
       </div>
     );
   }
 
-  const stats = data?.stats ?? { required: 24, uploaded: 18, missing: 6, hashVerified: 18, totalFiles: 18 };
-  const reconEvidence = data?.reconEvidence ?? [];
-  const jeEvidence = data?.jeEvidence ?? [];
-
-  const _gates = (readinessQuery.data as any)?.gates ?? [];
-  const _gatesTotal = (readinessQuery.data as any)?.gatesTotal ?? _gates.length;
-  const _activeGateIndex = _gates.findIndex((g: any) => !g.passing);
-  const _activeGateNum = _activeGateIndex >= 0 ? _activeGateIndex + 1 : _gatesTotal;
-  const _startedAt = (sessionQuery.data as any)?.startedAt ?? (sessionQuery.data as any)?.createdAt ?? new Date().toISOString();
-  const _dayElapsed = Math.max(1, Math.ceil((Date.now() - new Date(_startedAt).getTime()) / (1000 * 60 * 60 * 24)));
-  const _targetDays = (sessionQuery.data as any)?.closeDayTarget ?? 10;
-  const _sessionState = ((sessionQuery.data as any)?.state ?? 'IN_PROGRESS').replace(/_/g, ' ');
-  const _periodLabel = (sessionQuery.data as any)?.periodLabel ?? '';
+  const manifest = manifestQuery.data;
+  const reconsWithEvidence = manifest.reconEvidence.filter((group) => group.files.length > 0).length;
+  const jesWithEvidence = manifest.jeEvidence.filter((group) => group.files.length > 0).length;
 
   return (
-    <div className="min-h-screen bg-[#F5F0E8]">
-      {/* Progress Rail */}
-      {_gates.length > 0 && (
-        <div className="bg-[#2C2416] px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-4 text-sm">
-            <span className="text-[#B8860B] font-medium">
-              Gate {_activeGateNum} of {_gatesTotal}
-            </span>
-            <span className="text-[#8B7A5E]">
-              Close Day {_dayElapsed} of {_targetDays}
-            </span>
-            <span className="px-2 py-0.5 rounded text-xs font-medium bg-[#3B1F0A] text-[#B8860B]">
-              {_sessionState}
-            </span>
-            {_periodLabel && <span className="text-[#8B7A5E]">{_periodLabel}</span>}
+    <div className="ml-[260px] min-h-screen bg-[#F5F0E8] text-[#2C2416]">
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={async (event) => {
+          const file = event.target.files?.[0];
+          const target = uploadTarget;
+          event.target.value = '';
+          if (!file || !target) return;
+          setUploading(true);
+          setUploadError(null);
+          try {
+            await uploadSelectedFile(file, target);
+            await manifestQuery.refetch();
+          } catch (error) {
+            setUploadError(error instanceof Error ? error.message : 'Evidence upload failed');
+          } finally {
+            setUploading(false);
+            setUploadTarget(null);
+          }
+        }}
+      />
+
+      <header className="border-b border-[#DDD5C2] bg-[#EDE6D6] px-8 py-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-medium">Evidence by Close Object</h1>
+            <p className="mt-1 text-sm text-[#8B7A5E]">
+              Attach evidence to a specific reconciliation or journal entry so its accounting assertion and audit lineage remain explicit.
+            </p>
           </div>
-          <div className="flex items-center gap-1.5">
-            {_gates.map((gate: any, i: number) => {
-              let bg = '#5C4F3A';
-              if (gate.passing) bg = '#2D6A4F';
-              else if (i === _activeGateIndex) bg = '#B8860B';
-              return (
-                <div
-                  key={gate.id}
-                  className="w-2.5 h-2.5 rounded-full transition-colors"
-                  style={{ backgroundColor: bg }}
-                  title={`${gate.label}: ${gate.passing ? 'Passing' : 'Pending'}`}
-                />
-              );
-            })}
+          <Link
+            href={`/close/${sessionId}/evidence-manifest`}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[#DDD5C2] bg-[#F5F0E8] px-4 py-2 text-sm text-[#5C4F3A] hover:border-[#B8860B]"
+          >
+            View integrity manifest <ChevronRight size={15} />
+          </Link>
+        </div>
+      </header>
+
+      <main className="space-y-8 px-8 py-8">
+        {uploadError && (
+          <div className="flex items-start gap-2 rounded-lg border border-[#C44B2B]/30 bg-[#F5E4DE] p-4 text-sm text-[#C44B2B]">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0" /> {uploadError}
           </div>
+        )}
+        {uploading && (
+          <div className="flex items-center gap-2 rounded-lg border border-[#B8860B]/30 bg-[#F5EDD0] p-4 text-sm text-[#8B6914]">
+            <Loader2 size={16} className="animate-spin" /> Hashing, storing, and linking the evidence file…
+          </div>
+        )}
+
+        <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <StatCard label="Linked Files" value={manifest.totalFiles} icon={FileText} />
+          <StatCard label="Recons With Evidence" value={`${reconsWithEvidence}/${manifest.reconEvidence.length}`} icon={Paperclip} />
+          <StatCard label="JEs With Evidence" value={`${jesWithEvidence}/${manifest.jeEvidence.length}`} icon={ScrollText} />
+          <StatCard label="Integrity Failures" value={manifest.hashVerification.failedFileCount} icon={AlertTriangle} />
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-[#8B7A5E]">Reconciliations</h2>
+          <div className="overflow-hidden rounded-lg border border-[#DDD5C2] bg-[#EDE6D6]">
+            {manifest.reconEvidence.length === 0 ? (
+              <div className="p-8 text-center text-sm text-[#8B7A5E]">No reconciliations exist for this close.</div>
+            ) : manifest.reconEvidence.map((group) => (
+              <div key={group.reconId} className="grid gap-4 border-t border-[#DDD5C2] p-4 first:border-t-0 lg:grid-cols-[220px_1fr_auto]">
+                <div>
+                  <div className="font-medium">Account {group.accountCode}</div>
+                  <code className="text-[10px] text-[#8B7A5E]">{group.reconId}</code>
+                </div>
+                <FileList files={group.files} />
+                <div className="flex items-start gap-2">
+                  <Link href={`/close/${sessionId}/reconciliation/${group.reconId}`} className="rounded border border-[#DDD5C2] px-3 py-2 text-xs hover:border-[#B8860B]">
+                    Open recon
+                  </Link>
+                  <button type="button" disabled={uploading} onClick={() => chooseFile({ kind: 'reconciliation', id: group.reconId })} className="inline-flex items-center gap-1.5 rounded bg-[#B8860B] px-3 py-2 text-xs font-medium text-white disabled:opacity-50">
+                    <Upload size={13} /> Attach
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-[#8B7A5E]">Journal Entries</h2>
+          <div className="overflow-hidden rounded-lg border border-[#DDD5C2] bg-[#EDE6D6]">
+            {manifest.jeEvidence.length === 0 ? (
+              <div className="p-8 text-center text-sm text-[#8B7A5E]">No journal entries exist for this close.</div>
+            ) : manifest.jeEvidence.map((group) => (
+              <div key={group.jeId} className="grid gap-4 border-t border-[#DDD5C2] p-4 first:border-t-0 lg:grid-cols-[260px_1fr_auto]">
+                <div>
+                  <div className="font-medium">{group.memo || 'Journal entry'}</div>
+                  <code className="text-[10px] text-[#8B7A5E]">{group.jeId}</code>
+                </div>
+                <FileList files={group.files} />
+                <button type="button" disabled={uploading} onClick={() => chooseFile({ kind: 'journal_entry', id: group.jeId })} className="inline-flex h-fit items-center gap-1.5 rounded bg-[#B8860B] px-3 py-2 text-xs font-medium text-white disabled:opacity-50">
+                  <Upload size={13} /> Attach
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <div className="rounded-lg border border-[#DDD5C2] bg-[#EDE6D6] p-4 text-xs leading-relaxed text-[#5C4F3A]">
+          Uploads are hashed before storage and linked to the selected accounting object. A green integrity result means Sabit later retrieved that stored file and reproduced the recorded SHA-256 hash; it does not mean the document's accounting contents were approved.
         </div>
-      )}
-
-      {/* Header */}
-      <div className="px-8 pt-8 pb-6">
-        <h1 className="text-2xl font-medium text-[#2C2416]">Evidence Upload Zones</h1>
-        <p className="text-sm text-[#8B7A5E] mt-1">
-          Upload and verify supporting evidence for reconciliations and journal entries.
-        </p>
-      </div>
-
-      {/* Upload Dropzone */}
-      <div className="px-8 mb-8">
-        <div
-          className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
-            isDragOver
-              ? 'border-[#B8860B] bg-[#F5EDD0]'
-              : 'border-[#DDD5C2] bg-[#EDE6D6] hover:border-[#B8860B]/50'
-          }`}
-          onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-          onDragLeave={() => setIsDragOver(false)}
-          onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInputRef.current?.click(); } }}
-        >
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={handleFileInputChange}
-          />
-          {uploading ? (
-            <div className="flex flex-col items-center gap-2">
-              <Loader2 size={24} className="animate-spin text-[#B8860B]" />
-              <p className="text-sm text-[#8B7A5E]">Uploading...</p>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center gap-2">
-              <Upload size={24} className="text-[#8B7A5E]" />
-              <p className="text-sm text-[#2C2416] font-medium">
-                {isDragOver ? 'Drop files here' : 'Drag & drop files or click to browse'}
-              </p>
-              <p className="text-xs text-[#8B7A5E]">
-                Upload supporting evidence for reconciliations and journal entries
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Stat Cards */}
-      <div className="px-8 grid grid-cols-4 gap-4 mb-8">
-        <StatCard label="Required Files" value={stats.required} icon={FileText} />
-        <StatCard label="Uploaded" value={stats.uploaded} icon={Upload} />
-        <StatCard label="Missing" value={stats.missing} color="#C44B2B" icon={AlertTriangle} />
-        <StatCard
-          label="Hash Verified"
-          value={`${stats.hashVerified}/${stats.totalFiles}`}
-          color="#2D6A4F"
-          icon={ShieldCheck}
-        />
-      </div>
-
-      {/* Reconciliation Evidence */}
-      <div className="px-8 mb-8">
-        <h2 className="text-sm font-medium text-[#8B7A5E] uppercase tracking-wide mb-3">
-          Reconciliation Evidence
-        </h2>
-        <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-[#2C2416] text-[#B8860B]">
-                <th className="text-left px-4 py-3 font-medium">Account</th>
-                <th className="text-left px-4 py-3 font-medium">File</th>
-                <th className="text-left px-4 py-3 font-medium">SHA-256 Hash</th>
-                <th className="text-left px-4 py-3 font-medium">Uploader</th>
-                <th className="text-left px-4 py-3 font-medium">Date</th>
-                <th className="text-left px-4 py-3 font-medium">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reconEvidence.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-[#8B7A5E]">
-                    No reconciliation evidence records found.
-                  </td>
-                </tr>
-              ) : (
-                reconEvidence.map((re) => (
-                  <tr key={re.reconId} className="border-t border-[#DDD5C2] hover:bg-[#F5F0E8] transition-colors">
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-[#2C2416]">{re.accountCode}</div>
-                      <div className="text-xs text-[#8B7A5E]">{re.accountName}</div>
-                    </td>
-                    <td className="px-4 py-3">
-                      {re.file ? (
-                        <a
-                          href={re.file.fileUrl || '#'}
-                          className="text-[#3B6EA5] hover:underline inline-flex items-center gap-1"
-                        >
-                          <LinkIcon size={12} />
-                          {re.file.fileName}
-                        </a>
-                      ) : (
-                        <span className="text-[#8B7A5E]">--</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {re.file ? (
-                        <code className="text-xs font-mono text-[#B8860B] break-all">
-                          {re.file.sha256.slice(0, 16)}...
-                        </code>
-                      ) : (
-                        <span className="text-[#8B7A5E]">--</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-[#2C2416]">{re.file?.uploadedBy ?? '--'}</td>
-                    <td className="px-4 py-3 text-[#8B7A5E]">
-                      {re.file?.uploadedAt
-                        ? new Date(re.file.uploadedAt).toLocaleDateString()
-                        : '--'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={re.status} />
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Journal Entry Evidence */}
-      <div className="px-8 mb-8">
-        <h2 className="text-sm font-medium text-[#8B7A5E] uppercase tracking-wide mb-3">
-          Journal Entry Evidence
-        </h2>
-        <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-[#2C2416] text-[#B8860B]">
-                <th className="text-left px-4 py-3 font-medium">JE ID</th>
-                <th className="text-left px-4 py-3 font-medium">Description</th>
-                <th className="text-left px-4 py-3 font-medium">File</th>
-                <th className="text-left px-4 py-3 font-medium">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {jeEvidence.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-[#8B7A5E]">
-                    No journal entry evidence records found.
-                  </td>
-                </tr>
-              ) : (
-                jeEvidence.map((je) => (
-                  <tr key={je.jeId} className="border-t border-[#DDD5C2] hover:bg-[#F5F0E8] transition-colors">
-                    <td className="px-4 py-3 font-mono text-[#2C2416]">{je.entryNumber || je.jeId}</td>
-                    <td className="px-4 py-3">
-                      <div className="text-[#2C2416]">{je.description}</div>
-                      <div className="text-xs text-[#8B7A5E] mt-0.5">
-                        {je.amount}
-                        {je.isMaterial && (
-                          <span className="ml-2 text-xs font-medium px-1.5 py-0.5 rounded bg-[#F0E8D0] text-[#8B6914]">
-                            MATERIAL
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      {je.file ? (
-                        <a
-                          href={je.file.fileUrl || '#'}
-                          className="text-[#3B6EA5] hover:underline inline-flex items-center gap-1"
-                        >
-                          <LinkIcon size={12} />
-                          {je.file.fileName}
-                        </a>
-                      ) : (
-                        <span className="text-[#8B7A5E]">--</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={je.status} />
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Bottom Notice */}
-      <div className="px-8 pb-8">
-        <div className="bg-[#2C2416] rounded-lg px-6 py-4 flex items-center gap-3">
-          <Lock size={16} className="text-[#B8860B] flex-shrink-0" />
-          <p className="text-sm text-[#8B7A5E]">
-            <span className="text-[#B8860B] font-medium">IMMUTABLE EVIDENCE CHAIN</span> — Files are
-            SHA-256 hashed on upload. Hashes are recorded in the append-only audit ledger. Evidence cannot
-            be modified or replaced after upload without creating a new audit trail entry.
-          </p>
-        </div>
-      </div>
+      </main>
     </div>
   );
 }

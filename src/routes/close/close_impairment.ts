@@ -7,6 +7,7 @@ import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { send500 } from '../../lib/errorHandler.js';
 import { guardSessionWritable } from '../../lib/session_write_guard.js';
+import { requireSessionAccountingFramework } from '../../lib/session_framework_guard.js';
 import { getCloseSessionById } from '../../db/repositories/close_session_repository.js';
 import {
   listCGUs,
@@ -22,6 +23,10 @@ import {
 } from '../../services/impairment_service.js';
 
 const router = Router();
+router.use(
+  '/sessions/:sessionId/impairment/evaluate/:testId',
+  requireSessionAccountingFramework(['US_GAAP', 'IFRS'], 'Legacy impairment measurement engine')
+);
 
 /** GET /sessions/:sessionId/impairment/cgus — List cash generating units. */
 router.get('/sessions/:sessionId/impairment/cgus', async (req: Request, res: Response) => {

@@ -1,12 +1,11 @@
 /**
- * FinOS Agent — Financial types (CPA/CFA compliant)
- * Traceable to FASB ASC / IASB where noted.
+ * FinOS Agent — Financial types with framework-specific traceability.
  */
 
 /** Source of account classification (deterministic, agentic suggestion, or user-confirmed override). */
 export type ClassificationSource = 'deterministic' | 'agentic' | 'user_confirmed';
 
-/** Account classification for TB → BS / P&L mapping (ASC 210, IAS 1) */
+/** Account classification for TB → BS / P&L mapping. */
 export type AccountType =
   | 'ASSET'
   | 'LIABILITY'
@@ -44,15 +43,15 @@ export interface TrialBalanceEntry {
   openingBalance?: number;
 }
 
-/** Reference to authoritative standard (FASB or IASB) */
+/** Reference to the configured authoritative financial reporting framework. */
 export interface CodificationRef {
-  framework: 'FASB' | 'IASB';
-  /** e.g. "ASC 210-10-45" or "IAS 1.54" */
+  framework: 'FASB' | 'IASB' | 'ASPE' | 'FRS102';
+  /** e.g. "ASPE 1521", "ASC 210-10-45", or "IAS 1.54" */
   citation: string;
   description?: string;
 }
 
-/** Structured Balance Sheet (ASC 210-10-45, IAS 1.49) */
+/** Structured balance sheet / statement of financial position. */
 export interface BalanceSheet {
   reportDate?: string;
   assets: FinancialStatementLine[];
@@ -79,7 +78,7 @@ export interface BalanceSheet {
   codificationRef: CodificationRef;
 }
 
-/** Income Statement / P&L (ASC 220-10-45, IAS 1.81–82) */
+/** Income statement / statement of profit or loss. */
 export interface ProfitAndLoss {
   reportDate?: string;
   revenue: FinancialStatementLine[];
@@ -168,7 +167,6 @@ export interface FinancialStatementsOutput {
   notesAndPolicies?: NotesAndPolicies;
   standard?: 'ASPE' | 'IFRS' | 'FRS102' | 'US_GAAP';
   standardMetadata?: {
-    depreciationMethod?: 'straight-line';
     leaseLiability?: number;
     rightOfUseAsset?: number;
     citation?: string;
@@ -191,7 +189,7 @@ export interface CashFlowStatement {
 export interface EquityChangesStatement {
   openingEquity?: number;
   changes: Array<{ label: string; amount: number }>;
-  /** Other Comprehensive Income component of equity changes (ASC 220). */
+  /** Other-comprehensive-income component of equity changes, when applicable. */
   ociChanges?: Array<{ label: string; amount: number }>;
   closingEquity?: number;
   estimated?: boolean;

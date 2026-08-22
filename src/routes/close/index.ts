@@ -59,11 +59,17 @@ import closeArAgingRouter from './close_ar_aging.js';
 import closeApAgingRouter from './close_ap_aging.js';
 import closeInventoryReserveRouter from './close_inventory_reserve.js';
 import closeLeasesRouter from './close_leases.js';
+import closeAccountingProfilesRouter from './close_accounting_profiles.js';
+import closeRunbooksRouter from './close_runbooks.js';
+import closeAccountingMemoryRouter from './close_accounting_memory.js';
 import { createBankTransactionRoutes } from './close_bank_transactions.js';
 import { getTenantPool } from '../../db/index.js';
 
 const router = Router();
 const bankTransactionRouter = createBankTransactionRoutes(getTenantPool);
+router.use(closeAccountingProfilesRouter);
+router.use(closeRunbooksRouter);
+router.use(closeAccountingMemoryRouter);
 router.use(closeJeAccrualsRouter);
 router.use(closeSessionsRouter);
 router.use(closeIssuesRouter);

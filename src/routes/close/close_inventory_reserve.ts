@@ -7,6 +7,7 @@ import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { send500 } from '../../lib/errorHandler.js';
 import { guardSessionWritable } from '../../lib/session_write_guard.js';
+import { requireSessionAccountingFramework } from '../../lib/session_framework_guard.js';
 import { getCloseSessionById } from '../../db/repositories/close_session_repository.js';
 import {
   getInventoryReserve,
@@ -18,6 +19,9 @@ import {
 } from '../../services/inventory_reserve_service.js';
 
 const router = Router();
+const requireUsGaapReserveEngine = requireSessionAccountingFramework(['US_GAAP'], 'Legacy ASC 330 inventory-reserve calculation');
+router.use('/sessions/:sessionId/inventory-reserve/compute', requireUsGaapReserveEngine);
+router.use('/sessions/:sessionId/inventory-reserve/propose-aje', requireUsGaapReserveEngine);
 
 /** GET /sessions/:sessionId/inventory-reserve — Get reserve summary for session. */
 router.get('/sessions/:sessionId/inventory-reserve', async (req: Request, res: Response) => {

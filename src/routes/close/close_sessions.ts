@@ -31,10 +31,19 @@ import {
   computeReadiness,
   initializeChecklistTemplate,
   getChecklistItems,
+  getChecklistItem,
   completeChecklistItem,
   skipChecklistItem,
   emitIssuesForStuckChecklist,
+  ChecklistDispositionError,
 } from '../../services/close_checklist_readiness_service.js';
+import {
+  assertCanadianAspeProfileId,
+  CanadianAspeProfileError,
+  getCanadianAspeCloseProfile,
+  getCanadianAspeRequirement,
+  parseCloseFrequency,
+} from '../../services/canadian_aspe_close_profile.js';
 import { getReadinessGates } from '../../services/session_readiness_gates_service.js';
 import {
   getOrComputeTriage,
@@ -62,6 +71,10 @@ import {
 } from '../../services/cumulative_statement_service.js';
 import { getEntitySettings } from '../../services/entity_settings_service.js';
 import { getComparativeStatementLines } from '../../services/comparative_statements_service.js';
+import {
+  getEvidenceStorageAdapterAsync,
+  verifyEvidenceIntegrity,
+} from '../../services/evidence_storage_service.js';
 
 const router = Router();
 
@@ -426,15 +439,21 @@ router.post('/sessions/:id/module-proposals/:proposalId/approve', async (req: Re
       return;
     }
     const { proposalId } = req.params;
+    const sessionId = req.params.id;
     const userId = (req as unknown as { userId?: string }).userId ?? 'unknown';
 
     // If proposal has a linked JE, verify it has been posted before allowing approval
     const proposal = await pool.query<{ je_id: string | null; status: string; module_name: string }>(
-      `SELECT je_id, status, module_name FROM tenant_module_proposals WHERE id = $1 AND tenant_id = $2`,
-      [proposalId, tenantId]
+      `SELECT je_id, status, module_name FROM tenant_module_proposals
+       WHERE id = $1 AND tenant_id = $2 AND close_session_id = $3`,
+      [proposalId, tenantId, sessionId]
     );
     if (proposal.rows.length === 0) {
-      res.status(404).json({ error: 'Module proposal not found' });
+      res.status(404).json({ error: 'Module proposal not found for this session' });
+      return;
+    }
+    if (proposal.rows[0].status !== 'needs_review') {
+      res.status(409).json({ error: `Cannot approve a module proposal in '${proposal.rows[0].status}' status.` });
       return;
     }
     const jeId = proposal.rows[0].je_id;
@@ -456,8 +475,9 @@ router.post('/sessions/:id/module-proposals/:proposalId/approve', async (req: Re
     const moduleName = proposal.rows[0]?.module_name ?? proposalId;
 
     await pool.query(
-      `UPDATE tenant_module_proposals SET status = 'approved', reviewed_by = $1, reviewed_at = NOW() WHERE id = $2 AND tenant_id = $3`,
-      [userId, proposalId, tenantId]
+      `UPDATE tenant_module_proposals SET status = 'approved', reviewed_by = $1, reviewed_at = NOW()
+       WHERE id = $2 AND tenant_id = $3 AND close_session_id = $4 AND status = 'needs_review'`,
+      [userId, proposalId, tenantId, sessionId]
     );
 
     // Audit event
@@ -492,18 +512,49 @@ router.post('/sessions/:id/module-proposals/:proposalId/skip', async (req: Reque
       return;
     }
     const { proposalId } = req.params;
+    const sessionId = req.params.id;
     const userId = (req as unknown as { userId?: string }).userId ?? 'unknown';
     const reason = String(req.body?.reason ?? '').trim();
     if (reason.length < 10) { res.status(400).json({ error: 'Skip reason must be at least 10 characters' }); return; }
-    await pool.query(
-      `UPDATE tenant_module_proposals SET status = 'skipped', reviewed_by = $1, reviewed_at = NOW(), skip_reason = $2 WHERE id = $3 AND tenant_id = $4`,
-      [userId, reason, proposalId, tenantId]
+    const existing = await pool.query<{ module_name: string; status: string; je_id: string | null }>(
+      `SELECT module_name, status, je_id FROM tenant_module_proposals
+       WHERE id = $1 AND tenant_id = $2 AND close_session_id = $3`,
+      [proposalId, tenantId, sessionId]
     );
+    if (existing.rows.length === 0) {
+      res.status(404).json({ error: 'Module proposal not found for this session' });
+      return;
+    }
+    if (!['needs_review', 'failed'].includes(existing.rows[0].status)) {
+      res.status(409).json({ error: `Cannot skip a module proposal in '${existing.rows[0].status}' status.` });
+      return;
+    }
+    if (existing.rows[0].je_id) {
+      const je = await pool.query<{ status: string }>(
+        `SELECT status FROM journal_entries WHERE id = $1 AND tenant_id = $2 AND close_session_id = $3`,
+        [existing.rows[0].je_id, tenantId, sessionId]
+      );
+      const jeStatus = je.rows[0]?.status;
+      if (jeStatus && jeStatus !== 'rejected') {
+        res.status(409).json({ error: `Reject or remove the linked journal entry before skipping this module; current JE status is '${jeStatus}'.` });
+        return;
+      }
+    }
+    const skipped = await pool.query<{ module_name: string }>(
+      `UPDATE tenant_module_proposals
+       SET status = 'skipped', reviewed_by = $1, reviewed_at = NOW(), skip_reason = $2
+       WHERE id = $3 AND tenant_id = $4 AND close_session_id = $5 AND status IN ('needs_review', 'failed')
+       RETURNING module_name`,
+      [userId, reason, proposalId, tenantId, sessionId]
+    );
+    if (skipped.rows.length === 0) {
+      res.status(409).json({ error: 'Module proposal changed while the skip was being recorded.' });
+      return;
+    }
 
     // Audit event
     try {
-      const modRow = await pool.query<{ module_name: string }>(`SELECT module_name FROM tenant_module_proposals WHERE id = $1`, [proposalId]);
-      const moduleName = modRow.rows[0]?.module_name ?? proposalId;
+      const moduleName = skipped.rows[0]?.module_name ?? proposalId;
       await auditLedgerRepo.appendEntry(pool, {
         tenantId, eventType: 'module_proposal_skipped' as never,
         deterministicFlagSnapshot: { proposalId, moduleName, actor: userId, reason },
@@ -539,8 +590,8 @@ router.post('/sessions/:id/module-proposals/:proposalId/not-applicable', async (
       return;
     }
     // Verify proposal exists for this tenant + session
-    const existing = await pool.query<{ module_name: string; status: string }>(
-      `SELECT module_name, status FROM tenant_module_proposals WHERE id = $1 AND tenant_id = $2 AND close_session_id = $3`,
+    const existing = await pool.query<{ module_name: string; status: string; je_id: string | null }>(
+      `SELECT module_name, status, je_id FROM tenant_module_proposals WHERE id = $1 AND tenant_id = $2 AND close_session_id = $3`,
       [proposalId, tenantId, sessionId]
     );
     if (existing.rows.length === 0) {
@@ -548,11 +599,33 @@ router.post('/sessions/:id/module-proposals/:proposalId/not-applicable', async (
       return;
     }
     const moduleName = existing.rows[0].module_name;
+    if (!['needs_review', 'failed'].includes(existing.rows[0].status)) {
+      res.status(409).json({ error: `Cannot mark a module not applicable from '${existing.rows[0].status}' status.` });
+      return;
+    }
+    if (existing.rows[0].je_id) {
+      const je = await pool.query<{ status: string }>(
+        `SELECT status FROM journal_entries WHERE id = $1 AND tenant_id = $2 AND close_session_id = $3`,
+        [existing.rows[0].je_id, tenantId, sessionId]
+      );
+      const jeStatus = je.rows[0]?.status;
+      if (jeStatus && jeStatus !== 'rejected') {
+        res.status(409).json({ error: `Reject or remove the linked journal entry before marking this module not applicable; current JE status is '${jeStatus}'.` });
+        return;
+      }
+    }
 
-    await pool.query(
-      `UPDATE tenant_module_proposals SET status = 'not_applicable', not_applicable_reason = $1, reviewed_by = $2, reviewed_at = NOW() WHERE id = $3 AND tenant_id = $4`,
-      [reason, userId, proposalId, tenantId]
+    const marked = await pool.query(
+      `UPDATE tenant_module_proposals
+       SET status = 'not_applicable', not_applicable_reason = $1, reviewed_by = $2, reviewed_at = NOW()
+       WHERE id = $3 AND tenant_id = $4 AND close_session_id = $5 AND status IN ('needs_review', 'failed')
+       RETURNING id`,
+      [reason, userId, proposalId, tenantId, sessionId]
     );
+    if (marked.rows.length === 0) {
+      res.status(409).json({ error: 'Module proposal changed while the not-applicable conclusion was being recorded.' });
+      return;
+    }
 
     // Audit event
     try {
@@ -604,8 +677,9 @@ router.post('/sessions/:id/module-proposals/:proposalId/reopen', async (req: Req
     // Transition to needs_review. Retain skip_reason/not_applicable_reason for audit trail (do NOT clear).
     // Clear reviewed_by/reviewed_at since the review is being undone.
     await pool.query(
-      `UPDATE tenant_module_proposals SET status = 'needs_review', reviewed_by = NULL, reviewed_at = NULL WHERE id = $1 AND tenant_id = $2`,
-      [proposalId, tenantId]
+      `UPDATE tenant_module_proposals SET status = 'needs_review', reviewed_by = NULL, reviewed_at = NULL
+       WHERE id = $1 AND tenant_id = $2 AND close_session_id = $3 AND status IN ('not_applicable', 'skipped')`,
+      [proposalId, tenantId, sessionId]
     );
 
     // Audit event
@@ -672,31 +746,43 @@ router.get('/sessions/:id/audit-events', async (req: Request, res: Response) => 
     const limit = req.query.limit != null ? Math.min(1000, Math.max(1, Number(req.query.limit))) : 100;
     const offset = req.query.offset != null ? Math.max(0, Number(req.query.offset)) : 0;
 
-    const events = await auditLedgerRepo.listByTenantAndPeriod(pool, tenantId, periodLabel, {
-      eventType,
-      createdBy: userId,
-      dateFrom,
-      dateTo,
-      limit,
-      offset,
-    });
-    const total = await auditLedgerRepo.countByTenantAndPeriod(pool, tenantId, periodLabel, {
-      eventType,
-      createdBy: userId,
-      dateFrom,
-      dateTo,
-    });
+    const [events, total, chainVerification] = await Promise.all([
+      auditLedgerRepo.listByTenantAndPeriod(pool, tenantId, periodLabel, {
+        eventType,
+        createdBy: userId,
+        dateFrom,
+        dateTo,
+        limit,
+        offset,
+      }),
+      auditLedgerRepo.countByTenantAndPeriod(pool, tenantId, periodLabel, {
+        eventType,
+        createdBy: userId,
+        dateFrom,
+        dateTo,
+      }),
+      auditLedgerRepo.verifyChain(pool, tenantId),
+    ]);
 
     const eventsWithChain = events.map((e) => ({
       ...e,
       userName: e.userId || 'System',
-      chainValid: true,
     }));
 
     res.json({
       events: eventsWithChain,
       total,
-      chainIntegrity: true,
+      chainIntegrity: chainVerification.valid,
+      chainVerification: {
+        scope: 'tenant',
+        verified: chainVerification.valid,
+        entryCount: chainVerification.entryCount,
+        verifiedAt: chainVerification.verifiedAt,
+        latestEntryId: chainVerification.latestEntryId ?? null,
+        latestEntryHash: chainVerification.latestEntryHash ?? null,
+        brokenAtEntryId: chainVerification.brokenAtEntryId ?? null,
+        message: chainVerification.message ?? null,
+      },
     });
   } catch (e) {
     send500(res, e, 'Get session audit events failed');
@@ -721,51 +807,89 @@ router.get('/sessions/:id/evidence-manifest', async (req: Request, res: Response
     const { listEvidenceForObject } = await import('../../db/repositories/evidence_repository.js');
     const { listPeriodReconciliationsByPeriod } = await import('../../db/repositories/period_reconciliation_repository.js');
     const { listJournalEntries } = await import('../../db/repositories/journal_entry_repository.js');
+    let storageAdapterPromise: ReturnType<typeof getEvidenceStorageAdapterAsync> | null = null;
+
+    type EvidenceAttachment = Awaited<ReturnType<typeof listEvidenceForObject>>[number];
+    type EvidenceIntegrityStatus = 'verified' | 'failed' | 'not_verifiable';
+    const toManifestFile = async (attachment: EvidenceAttachment) => {
+      let integrityStatus: EvidenceIntegrityStatus = 'not_verifiable';
+      if (attachment.storagePath) {
+        try {
+          storageAdapterPromise ??= getEvidenceStorageAdapterAsync();
+          const storageAdapter = await storageAdapterPromise;
+          const verification = await verifyEvidenceIntegrity(
+            storageAdapter,
+            tenantId,
+            attachment.id,
+            attachment.hashSha256
+          );
+          integrityStatus = verification.valid ? 'verified' : 'failed';
+        } catch {
+          integrityStatus = 'failed';
+        }
+      }
+      return {
+        id: attachment.id,
+        fileName: attachment.originalFilename ?? attachment.label ?? 'evidence',
+        sizeBytes: attachment.sizeBytes,
+        mimeType: attachment.mimeType,
+        sha256Hash: attachment.hashSha256,
+        uploadedBy: attachment.attachedBy,
+        createdAt: attachment.attachedAt,
+        storageBacked: Boolean(attachment.storagePath),
+        integrityStatus,
+      };
+    };
 
     const recons = await listPeriodReconciliationsByPeriod(pool, tenantId, sessionId);
-    const reconEvidence: Array<{ reconId: string; accountCode: string; files: Array<{ id: string; fileName: string; sizeBytes: number; mimeType?: string; sha256Hash: string; uploadedBy: string; createdAt: string }> }> = [];
-    for (const r of recons) {
-      const attachments = await listEvidenceForObject(pool, tenantId, 'reconciliation', r.reconId);
-      reconEvidence.push({
+    const reconEvidence = await Promise.all(recons.map(async (r) => {
+      const attachments = await listEvidenceForObject(
+        pool,
+        tenantId,
+        'reconciliation',
+        r.reconId
+      );
+      return {
         reconId: r.reconId,
         accountCode: r.accountCode,
-        files: attachments.map((a) => ({
-          id: a.id,
-          fileName: a.originalFilename ?? a.label ?? 'evidence',
-          sizeBytes: a.sizeBytes,
-          mimeType: a.mimeType,
-          sha256Hash: a.hashSha256,
-          uploadedBy: a.attachedBy,
-          createdAt: a.attachedAt,
-        })),
-      });
-    }
+        files: await Promise.all(attachments.map(toManifestFile)),
+      };
+    }));
 
-    const jes = await listJournalEntries(pool, tenantId, { closeSessionId: sessionId, limit: 500 });
-    const jeEvidence: Array<{ jeId: string; memo?: string; files: Array<{ id: string; fileName: string; sizeBytes: number; mimeType?: string; sha256Hash: string; uploadedBy: string; createdAt: string }> }> = [];
-    for (const je of jes) {
+    const jes = await listJournalEntries(pool, tenantId, { closeSessionId: sessionId });
+    const jeEvidence = await Promise.all(jes.map(async (je) => {
       const attachments = await listEvidenceForObject(pool, tenantId, 'journal_entry', je.id);
-      jeEvidence.push({
+      return {
         jeId: je.id,
         memo: je.memo,
-        files: attachments.map((a) => ({
-          id: a.id,
-          fileName: a.originalFilename ?? a.label ?? 'evidence',
-          sizeBytes: a.sizeBytes,
-          mimeType: a.mimeType,
-          sha256Hash: a.hashSha256,
-          uploadedBy: a.attachedBy,
-          createdAt: a.attachedAt,
-        })),
-      });
-    }
+        files: await Promise.all(attachments.map(toManifestFile)),
+      };
+    }));
 
-    const totalFiles = reconEvidence.reduce((s, r) => s + r.files.length, 0) + jeEvidence.reduce((s, j) => s + j.files.length, 0);
+    const files = [
+      ...reconEvidence.flatMap((recon) => recon.files),
+      ...jeEvidence.flatMap((je) => je.files),
+    ];
+    const storedFileCount = files.filter((file) => file.storageBacked).length;
+    const verifiedFileCount = files.filter((file) => file.integrityStatus === 'verified').length;
+    const failedFileCount = files.filter((file) => file.integrityStatus === 'failed').length;
+    const notVerifiableFileCount = files.filter(
+      (file) => file.integrityStatus === 'not_verifiable'
+    ).length;
     res.json({
       reconEvidence,
       jeEvidence,
-      totalFiles,
-      allHashesVerified: true,
+      totalFiles: files.length,
+      totalSizeBytes: files.reduce((sum, file) => sum + file.sizeBytes, 0),
+      hashVerification: {
+        performedAt: new Date().toISOString(),
+        storedFileCount,
+        verifiedFileCount,
+        failedFileCount,
+        notVerifiableFileCount,
+        allStoredFilesVerified: storedFileCount > 0 ? failedFileCount === 0 : null,
+        note: 'Stored files were retrieved and re-hashed. External metadata-only evidence cannot be independently re-hashed by Sabit.',
+      },
     });
   } catch (e) {
     send500(res, e, 'Get session evidence manifest failed');
@@ -896,9 +1020,69 @@ router.post('/sessions/:id/checklist/initialize', async (req: Request, res: Resp
       return;
     }
     if (!await guardSessionWritable(res, pool, tenantId, id)) return;
-    const { items, created } = await initializeChecklistTemplate(pool, tenantId, id);
-    res.status(created ? 201 : 200).json({ items });
+    const body = req.body as { profileId?: unknown; frequency?: unknown } | undefined;
+    const useCanadianAspeProfile = body?.profileId != null || session.standard.toUpperCase() === 'ASPE';
+
+    if (useCanadianAspeProfile) {
+      assertCanadianAspeProfileId(body?.profileId);
+      if (session.standard.toUpperCase() !== 'ASPE') {
+        res.status(409).json({
+          error: 'The Canadian ASPE close profile can only be attached to a session whose standard is ASPE.',
+          code: 'PROFILE_STANDARD_MISMATCH',
+        });
+        return;
+      }
+      if (session.basis !== 'accrual') {
+        res.status(409).json({
+          error: 'The Canadian ASPE close profile requires an accrual-basis close session.',
+          code: 'PROFILE_BASIS_MISMATCH',
+        });
+        return;
+      }
+      const frequency = parseCloseFrequency(body?.frequency, 'monthly');
+      const existingItems = await getChecklistItems(pool, tenantId, id);
+      const alreadyQuarterly = existingItems.some((item) => {
+        const requirement = getCanadianAspeRequirement(item.code);
+        return requirement?.frequencies.length === 1 && requirement.frequencies[0] === 'quarterly';
+      });
+      if (frequency === 'monthly' && alreadyQuarterly) {
+        res.status(409).json({
+          error: 'This session already contains quarterly controls and cannot be downgraded to a monthly checklist.',
+          code: 'CHECKLIST_FREQUENCY_DOWNGRADE_NOT_ALLOWED',
+        });
+        return;
+      }
+      const profile = getCanadianAspeCloseProfile(frequency);
+      const { items, created, createdCount } = await initializeChecklistTemplate(pool, tenantId, id, {
+        items: profile.requirements.map((requirement) => ({
+          code: requirement.code,
+          name: requirement.name,
+          required: requirement.required,
+        })),
+      });
+      res.status(created ? 201 : 200).json({
+        items,
+        createdCount,
+        profile: {
+          id: profile.id,
+          version: profile.version,
+          jurisdiction: profile.jurisdiction,
+          framework: profile.framework,
+          frequency: profile.frequency,
+          functionalCurrency: profile.functionalCurrency,
+          agentBoundary: profile.agentBoundary,
+        },
+      });
+      return;
+    }
+
+    const { items, created, createdCount } = await initializeChecklistTemplate(pool, tenantId, id);
+    res.status(created ? 201 : 200).json({ items, createdCount });
   } catch (e) {
+    if (e instanceof CanadianAspeProfileError) {
+      res.status(400).json({ error: e.message, code: e.code });
+      return;
+    }
     send500(res, e, 'Initialize checklist failed');
   }
 });
@@ -960,6 +1144,31 @@ router.post('/checklist-items/:itemId/complete', async (req: Request, res: Respo
     const itemId = req.params.itemId ?? '';
     const completedBy = (req as AuthRequest).userId ?? 'unknown';
     const body = req.body as { notes?: string };
+    const existingItem = await getChecklistItem(pool, tenantId, itemId);
+    if (!existingItem) {
+      res.status(404).json({ error: 'Checklist item not found' });
+      return;
+    }
+    if (!await guardSessionWritable(res, pool, tenantId, existingItem.closeSessionId)) return;
+    const profileRequirement = getCanadianAspeRequirement(existingItem.code);
+    if (profileRequirement?.completionAuthority === 'system_check') {
+      res.status(409).json({
+        error: `${existingItem.name} is completed only by its deterministic readiness gate.`,
+        code: 'SYSTEM_CHECK_REQUIRED',
+      });
+      return;
+    }
+    if (profileRequirement?.completionAuthority === 'approver' && actorRole !== 'approver') {
+      res.status(403).json({ error: 'Insufficient role: this control requires an approver' });
+      return;
+    }
+    if (profileRequirement && !body.notes?.trim()) {
+      res.status(400).json({
+        error: 'A documented control conclusion is required for Canadian ASPE checklist completion.',
+        code: 'CONTROL_CONCLUSION_REQUIRED',
+      });
+      return;
+    }
     const item = await completeChecklistItem(pool, tenantId, itemId, completedBy, body.notes);
     if (!item) {
       res.status(404).json({ error: 'Checklist item not found' });
@@ -980,9 +1189,20 @@ router.post('/checklist-items/:itemId/skip', async (req: Request, res: Response)
       res.status(400).json({ error: 'Tenant context required' });
       return;
     }
+    const actorRole = getCloseRoleFromReq(req as AuthRequest);
+    if (actorRole !== 'reviewer' && actorRole !== 'approver') {
+      res.status(403).json({ error: 'Insufficient role: a not-applicable disposition requires reviewer or approver role' });
+      return;
+    }
     const itemId = req.params.itemId ?? '';
     const completedBy = (req as AuthRequest).userId ?? 'unknown';
     const body = req.body as { notes?: string };
+    const existingItem = await getChecklistItem(pool, tenantId, itemId);
+    if (!existingItem) {
+      res.status(404).json({ error: 'Checklist item not found' });
+      return;
+    }
+    if (!await guardSessionWritable(res, pool, tenantId, existingItem.closeSessionId)) return;
     const item = await skipChecklistItem(pool, tenantId, itemId, completedBy, body.notes);
     if (!item) {
       res.status(404).json({ error: 'Checklist item not found' });
@@ -990,6 +1210,10 @@ router.post('/checklist-items/:itemId/skip', async (req: Request, res: Response)
     }
     res.json(item);
   } catch (e) {
+    if (e instanceof ChecklistDispositionError) {
+      res.status(e.code === 'SKIP_REASON_REQUIRED' ? 400 : 409).json({ error: e.message, code: e.code });
+      return;
+    }
     send500(res, e, 'Skip checklist item failed');
   }
 });
@@ -1191,7 +1415,7 @@ router.get('/statement-packages/:id', async (req: Request, res: Response) => {
   }
 });
 
-/** GET /api/close/statement-packages/:id/lines — get package with lines. Query: includePrior=true, comparativePeriods=N */
+/** GET /api/close/statement-packages/:id/lines — get package with lines. Query: includePrior=true, comparativePeriods=N, statementType=... */
 router.get('/statement-packages/:id/lines', async (req: Request, res: Response) => {
   try {
     const tenantId = getTenantId(req);
@@ -1203,6 +1427,12 @@ router.get('/statement-packages/:id/lines', async (req: Request, res: Response) 
     const id = req.params.id ?? '';
     const includePrior = req.query.includePrior === 'true' || req.query.includePrior === '1';
     const comparativePeriods = req.query.comparativePeriods ? Number(req.query.comparativePeriods) : 0;
+    const statementType = typeof req.query.statementType === 'string' ? req.query.statementType : undefined;
+    const allowedStatementTypes = new Set(['balance_sheet', 'profit_and_loss', 'cash_flow', 'equity']);
+    if (statementType && !allowedStatementTypes.has(statementType)) {
+      res.status(400).json({ error: 'Invalid statementType' });
+      return;
+    }
 
     // Comparative multi-column mode
     if (comparativePeriods > 0) {
@@ -1224,7 +1454,10 @@ router.get('/statement-packages/:id/lines', async (req: Request, res: Response) 
       return;
     }
     const lineWithMeta = (l: (typeof result.lines)[0]) => (l as { priorAmount?: string; changeAmount?: string; changePercent?: string | null });
-    const lines = result.lines.map((l) => ({
+    const sourceLines = statementType
+      ? result.lines.filter((line) => line.statement === statementType)
+      : result.lines;
+    const lines = sourceLines.map((l) => ({
       id: `${result.package.id}:${l.fsLineId}`,
       fsLineId: l.fsLineId,
       name: (l.metadata as { label?: string })?.label ?? l.fsLineId,
@@ -1235,13 +1468,13 @@ router.get('/statement-packages/:id/lines', async (req: Request, res: Response) 
       isSubtotal: l.isSubtotal ?? false,
       isGrandTotal: l.isGrandTotal ?? false,
       sectionName: l.sectionName ?? null,
-      ...(includePrior && {
-        priorAmount: lineWithMeta(l).priorAmount ?? '0.00',
-        changeAmount: lineWithMeta(l).changeAmount ?? normalizeMoney(l.amount),
-        changePercent: lineWithMeta(l).changePercent ?? null,
+      ...(includePrior && lineWithMeta(l).priorAmount != null && {
+        priorAmount: lineWithMeta(l).priorAmount,
+        changeAmount: lineWithMeta(l).changeAmount,
+        changePercent: lineWithMeta(l).changePercent,
       }),
     }));
-    res.json({ package: result.package, lines });
+    res.json({ package: result.package, lines, priorAvailable: result.priorPackageId != null });
   } catch (e) {
     send500(res, e, 'Get statement package lines failed');
   }

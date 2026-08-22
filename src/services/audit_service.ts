@@ -49,6 +49,9 @@ export interface RecordMaterialEventInput {
     | 'subsequent_event_created'
     | 'subsequent_event_disposition_set'
     | 'subsequent_events_confirmed_none'
+    | 'accounting_correction'
+    | 'accounting_memory_change'
+    | 'close_orchestrator_event'
   >;
   deterministicFlagSnapshot: Record<string, unknown>;
   agentDissentSnapshot?: Record<string, unknown>;
@@ -68,6 +71,7 @@ export type AuditEventType =
   | 'aje_rejected'
   | 'aje_posted'
   | 'aje_reversed'
+  | 'aje_corrected'
   | 'recon_started'
   | 'recon_updated'
   | 'recon_completed'
@@ -110,6 +114,7 @@ function mapToLedgerEventType(eventType: AuditEventType): AuditLedgerEventType {
   const map: Partial<Record<AuditEventType, AuditLedgerEventType>> = {
     aje_posted: 'je_posting',
     aje_approved: 'je_approval',
+    aje_corrected: 'accounting_correction',
     close_certified: 'certify_close',
     close_initiated: 'close_session_transition',
     close_advanced: 'close_session_transition',
@@ -123,7 +128,7 @@ function mapToLedgerEventType(eventType: AuditEventType): AuditLedgerEventType {
     issue_verified: 'issue_status_change',
     recon_completed: 'recon_confirmation',
     recon_approved: 'recon_signoff',
-    audit_log_action: 'mapping_rule_update',
+    audit_log_action: 'audit_log_action',
   };
   return (map[eventType] ?? 'mapping_rule_update') as AuditLedgerEventType;
 }
@@ -205,6 +210,9 @@ export interface AuditLogActionEntry {
   resource?: string;
   detail?: string;
   payload?: Record<string, unknown>;
+  entityId?: string;
+  periodId?: string;
+  periodLabel?: string;
 }
 
 /**
@@ -218,6 +226,9 @@ export async function recordAuditLogAction(
 ): Promise<void> {
   await recordAuditEvent(client, tenantId, {
     eventType: 'audit_log_action',
+    entityId: entry.entityId,
+    periodId: entry.periodId,
+    periodLabel: entry.periodLabel,
     userId: entry.actor,
     targetType: 'audit_log',
     targetId: entry.resource ?? entry.action,

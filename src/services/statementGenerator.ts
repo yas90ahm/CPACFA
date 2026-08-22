@@ -12,7 +12,12 @@ import type {
 } from '../types/financial.js';
 import { buildBalanceSheet, buildProfitAndLoss, buildFinancialStatements, validateTrialBalanceAndBalanceSheet } from './financialStatements.js';
 import { classifyTrialBalanceDeterministic } from './accountClassifier.js';
-import { getStandardsRegistry, requiresLeaseLiabilityCalculation, usesSimplifiedDepreciation } from '../constants/accounting/index.js';
+import {
+  applyEntryPresentationReferences,
+  applyPresentationReferences,
+  getStandardsRegistry,
+  requiresLeaseLiabilityCalculation,
+} from '../constants/accounting/index.js';
 import type { AccountingStandard } from '../constants/accounting/index.js';
 // QUARANTINED — leaseLiabilityCalc not in MVP (CPA close only)
 // import { computeLeaseLiability, type LeaseLiabilityInput } from './leaseLiabilityCalc.js';
@@ -64,9 +69,8 @@ export interface StatementGeneratorResult {
   cashFlow?: CashFlowStatement;
   equityChanges?: EquityChangesStatement;
   notesAndPolicies?: NotesAndPolicies;
-  /** ASPE: simplified depreciation. IFRS/US_GAAP: lease liability when lease data provided. FRS102/ASPE: operating lease expense only (no ROU). */
+  /** Framework-specific calculation metadata, only when a configured deterministic calculation ran. */
   standardMetadata?: {
-    depreciationMethod?: 'straight-line';
     leaseLiability?: number;
     rightOfUseAsset?: number;
     citation?: string;
@@ -75,7 +79,7 @@ export interface StatementGeneratorResult {
 
 /**
  * Generate financial statements for the given standard.
- * - ASPE: Simplified depreciation (straight-line); operating leases off balance sheet.
+ * - ASPE: Uses approved entity policies; this generator does not invent useful lives, methods, or lease classification.
  * - IFRS: Lease liability/ROU when lease data provided (IFRS 16).
  * - US_GAAP: Lease liability/ROU when lease data provided (ASC 842).
  * - FRS102: Operating lease expense only (no ROU); baseline classification.
@@ -124,8 +128,10 @@ export async function generateStatements(
     });
   }
 
-  let balanceSheet = buildBalanceSheet(classified);
-  const profitAndLoss = buildProfitAndLoss(classified);
+  const frameworkEntries = applyEntryPresentationReferences(standard, classified);
+  let balanceSheet = buildBalanceSheet(frameworkEntries);
+  let profitAndLoss = buildProfitAndLoss(frameworkEntries);
+  ({ balanceSheet, profitAndLoss } = applyPresentationReferences(standard, balanceSheet, profitAndLoss));
   const priorClassified =
     options.priorTrialBalance && options.priorClassifiedEntries?.length === options.priorTrialBalance.entries.length
       ? options.priorClassifiedEntries
@@ -135,11 +141,6 @@ export async function generateStatements(
   const priorBalanceSheet = priorClassified ? buildBalanceSheet(priorClassified) : undefined;
 
   const standardMetadata: StatementGeneratorResult['standardMetadata'] = {};
-
-  if (usesSimplifiedDepreciation(standard)) {
-    // ASPE: simplified depreciation — straight-line only
-    standardMetadata.depreciationMethod = 'straight-line';
-  }
 
   // QUARANTINED — leaseLiabilityCalc not in MVP (CPA close only). Lease option ignored.
   // if (requiresLeaseLiabilityCalculation(standard) && options.lease) {
@@ -158,7 +159,7 @@ export async function generateStatements(
   return {
     balanceSheet,
     profitAndLoss,
-    classifiedEntries: classified,
+    classifiedEntries: frameworkEntries,
     standard,
     ...(options.fullSet ? {
       cashFlow: buildCashFlowStatement(trialBalanceResult, profitAndLoss, options.priorTrialBalance),

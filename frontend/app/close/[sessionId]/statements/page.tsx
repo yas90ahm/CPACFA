@@ -7,12 +7,11 @@ import { apiFetch } from '@/lib/api';
 import { useCloseSession } from '@/lib/hooks/useCloseSession';
 import { fmtMoney } from '@/lib/money';
 import {
-  FileText,
+  AlertCircle,
   CheckCircle2,
   Loader2,
   Download,
   FileSpreadsheet,
-  Code,
   Sparkles,
   TrendingUp,
   TrendingDown,
@@ -24,29 +23,36 @@ import { VarianceExplanationStatus, isVarianceExplained } from '@/lib/contracts/
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
-type StatementType = 'balance_sheet' | 'income_statement' | 'cash_flow' | 'stockholders_equity';
+type StatementType = 'balance_sheet' | 'profit_and_loss' | 'cash_flow' | 'equity';
 
 interface StatementPackage {
   id: string;
-  sessionId: string;
+  closeSessionId: string;
+  version: number;
   generatedAt: string;
-  statementTypes: StatementType[];
+  validationResults?: Array<{
+    check: string;
+    passed: boolean;
+    message?: string;
+  }>;
 }
 
 interface StatementLine {
   id: string;
-  lineItem: string;
-  section: string;
-  subsection?: string;
-  currentAmount: string;
+  fsLineId: string;
+  name: string;
+  amount: string;
+  statement: StatementType;
+  displayOrder: number;
+  indentLevel: number;
+  sectionName?: string | null;
   priorAmount?: string;
   isSubtotal: boolean;
-  isTotal: boolean;
-  indent: number;
-  statementType: StatementType;
+  isGrandTotal: boolean;
 }
 
 interface TieCheck {
+  key: string;
   label: string;
   passing: boolean;
   detail?: string;
@@ -58,10 +64,26 @@ interface TieCheck {
 
 const TABS: { key: StatementType; label: string }[] = [
   { key: 'balance_sheet', label: 'Balance Sheet' },
-  { key: 'income_statement', label: 'Income Statement' },
+  { key: 'profit_and_loss', label: 'Income Statement' },
   { key: 'cash_flow', label: 'Cash Flow' },
-  { key: 'stockholders_equity', label: "Stockholders' Equity" },
+  { key: 'equity', label: 'Changes in Equity' },
 ];
+
+const VALIDATION_LABELS: Record<string, string> = {
+  balance_sheet_equation: 'Assets equal liabilities plus equity',
+  net_income_tie: 'Net income ties to the statement of changes in equity',
+  cash_flow_sections_tie: 'Cash-flow sections equal the net change in cash',
+  cash_rollforward_tie: 'Beginning cash plus net change equals ending cash',
+  cash_tie: 'Ending cash ties to the balance sheet',
+  cash_flow_comparative_source: 'Cash flow uses a prior certified comparative balance',
+  equity_tie: 'Closing equity ties to the balance sheet',
+  equity_comparative_source: 'Changes in equity uses a prior certified comparative balance',
+  retained_earnings_tie: 'Retained earnings roll-forward ties',
+};
+
+function validationLabel(check: string): string {
+  return VALIDATION_LABELS[check] ?? check.replaceAll('_', ' ');
+}
 
 /* ------------------------------------------------------------------ */
 /*  Main Page                                                          */
@@ -115,10 +137,6 @@ export default function StatementsPage() {
     );
   };
 
-  const handleExportXbrl = () => {
-    alert('XBRL export coming soon');
-  };
-
   const {
     gates: _gates,
     gatesTotal: _gatesTotal,
@@ -145,10 +163,18 @@ export default function StatementsPage() {
   const packageId = packages?.[0]?.id;
 
   // Fetch lines for the selected package
-  const { data: linesData, isLoading } = useQuery<{ lines: StatementLine[]; tieChecks?: TieCheck[] }>({
+  const { data: linesData, isLoading } = useQuery<{
+    package: StatementPackage;
+    lines: StatementLine[];
+    priorAvailable: boolean;
+  }>({
     queryKey: ['statement-lines', packageId, activeTab],
     queryFn: () =>
-      apiFetch<{ lines: StatementLine[]; tieChecks?: TieCheck[] }>(
+      apiFetch<{
+        package: StatementPackage;
+        lines: StatementLine[];
+        priorAvailable: boolean;
+      }>(
         `/api/close/statement-packages/${packageId}/lines?includePrior=true&statementType=${activeTab}`
       ),
     enabled: !!packageId,
@@ -167,20 +193,16 @@ export default function StatementsPage() {
     (variancesQuery.data ?? []).map((v) => [v.lineItemName?.toLowerCase() ?? '', v])
   );
 
-  const lines = linesData?.lines ?? [];
-  const tieChecks = linesData?.tieChecks ?? [
-    { label: 'Assets = Liabilities + Equity', passing: true },
-    { label: 'Beginning Equity + Net Income - Dividends = Ending Equity', passing: true },
-    { label: 'Net Income ties to Income Statement', passing: true },
-    { label: 'Cash from Operations + Investing + Financing = Net Change in Cash', passing: true },
-    { label: 'Ending Cash ties to Balance Sheet', passing: true },
-    { label: 'Retained Earnings ties to Equity Statement', passing: true },
-    { label: 'Depreciation ties to Fixed Asset schedule', passing: true },
-    { label: 'Tax Provision ties to Deferred Tax schedule', passing: true },
-    { label: 'Stock Comp ties to Equity Statement', passing: true },
-  ];
+  const lines = (linesData?.lines ?? []).filter((line) => line.statement === activeTab);
+  const tieChecks: TieCheck[] = (linesData?.package.validationResults ?? []).map((validation) => ({
+    key: validation.check,
+    label: validationLabel(validation.check),
+    passing: validation.passed,
+    detail: validation.message,
+  }));
 
   const passingCount = tieChecks.filter((c) => c.passing).length;
+  const allChecksPassing = tieChecks.length > 0 && passingCount === tieChecks.length;
 
   // Derive current and prior period labels from session periodEnd
   const currentPeriodLabel = _periodLabel || 'Current Period';
@@ -284,46 +306,44 @@ export default function StatementsPage() {
                   </tr>
                 ) : (
                   lines.map((line) => {
-                    const isBold = line.isSubtotal || line.isTotal;
-                    const indent = line.indent ?? 0;
+                    const isBold = line.isSubtotal || line.isGrandTotal;
+                    const indent = line.indentLevel ?? 0;
+                    const isSectionHeader = line.fsLineId.includes('_header_');
                     return (
                       <tr
                         key={line.id}
                         className={`border-t border-[#DDD5C2] ${
-                          line.isTotal ? 'bg-[#F5F0E8]' : ''
+                          line.isGrandTotal ? 'bg-[#F5F0E8]' : ''
                         } ${line.isSubtotal ? 'bg-[#F5F0E8]/50' : ''}`}
                       >
                         <td
                           className={`px-4 py-2.5 text-[#2C2416] ${isBold ? 'font-semibold' : ''}`}
                           style={{ paddingLeft: `${16 + indent * 20}px` }}
                         >
-                          {line.section && line.indent === 0 && !line.isSubtotal && !line.isTotal ? (
-                            <span className="text-xs text-[#8B7A5E] uppercase tracking-wide">
-                              {line.section}
-                            </span>
-                          ) : (
-                            line.lineItem
-                          )}
-                          {line.section && line.indent === 0 && !line.isSubtotal && !line.isTotal && (
-                            <div className="mt-0.5">{line.lineItem}</div>
-                          )}
+                          <span className={isSectionHeader ? 'text-xs text-[#8B7A5E] uppercase tracking-wide' : ''}>
+                            {line.name}
+                          </span>
                         </td>
                         <td
                           className={`px-4 py-2.5 text-right font-mono text-[#2C2416] ${
                             isBold ? 'font-semibold' : ''
                           }`}
                         >
-                          {line.isTotal
-                            ? fmtMoney(line.currentAmount, { dollar: true })
-                            : fmtMoney(line.currentAmount)}
+                          {isSectionHeader
+                            ? ''
+                            : line.isGrandTotal
+                              ? fmtMoney(line.amount, { dollar: true })
+                              : fmtMoney(line.amount)}
                         </td>
                         <td
                           className={`px-4 py-2.5 text-right font-mono text-[#8B7A5E] ${
                             isBold ? 'font-semibold' : ''
                           }`}
                         >
-                          {line.priorAmount
-                            ? line.isTotal
+                          {isSectionHeader
+                            ? ''
+                            : line.priorAmount != null
+                              ? line.isGrandTotal
                               ? fmtMoney(line.priorAmount, { dollar: true })
                               : fmtMoney(line.priorAmount)
                             : '--'}
@@ -331,12 +351,13 @@ export default function StatementsPage() {
                         {/* Variance column */}
                         <td className="px-4 py-2.5 text-right text-xs">
                           {(() => {
-                            const v = varianceMap.get(line.lineItem?.toLowerCase() ?? '');
+                            if (isSectionHeader) return null;
+                            const v = varianceMap.get(line.name.toLowerCase());
                             if (!v) {
                               // Compute display-only variance from amounts
-                              const cur = parseFloat(line.currentAmount ?? '0');
+                              const cur = parseFloat(line.amount ?? '0');
                               const pri = parseFloat(line.priorAmount ?? '0');
-                              if (!line.priorAmount || isNaN(pri) || isNaN(cur)) return <span className="text-[#8B7A5E]">--</span>;
+                              if (line.priorAmount == null || isNaN(pri) || isNaN(cur)) return <span className="text-[#8B7A5E]">--</span>;
                               const diff = cur - pri;
                               if (Math.abs(diff) < 0.5) return <span className="text-[#8B7A5E]">--</span>;
                               const pct = pri !== 0 ? (diff / Math.abs(pri)) * 100 : 0;
@@ -394,23 +415,42 @@ export default function StatementsPage() {
           Cross-Statement Tie Checks
         </h2>
         <div className="bg-[#EDE6D6] border border-[#DDD5C2] rounded-lg p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <CheckCircle2 size={16} className="text-[#2D6A4F]" />
-            <span className="text-sm font-medium text-[#2D6A4F]">
-              {passingCount} of {tieChecks.length} Passing
-            </span>
-          </div>
-          <div className="space-y-2">
-            {tieChecks.map((check, i) => (
-              <div key={i} className="flex items-center gap-3">
-                <CheckCircle2
-                  size={14}
-                  className={check.passing ? 'text-[#2D6A4F]' : 'text-[#C44B2B]'}
-                />
-                <span className="text-sm text-[#2C2416]">{check.label}</span>
+          {tieChecks.length === 0 ? (
+            <div className="flex items-center gap-2 text-sm text-[#8B7A5E]">
+              <AlertCircle size={16} />
+              No persisted validation results are available for this statement package.
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 mb-4">
+                {allChecksPassing ? (
+                  <CheckCircle2 size={16} className="text-[#2D6A4F]" />
+                ) : (
+                  <AlertCircle size={16} className="text-[#C44B2B]" />
+                )}
+                <span className={`text-sm font-medium ${allChecksPassing ? 'text-[#2D6A4F]' : 'text-[#C44B2B]'}`}>
+                  {passingCount} of {tieChecks.length} passing
+                </span>
               </div>
-            ))}
-          </div>
+              <div className="space-y-3">
+                {tieChecks.map((check) => {
+                  const Icon = check.passing ? CheckCircle2 : AlertCircle;
+                  return (
+                    <div key={check.key} className="flex items-start gap-3">
+                      <Icon
+                        size={14}
+                        className={check.passing ? 'mt-0.5 text-[#2D6A4F]' : 'mt-0.5 text-[#C44B2B]'}
+                      />
+                      <div>
+                        <div className="text-sm text-[#2C2416]">{check.label}</div>
+                        {check.detail && <div className="mt-0.5 text-xs text-[#8B7A5E]">{check.detail}</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -429,13 +469,6 @@ export default function StatementsPage() {
         >
           <FileSpreadsheet size={16} />
           Export Excel
-        </button>
-        <button
-          onClick={handleExportXbrl}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#EDE6D6] border border-[#DDD5C2] text-sm font-medium text-[#2C2416] hover:border-[#B8860B] transition-colors"
-        >
-          <Code size={16} />
-          Export XBRL
         </button>
       </div>
     </div>

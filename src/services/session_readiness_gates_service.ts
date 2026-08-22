@@ -87,13 +87,16 @@ export async function getReadinessGates(
   // 3. Reconciliations Complete — requires data
   const reconResult = await checkReconCompleteness(pool, tenantId, closeSessionId);
   const reconCompleteCount = reconResult.completed + reconResult.approved;
+  const reconPopulationConfigured = reconResult.total_required > 0;
   gates.push({
     id: 'recons_complete',
     name: 'Reconciliations Complete',
     description: 'All required accounts must be reconciled with supporting documentation',
-    passing: hasData && reconResult.passes,
+    passing: hasData && reconPopulationConfigured && reconResult.passes,
     detail: !hasData
       ? 'Upload a trial balance first'
+      : !reconPopulationConfigured
+        ? 'No required reconciliation population is configured'
       : `${reconCompleteCount}/${reconResult.total_required} reconciliations complete`,
     category: 'hard',
     navigateTo: '/reconciliation',
@@ -115,7 +118,19 @@ export async function getReadinessGates(
     navigateTo: '/adjustments',
   });
 
-  // 5. Statements Current — requires data
+  // 5. Approved company runbook — once configured or started, every persisted
+  // task outcome is part of the hard close gate.
+  gates.push({
+    id: 'runbook_complete',
+    name: 'Approved Runbook Complete',
+    description: 'Every procedure in the approved company runbook must be completed or validly dispositioned',
+    passing: readiness.runbookComplete !== false,
+    detail: readiness.runbookDetail ?? 'No approved runbook is required for this close session',
+    category: 'hard',
+    navigateTo: '/runbook',
+  });
+
+  // 6. Statements Current — requires data
   const pkgs = await statementPackageRepo.listStatementPackagesByCloseSessionId(pool, tenantId, closeSessionId, 1);
   const statementsExist = pkgs.length > 0;
   const statementsStale = !!session.statementsStaleSince;
@@ -136,7 +151,7 @@ export async function getReadinessGates(
     navigateTo: '/statements',
   });
 
-  // 6. Material Variances Explained
+  // 7. Material Variances Explained
   const varianceResult = await checkVarianceCompleteness(pool, tenantId, closeSessionId);
   const variancePassing = statementsExist ? varianceResult.passes : false;
   const varianceDetail = !statementsExist
@@ -156,7 +171,7 @@ export async function getReadinessGates(
     navigateTo: '/variance',
   });
 
-  // 7. Zero Blocking Issues
+  // 8. Zero Blocking Issues
   const blockingIssues = await getBlockingIssuesForPeriod(pool, closeSessionId, tenantId);
   const noBlockingIssues = blockingIssues.length === 0;
   gates.push({
@@ -169,7 +184,7 @@ export async function getReadinessGates(
     navigateTo: '/issues',
   });
 
-  // 8. Evidence Policy Met — check actual evidence count for completed recons
+  // 9. Evidence Policy Met — check actual evidence count for completed recons
   let evidencePass = true;
   let evidenceDetail = 'Evidence requirements satisfied';
   const evidenceBlockers = readiness.hardBlockers.filter((m) =>
@@ -210,11 +225,11 @@ export async function getReadinessGates(
     navigateTo: '/reconciliation',
   });
 
-  // 9. Checklist Complete — requires data
+  // 10. Checklist Complete — requires data
   gates.push({
     id: 'checklist_complete',
     name: 'Close Checklist Complete',
-    description: 'All required checklist items must be completed or skipped',
+    description: 'All core controls must be completed; conditional controls require an approved not-applicable reason',
     passing: hasData && readiness.checklistComplete !== false,
     detail: !hasData
       ? 'Upload a trial balance first'
@@ -223,9 +238,13 @@ export async function getReadinessGates(
     navigateTo: '/checklist',
   });
 
-  // 10. Cash Reconciliation — check period reconciliations for cash accounts (1xxx)
-  let cashRecPassing = true;
-  let cashRecDetail = 'No cash reconciliations required';
+  // 11. Cash Reconciliation — check period reconciliations for cash accounts (1xxx)
+  let cashRecPassing = hasData && readiness.cashRecComplete !== false;
+  let cashRecDetail = !hasData
+    ? 'Upload a trial balance first'
+    : cashRecPassing
+      ? 'Cash reconciliation readiness checks passed'
+      : 'Bank reconciliation is missing or requires sign-off';
   try {
     const cashRecons = await pool.query<{ status: string; account_code: string }>(
       `SELECT status, account_code FROM tenant_period_reconciliations
@@ -236,10 +255,12 @@ export async function getReadinessGates(
     );
     if (cashRecons.rows.length > 0) {
       const notApproved = cashRecons.rows.filter(r => r.status !== 'approved' && r.status !== 'completed');
-      cashRecPassing = notApproved.length === 0;
+      cashRecPassing = cashRecPassing && notApproved.length === 0;
       cashRecDetail = cashRecPassing
         ? `${cashRecons.rows.length} cash reconciliation${cashRecons.rows.length === 1 ? '' : 's'} complete`
-        : `${notApproved.length} cash reconciliation${notApproved.length === 1 ? '' : 's'} not yet complete`;
+        : notApproved.length > 0
+          ? `${notApproved.length} cash reconciliation${notApproved.length === 1 ? '' : 's'} not yet complete`
+          : 'Bank reconciliation run is missing or requires sign-off';
     }
   } catch {
     // Table may not exist — use readiness fallback
@@ -256,19 +277,19 @@ export async function getReadinessGates(
     navigateTo: '/reconciliation',
   });
 
-  // 11. Material JEs Approved — requires data
+  // 12. Material JEs Approved — requires data
   const jesApproved = hasData && readiness.materialJesApproved !== false;
   const jesDetail = !hasData
     ? 'Upload a trial balance first'
     : !jesApproved
-      ? 'Draft or proposed JEs pending'
+      ? 'Unapproved journal entries remain pending'
       : readiness.jeTotal === 0
         ? 'No journal entries posted'
         : 'All JEs approved or rejected';
   gates.push({
     id: 'material_jes_approved',
     name: 'Material JEs Approved',
-    description: 'All journal entries must be approved or rejected (no draft/proposed)',
+    description: 'All journal entries must be approved or rejected (no draft, proposed, or pending-approval entries)',
     passing: jesApproved,
     detail: jesDetail,
     category: 'hard',

@@ -554,7 +554,7 @@ export interface CreateSessionUploadParams {
   filename: string;
   contentType?: string | null;
   summaryText?: string | null;
-  /** Use for raw rows (messy ingest), status (pending_agentic_cleanup), etc. */
+  /** Source metadata and workflow status associated with the uploaded evidence. */
   metadata?: Record<string, unknown> | null;
 }
 

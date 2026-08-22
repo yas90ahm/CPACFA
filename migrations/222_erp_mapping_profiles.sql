@@ -1,7 +1,7 @@
 -- ERP Mapping Profiles: per-connection field mapping configuration.
 -- Templates (tenant_id='__system__') are built-in; tenant-specific profiles are cloned from templates.
 
-CREATE TABLE IF NOT EXISTS erp_mapping_profiles (
+CREATE TABLE IF NOT EXISTS core.erp_mapping_profiles (
   id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
   tenant_id     TEXT NOT NULL,
   connection_id TEXT NOT NULL DEFAULT '__template__',
@@ -17,14 +17,14 @@ CREATE TABLE IF NOT EXISTS erp_mapping_profiles (
 );
 
 CREATE INDEX IF NOT EXISTS idx_erp_mapping_profiles_tenant
-  ON erp_mapping_profiles(tenant_id, connection_id);
+  ON core.erp_mapping_profiles(tenant_id, connection_id);
 
 CREATE INDEX IF NOT EXISTS idx_erp_mapping_profiles_provider_template
-  ON erp_mapping_profiles(provider, is_template) WHERE is_template = TRUE;
+  ON core.erp_mapping_profiles(provider, is_template) WHERE is_template = TRUE;
 
-CREATE TABLE IF NOT EXISTS erp_mapping_rules (
+CREATE TABLE IF NOT EXISTS core.erp_mapping_rules (
   id                TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-  profile_id        TEXT NOT NULL REFERENCES erp_mapping_profiles(id) ON DELETE CASCADE,
+  profile_id        TEXT NOT NULL REFERENCES core.erp_mapping_profiles(id) ON DELETE CASCADE,
   source_field      TEXT NOT NULL,
   canonical_field   TEXT NOT NULL,
   transform_type    TEXT NOT NULL DEFAULT 'direct'
@@ -38,4 +38,4 @@ CREATE TABLE IF NOT EXISTS erp_mapping_rules (
 );
 
 CREATE INDEX IF NOT EXISTS idx_erp_mapping_rules_profile
-  ON erp_mapping_rules(profile_id, sort_order);
+  ON core.erp_mapping_rules(profile_id, sort_order);

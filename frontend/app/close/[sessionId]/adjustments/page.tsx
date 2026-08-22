@@ -1,13 +1,20 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
-import { useParams } from 'next/navigation';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { fmtMoney } from '@/lib/money';
-import { CloseSidebar } from '@/components/close-sidebar';
+import {
+  getAccountingModules,
+  normalizeFrontendAccountingStandard,
+  type AccountingModuleDefinition,
+} from '@/lib/accounting-modules';
 import { WorkflowBreadcrumb } from '@/components/workflow-breadcrumb';
+import { closeQueryKeys, useCloseSession } from '@/lib/hooks/useCloseSession';
+import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
+import type { NormalizedGate } from '@/lib/contracts';
 import {
   ChevronRight,
   ChevronDown,
@@ -18,18 +25,6 @@ import {
   ShieldCheck,
   Loader2,
   Lock,
-  Building2,
-  Users,
-  Landmark,
-  Receipt,
-  FileStack,
-  Package,
-  Award,
-  TrendingDown,
-  BarChart3,
-  Layers,
-  DollarSign,
-  ShieldAlert,
   Pencil,
   SkipForward,
   Sparkles,
@@ -40,30 +35,6 @@ import {
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
-
-interface Gate {
-  id: string;
-  label: string;
-  passing: boolean;
-  detail?: string;
-}
-
-interface ReadinessResponse {
-  gates: Gate[];
-  gatesPassing: number;
-  gatesTotal: number;
-  canAdvance: boolean;
-}
-
-interface SessionResponse {
-  id: string;
-  state: string;
-  periodLabel: string;
-  entityName: string;
-  startedAt: string;
-  createdAt: string;
-  closeDayTarget?: number;
-}
 
 interface JournalEntry {
   id: string;
@@ -84,6 +55,30 @@ interface JournalEntry {
   shadowAuditStatus?: string;
   shadowAuditChecks?: number;
 }
+
+interface JournalEntryDetailLine {
+  jeId: string;
+  lineIndex: number;
+  accountRef: string;
+  debit: string;
+  credit: string;
+  description?: string;
+}
+
+interface JournalEntryDetail {
+  je: JournalEntry;
+  lines: JournalEntryDetailLine[];
+}
+
+interface EditableJournalLine {
+  accountRef: string;
+  debit: string;
+  credit: string;
+  description: string;
+}
+
+type CorrectionApplicability = 'one_time' | 'recurring' | 'policy_candidate';
+type CorrectionMemoryScope = 'transaction_pattern' | 'account' | 'entity';
 
 interface ProposalLine {
   id: string;
@@ -118,34 +113,6 @@ interface ModuleProposalsResponse {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Static module definitions (for card rendering)                     */
-/* ------------------------------------------------------------------ */
-
-interface ModuleDef {
-  id: string;
-  number: string;
-  name: string;
-  asc: string;
-  icon: React.ElementType;
-}
-
-const MODULES: ModuleDef[] = [
-  { id: 'prepaids', number: '01', name: 'Prepaids & Deferrals', asc: 'ASC 340', icon: Clock },
-  { id: 'fixed-assets', number: '02', name: 'Fixed Assets & Depreciation', asc: 'ASC 360', icon: Building2 },
-  { id: 'payroll', number: '03', name: 'Payroll Accruals', asc: 'ASC 710', icon: Users },
-  { id: 'debt-interest', number: '04', name: 'Debt & Interest Accrual', asc: 'ASC 835', icon: Landmark },
-  { id: 'deferred-tax', number: '05', name: 'Deferred Tax Provision', asc: 'ASC 740', icon: Receipt },
-  { id: 'leases', number: '06', name: 'Lease Accounting', asc: 'ASC 842', icon: FileStack },
-  { id: 'inventory', number: '07', name: 'Inventory Reserves', asc: 'ASC 330', icon: Package },
-  { id: 'stock-comp', number: '08', name: 'Stock Compensation', asc: 'ASC 718', icon: Award },
-  { id: 'impairment', number: '09', name: 'Impairment Testing', asc: 'ASC 350/360', icon: TrendingDown },
-  { id: 'ap-aging', number: '10', name: 'AP Aging & Accruals', asc: 'ASC 405', icon: BarChart3 },
-  { id: 'ar-cecl', number: '11', name: 'AR & CECL Allowance', asc: 'ASC 326', icon: ShieldAlert },
-  { id: 'segments', number: '12', name: 'Segment Allocations', asc: 'ASC 280', icon: Layers },
-  { id: 'revenue', number: '13', name: 'Revenue Recognition', asc: 'ASC 606', icon: DollarSign },
-];
-
-/* ------------------------------------------------------------------ */
 /*  Nav                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -163,7 +130,7 @@ function ProgressRail({
   postedCount,
   pendingCount,
 }: {
-  gates: Gate[];
+  gates: NormalizedGate[];
   gatesPassing: number;
   gatesTotal: number;
   sessionState: string;
@@ -352,7 +319,7 @@ function ModuleCard({
   isExpanded,
   onToggle,
 }: {
-  moduleDef: ModuleDef;
+  moduleDef: AccountingModuleDefinition;
   proposal?: ModuleProposal;
   isExpanded: boolean;
   onToggle: () => void;
@@ -379,7 +346,7 @@ function ModuleCard({
           <div>
             <div className="text-sm font-medium text-[#2C2416]">{moduleDef.name}</div>
             <span className="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#E0EAF5] text-[#3B6EA5] mt-1">
-              {moduleDef.asc}
+              {moduleDef.guidance}
             </span>
           </div>
         </div>
@@ -538,16 +505,6 @@ function ModuleDetail({
             Approve All
           </button>
           <button
-            onClick={() => {
-              /* Modify amounts — could open a modal or inline editor */
-            }}
-            disabled={isActing}
-            className="px-4 py-2 text-xs font-medium rounded border border-[#DDD5C2] text-[#5C4F3A] bg-[#F5F0E8] hover:bg-[#EDE6D6] transition-colors disabled:opacity-50 flex items-center gap-1.5"
-          >
-            <Pencil size={12} />
-            Modify Amounts
-          </button>
-          <button
             onClick={() => setSkipMode(true)}
             disabled={isActing}
             className="px-4 py-2 text-xs font-medium rounded border border-[#C44B2B]/20 text-[#C44B2B] bg-[#F5E4DE] hover:bg-[#C44B2B] hover:text-[#F5F0E8] transition-colors disabled:opacity-50 flex items-center gap-1.5"
@@ -597,11 +554,13 @@ function PendingCard({
   entry,
   onApprove,
   onReject,
+  onCorrect,
   isActing,
 }: {
   entry: JournalEntry;
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
+  onCorrect: (entry: JournalEntry) => void;
   isActing: boolean;
 }) {
   const displayId = entry.entryNumber || `AJE-${String(entry.id).slice(0, 3).toUpperCase()}`;
@@ -626,6 +585,14 @@ function PendingCard({
         </span>
         <div className="flex items-center gap-2">
           <button
+            onClick={() => onCorrect(entry)}
+            disabled={isActing}
+            className="flex items-center gap-1.5 rounded border border-[#B8860B]/30 bg-[#F0E8D0] px-3 py-1.5 text-xs font-medium text-[#8B6914] transition-colors hover:bg-[#B8860B] hover:text-white disabled:opacity-50"
+          >
+            <Pencil size={12} />
+            Correct &amp; remember
+          </button>
+          <button
             onClick={() => onReject(entry.id)}
             disabled={isActing}
             className="px-3 py-1.5 text-xs font-medium rounded border border-[#C44B2B]/30 text-[#C44B2B] bg-[#F5E4DE] hover:bg-[#C44B2B] hover:text-[#F5F0E8] transition-colors disabled:opacity-50"
@@ -639,6 +606,223 @@ function PendingCard({
           >
             {isActing ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
             Approve
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface CorrectionResult {
+  replacementJournalEntryId: string;
+  memory: { id: string; status: 'candidate' | 'approved' | 'superseded' | 'revoked' };
+  memoryConflictRequiresApproval: boolean;
+  orchestrationQueued: boolean;
+  orchestrationWarning?: string;
+}
+
+function CorrectionDialog({
+  entry,
+  onClose,
+  onSaved,
+}: {
+  entry: JournalEntry;
+  onClose: () => void;
+  onSaved: (result: CorrectionResult) => void;
+}) {
+  useKeyboardShortcuts([{ key: 'Escape', handler: onClose }]);
+  const detailQuery = useQuery({
+    queryKey: ['journal-entry-detail', entry.id],
+    queryFn: () => apiFetch<JournalEntryDetail>(`/api/close/journal-entries/${entry.id}`, {
+      params: { withLines: 'true' },
+    }),
+  });
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#2C2416]/60 p-4" role="dialog" aria-modal="true" aria-labelledby="correction-dialog-title">
+      <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-xl border border-[#DDD5C2] bg-[#F5F0E8] shadow-2xl">
+        <div className="sticky top-0 z-10 flex items-start justify-between border-b border-[#DDD5C2] bg-[#EDE6D6] px-6 py-4">
+          <div>
+            <h2 id="correction-dialog-title" className="text-lg font-medium text-[#2C2416]">Correct journal entry and remember</h2>
+            <p className="mt-1 text-xs text-[#8B7A5E]">The original proposal remains in the audit trail. A balanced replacement is proposed for independent approval.</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded p-1 text-[#8B7A5E] hover:bg-[#DDD5C2] hover:text-[#2C2416]" aria-label="Close correction dialog">
+            <XCircle size={20} />
+          </button>
+        </div>
+        {detailQuery.isLoading && (
+          <div className="flex items-center justify-center gap-2 px-6 py-16 text-sm text-[#8B7A5E]"><Loader2 size={18} className="animate-spin" /> Loading journal entry…</div>
+        )}
+        {detailQuery.error && (
+          <div className="m-6 rounded-lg border border-[#C44B2B]/20 bg-[#F5E4DE] p-4 text-sm text-[#C44B2B]">{(detailQuery.error as Error).message}</div>
+        )}
+        {detailQuery.data && (
+          <CorrectionForm key={entry.id} detail={detailQuery.data} onClose={onClose} onSaved={onSaved} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CorrectionForm({
+  detail,
+  onClose,
+  onSaved,
+}: {
+  detail: JournalEntryDetail;
+  onClose: () => void;
+  onSaved: (result: CorrectionResult) => void;
+}) {
+  const [memo, setMemo] = useState(detail.je.memo ?? '');
+  const [rationale, setRationale] = useState('');
+  const [applicability, setApplicability] = useState<CorrectionApplicability>('recurring');
+  const [memoryScope, setMemoryScope] = useState<CorrectionMemoryScope>('transaction_pattern');
+  const [lines, setLines] = useState<EditableJournalLine[]>(detail.lines.map((line) => ({
+    accountRef: line.accountRef,
+    debit: line.debit === '0.00' ? '' : line.debit,
+    credit: line.credit === '0.00' ? '' : line.credit,
+    description: line.description ?? '',
+  })));
+
+  const totals = useMemo(() => lines.reduce((value, line) => ({
+    debit: value.debit + (Number(line.debit) || 0),
+    credit: value.credit + (Number(line.credit) || 0),
+  }), { debit: 0, credit: 0 }), [lines]);
+  const lineStructureValid = lines.length >= 2 && lines.every((line) => {
+    const debit = Number(line.debit) || 0;
+    const credit = Number(line.credit) || 0;
+    return Boolean(line.accountRef.trim()) && debit >= 0 && credit >= 0 && (debit > 0) !== (credit > 0);
+  });
+  const balanced = totals.debit > 0 && Math.abs(totals.debit - totals.credit) < 0.005;
+  const canSubmit = memo.trim().length >= 5 && rationale.trim().length >= 10 && lineStructureValid && balanced;
+
+  const mutation = useMutation({
+    mutationFn: () => apiFetch<CorrectionResult>(`/api/close/journal-entries/${detail.je.id}/correct`, {
+      method: 'POST',
+      body: {
+        memo: memo.trim(),
+        rationale: rationale.trim(),
+        applicability,
+        memoryScope,
+        lines: lines.map((line) => ({
+          accountRef: line.accountRef.trim(),
+          debit: Number(line.debit) || 0,
+          credit: Number(line.credit) || 0,
+          description: line.description.trim() || undefined,
+        })),
+      },
+    }),
+    onSuccess: onSaved,
+  });
+
+  function updateLine(index: number, field: keyof EditableJournalLine, value: string) {
+    setLines((current) => current.map((line, lineIndex) => lineIndex === index ? { ...line, [field]: value } : line));
+  }
+
+  return (
+    <div className="space-y-5 p-6">
+      <div className="rounded-lg border border-[#B8860B]/25 bg-[#F0E8D0] p-4">
+        <div className="flex items-center gap-2 text-sm font-medium text-[#8B6914]"><ShieldCheck size={15} /> Safe learning boundary</div>
+        <p className="mt-1 text-xs leading-relaxed text-[#8B6914]">Sabit remembers the corrected accounts, debit/credit direction, rationale, and scope. It never reuses this entry’s amounts; every later close must recalculate from current-period evidence.</p>
+      </div>
+
+      <div>
+        <label htmlFor="corrected-memo" className="text-xs font-medium text-[#5C4F3A]">Corrected memo</label>
+        <input id="corrected-memo" value={memo} onChange={(event) => setMemo(event.target.value)} className="mt-1.5 w-full rounded-md border border-[#DDD5C2] bg-white px-3 py-2 text-sm outline-none focus:border-[#B8860B]" />
+      </div>
+
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-xs font-medium text-[#5C4F3A]">Corrected lines</span>
+          <button type="button" onClick={() => setLines((current) => [...current, { accountRef: '', debit: '', credit: '', description: '' }])} className="flex items-center gap-1 text-xs font-medium text-[#B8860B] hover:underline"><Plus size={12} /> Add line</button>
+        </div>
+        <div className="space-y-2">
+          <div className="grid grid-cols-[1.5fr_1fr_1fr_2fr_auto] gap-2 px-1 text-[10px] font-medium uppercase tracking-wider text-[#8B7A5E]"><span>Account</span><span>Debit</span><span>Credit</span><span>Description</span><span /></div>
+          {lines.map((line, index) => (
+            <div key={index} className="grid grid-cols-[1.5fr_1fr_1fr_2fr_auto] gap-2">
+              <input aria-label={`Line ${index + 1} account`} value={line.accountRef} onChange={(event) => updateLine(index, 'accountRef', event.target.value)} className="rounded border border-[#DDD5C2] bg-white px-2 py-2 font-mono text-sm outline-none focus:border-[#B8860B]" />
+              <input aria-label={`Line ${index + 1} debit`} type="number" min="0" step="0.01" value={line.debit} onChange={(event) => updateLine(index, 'debit', event.target.value)} className="rounded border border-[#DDD5C2] bg-white px-2 py-2 text-right font-mono text-sm outline-none focus:border-[#B8860B]" />
+              <input aria-label={`Line ${index + 1} credit`} type="number" min="0" step="0.01" value={line.credit} onChange={(event) => updateLine(index, 'credit', event.target.value)} className="rounded border border-[#DDD5C2] bg-white px-2 py-2 text-right font-mono text-sm outline-none focus:border-[#B8860B]" />
+              <input aria-label={`Line ${index + 1} description`} value={line.description} onChange={(event) => updateLine(index, 'description', event.target.value)} className="rounded border border-[#DDD5C2] bg-white px-2 py-2 text-sm outline-none focus:border-[#B8860B]" />
+              <button type="button" onClick={() => setLines((current) => current.filter((_, lineIndex) => lineIndex !== index))} disabled={lines.length <= 2} className="rounded p-2 text-[#C44B2B] hover:bg-[#F5E4DE] disabled:opacity-30" aria-label={`Remove line ${index + 1}`}><Trash2 size={15} /></button>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 grid grid-cols-[1.5fr_1fr_1fr_2fr_auto] gap-2 border-t border-[#DDD5C2] pt-3 text-xs">
+          <span className="text-right font-medium text-[#5C4F3A]">Totals</span>
+          <span className="text-right font-mono text-[#2C2416]">{totals.debit.toFixed(2)}</span>
+          <span className="text-right font-mono text-[#2C2416]">{totals.credit.toFixed(2)}</span>
+          <span className={balanced ? 'text-[#2D6A4F]' : 'text-[#C44B2B]'}>{balanced ? 'Balanced' : 'Entry must balance'}</span><span />
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div>
+          <label htmlFor="correction-applicability" className="text-xs font-medium text-[#5C4F3A]">Applicability</label>
+          <select id="correction-applicability" value={applicability} onChange={(event) => setApplicability(event.target.value as CorrectionApplicability)} className="mt-1.5 w-full rounded-md border border-[#DDD5C2] bg-white px-3 py-2 text-sm outline-none focus:border-[#B8860B]">
+            <option value="recurring">Recurring treatment</option>
+            <option value="one_time">One-time correction</option>
+            <option value="policy_candidate">Policy candidate — separate approval</option>
+          </select>
+        </div>
+        <div>
+          <label htmlFor="correction-scope" className="text-xs font-medium text-[#5C4F3A]">Memory scope</label>
+          <select id="correction-scope" value={memoryScope} onChange={(event) => setMemoryScope(event.target.value as CorrectionMemoryScope)} className="mt-1.5 w-full rounded-md border border-[#DDD5C2] bg-white px-3 py-2 text-sm outline-none focus:border-[#B8860B]">
+            <option value="transaction_pattern">Matching transaction pattern</option>
+            <option value="account">Account treatment</option>
+            <option value="entity">Entity close context</option>
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label htmlFor="correction-rationale" className="text-xs font-medium text-[#5C4F3A]">Supervisor rationale</label>
+        <textarea id="correction-rationale" rows={3} value={rationale} onChange={(event) => setRationale(event.target.value)} placeholder="Explain what was wrong and why this treatment is correct under ASPE…" className="mt-1.5 w-full rounded-md border border-[#DDD5C2] bg-white px-3 py-2 text-sm outline-none focus:border-[#B8860B]" />
+        <div className="mt-1 text-[11px] text-[#8B7A5E]">Minimum 10 characters. This becomes an immutable correction fact.</div>
+      </div>
+
+      {mutation.error && <div className="rounded-md border border-[#C44B2B]/20 bg-[#F5E4DE] px-3 py-2 text-sm text-[#C44B2B]">{(mutation.error as Error).message}</div>}
+      {!lineStructureValid && <div className="text-xs text-[#C44B2B]">Each line needs an account and exactly one positive debit or credit.</div>}
+
+      <div className="flex justify-end gap-3 border-t border-[#DDD5C2] pt-4">
+        <button type="button" onClick={onClose} disabled={mutation.isPending} className="rounded-md border border-[#DDD5C2] px-4 py-2 text-sm font-medium text-[#5C4F3A] hover:bg-[#EDE6D6] disabled:opacity-50">Cancel</button>
+        <button type="button" onClick={() => mutation.mutate()} disabled={!canSubmit || mutation.isPending} className="flex items-center gap-2 rounded-md bg-[#2D6A4F] px-4 py-2 text-sm font-medium text-white hover:bg-[#245A42] disabled:opacity-50">
+          {mutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />}
+          Record correction
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RejectDialog({
+  entry,
+  onClose,
+  onConfirm,
+  isPending,
+  error,
+}: {
+  entry: JournalEntry;
+  onClose: () => void;
+  onConfirm: (reason: string) => void;
+  isPending: boolean;
+  error?: Error | null;
+}) {
+  const [reason, setReason] = useState('');
+  useKeyboardShortcuts([{ key: 'Escape', handler: onClose, enabled: !isPending }]);
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#2C2416]/60 p-4" role="dialog" aria-modal="true" aria-labelledby="reject-dialog-title">
+      <div className="w-full max-w-lg rounded-xl border border-[#DDD5C2] bg-[#F5F0E8] p-6 shadow-2xl">
+        <h2 id="reject-dialog-title" className="text-lg font-medium text-[#2C2416]">Reject proposed entry</h2>
+        <p className="mt-1 text-sm text-[#8B7A5E]">{entry.memo || entry.description || entry.id}</p>
+        <label htmlFor="rejection-reason" className="mt-5 block text-xs font-medium text-[#5C4F3A]">Reason</label>
+        <textarea id="rejection-reason" rows={4} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Explain why this proposal should not be recorded…" className="mt-1.5 w-full rounded-md border border-[#DDD5C2] bg-white px-3 py-2 text-sm outline-none focus:border-[#B8860B]" />
+        <p className="mt-1 text-[11px] text-[#8B7A5E]">Minimum 10 characters. Rejection does not create reusable accounting memory.</p>
+        {error && <div className="mt-3 rounded bg-[#F5E4DE] px-3 py-2 text-xs text-[#C44B2B]">{error.message}</div>}
+        <div className="mt-5 flex justify-end gap-3">
+          <button type="button" onClick={onClose} disabled={isPending} className="rounded-md border border-[#DDD5C2] px-4 py-2 text-sm font-medium text-[#5C4F3A] disabled:opacity-50">Cancel</button>
+          <button type="button" onClick={() => onConfirm(reason.trim())} disabled={reason.trim().length < 10 || isPending} className="flex items-center gap-2 rounded-md bg-[#C44B2B] px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+            {isPending && <Loader2 size={14} className="animate-spin" />} Reject entry
           </button>
         </div>
       </div>
@@ -685,12 +869,6 @@ function formatDateTime(iso?: string): string {
   );
 }
 
-/** Check if an entry source starts with 'module:' */
-function isModuleSourceEntry(entry: JournalEntry): boolean {
-  const src = entry.source || entry.sourceModule || entry.moduleRef || '';
-  return src.toLowerCase().startsWith('module:');
-}
-
 /* ------------------------------------------------------------------ */
 /*  Tab Button                                                         */
 /* ------------------------------------------------------------------ */
@@ -700,16 +878,24 @@ function TabButton({
   label,
   count,
   onClick,
+  tabId,
+  panelId,
 }: {
   active: boolean;
   label: string;
   count?: number;
   onClick: () => void;
+  tabId: string;
+  panelId: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      id={tabId}
+      role="tab"
+      aria-selected={active}
+      aria-controls={panelId}
       className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
         active
           ? 'bg-[#2C2416] text-[#EDE6D6]'
@@ -736,28 +922,22 @@ function TabButton({
 
 export default function JournalEntriesPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const sessionId = params.sessionId as string;
+  const closeSession = useCloseSession(sessionId);
+  const { sessionQuery, readinessQuery } = closeSession;
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'modules' | 'manual'>('modules');
+  const [activeTab, setActiveTab] = useState<'modules' | 'entries'>(
+    searchParams.get('tab') === 'entries' ? 'entries' : 'modules'
+  );
   const [expandedModule, setExpandedModule] = useState<string | null>(null);
   const [actingOnId, setActingOnId] = useState<string | null>(null);
+  const [correctingEntry, setCorrectingEntry] = useState<JournalEntry | null>(null);
+  const [rejectingEntry, setRejectingEntry] = useState<JournalEntry | null>(null);
+  const [correctionNotice, setCorrectionNotice] = useState<string | null>(null);
+  const requestedCorrectionHandled = useRef(false);
 
   /* --- Data fetching --- */
-
-  const sessionQuery = useQuery({
-    queryKey: ['close-session', sessionId],
-    queryFn: () => apiFetch<SessionResponse>(`/api/close/sessions/${sessionId}`),
-    enabled: !!sessionId,
-  });
-
-  const readinessQuery = useQuery({
-    queryKey: ['close-readiness', sessionId],
-    queryFn: () =>
-      apiFetch<ReadinessResponse>(`/api/close/sessions/${sessionId}/readiness`, {
-        params: { format: 'gates' },
-      }),
-    enabled: !!sessionId,
-  });
 
   const proposalsQuery = useQuery({
     queryKey: ['module-proposals', sessionId],
@@ -771,7 +951,7 @@ export default function JournalEntriesPage() {
   });
 
   const jesQuery = useQuery({
-    queryKey: ['journal-entries', sessionId],
+    queryKey: closeQueryKeys.journalEntries(sessionId),
     queryFn: async () => {
       const data = await apiFetch<{ journalEntries?: JournalEntry[]; entries?: JournalEntry[] } | JournalEntry[]>(
         '/api/close/journal-entries',
@@ -783,6 +963,18 @@ export default function JournalEntriesPage() {
     enabled: !!sessionId,
   });
 
+  useEffect(() => {
+    if (requestedCorrectionHandled.current || !jesQuery.data) return;
+    const requestedId = searchParams.get('correct');
+    if (!requestedId) return;
+    requestedCorrectionHandled.current = true;
+    const requestedEntry = jesQuery.data.find((entry) => entry.id === requestedId);
+    if (requestedEntry && ['proposed', 'pending_approval'].includes(requestedEntry.status)) {
+      setActiveTab('entries');
+      setCorrectingEntry(requestedEntry);
+    }
+  }, [jesQuery.data, searchParams]);
+
   /* --- Mutations (Manual Entries tab) --- */
 
   const approveMutation = useMutation({
@@ -791,20 +983,38 @@ export default function JournalEntriesPage() {
     onMutate: (id) => setActingOnId(id),
     onSettled: () => {
       setActingOnId(null);
-      queryClient.invalidateQueries({ queryKey: ['journal-entries', sessionId] });
-      queryClient.invalidateQueries({ queryKey: ['close-readiness', sessionId] });
+      queryClient.invalidateQueries({ queryKey: closeQueryKeys.journalEntries(sessionId) });
+      queryClient.invalidateQueries({ queryKey: closeQueryKeys.readiness(sessionId) });
     },
   });
 
   const rejectMutation = useMutation({
-    mutationFn: (id: string) =>
-      apiFetch(`/api/close/journal-entries/${id}/reject`, { method: 'POST' }),
-    onMutate: (id) => setActingOnId(id),
+    mutationFn: (input: { id: string; reason: string }) =>
+      apiFetch(`/api/close/journal-entries/${input.id}/reject`, {
+        method: 'POST',
+        body: { reason: input.reason },
+      }),
+    onMutate: (input) => setActingOnId(input.id),
+    onSuccess: () => setRejectingEntry(null),
     onSettled: () => {
       setActingOnId(null);
-      queryClient.invalidateQueries({ queryKey: ['journal-entries', sessionId] });
+      queryClient.invalidateQueries({ queryKey: closeQueryKeys.journalEntries(sessionId) });
+      queryClient.invalidateQueries({ queryKey: closeQueryKeys.readiness(sessionId) });
     },
   });
+
+  function handleCorrectionSaved(result: CorrectionResult) {
+    setCorrectingEntry(null);
+    setCorrectionNotice(result.memory.status === 'candidate'
+      ? 'Correction recorded. The replacement is proposed and the treatment is awaiting explicit memory approval.'
+      : result.orchestrationWarning
+        ? result.orchestrationWarning
+        : 'Correction recorded. Sabit remembered the treatment and queued the affected close checks.');
+    queryClient.invalidateQueries({ queryKey: closeQueryKeys.journalEntries(sessionId) });
+    queryClient.invalidateQueries({ queryKey: closeQueryKeys.readiness(sessionId) });
+    queryClient.invalidateQueries({ queryKey: closeQueryKeys.accountingMemory(sessionId) });
+    queryClient.invalidateQueries({ queryKey: closeQueryKeys.orchestrator(sessionId) });
+  }
 
   const autoProposeMutation = useMutation({
     mutationFn: () =>
@@ -814,8 +1024,8 @@ export default function JournalEntriesPage() {
       }),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['module-proposals', sessionId] });
-      queryClient.invalidateQueries({ queryKey: ['journal-entries', sessionId] });
-      queryClient.invalidateQueries({ queryKey: ['close-readiness', sessionId] });
+      queryClient.invalidateQueries({ queryKey: closeQueryKeys.journalEntries(sessionId) });
+      queryClient.invalidateQueries({ queryKey: closeQueryKeys.readiness(sessionId) });
     },
   });
 
@@ -830,8 +1040,8 @@ export default function JournalEntriesPage() {
       try {
         await apiFetch(`/api/close/journal-entries/${data.id}/propose`, { method: 'POST' });
       } catch { /* may fail if already proposed */ }
-      queryClient.invalidateQueries({ queryKey: ['journal-entries', sessionId] });
-      queryClient.invalidateQueries({ queryKey: ['close-readiness', sessionId] });
+      queryClient.invalidateQueries({ queryKey: closeQueryKeys.journalEntries(sessionId) });
+      queryClient.invalidateQueries({ queryKey: closeQueryKeys.readiness(sessionId) });
       setShowNewJE(false);
       setNewJELines([{ accountRef: '', debit: '', credit: '', description: '' }]);
       setNewJEMemo('');
@@ -845,18 +1055,17 @@ export default function JournalEntriesPage() {
   ]);
 
   function addLine() {
-    setNewJELines([...newJELines, { accountRef: '', debit: '', credit: '', description: '' }]);
+    setNewJELines((lines) => [...lines, { accountRef: '', debit: '', credit: '', description: '' }]);
   }
 
   function updateLine(index: number, field: string, value: string) {
-    const updated = [...newJELines];
-    (updated[index] as Record<string, string>)[field] = value;
-    setNewJELines(updated);
+    setNewJELines((lines) => lines.map((line, lineIndex) => lineIndex === index
+      ? { ...line, [field]: value }
+      : line));
   }
 
   function removeLine(index: number) {
-    if (newJELines.length <= 1) return;
-    setNewJELines(newJELines.filter((_, i) => i !== index));
+    setNewJELines((lines) => lines.length <= 1 ? lines : lines.filter((_, lineIndex) => lineIndex !== index));
   }
 
   function submitNewJE() {
@@ -868,7 +1077,14 @@ export default function JournalEntriesPage() {
         credit: parseFloat(l.credit) || 0,
         description: l.description || undefined,
       }));
-    if (lines.length < 1 || !newJEMemo.trim()) return;
+    if (lines.length < 2 || !newJEMemo.trim()) {
+      alert('A journal entry requires a memo and at least two populated lines.');
+      return;
+    }
+    if (lines.some((line) => line.debit < 0 || line.credit < 0 || (line.debit > 0) === (line.credit > 0))) {
+      alert('Each line must contain exactly one positive debit or credit.');
+      return;
+    }
     const totalD = lines.reduce((s, l) => s + l.debit, 0);
     const totalC = lines.reduce((s, l) => s + l.credit, 0);
     if (Math.abs(totalD - totalC) > 0.01) {
@@ -880,18 +1096,17 @@ export default function JournalEntriesPage() {
 
   /* --- Derived state --- */
 
-  const session = sessionQuery.data;
-  const gates = readinessQuery.data?.gates ?? [];
-  const gatesPassing = readinessQuery.data?.gatesPassing ?? 0;
-  const gatesTotal = readinessQuery.data?.gatesTotal ?? 0;
+  const session = closeSession.session;
+  const modules = getAccountingModules(session?.standard);
+  const isAspe = normalizeFrontendAccountingStandard(session?.standard) === 'ASPE';
+  const gates = closeSession.gates;
+  const gatesPassing = closeSession.gatesPassing;
+  const gatesTotal = closeSession.gatesTotal;
   const allEntries = jesQuery.data ?? [];
   const proposals = proposalsQuery.data ?? [];
 
-  // Manual entries: filter out module-sourced entries
-  const manualEntries = useMemo(
-    () => allEntries.filter((e) => !isModuleSourceEntry(e)),
-    [allEntries]
-  );
+  // The entry-review tab is the complete persisted JE lifecycle, including agent/module proposals.
+  const manualEntries = allEntries;
 
   const drafts = manualEntries.filter((e) => e.status === 'draft');
   const proposed = manualEntries.filter(
@@ -923,8 +1138,8 @@ export default function JournalEntriesPage() {
 
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ['module-proposals', sessionId] });
-    queryClient.invalidateQueries({ queryKey: ['journal-entries', sessionId] });
-    queryClient.invalidateQueries({ queryKey: ['close-readiness', sessionId] });
+    queryClient.invalidateQueries({ queryKey: closeQueryKeys.journalEntries(sessionId) });
+    queryClient.invalidateQueries({ queryKey: closeQueryKeys.readiness(sessionId) });
   };
 
   return (
@@ -989,18 +1204,22 @@ export default function JournalEntriesPage() {
               </div>
 
               {/* Tab bar */}
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3" role="tablist" aria-label="Journal entry review mode">
                 <TabButton
                   active={activeTab === 'modules'}
                   label="Module Review"
                   count={proposals.filter((p) => p.status === 'pending' || p.status === 'proposed').length}
                   onClick={() => setActiveTab('modules')}
+                  tabId="module-review-tab"
+                  panelId="module-review-panel"
                 />
                 <TabButton
-                  active={activeTab === 'manual'}
-                  label="Manual Entries"
+                  active={activeTab === 'entries'}
+                  label="Entry Review"
                   count={manualEntries.length}
-                  onClick={() => setActiveTab('manual')}
+                  onClick={() => setActiveTab('entries')}
+                  tabId="entry-review-tab"
+                  panelId="entry-review-panel"
                 />
               </div>
 
@@ -1008,18 +1227,22 @@ export default function JournalEntriesPage() {
               {/*  TAB 1: Module Review                          */}
               {/* ============================================== */}
               {activeTab === 'modules' && (
-                <div className="space-y-6">
+                <div id="module-review-panel" role="tabpanel" aria-labelledby="module-review-tab" className="space-y-6">
                   {/* Auto-propose CTA */}
                   <div className="bg-[#E0EAF5] border border-[#3B6EA5]/20 rounded-lg px-5 py-4 flex items-center justify-between">
                     <div>
-                      <div className="text-sm font-medium text-[#2C2416]">Auto-Compute Adjusting Entries</div>
+                      <div className="text-sm font-medium text-[#2C2416]">
+                        {isAspe ? 'ASPE Workpapers Run Through the Approved Runbook' : 'Compute Adjusting-Entry Proposals'}
+                      </div>
                       <div className="text-xs text-[#8B7A5E] mt-0.5">
-                        Run all 13 accounting modules to propose adjustments based on your trial balance data.
+                        {isAspe
+                          ? 'Registered agents prepare checks and drafts; reviewers approve conclusions and journal entries before ERP posting.'
+                          : 'Run the configured accounting modules to propose adjustments from trial-balance data and approved policies.'}
                       </div>
                     </div>
                     <button
                       onClick={() => autoProposeMutation.mutate()}
-                      disabled={autoProposeMutation.isPending}
+                      disabled={isAspe || autoProposeMutation.isPending}
                       className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-[#B8860B] text-[#F5F0E8] hover:bg-[#A07608] disabled:opacity-50 transition-colors shrink-0"
                     >
                       {autoProposeMutation.isPending ? (
@@ -1027,7 +1250,7 @@ export default function JournalEntriesPage() {
                       ) : (
                         <Sparkles size={14} />
                       )}
-                      {autoProposeMutation.isPending ? 'Computing...' : 'Run Modules'}
+                      {isAspe ? 'Runbook Controlled' : autoProposeMutation.isPending ? 'Computing...' : 'Run Modules'}
                     </button>
                   </div>
                   {autoProposeMutation.isSuccess && (
@@ -1044,7 +1267,7 @@ export default function JournalEntriesPage() {
 
                   {/* Module grid */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    {MODULES.map((mod) => {
+                    {modules.map((mod) => {
                       const proposal = proposalsByModule.get(mod.id);
                       const isPending =
                         proposal?.status === 'pending' || proposal?.status === 'proposed';
@@ -1086,13 +1309,13 @@ export default function JournalEntriesPage() {
               {/* ============================================== */}
               {/*  TAB 2: Manual Entries                          */}
               {/* ============================================== */}
-              {activeTab === 'manual' && (
-                <div className="space-y-6">
+              {activeTab === 'entries' && (
+                <div id="entry-review-panel" role="tabpanel" aria-labelledby="entry-review-tab" className="space-y-6">
                   {/* New JE button */}
                   <div className="flex items-center justify-between">
                     <div>
-                      <div className="text-sm font-medium text-[#2C2416]">Manual Adjusting Entries</div>
-                      <div className="text-xs text-[#8B7A5E]">One-time entries not covered by modules</div>
+                      <div className="text-sm font-medium text-[#2C2416]">Journal Entry Review &amp; Manual Adjustments</div>
+                      <div className="text-xs text-[#8B7A5E]">Review every persisted proposal, including module and agent work, or create a manual entry</div>
                     </div>
                     <button
                       onClick={() => setShowNewJE(!showNewJE)}
@@ -1212,6 +1435,13 @@ export default function JournalEntriesPage() {
                   )}
 
                   {/* Lifecycle counter cards */}
+                  {correctionNotice && (
+                    <div className="flex items-start justify-between gap-3 rounded-lg border border-[#2D6A4F]/20 bg-[#E0EDE8] px-4 py-3 text-sm text-[#2D6A4F]">
+                      <span className="flex items-start gap-2"><CheckCircle2 size={16} className="mt-0.5 shrink-0" />{correctionNotice}</span>
+                      <button type="button" onClick={() => setCorrectionNotice(null)} className="text-xs font-medium hover:underline">Dismiss</button>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
                     <StatCard label="Draft" count={drafts.length} color="#5C4F3A" bgColor="#DDD5C2" />
                     <StatCard
@@ -1252,7 +1482,11 @@ export default function JournalEntriesPage() {
                             key={entry.id}
                             entry={entry}
                             onApprove={(id) => approveMutation.mutate(id)}
-                            onReject={(id) => rejectMutation.mutate(id)}
+                            onReject={() => {
+                              rejectMutation.reset();
+                              setRejectingEntry(entry);
+                            }}
+                            onCorrect={setCorrectingEntry}
                             isActing={actingOnId === entry.id}
                           />
                         ))}
@@ -1347,6 +1581,22 @@ export default function JournalEntriesPage() {
           )}
         </main>
       </div>
+      {correctingEntry && (
+        <CorrectionDialog
+          entry={correctingEntry}
+          onClose={() => setCorrectingEntry(null)}
+          onSaved={handleCorrectionSaved}
+        />
+      )}
+      {rejectingEntry && (
+        <RejectDialog
+          entry={rejectingEntry}
+          onClose={() => setRejectingEntry(null)}
+          onConfirm={(reason) => rejectMutation.mutate({ id: rejectingEntry.id, reason })}
+          isPending={rejectMutation.isPending}
+          error={rejectMutation.error as Error | null}
+        />
+      )}
     </div>
   );
 }

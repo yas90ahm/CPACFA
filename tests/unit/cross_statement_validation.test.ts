@@ -25,6 +25,8 @@ const plBalanced: ProfitAndLoss = {
 
 const cfBalanced: CashFlowStatement = {
   endingCash: 500,
+  beginningCash: 500,
+  netChangeInCash: 0,
   operating: [],
   investing: [],
   financing: [],
@@ -51,7 +53,7 @@ describe('runCrossStatementValidationForCertification', () => {
     const bsBroken: BalanceSheet = {
       ...bsBalanced,
       totalAssets: 800,
-      totalEquity: 700,
+      totalEquity: 650,
     };
     const checks = runCrossStatementValidationForCertification(
       bsBroken,
@@ -88,7 +90,7 @@ describe('runCrossStatementValidationForCertification', () => {
     const eq = checks.find((c) => c.check_name === 'equity_statement_exists');
     expect(eq).toBeDefined();
     expect(eq?.passes).toBe(false);
-    expect(eq?.message).toContain('Stockholders Equity');
+    expect(eq?.message).toContain('changes in equity');
   });
 
   it('fails cash_tie when CF ending cash != BS cash', () => {
@@ -103,5 +105,47 @@ describe('runCrossStatementValidationForCertification', () => {
     expect(tie).toBeDefined();
     expect(tie?.passes).toBe(false);
     expect(tie?.message).toContain('ending cash');
+  });
+
+  it('fails when cash-flow sections do not equal reported net change in cash', () => {
+    const cfBroken: CashFlowStatement = {
+      operating: [{ label: 'Net income', amount: 100 }],
+      investing: [],
+      financing: [],
+      beginningCash: 450,
+      endingCash: 500,
+      netChangeInCash: 50,
+    };
+
+    const checks = runCrossStatementValidationForCertification(
+      bsBalanced,
+      plBalanced,
+      cfBroken,
+      equityBalanced
+    );
+    const tie = checks.find((check) => check.check_name === 'cash_flow_sections_tie');
+    expect(tie?.passes).toBe(false);
+    expect(tie?.message).toContain('sections total');
+  });
+
+  it('fails when beginning cash plus net change does not equal ending cash', () => {
+    const cfBroken: CashFlowStatement = {
+      operating: [{ label: 'Net income', amount: 50 }],
+      investing: [],
+      financing: [],
+      beginningCash: 400,
+      endingCash: 500,
+      netChangeInCash: 50,
+    };
+
+    const checks = runCrossStatementValidationForCertification(
+      bsBalanced,
+      plBalanced,
+      cfBroken,
+      equityBalanced
+    );
+    const tie = checks.find((check) => check.check_name === 'cash_rollforward_tie');
+    expect(tie?.passes).toBe(false);
+    expect(tie?.message).toContain('Beginning cash');
   });
 });

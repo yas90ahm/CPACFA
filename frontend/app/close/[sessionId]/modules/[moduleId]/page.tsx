@@ -7,6 +7,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { fmtMoney } from '@/lib/money';
 import {
+  getAccountingModule,
+  getAccountingModuleAliases,
+  matchesAccountingModule,
+  normalizeAccountingModuleToken,
+} from '@/lib/accounting-modules';
+import {
   ChevronRight,
   AlertCircle,
   CheckCircle2,
@@ -25,12 +31,14 @@ import {
 
 interface JournalEntryLine {
   id?: string;
+  accountRef?: string;
   accountCode?: string;
   accountName?: string;
   description?: string;
   debit?: string;
   credit?: string;
   provenance?: string;
+  amountProvenance?: string;
 }
 
 interface JournalEntry {
@@ -39,11 +47,35 @@ interface JournalEntry {
   amount?: string;
   memo?: string;
   description?: string;
+  source?: string;
   moduleRef?: string;
   sourceModule?: string;
   provenance?: string;
   lines?: JournalEntryLine[];
   createdAt?: string;
+}
+
+interface JournalEntryWithLinesResponse {
+  je: JournalEntry;
+  lines: JournalEntryLine[];
+}
+
+interface ModuleProposal {
+  id: string;
+  moduleName: string;
+  status: 'needs_review' | 'approved' | 'skipped' | 'not_applicable' | 'failed';
+  jeId?: string;
+}
+
+function belongsToModule(je: JournalEntry, moduleId: string): boolean {
+  return matchesAccountingModule(
+    moduleId,
+    je.moduleRef,
+    je.sourceModule,
+    je.source,
+    je.memo,
+    je.description
+  );
 }
 
 interface ComputationInput {
@@ -58,26 +90,6 @@ interface DataQualityFlag {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Module metadata                                                    */
-/* ------------------------------------------------------------------ */
-
-const MODULE_META: Record<string, { name: string; asc: string; fullAsc: string }> = {
-  prepaids: { name: 'Prepaids & Deferrals', asc: 'ASC 340', fullAsc: 'ASC 340-10' },
-  'fixed-assets': { name: 'Fixed Assets & Depreciation', asc: 'ASC 360', fullAsc: 'ASC 360-10' },
-  payroll: { name: 'Payroll Accruals', asc: 'ASC 710', fullAsc: 'ASC 710-10' },
-  'debt-interest': { name: 'Debt & Interest Accrual', asc: 'ASC 835', fullAsc: 'ASC 835-30' },
-  'deferred-tax': { name: 'Deferred Tax Provision', asc: 'ASC 740', fullAsc: 'ASC 740-10' },
-  leases: { name: 'Lease Accounting', asc: 'ASC 842', fullAsc: 'ASC 842-20' },
-  inventory: { name: 'Inventory Reserves', asc: 'ASC 330', fullAsc: 'ASC 330-10' },
-  'stock-comp': { name: 'Stock Compensation', asc: 'ASC 718', fullAsc: 'ASC 718-10' },
-  impairment: { name: 'Impairment Testing', asc: 'ASC 350/360', fullAsc: 'ASC 350-20 / 360-10' },
-  'ap-aging': { name: 'AP Aging & Accruals', asc: 'ASC 405', fullAsc: 'ASC 405-20' },
-  'ar-cecl': { name: 'AR & CECL Allowance', asc: 'ASC 326', fullAsc: 'ASC 326-20' },
-  segments: { name: 'Segment Allocations', asc: 'ASC 280', fullAsc: 'ASC 280-10' },
-  revenue: { name: 'Revenue Recognition', asc: 'ASC 606', fullAsc: 'ASC 606-10' },
-};
-
-/* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -89,27 +101,30 @@ function provenanceBadge(provenance?: string): { label: string; color: string; b
       return { label: 'ledger_exact', color: '#B8860B', bg: '#F0E8D0' };
     case 'ai_suggested':
       return { label: 'ai_suggested', color: '#3B6EA5', bg: '#E0EAF5' };
+    case 'recorded_header':
+      return { label: 'recorded_header', color: '#5C4F3A', bg: '#EDE6D6' };
     default:
-      return { label: provenance ?? 'manual', color: '#8B7A5E', bg: '#EDE6D6' };
+      return { label: provenance ?? 'not_recorded', color: '#8B7A5E', bg: '#EDE6D6' };
   }
 }
 
 function buildInputsFromJE(je: JournalEntry): ComputationInput[] {
   const inputs: ComputationInput[] = [];
   if (je.memo) {
-    inputs.push({ label: 'Memo', value: je.memo, source: 'engine_calculation' });
+    inputs.push({ label: 'Memo', value: je.memo, source: 'recorded_header' });
   }
   if (je.amount) {
-    inputs.push({ label: 'Computed Amount', value: fmtMoney(je.amount, { dollar: true, dash: false }), source: 'engine_calculation' });
+    inputs.push({ label: 'Header Amount', value: fmtMoney(je.amount, { dollar: true, dash: false }), source: 'recorded_header' });
   }
   if (je.createdAt) {
-    inputs.push({ label: 'Created', value: new Date(je.createdAt).toLocaleDateString(), source: 'engine_calculation' });
+    inputs.push({ label: 'Created', value: new Date(je.createdAt).toLocaleDateString(), source: 'recorded_header' });
   }
   return inputs;
 }
 
 function buildFlags(jes: JournalEntry[]): DataQualityFlag[] {
   const flags: DataQualityFlag[] = [];
+  const lineCount = jes.reduce((count, je) => count + (je.lines?.length ?? 0), 0);
 
   // Check balance
   let totalDebit = 0;
@@ -120,15 +135,17 @@ function buildFlags(jes: JournalEntry[]): DataQualityFlag[] {
       totalCredit += parseFloat(String(line.credit ?? '0').replace(/[$,]/g, '')) || 0;
     }
   }
-  const diff = Math.abs(totalDebit - totalCredit);
-  if (diff < 0.02) {
-    flags.push({ severity: 'info', message: 'All proposed entries balance (debits = credits). No exceptions.' });
-  } else {
-    flags.push({ severity: 'warning', message: `Imbalance detected: debits and credits differ by ${fmtMoney(diff.toFixed(2), { dollar: true, dash: false })}.` });
+  if (lineCount > 0) {
+    const diff = Math.abs(totalDebit - totalCredit);
+    if (diff < 0.02) {
+      flags.push({ severity: 'info', message: 'The retrieved journal-entry lines balance (debits equal credits).' });
+    } else {
+      flags.push({ severity: 'warning', message: `Imbalance detected: debits and credits differ by ${fmtMoney(diff.toFixed(2), { dollar: true, dash: false })}.` });
+    }
   }
 
   if (jes.length > 0) {
-    flags.push({ severity: 'info', message: `${jes.length} journal entr${jes.length === 1 ? 'y' : 'ies'} proposed by deterministic calculation engine.` });
+    flags.push({ severity: 'info', message: `${jes.length} journal entr${jes.length === 1 ? 'y is' : 'ies are'} linked to this workpaper from persisted close records.` });
   }
 
   const blocked = jes.filter((j) => j.status === 'blocked' || j.status === 'rejected');
@@ -184,36 +201,37 @@ export default function ModuleDrillDownPage() {
     enabled: !!sessionId,
   });
 
-  const meta = MODULE_META[moduleId] ?? {
+  const meta = getAccountingModule(moduleId, (sessionQuery.data as { standard?: string } | undefined)?.standard) ?? {
     name: moduleId.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
-    asc: '',
-    fullAsc: '',
+    guidance: '',
+    fullGuidance: '',
   };
 
   // Fetch JEs for this module
   const jesQuery = useQuery({
     queryKey: ['module-jes', sessionId, moduleId],
     queryFn: async () => {
-      const data = await apiFetch<{ entries?: JournalEntry[] } | JournalEntry[]>(
+      const data = await apiFetch<{ journalEntries?: JournalEntry[] } | JournalEntry[]>(
         '/api/close/journal-entries',
-        { params: { closeSessionId: sessionId, moduleRef: moduleId } }
+        { params: { closeSessionId: sessionId } }
       );
-      const entries = Array.isArray(data) ? data : data.entries ?? [];
-      // If moduleRef filter didn't work, filter client-side
-      if (entries.length === 0) {
-        const allData = await apiFetch<{ entries?: JournalEntry[] } | JournalEntry[]>(
-          '/api/close/journal-entries',
-          { params: { closeSessionId: sessionId } }
+      const entries = Array.isArray(data) ? data : data.journalEntries ?? [];
+      const matching = entries.filter((je) => belongsToModule(je, moduleId));
+      return Promise.all(matching.map(async (entry) => {
+        const detail = await apiFetch<JournalEntryWithLinesResponse>(
+          `/api/close/journal-entries/${entry.id}`,
+          { params: { withLines: 'true' } }
         );
-        const allEntries = Array.isArray(allData) ? allData : allData.entries ?? [];
-        return allEntries.filter((je) => {
-          const ref = (je.moduleRef ?? je.sourceModule ?? '').toLowerCase().replace(/[\s_-]/g, '');
-          return ref.includes(moduleId.replace(/-/g, ''));
-        });
-      }
-      return entries;
+        return { ...detail.je, lines: detail.lines };
+      }));
     },
     enabled: !!sessionId && !!moduleId,
+  });
+
+  const moduleProposalsQuery = useQuery({
+    queryKey: ['module-proposals', sessionId],
+    queryFn: () => apiFetch<{ proposals: ModuleProposal[] }>(`/api/close/sessions/${sessionId}/module-proposals`),
+    enabled: Boolean(sessionId),
   });
 
   const jes = jesQuery.data ?? [];
@@ -223,19 +241,8 @@ export default function ModuleDrillDownPage() {
   for (const je of jes) {
     if (je.lines && je.lines.length > 0) {
       for (const line of je.lines) {
-        allLines.push({ ...line, jeId: je.id, jeProvenance: line.provenance ?? je.provenance });
+        allLines.push({ ...line, jeId: je.id, jeProvenance: line.amountProvenance ?? line.provenance ?? je.provenance });
       }
-    } else {
-      // Synthesize a line from the JE itself
-      allLines.push({
-        jeId: je.id,
-        accountCode: '',
-        accountName: je.memo ?? je.description ?? '',
-        description: je.memo ?? je.description ?? '',
-        debit: je.amount ?? '0.00',
-        credit: '0.00',
-        jeProvenance: je.provenance,
-      });
     }
   }
 
@@ -246,7 +253,14 @@ export default function ModuleDrillDownPage() {
     totalDebit += parseFloat(String(line.debit ?? '0').replace(/[$,]/g, '')) || 0;
     totalCredit += parseFloat(String(line.credit ?? '0').replace(/[$,]/g, '')) || 0;
   }
-  const isBalanced = Math.abs(totalDebit - totalCredit) < 0.02;
+  const isBalanced = allLines.length > 0 && Math.abs(totalDebit - totalCredit) < 0.02;
+
+  const aliases = getAccountingModuleAliases(moduleId);
+  const moduleProposal = moduleProposalsQuery.data?.proposals.find((proposal) =>
+    aliases.some((alias) => normalizeAccountingModuleToken(proposal.moduleName).includes(alias))
+  );
+  const canSkipProposal = moduleProposal != null && ['needs_review', 'failed'].includes(moduleProposal.status);
+  const approvableEntries = jes.filter((je) => je.status === 'proposed');
 
   const inputs = jes.length > 0 ? buildInputsFromJE(jes[0]) : [];
   const flags = buildFlags(jes);
@@ -254,19 +268,37 @@ export default function ModuleDrillDownPage() {
   // Approve mutation
   const approveMutation = useMutation({
     mutationFn: async () => {
-      for (const je of jes) {
-        if (je.status === 'proposed' || je.status === 'pending_approval') {
-          try {
-            await apiFetch(`/api/close/journal-entries/${je.id}/approve`, { method: 'POST' });
-          } catch {
-            // Some may already be approved
-          }
-        }
+      if (approvableEntries.length === 0) {
+        throw new Error('No proposed journal entries are available for approval.');
+      }
+      for (const je of approvableEntries) {
+        await apiFetch(`/api/close/journal-entries/${je.id}/approve`, { method: 'POST' });
       }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['module-jes', sessionId, moduleId] });
       queryClient.invalidateQueries({ queryKey: ['journal-entries', sessionId] });
+    },
+  });
+
+  const skipMutation = useMutation({
+    mutationFn: async () => {
+      if (!moduleProposal) {
+        throw new Error('No persisted module proposal is available to skip.');
+      }
+      if (skipReason.trim().length < 10) {
+        throw new Error('Skip reason must be at least 10 characters.');
+      }
+      await apiFetch(`/api/close/sessions/${sessionId}/module-proposals/${moduleProposal.id}/skip`, {
+        method: 'POST',
+        body: { reason: skipReason.trim() },
+      });
+    },
+    onSuccess: () => {
+      setSelectedAction(null);
+      setSkipReason('');
+      queryClient.invalidateQueries({ queryKey: ['module-proposals', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['module-jes', sessionId, moduleId] });
     },
   });
 
@@ -355,15 +387,15 @@ export default function ModuleDrillDownPage() {
               </button>
               <div className="flex items-center gap-3">
                 <h1 className="text-2xl font-medium text-[#2C2416]">{meta.name}</h1>
-                {meta.asc && (
+                {meta.guidance && (
                   <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#2C2416] text-[#B8860B]">
-                    {meta.asc}
+                    {meta.guidance}
                   </span>
                 )}
               </div>
-              {meta.fullAsc && (
+              {meta.fullGuidance && (
                 <p className="text-xs text-[#8B7A5E] mt-1">
-                  Guidance: {meta.fullAsc}
+                  Guidance: {meta.fullGuidance}
                 </p>
               )}
             </div>
@@ -381,10 +413,14 @@ export default function ModuleDrillDownPage() {
               </div>
               <span
                 className={`text-xs font-medium px-2 py-0.5 rounded ${
-                  isBalanced ? 'bg-[#E0EDE8] text-[#2D6A4F]' : 'bg-[#F5E4DE] text-[#C44B2B]'
+                  allLines.length === 0
+                    ? 'bg-[#EDE6D6] text-[#8B7A5E]'
+                    : isBalanced
+                      ? 'bg-[#E0EDE8] text-[#2D6A4F]'
+                      : 'bg-[#F5E4DE] text-[#C44B2B]'
                 }`}
               >
-                {isBalanced ? 'Balanced' : 'Imbalanced'}
+                {allLines.length === 0 ? 'No lines recorded' : isBalanced ? 'Balanced' : 'Imbalanced'}
               </span>
             </div>
 
@@ -458,7 +494,9 @@ export default function ModuleDrillDownPage() {
                               {line.jeId.slice(0, 8)}
                             </td>
                             <td className="px-5 py-2.5 text-[#2C2416]">
-                              {line.accountCode ? `${line.accountCode} — ${line.accountName ?? ''}` : line.accountName ?? ''}
+                              {line.accountCode
+                                ? `${line.accountCode} — ${line.accountName ?? ''}`
+                                : line.accountRef ?? line.accountName ?? ''}
                             </td>
                             <td className="px-5 py-2.5 text-[#8B7A5E]">{line.description ?? ''}</td>
                             <td className="px-5 py-2.5 text-right font-mono text-[#2C2416]">
@@ -542,60 +580,64 @@ export default function ModuleDrillDownPage() {
                 <h2 className="text-sm font-medium text-[#2C2416]">YOUR DECISION</h2>
               </div>
               <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-                {/* Approve All */}
+                {/* Approve proposed entries */}
                 <button
                   onClick={() => setSelectedAction('approve')}
+                  disabled={approvableEntries.length === 0}
                   className={`p-4 rounded-lg border-2 text-left transition-colors ${
                     selectedAction === 'approve'
                       ? 'border-[#2D6A4F] bg-[#E0EDE8]'
                       : 'border-[#DDD5C2] hover:border-[#2D6A4F]'
-                  }`}
+                  } disabled:cursor-not-allowed disabled:opacity-50`}
                 >
                   <div className="flex items-center gap-2 mb-2">
                     <ThumbsUp size={16} className="text-[#2D6A4F]" />
-                    <span className="text-sm font-medium text-[#2C2416]">Approve All</span>
+                    <span className="text-sm font-medium text-[#2C2416]">Approve proposed JEs</span>
                   </div>
-                  <span className="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#E0EDE8] text-[#2D6A4F] mb-2">
-                    RECOMMENDED
-                  </span>
                   <p className="text-xs text-[#8B7A5E]">
-                    Post all proposed entries as-is. Amounts computed by deterministic engine.
+                    Approve {approvableEntries.length} persisted proposed entr{approvableEntries.length === 1 ? 'y' : 'ies'}. Posting remains a separate controlled action.
                   </p>
                 </button>
 
-                {/* Modify */}
+                {/* Governed correction */}
                 <button
                   onClick={() => setSelectedAction('modify')}
+                  disabled={approvableEntries.length === 0}
                   className={`p-4 rounded-lg border-2 text-left transition-colors ${
                     selectedAction === 'modify'
                       ? 'border-[#8B7A5E] bg-[#F5F0E8]'
                       : 'border-[#DDD5C2] hover:border-[#8B7A5E]'
-                  }`}
+                  } disabled:cursor-not-allowed disabled:opacity-50`}
                 >
                   <div className="flex items-center gap-2 mb-2">
                     <Pencil size={16} className="text-[#8B7A5E]" />
-                    <span className="text-sm font-medium text-[#2C2416]">Modify Amounts</span>
+                    <span className="text-sm font-medium text-[#2C2416]">Correct proposed JE</span>
                   </div>
                   <p className="text-xs text-[#8B7A5E] mt-2">
-                    Edit individual line amounts before posting. Changes will be audit-logged.
+                    {approvableEntries.length > 0
+                      ? 'Create a balanced replacement while preserving the original proposal and correction history.'
+                      : 'No proposed journal entry is available to correct.'}
                   </p>
                 </button>
 
                 {/* Skip */}
                 <button
                   onClick={() => setSelectedAction('skip')}
+                  disabled={!canSkipProposal}
                   className={`p-4 rounded-lg border-2 text-left transition-colors ${
                     selectedAction === 'skip'
                       ? 'border-[#8B7A5E] bg-[#F5F0E8]'
                       : 'border-[#DDD5C2] hover:border-[#8B7A5E]'
-                  }`}
+                  } disabled:cursor-not-allowed disabled:opacity-50`}
                 >
                   <div className="flex items-center gap-2 mb-2">
                     <SkipForward size={16} className="text-[#8B7A5E]" />
                     <span className="text-sm font-medium text-[#2C2416]">Skip Module</span>
                   </div>
                   <p className="text-xs text-[#8B7A5E] mt-2">
-                    Skip this module for the current period. Requires a written reason.
+                    {canSkipProposal
+                      ? 'Skip the persisted module proposal for this period with a written rationale.'
+                      : 'No reviewable module proposal is available to skip.'}
                   </p>
                 </button>
               </div>
@@ -622,26 +664,34 @@ export default function ModuleDrillDownPage() {
                   {selectedAction === 'approve' && (
                     <button
                       onClick={() => approveMutation.mutate()}
-                      disabled={approveMutation.isPending}
+                      disabled={approveMutation.isPending || approvableEntries.length === 0}
                       className="px-4 py-2 rounded-md text-sm font-medium bg-[#2D6A4F] text-[#F5F0E8] hover:bg-[#245A42] transition-colors disabled:opacity-50 flex items-center gap-2"
                     >
                       {approveMutation.isPending && <Loader2 size={14} className="animate-spin" />}
-                      Approve & Post All Entries
+                      Approve proposed entries
                     </button>
                   )}
                   {selectedAction === 'modify' && (
-                    <Link
-                      href={`/close/${sessionId}/adjustments`}
-                      className="px-4 py-2 rounded-md text-sm font-medium bg-[#2C2416] text-[#B8860B] hover:bg-[#3B1F0A] transition-colors"
-                    >
-                      Open in Journal Entry Editor
-                    </Link>
+                    <div className="flex flex-wrap gap-2">
+                      {approvableEntries.map((entry) => (
+                        <Link
+                          key={entry.id}
+                          href={`/close/${sessionId}/adjustments?tab=entries&correct=${entry.id}`}
+                          className="px-4 py-2 rounded-md text-sm font-medium bg-[#2C2416] text-[#B8860B] hover:bg-[#3B1F0A] transition-colors"
+                        >
+                          Correct {entry.id.slice(0, 8)}…
+                        </Link>
+                      ))}
+                    </div>
                   )}
                   {selectedAction === 'skip' && (
                     <button
-                      disabled={!skipReason.trim()}
+                      type="button"
+                      onClick={() => skipMutation.mutate()}
+                      disabled={!canSkipProposal || skipReason.trim().length < 10 || skipMutation.isPending}
                       className="px-4 py-2 rounded-md text-sm font-medium bg-[#8B7A5E] text-[#F5F0E8] hover:bg-[#6E614A] transition-colors disabled:opacity-50"
                     >
+                      {skipMutation.isPending && <Loader2 size={14} className="mr-2 inline animate-spin" />}
                       Confirm Skip
                     </button>
                   )}
@@ -660,7 +710,13 @@ export default function ModuleDrillDownPage() {
               {approveMutation.isSuccess && (
                 <div className="mx-5 mb-4 px-4 py-2.5 rounded-md bg-[#E0EDE8] text-[#2D6A4F] text-xs font-medium flex items-center gap-2">
                   <CheckCircle2 size={14} />
-                  All entries approved and posted successfully.
+                  Proposed journal entries approved. No ERP posting was performed by this action.
+                </div>
+              )}
+              {(approveMutation.error || skipMutation.error) && (
+                <div className="mx-5 mb-4 flex items-start gap-2 rounded-md bg-[#F5E4DE] px-4 py-2.5 text-xs text-[#C44B2B]">
+                  <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                  {(approveMutation.error as Error | null)?.message ?? (skipMutation.error as Error | null)?.message}
                 </div>
               )}
             </div>

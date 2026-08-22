@@ -4,24 +4,12 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
-import { fmtMoney } from '@/lib/money';
+import { getAccountingModules, matchesAccountingModule } from '@/lib/accounting-modules';
 import {
   ChevronRight,
   Loader2,
   AlertCircle,
   Calculator,
-  Building2,
-  Users,
-  Landmark,
-  Receipt,
-  FileStack,
-  Package,
-  Award,
-  TrendingDown,
-  Clock,
-  BarChart3,
-  Layers,
-  DollarSign,
   ShieldAlert,
 } from 'lucide-react';
 
@@ -36,140 +24,6 @@ interface JournalEntry {
   source?: string;
 }
 
-interface ModuleDefinition {
-  id: string;
-  number: string;
-  name: string;
-  asc: string;
-  description: string;
-  method: string;
-  icon: React.ElementType;
-}
-
-/* ------------------------------------------------------------------ */
-/*  Static module definitions                                          */
-/* ------------------------------------------------------------------ */
-
-const MODULES: ModuleDefinition[] = [
-  {
-    id: 'prepaids',
-    number: '01',
-    name: 'Prepaids & Deferrals',
-    asc: 'ASC 340',
-    description: 'Amortizes prepaid expenses over benefit periods using straight-line method.',
-    method: 'Straight-line amortization',
-    icon: Clock,
-  },
-  {
-    id: 'fixed-assets',
-    number: '02',
-    name: 'Fixed Assets & Depreciation',
-    asc: 'ASC 360',
-    description: 'Computes monthly depreciation for all capitalized assets by class.',
-    method: 'MACRS / Straight-line',
-    icon: Building2,
-  },
-  {
-    id: 'payroll',
-    number: '03',
-    name: 'Payroll Accruals',
-    asc: 'ASC 710',
-    description: 'Accrues unpaid wages, benefits, and employer taxes through period end.',
-    method: 'Daily rate proration',
-    icon: Users,
-  },
-  {
-    id: 'debt-interest',
-    number: '04',
-    name: 'Debt & Interest Accrual',
-    asc: 'ASC 835',
-    description: 'Calculates accrued interest on all debt instruments using effective rate.',
-    method: 'Effective interest method',
-    icon: Landmark,
-  },
-  {
-    id: 'deferred-tax',
-    number: '05',
-    name: 'Deferred Tax Provision',
-    asc: 'ASC 740',
-    description: 'Computes deferred tax assets/liabilities from temporary differences.',
-    method: 'Balance sheet approach',
-    icon: Receipt,
-  },
-  {
-    id: 'leases',
-    number: '06',
-    name: 'Lease Accounting',
-    asc: 'ASC 842',
-    description: 'Amortizes ROU assets and accrues lease liabilities for all active leases.',
-    method: 'Present value amortization',
-    icon: FileStack,
-  },
-  {
-    id: 'inventory',
-    number: '07',
-    name: 'Inventory Reserves',
-    asc: 'ASC 330',
-    description: 'Evaluates inventory for lower-of-cost-or-NRV and obsolescence reserves.',
-    method: 'LCM / NRV analysis',
-    icon: Package,
-  },
-  {
-    id: 'stock-comp',
-    number: '08',
-    name: 'Stock Compensation',
-    asc: 'ASC 718',
-    description: 'Recognizes stock-based compensation expense across vesting schedules.',
-    method: 'Black-Scholes / graded vesting',
-    icon: Award,
-  },
-  {
-    id: 'impairment',
-    number: '09',
-    name: 'Impairment Testing',
-    asc: 'ASC 350/360',
-    description: 'Tests goodwill and long-lived assets for impairment indicators.',
-    method: 'Qualitative + quantitative',
-    icon: TrendingDown,
-  },
-  {
-    id: 'ap-aging',
-    number: '10',
-    name: 'AP Aging & Accruals',
-    asc: 'ASC 405',
-    description: 'Analyzes accounts payable aging and identifies unrecorded liabilities.',
-    method: 'Aging bucket analysis',
-    icon: BarChart3,
-  },
-  {
-    id: 'ar-cecl',
-    number: '11',
-    name: 'AR & CECL Allowance',
-    asc: 'ASC 326',
-    description: 'Computes expected credit loss allowance using historical loss rates.',
-    method: 'CECL expected loss model',
-    icon: ShieldAlert,
-  },
-  {
-    id: 'segments',
-    number: '12',
-    name: 'Segment Allocations',
-    asc: 'ASC 280',
-    description: 'Allocates shared costs across operating segments per allocation keys.',
-    method: 'Activity-based allocation',
-    icon: Layers,
-  },
-  {
-    id: 'revenue',
-    number: '13',
-    name: 'Revenue Recognition',
-    asc: 'ASC 606',
-    description: 'Recognizes revenue across performance obligations by contract terms.',
-    method: '5-step ASC 606 model',
-    icon: DollarSign,
-  },
-];
-
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
@@ -180,11 +34,7 @@ function getModuleStatus(
 ): { label: string; color: string; bg: string } {
   const jes = (jesByModule.get(moduleId) ?? []).filter(Boolean);
   if (jes.length === 0) {
-    // Impairment module with no JEs is a special case
-    if (moduleId === 'impairment') {
-      return { label: 'No Impairment', color: '#2D6A4F', bg: '#E0EDE8' };
-    }
-    return { label: 'No JEs', color: '#8B7A5E', bg: '#EDE6D6' };
+    return { label: 'No linked JEs', color: '#8B7A5E', bg: '#EDE6D6' };
   }
 
   const blocked = jes.some((j) => j?.status === 'blocked' || j?.status === 'rejected');
@@ -207,12 +57,6 @@ function getModuleStatus(
   }
 
   return { label: 'In Progress', color: '#8B6914', bg: '#F0E8D0' };
-}
-
-function getModuleAmount(_moduleId: string, _jesByModule: Map<string, JournalEntry[]>): string {
-  // JE amounts live on JournalEntryLine (debit/credit per line), not on the JE header.
-  // Module-level totals require fetching lines — display JE count instead.
-  return '0.00';
 }
 
 function getModuleJeCount(moduleId: string, jesByModule: Map<string, JournalEntry[]>): number {
@@ -276,17 +120,15 @@ export default function AccountingModulesPage() {
     enabled: !!sessionId,
   });
 
+  const modules = getAccountingModules((sessionQuery.data as { standard?: string } | undefined)?.standard);
   const jes = jesQuery.data ?? [];
 
   // Group JEs by module — match source and memo against module names/IDs
   const jesByModule = new Map<string, JournalEntry[]>();
   for (const je of jes) {
     if (!je) continue;
-    const searchText = [je.source ?? '', je.memo ?? ''].join(' ').toLowerCase().replace(/[\s_-]/g, '');
-    for (const mod of MODULES) {
-      const modKey = mod.id.replace(/-/g, '');
-      const modNameKey = mod.name.toLowerCase().replace(/[\s&]/g, '');
-      if (searchText.includes(modKey) || searchText.includes(modNameKey)) {
+    for (const mod of modules) {
+      if (matchesAccountingModule(mod.id, je.source, je.memo)) {
         const arr = jesByModule.get(mod.id) ?? [];
         arr.push(je);
         jesByModule.set(mod.id, arr);
@@ -373,11 +215,13 @@ export default function AccountingModulesPage() {
             {/* Title */}
             <div>
               <h1 className="text-2xl font-medium text-[#2C2416]">
-                13 Accounting Modules — Auto-Calculation Engines
+                {((sessionQuery.data as { standard?: string } | undefined)?.standard ?? '').toUpperCase() === 'ASPE'
+                  ? 'Canadian ASPE Close Workpapers'
+                  : 'Accounting Modules'}
               </h1>
               <p className="text-sm text-[#8B7A5E] mt-1">
-                Each module computes adjusting entries using deterministic math (Decimal.js).
-                AI proposes — humans approve.
+                Registered checks assemble workpapers and proposed entries from ledger data and approved policies.
+                Deterministic math calculates amounts; reviewers approve conclusions and every journal entry.
               </p>
             </div>
 
@@ -385,21 +229,17 @@ export default function AccountingModulesPage() {
             <div className="bg-[#2C2416] rounded-lg px-5 py-3 flex items-center justify-between">
               <div className="flex items-center gap-3 text-sm">
                 <Calculator size={16} className="text-[#B8860B]" />
-                <span className="text-[#B8860B] font-medium">13 Modules</span>
+                <span className="text-[#B8860B] font-medium">{modules.length} Workpapers</span>
                 <span className="text-[#8B7A5E]">
-                  {totalJEs} JEs auto-proposed
-                </span>
-                <span className="text-[#8B7A5E]">
-                  auto-proposed
+                  {totalJEs} journal entr{totalJEs === 1 ? 'y' : 'ies'} recorded in this close
                 </span>
               </div>
             </div>
 
             {/* Module cards grid */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {MODULES.map((mod) => {
+              {modules.map((mod) => {
                 const status = getModuleStatus(mod.id, jesByModule);
-                const amount = getModuleAmount(mod.id, jesByModule);
                 const jeCount = getModuleJeCount(mod.id, jesByModule);
                 const Icon = mod.icon;
 
@@ -420,7 +260,7 @@ export default function AccountingModulesPage() {
                             {mod.name}
                           </div>
                           <span className="inline-block mt-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#2C2416] text-[#B8860B]">
-                            {mod.asc}
+                            {mod.guidance}
                           </span>
                         </div>
                       </div>
@@ -445,12 +285,10 @@ export default function AccountingModulesPage() {
                       <div className="flex items-center gap-1">
                         <Icon size={14} className="text-[#8B7A5E]" />
                         <span className="text-xs text-[#8B7A5E]">
-                          {jeCount} JE{jeCount !== 1 ? 's' : ''} Proposed
+                          {jeCount} linked JE{jeCount !== 1 ? 's' : ''}
                         </span>
                       </div>
-                      <span className="text-sm font-mono text-[#2C2416]">
-                        {fmtMoney(amount, { dollar: true, dash: false })}
-                      </span>
+                      <span className="text-xs text-[#3B6EA5]">Review workpaper →</span>
                     </div>
                   </Link>
                 );

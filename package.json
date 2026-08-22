@@ -1,7 +1,7 @@
 {
   "name": "sabit",
   "version": "0.1.0",
-  "description": "Sabit — Enterprise-grade financial close automation engine",
+  "description": "Sabit — Canadian ASPE close harness with governed agents and ERP writeback",
   "private": true,
   "scripts": {
     "build": "tsc",
@@ -46,6 +46,7 @@
     "express-rate-limit": "^7.1.5",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
+    "jszip": "^3.10.1",
     "multer": "^1.4.5-lts.1",
     "pdf-lib": "^1.17.1",
     "pg": "^8.11.3",

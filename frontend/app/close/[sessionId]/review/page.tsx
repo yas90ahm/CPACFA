@@ -27,7 +27,8 @@ import { adaptVariances } from '@/lib/contracts/adapters';
 
 interface Gate {
   id: string;
-  label: string;
+  name: string;
+  description?: string;
   passing: boolean;
   detail?: string;
 }
@@ -53,25 +54,40 @@ interface SessionResponse {
   closeDayTarget?: number;
 }
 
-interface CertificationArtifact {
-  signature: string;
-  documentHash: string;
-  certifiedBy: string;
-  certifiedAt: string;
-  publicKey?: string;
-  verified?: boolean;
+interface CertificationArtifactEnvelope {
+  contractVersion: 'v1';
+  artifact: {
+    certifiedBy: string | null;
+    certifiedAt: string;
+    snapshot: {
+      snapshotId: string;
+      snapshotHash: string;
+      hashVersion: string;
+    };
+  };
+  artifactHash: string;
+  signatureB64: string;
+  publicKeyB64: string;
+  alg: string;
 }
 
 interface StatementLine {
-  lineItemName: string;
+  id: string;
+  fsLineId: string;
+  name: string;
   amount: string;
-  section?: string;
+  statement: 'balance_sheet' | 'profit_and_loss' | 'cash_flow' | 'equity';
 }
 
 interface StatementPackage {
   id: string;
-  type: string;
-  lines?: StatementLine[];
+  version: number;
+}
+
+interface ArtifactVerification {
+  signatureValid: boolean;
+  snapshotHashMatches?: boolean;
+  auditChainVerified?: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -119,14 +135,27 @@ function GateGrid({ gates }: { gates: Gate[] }) {
               className={gate.passing ? 'text-[#A7D7C5]' : 'text-[#8B7A5E]'}
             />
           </div>
-          <span className="text-sm text-[#C4B89A] truncate">{gate.label}</span>
+          <span className="text-sm text-[#C4B89A] truncate">{gate.name}</span>
         </div>
       ))}
     </div>
   );
 }
 
-function CryptographicCard({ artifact }: { artifact: CertificationArtifact }) {
+function CryptographicCard({
+  envelope,
+  verification,
+  verifying,
+}: {
+  envelope: CertificationArtifactEnvelope;
+  verification?: ArtifactVerification;
+  verifying: boolean;
+}) {
+  const artifact = envelope.artifact;
+  const fullyVerified =
+    verification?.signatureValid === true &&
+    verification.snapshotHashMatches !== false &&
+    verification.auditChainVerified !== false;
   return (
     <div className="rounded-xl border-2 border-[#B8860B]/40 bg-[#1F1A12] p-6 space-y-5">
       <div className="flex items-center gap-3">
@@ -141,7 +170,7 @@ function CryptographicCard({ artifact }: { artifact: CertificationArtifact }) {
           <div className="text-xs text-[#8B7A5E] uppercase tracking-wider mb-1">
             Certified By
           </div>
-          <div className="text-sm text-[#E8DCC8]">{artifact.certifiedBy}</div>
+          <div className="text-sm text-[#E8DCC8]">{artifact.certifiedBy ?? 'Not recorded'}</div>
         </div>
 
         <div>
@@ -158,7 +187,7 @@ function CryptographicCard({ artifact }: { artifact: CertificationArtifact }) {
             Ed25519 Digital Signature
           </div>
           <div className="font-mono text-xs text-[#B8860B] break-all leading-relaxed bg-[#15120C] rounded-lg p-3 border border-[#3B2F1E]">
-            {truncateHash(artifact.signature)}
+            {truncateHash(envelope.signatureB64)}
           </div>
         </div>
 
@@ -167,18 +196,36 @@ function CryptographicCard({ artifact }: { artifact: CertificationArtifact }) {
             Document SHA-256 Hash
           </div>
           <div className="font-mono text-xs text-[#C4B89A] break-all leading-relaxed bg-[#15120C] rounded-lg p-3 border border-[#3B2F1E]">
-            {truncateHash(artifact.documentHash)}
+            {truncateHash(envelope.artifactHash)}
           </div>
         </div>
 
-        {(artifact.verified !== false) && (
-          <div className="flex items-center gap-2 bg-[#2D6A4F]/20 border border-[#2D6A4F]/30 rounded-lg px-4 py-2.5">
+        <div className={`flex items-center gap-2 rounded-lg border px-4 py-2.5 ${
+          fullyVerified
+            ? 'bg-[#2D6A4F]/20 border-[#2D6A4F]/30'
+            : verification
+              ? 'bg-[#C44B2B]/10 border-[#C44B2B]/30'
+              : 'bg-[#5C4F3A]/20 border-[#5C4F3A]/30'
+        }`}>
+          {verifying ? (
+            <Loader2 size={16} className="animate-spin text-[#8B7A5E]" />
+          ) : fullyVerified ? (
             <CheckCircle2 size={16} className="text-[#2D6A4F]" />
-            <span className="text-sm font-medium text-[#A7D7C5]">
-              Signature Verified
-            </span>
-          </div>
-        )}
+          ) : (
+            <AlertCircle size={16} className={verification ? 'text-[#C44B2B]' : 'text-[#8B7A5E]'} />
+          )}
+          <span className={`text-sm font-medium ${
+            fullyVerified ? 'text-[#A7D7C5]' : verification ? 'text-[#C44B2B]' : 'text-[#8B7A5E]'
+          }`}>
+            {verifying
+              ? 'Verifying signature and snapshot binding…'
+              : fullyVerified
+                ? 'Signature and certified snapshot verified'
+                : verification
+                  ? 'Artifact verification failed'
+                  : 'Verification result unavailable'}
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -282,11 +329,11 @@ export default function CertificationCeremonyPage() {
     queryKey: ['certification-artifact', sessionId],
     queryFn: async () => {
       try {
-        return await apiFetch<CertificationArtifact>(
+        return await apiFetch<CertificationArtifactEnvelope>(
           `/api/verification/certification/artifacts/${sessionId}`
         );
       } catch {
-        // Artifact may not exist if not yet certified; return placeholder
+        // A 404 is expected before certification; no success state is inferred.
         return null;
       }
     },
@@ -308,6 +355,33 @@ export default function CertificationCeremonyPage() {
     enabled: !!sessionId,
   });
 
+  const latestPackageId = statementsQuery.data?.[0]?.id;
+  const statementLinesQuery = useQuery({
+    queryKey: ['statement-lines', latestPackageId],
+    queryFn: () =>
+      apiFetch<{ lines: StatementLine[] }>(
+        `/api/close/statement-packages/${latestPackageId}/lines`
+      ),
+    enabled: !!latestPackageId,
+  });
+
+  const artifactVerificationQuery = useQuery({
+    queryKey: ['certification-artifact-verification', sessionId, artifactQuery.data?.artifactHash],
+    queryFn: () => {
+      const envelope = artifactQuery.data;
+      if (!envelope) throw new Error('Certification artifact is unavailable');
+      return apiFetch<ArtifactVerification>('/api/verification/certification/verify', {
+        method: 'POST',
+        body: {
+          artifact: envelope.artifact,
+          signatureB64: envelope.signatureB64,
+          publicKeyB64: envelope.publicKeyB64,
+        },
+      });
+    },
+    enabled: !!artifactQuery.data,
+  });
+
   const variancesQuery = useQuery({
     queryKey: ['variances', sessionId],
     queryFn: async () => {
@@ -324,6 +398,7 @@ export default function CertificationCeremonyPage() {
   const gatesPassing = readinessQuery.data?.gatesPassing ?? gates.filter((g) => g.passing).length;
   const artifact = artifactQuery.data;
   const statements = statementsQuery.data ?? [];
+  const statementLines = statementLinesQuery.data?.lines ?? [];
 
   /* ---- Lifecycle mutations ---- */
   const invalidateSession = () => {
@@ -372,30 +447,15 @@ export default function CertificationCeremonyPage() {
   if (isLoading) return <CeremonySkeleton />;
   if (error) return <ErrorState message={(error as Error).message} />;
 
-  // Build financial summary from statement packages or use placeholder values
-  function findStatementTotal(keyword: string): string {
-    const pkg = statements.find((s) =>
-      s.type?.toLowerCase().includes(keyword)
-    );
-    if (pkg?.lines && pkg.lines.length > 0) {
-      // Find "total" line or last line
-      const totalLine =
-        pkg.lines.find(
-          (l) =>
-            l.lineItemName?.toLowerCase().includes('total') &&
-            l.lineItemName?.toLowerCase().includes(keyword.split('_')[0])
-        ) ?? pkg.lines[pkg.lines.length - 1];
-      if (totalLine?.amount) {
-        return fmtMoney(totalLine.amount, { dollar: true, dash: false });
-      }
-    }
-    return '--';
+  function statementAmount(fsLineId: string): string {
+    const line = statementLines.find((candidate) => candidate.fsLineId === fsLineId);
+    return line ? fmtMoney(line.amount, { dollar: true, dash: false }) : '--';
   }
 
-  const balanceSheetTotal = findStatementTotal('balance');
-  const incomeTotal = findStatementTotal('income');
-  const cashFlowTotal = findStatementTotal('cash');
-  const equityTotal = findStatementTotal('equity');
+  const balanceSheetTotal = statementAmount('bs_total_assets');
+  const incomeTotal = statementAmount('pl_net_income');
+  const cashFlowTotal = statementAmount('cf_net_change');
+  const equityTotal = statementAmount('eq_closing');
 
   const sessionStatus = (session?.state ?? session?.status ?? '').toLowerCase().replace(/-/g, '_');
   const isCertified = sessionStatus === 'certified' || sessionStatus === 'subsequent_events_review' || sessionStatus === 'locked';
@@ -438,7 +498,7 @@ export default function CertificationCeremonyPage() {
                   key={gate.id}
                   className="w-2.5 h-2.5 rounded-full transition-colors"
                   style={{ backgroundColor: bg }}
-                  title={`${gate.label}: ${gate.passing ? 'Passing' : 'Pending'}`}
+                  title={`${gate.name}: ${gate.passing ? 'Passing' : 'Pending'}`}
                 />
               );
             })}
@@ -452,7 +512,7 @@ export default function CertificationCeremonyPage() {
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-[#B8860B]/40 bg-[#B8860B]/10 mb-6">
             <Shield size={14} className="text-[#B8860B]" />
             <span className="text-xs font-medium text-[#B8860B] uppercase tracking-widest">
-              Certified
+              {isCertified ? 'Certified' : 'Close Review'}
             </span>
           </div>
 
@@ -502,7 +562,11 @@ export default function CertificationCeremonyPage() {
         {/* Cryptographic Certification */}
         <div className="mb-10">
           {artifact ? (
-            <CryptographicCard artifact={artifact} />
+            <CryptographicCard
+              envelope={artifact}
+              verification={artifactVerificationQuery.data}
+              verifying={artifactVerificationQuery.isLoading}
+            />
           ) : (
             <div className="rounded-xl border-2 border-[#5C4F3A]/40 bg-[#1F1A12] p-6 text-center">
               <Shield size={20} className="text-[#8B7A5E] mx-auto mb-2" />
@@ -514,11 +578,11 @@ export default function CertificationCeremonyPage() {
         {/* Financial Summary */}
         <div className="mb-10">
           <h2 className="text-sm font-medium text-[#8B7A5E] uppercase tracking-wider text-center mb-5">
-            Certified Financial Summary
+            Latest Financial Statement Package
           </h2>
-          {statements.length === 0 ? (
+          {statements.length === 0 || statementLinesQuery.isLoading ? (
             <div className="text-center py-8 text-sm text-[#8B7A5E] border border-[#3B2F1E] rounded-xl bg-[#1F1A12]">
-              Generate statements first
+              {statementLinesQuery.isLoading ? 'Loading persisted statement lines…' : 'Generate statements first'}
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -538,11 +602,11 @@ export default function CertificationCeremonyPage() {
                 icon={DollarSign}
                 title="Cash Flow"
                 value={cashFlowTotal}
-                label="Operating Cash Flow"
+                label="Net Change in Cash"
               />
               <SummaryCard
                 icon={Users}
-                title="Stockholders&rsquo; Equity"
+                title="Changes in Equity"
                 value={equityTotal}
                 label="Total Equity"
               />
@@ -553,20 +617,21 @@ export default function CertificationCeremonyPage() {
         {/* Lifecycle Actions */}
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            {/* Download Audit Binder — always available */}
-            <button
-              type="button"
-              onClick={() =>
-                downloadBlob(
-                  `/api/audit/binder?closeSessionId=${sessionId}`,
-                  `audit-binder-${sessionId}.pdf`
-                )
-              }
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#2A231A] border border-[#3B2F1E] text-[#C4B89A] text-sm font-medium hover:border-[#B8860B]/40 hover:text-[#E8DCC8] transition-colors"
-            >
-              <Download size={16} />
-              Download Audit Binder
-            </button>
+            {isCertified && (
+              <button
+                type="button"
+                onClick={() =>
+                  downloadBlob(
+                    `/api/audit/binder/export/pdf?closeSessionId=${sessionId}`,
+                    `audit-binder-${sessionId}.pdf`
+                  )
+                }
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#2A231A] border border-[#3B2F1E] text-[#C4B89A] text-sm font-medium hover:border-[#B8860B]/40 hover:text-[#E8DCC8] transition-colors"
+              >
+                <Download size={16} />
+                Download Certified Audit Binder
+              </button>
+            )}
 
             {/* Lifecycle button — one at a time based on current state */}
             {sessionStatus === 'open' && (

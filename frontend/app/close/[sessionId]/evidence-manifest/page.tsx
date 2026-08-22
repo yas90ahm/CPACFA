@@ -1,271 +1,307 @@
 'use client';
 
+import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
+import type {
+  EvidenceIntegrityStatus,
+  SessionEvidenceFile,
+  SessionEvidenceManifest,
+} from '@/lib/contracts';
 import {
-  FileText,
-  ShieldCheck,
-  Link2,
+  AlertTriangle,
   CheckCircle2,
-  Loader2,
   Download,
-  Hash,
-  HardDrive,
+  FileText,
   FolderOpen,
-  Lock,
+  HardDrive,
+  Hash,
+  Loader2,
+  RefreshCw,
 } from 'lucide-react';
 
-/* ------------------------------------------------------------------ */
-/*  Types                                                              */
-/* ------------------------------------------------------------------ */
-
-interface ManifestFile {
-  id: string;
-  fileName: string;
+interface DisplayFile extends SessionEvidenceFile {
   category: string;
-  sha256: string;
-  uploadedBy: string;
-  uploadedAt: string;
-  fileSize: string;
-  verified: boolean;
+  sourceId: string;
 }
 
-interface ManifestData {
-  files: ManifestFile[];
-  stats: {
-    totalFiles: number;
-    hashVerified: number;
-    chainStatus: string;
-    categories: number;
-    totalSize: string;
-  };
-  snapshotId?: string;
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Stat Card (dark theme)                                             */
-/* ------------------------------------------------------------------ */
+function csvCell(value: string | number): string {
+  const raw = String(value);
+  return /[",\n]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
+}
+
+function downloadManifest(files: DisplayFile[], sessionId: string): void {
+  const header = [
+    'Evidence ID',
+    'Source type',
+    'Source ID',
+    'File name',
+    'Size bytes',
+    'SHA-256',
+    'Uploaded by',
+    'Uploaded at',
+    'Integrity status',
+  ];
+  const rows = files.map((file) => [
+    file.id,
+    file.category,
+    file.sourceId,
+    file.fileName,
+    file.sizeBytes,
+    file.sha256Hash,
+    file.uploadedBy,
+    file.createdAt,
+    file.integrityStatus,
+  ]);
+  const csv = [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n');
+  const href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const anchor = document.createElement('a');
+  anchor.href = href;
+  anchor.download = `sabit-evidence-manifest-${sessionId}.csv`;
+  anchor.click();
+  URL.revokeObjectURL(href);
+}
 
 function StatCard({
   label,
   value,
-  color,
   icon: Icon,
+  color = '#B8860B',
 }: {
   label: string;
   value: string | number;
-  color?: string;
   icon: React.ElementType;
+  color?: string;
 }) {
   return (
-    <div className="bg-[#2C2416] border border-[#3B1F0A] rounded-lg p-5">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-xs text-[#8B7A5E] font-medium uppercase tracking-wide">{label}</span>
+    <div className="rounded-lg border border-[#3B1F0A] bg-[#2C2416] p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-xs font-medium uppercase tracking-wide text-[#8B7A5E]">{label}</span>
         <Icon size={16} className="text-[#8B7A5E]" />
       </div>
-      <div className="text-2xl font-medium font-mono" style={{ color: color || '#B8860B' }}>
+      <div className="font-mono text-2xl font-medium" style={{ color }}>
         {value}
       </div>
     </div>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Main Page                                                          */
-/* ------------------------------------------------------------------ */
+function IntegrityBadge({ status }: { status: EvidenceIntegrityStatus }) {
+  if (status === 'verified') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-[#68A98A]">
+        <CheckCircle2 size={14} /> Re-hash matched
+      </span>
+    );
+  }
+  if (status === 'failed') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-[#E0785C]">
+        <AlertTriangle size={14} /> Failed
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-medium text-[#B8A98D]">
+      <Hash size={14} /> Hash recorded only
+    </span>
+  );
+}
 
 export default function EvidenceManifestPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
-
-  const sessionQuery = useQuery({
-    queryKey: ['session', sessionId],
-    queryFn: () => apiFetch<any>(`/api/close/sessions/${sessionId}`),
-    enabled: !!sessionId,
-  });
-  const readinessQuery = useQuery({
-    queryKey: ['readiness', sessionId],
-    queryFn: () => apiFetch<any>(`/api/close/sessions/${sessionId}/readiness`, { params: { format: 'gates' } }),
-    enabled: !!sessionId,
-  });
-
-  const { data, isLoading, error } = useQuery<ManifestData>({
+  const [exportError, setExportError] = useState<string | null>(null);
+  const manifestQuery = useQuery<SessionEvidenceManifest>({
     queryKey: ['evidence-manifest', sessionId],
-    queryFn: async () => {
-      const manifest = await apiFetch<any>(`/api/close/sessions/${sessionId}/evidence-manifest`);
-      return manifest;
-    },
-    enabled: !!sessionId,
+    queryFn: () => apiFetch<SessionEvidenceManifest>(
+      `/api/close/sessions/${sessionId}/evidence-manifest`
+    ),
+    enabled: Boolean(sessionId),
   });
 
-  if (isLoading) {
+  if (manifestQuery.isLoading) {
     return (
-      <div className="ml-[260px] min-h-screen bg-[#1A1510] flex items-center justify-center">
+      <div className="ml-[260px] flex min-h-screen items-center justify-center bg-[#1A1510]">
         <Loader2 size={32} className="animate-spin text-[#B8860B]" />
       </div>
     );
   }
 
-  if (error) {
+  if (manifestQuery.error || !manifestQuery.data) {
     return (
-      <div className="min-h-screen bg-[#1A1510] flex items-center justify-center">
-        <div className="text-[#C44B2B] text-sm">Failed to load evidence manifest.</div>
+      <div className="ml-[260px] flex min-h-screen items-center justify-center bg-[#1A1510] px-6">
+        <div className="text-sm text-[#E0785C]">
+          {manifestQuery.error instanceof Error
+            ? manifestQuery.error.message
+            : 'Evidence manifest is unavailable.'}
+        </div>
       </div>
     );
   }
 
-  const stats = data?.stats ?? {
-    totalFiles: 61,
-    hashVerified: 61,
-    chainStatus: 'INTACT',
-    categories: 6,
-    totalSize: '142 MB',
-  };
-  const files = data?.files ?? [];
-
-  const _gates = (readinessQuery.data as any)?.gates ?? [];
-  const _gatesTotal = (readinessQuery.data as any)?.gatesTotal ?? _gates.length;
-  const _activeGateIndex = _gates.findIndex((g: any) => !g.passing);
-  const _activeGateNum = _activeGateIndex >= 0 ? _activeGateIndex + 1 : _gatesTotal;
-  const _startedAt = (sessionQuery.data as any)?.startedAt ?? (sessionQuery.data as any)?.createdAt ?? new Date().toISOString();
-  const _dayElapsed = Math.max(1, Math.ceil((Date.now() - new Date(_startedAt).getTime()) / (1000 * 60 * 60 * 24)));
-  const _targetDays = (sessionQuery.data as any)?.closeDayTarget ?? 10;
-  const _sessionState = ((sessionQuery.data as any)?.state ?? 'IN_PROGRESS').replace(/_/g, ' ');
-  const _periodLabel = (sessionQuery.data as any)?.periodLabel ?? '';
+  const manifest = manifestQuery.data;
+  const verification = manifest.hashVerification;
+  const files: DisplayFile[] = [
+    ...manifest.reconEvidence.flatMap((group) =>
+      group.files.map((file) => ({
+        ...file,
+        category: 'Reconciliation',
+        sourceId: `${group.accountCode} · ${group.reconId}`,
+      }))
+    ),
+    ...manifest.jeEvidence.flatMap((group) =>
+      group.files.map((file) => ({
+        ...file,
+        category: 'Journal entry',
+        sourceId: group.jeId,
+      }))
+    ),
+  ];
+  const categoryCount = new Set(files.map((file) => file.category)).size;
 
   return (
-    <div className="min-h-screen bg-[#1A1510]">
-      {/* Progress Rail */}
-      {_gates.length > 0 && (
-        <div className="bg-[#2C2416] px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-4 text-sm">
-            <span className="text-[#B8860B] font-medium">
-              Gate {_activeGateNum} of {_gatesTotal}
-            </span>
-            <span className="text-[#8B7A5E]">
-              Close Day {_dayElapsed} of {_targetDays}
-            </span>
-            <span className="px-2 py-0.5 rounded text-xs font-medium bg-[#3B1F0A] text-[#B8860B]">
-              {_sessionState}
-            </span>
-            {_periodLabel && <span className="text-[#8B7A5E]">{_periodLabel}</span>}
-          </div>
-          <div className="flex items-center gap-1.5">
-            {_gates.map((gate: any, i: number) => {
-              let bg = '#5C4F3A';
-              if (gate.passing) bg = '#2D6A4F';
-              else if (i === _activeGateIndex) bg = '#B8860B';
-              return (
-                <div
-                  key={gate.id}
-                  className="w-2.5 h-2.5 rounded-full transition-colors"
-                  style={{ backgroundColor: bg }}
-                  title={`${gate.label}: ${gate.passing ? 'Passing' : 'Pending'}`}
-                />
-              );
-            })}
+    <div className="ml-[260px] min-h-screen bg-[#1A1510] text-[#EDE6D6]">
+      <header className="px-8 pb-6 pt-8">
+        <h1 className="text-2xl font-medium text-[#B8860B]">Evidence Manifest</h1>
+        <p className="mt-1 text-sm text-[#8B7A5E]">
+          Evidence linked to this close. Stored files are retrieved and re-hashed on each refresh;
+          external references retain their supplied hash but are not shown as independently verified.
+        </p>
+      </header>
+
+      <section className="mb-6 grid grid-cols-2 gap-4 px-8 lg:grid-cols-5">
+        <StatCard label="Total Files" value={manifest.totalFiles} icon={FileText} />
+        <StatCard
+          label="Stored & Verified"
+          value={`${verification.verifiedFileCount}/${verification.storedFileCount}`}
+          icon={CheckCircle2}
+          color={verification.failedFileCount > 0 ? '#E0785C' : '#68A98A'}
+        />
+        <StatCard
+          label="Verification Failures"
+          value={verification.failedFileCount}
+          icon={AlertTriangle}
+          color={verification.failedFileCount > 0 ? '#E0785C' : '#68A98A'}
+        />
+        <StatCard label="Categories" value={categoryCount} icon={FolderOpen} />
+        <StatCard label="Total Size" value={formatBytes(manifest.totalSizeBytes)} icon={HardDrive} />
+      </section>
+
+      <section className="mb-6 px-8">
+        <div className={`rounded-lg border px-5 py-4 ${
+          verification.failedFileCount > 0
+            ? 'border-[#C44B2B]/30 bg-[#C44B2B]/10'
+            : 'border-[#3B1F0A] bg-[#2C2416]'
+        }`}>
+          <div className="flex items-start gap-3">
+            {verification.failedFileCount > 0 ? (
+              <AlertTriangle size={17} className="mt-0.5 shrink-0 text-[#E0785C]" />
+            ) : (
+              <Hash size={17} className="mt-0.5 shrink-0 text-[#B8860B]" />
+            )}
+            <div>
+              <div className="text-sm font-medium">
+                {verification.failedFileCount > 0
+                  ? 'One or more stored files failed integrity verification.'
+                  : verification.storedFileCount > 0
+                    ? 'All retrieved stored files matched their recorded SHA-256 hashes.'
+                    : 'No storage-backed files were available to re-hash.'}
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-[#8B7A5E]">
+                {verification.notVerifiableFileCount} external metadata-only file(s) were not re-hashed.
+                Verification ran {new Date(verification.performedAt).toLocaleString('en-CA')}.
+              </p>
+            </div>
           </div>
         </div>
-      )}
+      </section>
 
-      {/* Header */}
-      <div className="px-8 pt-8 pb-6">
-        <h1 className="text-2xl font-medium text-[#B8860B]">
-          Evidence Manifest — Complete File Registry
-        </h1>
-        <p className="text-sm text-[#8B7A5E] mt-1">
-          Immutable record of all evidence files uploaded during this close cycle.
-        </p>
-      </div>
-
-      {/* Stat Cards */}
-      <div className="px-8 grid grid-cols-5 gap-4 mb-8">
-        <StatCard label="Total Files" value={stats.totalFiles} icon={FileText} />
-        <StatCard
-          label="Hash Verified"
-          value={`${stats.hashVerified}/${stats.totalFiles}`}
-          color="#2D6A4F"
-          icon={ShieldCheck}
-        />
-        <StatCard label="Chain Status" value={stats.chainStatus} color="#2D6A4F" icon={Link2} />
-        <StatCard label="Categories" value={stats.categories} icon={FolderOpen} />
-        <StatCard label="Total Size" value={stats.totalSize} icon={HardDrive} />
-      </div>
-
-      {/* File Table */}
-      <div className="px-8 mb-8">
-        <div className="bg-[#2C2416] border border-[#3B1F0A] rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-[#3B1F0A] text-[#B8860B]">
-                <th className="text-left px-4 py-3 font-medium">File Name</th>
-                <th className="text-left px-4 py-3 font-medium">Category</th>
-                <th className="text-left px-4 py-3 font-medium">SHA-256 Hash</th>
-                <th className="text-left px-4 py-3 font-medium">Uploader</th>
-                <th className="text-left px-4 py-3 font-medium">Date</th>
-                <th className="text-right px-4 py-3 font-medium">Size</th>
-                <th className="text-center px-4 py-3 font-medium">Verified</th>
-              </tr>
-            </thead>
-            <tbody>
-              {files.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-[#8B7A5E]">
-                    No evidence files in manifest.
-                  </td>
+      <section className="px-8">
+        <div className="overflow-hidden rounded-lg border border-[#3B1F0A] bg-[#2C2416]">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-[#3B1F0A] text-[#B8860B]">
+                  <th className="px-4 py-3 text-left font-medium">File</th>
+                  <th className="px-4 py-3 text-left font-medium">Source</th>
+                  <th className="px-4 py-3 text-left font-medium">SHA-256</th>
+                  <th className="px-4 py-3 text-left font-medium">Uploaded</th>
+                  <th className="px-4 py-3 text-right font-medium">Size</th>
+                  <th className="px-4 py-3 text-left font-medium">Integrity</th>
                 </tr>
-              ) : (
-                files.map((file) => (
-                  <tr
-                    key={file.id}
-                    className="border-t border-[#3B1F0A] hover:bg-[#3B1F0A]/30 transition-colors"
-                  >
-                    <td className="px-4 py-3 text-[#EDE6D6]">{file.fileName}</td>
-                    <td className="px-4 py-3">
-                      <span className="text-xs font-medium px-2 py-0.5 rounded bg-[#3B1F0A] text-[#8B7A5E]">
-                        {file.category}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <code className="text-xs font-mono text-[#B8860B] break-all">
-                        {file.sha256.slice(0, 24)}...
-                      </code>
-                    </td>
-                    <td className="px-4 py-3 text-[#8B7A5E]">{file.uploadedBy}</td>
-                    <td className="px-4 py-3 text-[#8B7A5E]">
-                      {new Date(file.uploadedAt).toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-3 text-right text-[#8B7A5E] font-mono">{file.fileSize}</td>
-                    <td className="px-4 py-3 text-center">
-                      {file.verified ? (
-                        <CheckCircle2 size={16} className="text-[#2D6A4F] mx-auto" />
-                      ) : (
-                        <span className="text-[#C44B2B] text-xs">Failed</span>
-                      )}
+              </thead>
+              <tbody>
+                {files.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-10 text-center text-[#8B7A5E]">
+                      No evidence is linked to reconciliations or journal entries in this close.
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : files.map((file) => (
+                  <tr key={`${file.category}-${file.sourceId}-${file.id}`} className="border-t border-[#3B1F0A]">
+                    <td className="px-4 py-3 text-[#EDE6D6]">
+                      <div>{file.fileName}</div>
+                      <div className="mt-0.5 text-xs text-[#8B7A5E]">{file.mimeType ?? 'Unknown type'}</div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="text-[#C4B89A]">{file.category}</div>
+                      <code className="text-[11px] text-[#8B7A5E]">{file.sourceId}</code>
+                    </td>
+                    <td className="max-w-[230px] px-4 py-3">
+                      <code className="block truncate font-mono text-xs text-[#B8860B]" title={file.sha256Hash}>
+                        {file.sha256Hash}
+                      </code>
+                    </td>
+                    <td className="px-4 py-3 text-[#8B7A5E]">
+                      <div>{file.uploadedBy}</div>
+                      <div className="text-xs">{new Date(file.createdAt).toLocaleString('en-CA')}</div>
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono text-[#8B7A5E]">
+                      {formatBytes(file.sizeBytes)}
+                    </td>
+                    <td className="px-4 py-3"><IntegrityBadge status={file.integrityStatus} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      </section>
 
-      {/* Export Buttons */}
-      <div className="px-8 pb-8 flex items-center gap-4">
-        <button className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#2C2416] border border-[#3B1F0A] text-sm font-medium text-[#8B7A5E] hover:text-[#B8860B] hover:border-[#B8860B] transition-colors">
-          <Download size={16} />
-          Download Full Manifest (CSV)
+      <footer className="flex items-center gap-3 px-8 py-8">
+        <button
+          type="button"
+          onClick={() => {
+            setExportError(null);
+            try {
+              downloadManifest(files, sessionId);
+            } catch (error) {
+              setExportError(error instanceof Error ? error.message : 'Manifest export failed');
+            }
+          }}
+          disabled={files.length === 0}
+          className="inline-flex items-center gap-2 rounded-lg border border-[#3B1F0A] bg-[#2C2416] px-5 py-2.5 text-sm font-medium text-[#B8A98D] transition-colors hover:border-[#B8860B] hover:text-[#B8860B] disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Download size={16} /> Download manifest CSV
         </button>
-        <button className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#B8860B] text-sm font-medium text-[#2C2416] hover:bg-[#A07608] transition-colors">
-          <Download size={16} />
-          Download All Evidence (ZIP)
+        <button
+          type="button"
+          onClick={() => manifestQuery.refetch()}
+          disabled={manifestQuery.isFetching}
+          className="inline-flex items-center gap-2 rounded-lg bg-[#B8860B] px-5 py-2.5 text-sm font-medium text-[#2C2416] transition-colors hover:bg-[#A07608] disabled:opacity-50"
+        >
+          <RefreshCw size={16} className={manifestQuery.isFetching ? 'animate-spin' : ''} />
+          Re-run stored-file verification
         </button>
-        <button className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#2C2416] border border-[#3B1F0A] text-sm font-medium text-[#8B7A5E] hover:text-[#B8860B] hover:border-[#B8860B] transition-colors">
-          <ShieldCheck size={16} />
-          Verify All Hashes
-        </button>
-      </div>
+        {exportError && <span className="text-xs text-[#E0785C]">{exportError}</span>}
+      </footer>
     </div>
   );
 }

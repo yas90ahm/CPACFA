@@ -60,6 +60,45 @@ describe('certified_statements_service', () => {
       expect(out.profitAndLoss.netIncome).toBe(0);
     });
 
+    it('uses the embedded prior certified TB for cash and equity roll-forwards and ASPE presentation', () => {
+      const comparativeSnapshot: LedgerSnapshotPayload = {
+        ...FIXED_SNAPSHOT,
+        accountingContext: { standard: 'ASPE' },
+        comparativeTrialBalance: {
+          periodLabel: '2026-06',
+          sourceSnapshotId: 'prior-certified-snapshot',
+          sourceSnapshotHash: 'a'.repeat(64),
+          entries: [
+            { accountName: 'Cash', debit: 800, credit: 0, accountCode: '1000' },
+            { accountName: 'Account Payable', debit: 0, credit: 200, accountCode: '2000' },
+            { accountName: 'Equity', debit: 0, credit: 600, accountCode: '3000' },
+          ],
+          totalDebits: 800,
+          totalCredits: 800,
+        },
+      };
+
+      const out = buildCertifiedStatementsFromSnapshot(comparativeSnapshot);
+
+      expect(out.standard).toBe('ASPE');
+      expect(out.balanceSheet.codificationRef).toEqual(expect.objectContaining({ framework: 'ASPE' }));
+      expect(out.profitAndLoss.codificationRef).toEqual(expect.objectContaining({ framework: 'ASPE' }));
+      expect(out.cashFlow).toEqual(expect.objectContaining({
+        beginningCash: 800,
+        endingCash: 1000,
+        netChangeInCash: 200,
+        estimated: false,
+      }));
+      expect(out.cashFlow?.financing).toEqual(
+        expect.arrayContaining([expect.objectContaining({ amount: 200 })])
+      );
+      expect(out.equityChanges).toEqual(expect.objectContaining({
+        openingEquity: 600,
+        closingEquity: 800,
+        estimated: false,
+      }));
+    });
+
     it('throws when trial balance is imbalanced (MathematicalIntegrityError from builder)', () => {
       const imbalanced: LedgerSnapshotPayload = {
         trialBalance: {

@@ -22,11 +22,12 @@ import type {
 const HASH_VERSION = 'v1';
 const ALLOWED_HASH_VERSIONS = new Set<string>(['v1']);
 
-/** Hash version for DB: 1 = legacy (numbers), 2 = canonical money strings, 3 = + evidence manifest, 4 = + general ledger. */
+/** Hash version for DB: 1 = legacy, 2 = canonical money, 3 = evidence, 4 = GL, 5 = certified accounting context. */
 export const HASH_VERSION_LEGACY = 1;
 export const HASH_VERSION_CANONICAL_MONEY = 2;
 export const HASH_VERSION_WITH_EVIDENCE_MANIFEST = 3;
 export const HASH_VERSION_WITH_GL = 4;
+export const HASH_VERSION_WITH_CERTIFIED_CONTEXT = 5;
 
 export class InvalidHashVersionError extends Error {
   constructor(version: unknown) {
@@ -102,6 +103,8 @@ export const HASH_INPUT_ALLOWED_TOP_LEVEL_KEYS = new Set<string>([
   'entries',
   'evidenceManifest',
   'generalLedger',
+  'comparativeTrialBalance',
+  'accountingContext',
 ]);
 
 /** Required top-level keys in hash input. */
@@ -124,6 +127,17 @@ function normalizePayloadForHash(payload: LedgerSnapshotPayload): LedgerSnapshot
       totalCredits: payload.trialBalance.totalCredits,
     },
     ...(extraEntries && extraEntries.length > 0 && { entries: extraEntries }),
+    ...(payload.comparativeTrialBalance && {
+      comparativeTrialBalance: {
+        ...payload.comparativeTrialBalance,
+        entries: [...payload.comparativeTrialBalance.entries].sort((a, b) =>
+          entrySortKey(a).localeCompare(entrySortKey(b))
+        ),
+      },
+    }),
+    ...(payload.accountingContext && {
+      accountingContext: { standard: payload.accountingContext.standard },
+    }),
   };
 }
 
@@ -166,6 +180,19 @@ function toCanonicalMoneyPayload(payload: LedgerSnapshotPayload): Record<string,
   if (payload.entries && payload.entries.length > 0) {
     result.entries = payload.entries.map(mapEntry);
   }
+  if (payload.comparativeTrialBalance) {
+    result.comparativeTrialBalance = {
+      periodLabel: payload.comparativeTrialBalance.periodLabel,
+      sourceSnapshotId: payload.comparativeTrialBalance.sourceSnapshotId,
+      sourceSnapshotHash: payload.comparativeTrialBalance.sourceSnapshotHash,
+      entries: payload.comparativeTrialBalance.entries.map(mapEntry),
+      totalDebits: normalizeMoney(payload.comparativeTrialBalance.totalDebits),
+      totalCredits: normalizeMoney(payload.comparativeTrialBalance.totalCredits),
+    };
+  }
+  if (payload.accountingContext) {
+    result.accountingContext = { standard: payload.accountingContext.standard };
+  }
   return result;
 }
 
@@ -205,6 +232,7 @@ export interface HashSnapshotPayloadOptions {
  * For hashVersion 2 (default), amounts are canonical strings ("1234.56") to eliminate JS float drift.
  * For hashVersion 3+, evidenceManifest is included in hash input.
  * For hashVersion 4+, generalLedger is included in hash input.
+ * For hashVersion 5+, the prior certified comparative trial balance is included.
  */
 export function hashSnapshotPayload(
   payload: LedgerSnapshotPayload,
@@ -219,6 +247,10 @@ export function hashSnapshotPayload(
   }
   if (hashVersion >= HASH_VERSION_WITH_GL && payload.generalLedger && payload.generalLedger.length > 0) {
     hashInput.generalLedger = sortGLEntries(payload.generalLedger);
+  }
+  if (hashVersion < HASH_VERSION_WITH_CERTIFIED_CONTEXT) {
+    delete hashInput.comparativeTrialBalance;
+    delete hashInput.accountingContext;
   }
   validateHashInput(hashInput);
   const json = canonicalStringifyKeysOnly(hashInput);

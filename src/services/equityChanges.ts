@@ -19,7 +19,7 @@ export function buildEquityChangesStatement(
     changes.push({ label: 'Net income', amount: netIncome });
   }
 
-  // OCI component of equity changes (ASC 220)
+  // Other-comprehensive-income component, when the selected framework uses it.
   const ociChanges: Array<{ label: string; amount: number }> = [];
   const totalOci = currentBalanceSheet.oci?.total ?? 0;
   if (currentBalanceSheet.oci && currentBalanceSheet.oci.items.length > 0) {
@@ -48,4 +48,3 @@ export function buildEquityChangesStatement(
       : 'Estimated from current balance sheet; provide prior period equity and transactions for full equity roll-forward.',
   };
 }
-

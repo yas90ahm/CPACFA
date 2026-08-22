@@ -6,6 +6,7 @@ import type { Pool } from 'pg';
 
 export interface InsertCallLogParams {
   tenantId: string;
+  closeSessionId?: string;
   pillar: string;
   promptVersion: string;
   model: string;
@@ -30,13 +31,14 @@ export async function insertCallLog(
   }
   const r = await pool.query<{ id: string }>(
     `INSERT INTO ai_call_log (
-      tenant_id, pillar, prompt_version, model, request_json,
+      tenant_id, close_session_id, pillar, prompt_version, model, request_json,
       response_raw, response_json, ok, error,
       latency_ms, input_tokens, output_tokens, estimated_cost_usd
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
     RETURNING id`,
     [
       params.tenantId,
+      params.closeSessionId ?? null,
       params.pillar,
       params.promptVersion,
       params.model,

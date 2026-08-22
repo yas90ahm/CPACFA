@@ -2,7 +2,7 @@
  * Shadow Auditor pillar prompt template. Validation/flagging only; no amounts computed or changed.
  */
 
-export const SHADOW_AUDITOR_PROMPT_VERSION = 'shadow_auditor_v2.0.0';
+export const SHADOW_AUDITOR_PROMPT_VERSION = 'shadow_auditor_v3.0.0';
 
 export interface ShadowAuditorContext {
   tenantId: string;
@@ -11,6 +11,7 @@ export interface ShadowAuditorContext {
   subjectId: string;
   materialityThreshold?: number;
   workflowState?: string;
+  reportingFramework?: string;
 }
 
 export interface ShadowAuditorSnippet {
@@ -49,15 +50,16 @@ RULES:
 ## EXAMPLE OUTPUTS
 
 ### Severity: ok
-{"prompt_version":"${SHADOW_AUDITOR_PROMPT_VERSION}","severity":"ok","confidence":0.95,"findings":[{"code":"ROUTINE_DEPRECIATION","message":"Standard monthly depreciation entry to accumulated depreciation. Amount is consistent with prior periods and supported by the fixed asset register.","rule_ids":["ASC 360-10-35-4"],"refs":["fixed_asset_register"]}]}
+{"prompt_version":"${SHADOW_AUDITOR_PROMPT_VERSION}","severity":"ok","confidence":0.95,"findings":[{"code":"SUPPORTED_ENTRY","message":"The entry is balanced and the supplied support satisfies the cited internal policy.","rule_ids":["provenance_required"],"refs":["fixed_asset_register"]}]}
 
 ### Severity: warn
 {"prompt_version":"${SHADOW_AUDITOR_PROMPT_VERSION}","severity":"warn","confidence":0.72,"findings":[{"code":"STRUCTURING_RISK","message":"Journal entry posts to Consulting Expense at an amount just below the materiality threshold requiring evidence attachment. Pattern across multiple periods is consistent with structuring to avoid documentation requirements.","rule_ids":[],"refs":["JE-247"]}]}
 
 ### Severity: block
-{"prompt_version":"${SHADOW_AUDITOR_PROMPT_VERSION}","severity":"block","confidence":0.88,"findings":[{"code":"UNSUPPORTED_REVENUE","message":"Journal entry debits Cash and credits Revenue on the last day of the period with memo 'Year-end adjustment.' Revenue recognition without supporting documentation (invoice, contract, BOL) creates significant audit risk under ASC 606.","rule_ids":["ASC 606-10-25-1"],"refs":["JE-312"]}]}
+{"prompt_version":"${SHADOW_AUDITOR_PROMPT_VERSION}","severity":"block","confidence":0.88,"findings":[{"code":"UNSUPPORTED_ENTRY","message":"The period-end entry has no supporting documentation and therefore fails the supplied documentation policy.","rule_ids":["documentation_unusual"],"refs":["JE-312"]}]}
 
 Context: tenantId=${context.tenantId}, periodLabel=${context.periodLabel}, subjectType=${context.subjectType}, subjectId=${context.subjectId}. ${materialityNote}
+Reporting framework: ${context.reportingFramework ?? 'not supplied; do not infer one'}.
 ${context.workflowState ? `Workflow state: ${context.workflowState}.` : ''}
 
 Transaction payload (use only these facts):
@@ -79,6 +81,7 @@ Task:
 Grounding policy:
 - Use only provided payload and standards snippets.
 - Do not invent facts or citations.
+- Never substitute one reporting framework for another. If the framework is absent or no authoritative snippet is supplied, apply only the supplied internal control policies.
 - Do not compute, change, or rebalance amounts.
 - You are advisory-only: do not imply posting, approval, or mutation already occurred.
 

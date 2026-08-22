@@ -12,6 +12,7 @@ import { JUSTIFIER_PROMPT_VERSION } from '../prompts/justifier.prompt.js';
 import { SHADOW_AUDITOR_PROMPT_VERSION } from '../prompts/shadow_auditor.prompt.js';
 import { CLASSIFIER_PROMPT_VERSION } from '../prompts/classifier.prompt.js';
 import { ADVISOR_PROMPT_VERSION } from '../prompts/advisor.prompt.js';
+import { RUNBOOK_WORKPAPER_PROMPT_VERSION } from '../prompts/runbook_workpaper.prompt.js';
 
 export interface ClaudeAdapterInput {
   model: string;
@@ -121,6 +122,19 @@ function getMockAdvisorJson(): string {
   });
 }
 
+function getMockRunbookWorkpaperJson(): string {
+  return JSON.stringify({
+    prompt_version: RUNBOOK_WORKPAPER_PROMPT_VERSION,
+    conclusion: 'ready_for_review',
+    summary: 'The registered deterministic checks completed and the result is ready for human review.',
+    procedures_performed: ['Reviewed the registered capability result and its evidence keys.'],
+    exceptions: [],
+    reviewer_questions: [],
+    evidence_keys: ['deterministic_result'],
+    requires_human_confirmation: true,
+  });
+}
+
 export async function callClaude(input: ClaudeAdapterInput): Promise<ClaudeAdapterOutput> {
   // In deployment modes (prod/staging/demo), NEVER return mock data regardless of env vars.
   if (!isDeploymentMode()) {
@@ -134,8 +148,11 @@ export async function callClaude(input: ClaudeAdapterInput): Promise<ClaudeAdapt
     }
     if (aiMock()) {
       console.warn(`[claude_adapter] Returning MOCK data for pillar=${input.pillar ?? 'unknown'}. This must not appear in production logs.`);
-      const rawText =
-        input.pillar === 'shadow_auditor' ? getMockShadowAuditorJson() : MOCK_JUSTIFIER_JSON;
+      const rawText = input.pillar === 'shadow_auditor'
+        ? getMockShadowAuditorJson()
+        : input.pillar === 'runbook_workpaper'
+          ? getMockRunbookWorkpaperJson()
+          : MOCK_JUSTIFIER_JSON;
       return { ok: true, rawText };
     }
   }

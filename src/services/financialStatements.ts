@@ -348,7 +348,15 @@ export function buildProfitAndLoss(
   const revenue = revenueEntries.map(toLine);
   const cogsLines = cogsEntries.map(toLine);
   const opexLines = opexEntries.map(toLine);
-  const otherLines = otherEntries.map(toLine);
+  // Other income/(expense) is a signed subtotal: income/gains are positive and
+  // interest expense is negative. The generic statement-line convention keeps
+  // debit-normal expenses positive, so interest expense must be inverted here.
+  const otherLines = otherEntries.map((entry) => {
+    const line = toLine(entry);
+    return entry.fsLineId === 'fs_interest_expense'
+      ? { ...line, amount: round2(-line.amount) }
+      : line;
+  });
   const taxLines = taxEntries.map(toLine);
   const unclassifiedExpenses = expenseEntries.map(toLine);
   const discontinuedLines = discontinuedEntries.map(toLine);
@@ -361,8 +369,12 @@ export function buildProfitAndLoss(
   const totalUnclassifiedExpenses = sumLines(unclassifiedExpenses);
   const totalDiscontinued = sumLines(discontinuedLines);
 
-  // All classified detail-expense lines combined (for the flat "expenses" array)
-  const allExpenseLines = [...cogsLines, ...opexLines, ...otherLines, ...taxLines, ...unclassifiedExpenses];
+  // The flat expense view contains expense amounts as positive values and must
+  // not treat interest income or other gains as expenses.
+  const otherExpenseLines = otherLines
+    .filter((line) => line.amount < 0)
+    .map((line) => ({ ...line, amount: round2(-line.amount) }));
+  const allExpenseLines = [...cogsLines, ...opexLines, ...otherExpenseLines, ...taxLines, ...unclassifiedExpenses];
   const totalExpenses = sumRound2(allExpenseLines.map((l) => l.amount));
 
   // PE-standard intermediate subtotals (using Decimal.js arithmetic)

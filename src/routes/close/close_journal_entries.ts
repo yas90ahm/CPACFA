@@ -33,13 +33,35 @@ import {
 import * as jeRepo from '../../db/repositories/journal_entry_repository.js';
 import * as evidenceRepo from '../../db/repositories/evidence_repository.js';
 import { getEvidenceStorageAdapterAsync } from '../../services/evidence_storage_service.js';
-import type { JournalEntrySource } from '../../types/journal_entry.js';
+import type { JournalEntry, JournalEntrySource } from '../../types/journal_entry.js';
 import { executeBridgeCommand } from '../../bridge/index.js';
 import type { AuthRequest } from '../../auth/middleware.js';
 import { guardSessionWritable } from '../../lib/session_write_guard.js';
 import { getCloseRoleFromReq } from '../../lib/closeRole.js';
+import {
+  ErpWritebackError,
+  requestApprovedErpWriteback,
+} from '../../services/journal_entry_erp_writeback_service.js';
+import { getWriteback } from '../../db/repositories/journal_entry_erp_writeback_repository.js';
+import { enqueueCloseOrchestratorReconcile } from '../../services/close_orchestrator_service.js';
 
 const router = Router();
+
+async function queueJournalEntryCloseRecheck(
+  tenantId: string,
+  journalEntry: JournalEntry,
+  occurrenceToken = `${journalEntry.status}:${journalEntry.updatedAt}`
+): Promise<boolean> {
+  const queued = await enqueueCloseOrchestratorReconcile({
+    tenantId,
+    closeSessionId: journalEntry.closeSessionId,
+    trigger: 'journal_entry_changed',
+    sourceType: 'journal_entry',
+    sourceId: journalEntry.id,
+    occurrenceToken,
+  }).catch(() => ({ inserted: false }));
+  return queued.inserted;
+}
 
 /** Allowed MIME types for JE attachments (configurable via env; default whitelist). */
 const ATTACHMENT_ALLOWED_MIMES = (
@@ -103,7 +125,6 @@ router.post('/journal-entries', async (req: Request, res: Response) => {
       closeSessionId: string;
       memo?: string;
       source: JournalEntrySource;
-      createdBy?: string;
       lines: { accountRef: string; debit?: number; credit?: number; description?: string }[];
     };
     if (!body?.closeSessionId || !body?.source || !Array.isArray(body?.lines)) {
@@ -111,19 +132,30 @@ router.post('/journal-entries', async (req: Request, res: Response) => {
       return;
     }
     if (!await guardSessionWritable(res, pool, tenantId, body.closeSessionId)) return;
+    const actor = (req as AuthRequest).userId ?? 'anonymous';
+    const lines = body.source === 'manual'
+      ? body.lines.map((line) => ({
+          ...line,
+          amountProvenance: {
+            kind: 'human_entered' as const,
+            enteredBy: actor,
+            enteredAt: new Date().toISOString(),
+          },
+        }))
+      : body.lines;
     const result = await executeBridgeCommand(
       {
         pool,
         tenantId,
-        actor: (req as AuthRequest).userId ?? 'anonymous',
+        actor,
       },
       {
         commandType: 'CreateDraftJE',
         closeSessionId: body.closeSessionId,
         memo: body.memo,
         source: body.source,
-        createdBy: body.createdBy ?? (req as AuthRequest).userId,
-        lines: body.lines,
+        createdBy: actor,
+        lines,
       }
     );
     if (!result.ok) {
@@ -138,7 +170,8 @@ router.post('/journal-entries', async (req: Request, res: Response) => {
       send500(res, new Error('Journal entry not found after create'), 'Journal entry not found after create');
       return;
     }
-    res.status(201).json(je);
+    const closeRecheckQueued = await queueJournalEntryCloseRecheck(tenantId, je);
+    res.status(201).json({ ...je, closeRecheckQueued });
   } catch (e) {
     if (e instanceof JournalEntryError) {
       res.status(e.code === 'NOT_FOUND' ? 404 : 400).json({ error: e.message });
@@ -219,6 +252,71 @@ router.get('/journal-entries/:id', async (req: Request, res: Response) => {
   }
 });
 
+/** GET /api/close/journal-entries/:id/erp-writeback — durable external posting receipt. */
+router.get('/journal-entries/:id/erp-writeback', async (req: Request, res: Response) => {
+  try {
+    const pool = getTenantPool(req);
+    const tenantId = getTenantId(req);
+    if (!pool || !tenantId) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    const writeback = await getWriteback(pool, tenantId, req.params.id ?? '');
+    if (!writeback) {
+      res.status(404).json({ error: 'ERP writeback not found', code: 'NOT_FOUND' });
+      return;
+    }
+    res.json(writeback);
+  } catch (e) {
+    send500(res, e, 'Get ERP writeback failed');
+  }
+});
+
+/**
+ * POST /api/close/journal-entries/:id/erp-writeback
+ * Controller recovery path for an entry approved before auto-writeback was enabled.
+ */
+router.post('/journal-entries/:id/erp-writeback', async (req: Request, res: Response) => {
+  try {
+    const pool = getTenantPool(req);
+    const tenantId = getTenantId(req);
+    if (!pool || !tenantId) {
+      res.status(400).json({ error: 'Tenant context required' });
+      return;
+    }
+    if (getCloseRoleFromReq(req as AuthRequest) !== 'approver') {
+      res.status(403).json({ error: 'Only approvers can request ERP writeback', code: 'INSUFFICIENT_ROLE' });
+      return;
+    }
+    const result = await requestApprovedErpWriteback(
+      pool,
+      tenantId,
+      req.params.id ?? '',
+      (req as AuthRequest).userId ?? 'anonymous'
+    );
+    if (!result.enabled) {
+      res.status(409).json({ error: result.reason, code: 'NOT_CONFIGURED' });
+      return;
+    }
+    const journalEntry = await getJournalEntry(pool, tenantId, req.params.id ?? '');
+    const closeRecheckQueued = journalEntry && result.writeback
+      ? await queueJournalEntryCloseRecheck(
+          tenantId,
+          journalEntry,
+          `writeback:${result.writeback.status}:${result.writeback.updatedAt}`
+        )
+      : false;
+    res.status(result.queued ? 202 : 200).json({ ...result, closeRecheckQueued });
+  } catch (e) {
+    if (e instanceof ErpWritebackError) {
+      const status = e.code === 'NOT_FOUND' ? 404 : e.code === 'NOT_APPROVED' ? 409 : 400;
+      res.status(status).json({ error: e.message, code: e.code });
+      return;
+    }
+    send500(res, e, 'Request ERP writeback failed');
+  }
+});
+
 /** POST /api/close/journal-entries/:id/propose (via bridge) */
 router.post('/journal-entries/:id/propose', async (req: Request, res: Response) => {
   try {
@@ -246,7 +344,8 @@ router.post('/journal-entries/:id/propose', async (req: Request, res: Response) 
       res.status(404).json({ error: 'Journal entry not found' });
       return;
     }
-    res.json(je);
+    const closeRecheckQueued = await queueJournalEntryCloseRecheck(tenantId, je);
+    res.json({ ...je, closeRecheckQueued });
   } catch (e) {
     if (e instanceof JournalEntryError) {
       res.status(e.code === 'NOT_FOUND' ? 404 : 400).json({ error: e.message });
@@ -292,7 +391,24 @@ router.post('/journal-entries/:id/approve', async (req: Request, res: Response) 
       res.status(404).json({ error: 'Journal entry not found' });
       return;
     }
-    res.json(je);
+    let erpWriteback: Awaited<ReturnType<typeof requestApprovedErpWriteback>> | undefined;
+    try {
+      erpWriteback = await requestApprovedErpWriteback(pool, tenantId, je.id, approvedBy);
+    } catch (writebackError) {
+      const { log } = await import('../../lib/logger.js');
+      log('error', 'Journal entry approved but ERP writeback request failed', {
+        tenantId,
+        journalEntryId: je.id,
+        error: writebackError instanceof Error ? writebackError.message : String(writebackError),
+      });
+      erpWriteback = {
+        enabled: true,
+        queued: false,
+        reason: 'Approval succeeded, but the ERP writeback request could not be persisted.',
+      };
+    }
+    const closeRecheckQueued = await queueJournalEntryCloseRecheck(tenantId, je);
+    res.json({ ...je, erpWriteback, closeRecheckQueued });
   } catch (e) {
     if (e instanceof JournalEntryError) {
       const status = e.code === 'NOT_FOUND' ? 404 : e.code === 'SEGREGATION' ? 403 : 400;
@@ -323,7 +439,8 @@ router.post('/journal-entries/:id/reject', async (req: Request, res: Response) =
     }
     const userId = (req as AuthRequest).userId ?? 'anonymous';
     const je = await rejectJE(pool, tenantId, id, reason, userId);
-    res.json(je);
+    const closeRecheckQueued = await queueJournalEntryCloseRecheck(tenantId, je);
+    res.json({ ...je, closeRecheckQueued });
   } catch (e) {
     if (e instanceof JournalEntryError) {
       res.status(e.code === 'NOT_FOUND' ? 404 : e.code === 'VALIDATION' ? 400 : 400).json({ error: e.message });
@@ -366,9 +483,11 @@ router.post('/journal-entries/:id/post', async (req: Request, res: Response) => 
       res.status(404).json({ error: 'Journal entry not found', code: 'NOT_FOUND' });
       return;
     }
+    const closeRecheckQueued = await queueJournalEntryCloseRecheck(tenantId, je);
     res.json({
       ...je,
       ...(result.aiWarnings?.length && { ai_warnings: result.aiWarnings }),
+      closeRecheckQueued,
     });
   } catch (e) {
     if (e instanceof JournalEntryError) {
@@ -398,7 +517,14 @@ router.delete('/journal-entries/:id', async (req: Request, res: Response) => {
     if (jeForGuard && !await guardSessionWritable(res, pool, tenantId, jeForGuard.closeSessionId)) return;
     const userId = (req as AuthRequest).userId ?? 'anonymous';
     const result = await deleteDraftJE(pool, tenantId, id, userId);
-    res.json(result);
+    const closeRecheckQueued = jeForGuard
+      ? await queueJournalEntryCloseRecheck(
+          tenantId,
+          jeForGuard,
+          `deleted:${jeForGuard.updatedAt}`
+        )
+      : false;
+    res.json({ ...result, closeRecheckQueued });
   } catch (e) {
     if (e instanceof JournalEntryError) {
       res.status(e.code === 'NOT_FOUND' ? 404 : e.code === 'INVALID_STATUS' ? 403 : 400).json({ error: e.message });
@@ -419,7 +545,8 @@ router.post('/journal-entries/:id/export', async (req: Request, res: Response) =
     }
     const id = req.params.id ?? '';
     const je = await exportJE(pool, tenantId, id);
-    res.json(je);
+    const closeRecheckQueued = await queueJournalEntryCloseRecheck(tenantId, je);
+    res.json({ ...je, closeRecheckQueued });
   } catch (e) {
     if (e instanceof JournalEntryError) {
       res.status(e.code === 'NOT_FOUND' ? 404 : 400).json({ error: e.message });
@@ -439,10 +566,13 @@ router.post('/journal-entries/:id/reverse', async (req: Request, res: Response) 
       return;
     }
     const id = req.params.id ?? '';
+    const original = await getJournalEntry(pool, tenantId, id);
+    if (original && !await guardSessionWritable(res, pool, tenantId, original.closeSessionId)) return;
     const userId = (req as AuthRequest).userId ?? 'anonymous';
     const reversalDate = req.body?.reversalDate as string | undefined;
     const reversalJE = await reversePostedJE(pool, tenantId, id, userId, reversalDate);
-    res.status(201).json({ reversalJE, originalJeId: id });
+    const closeRecheckQueued = await queueJournalEntryCloseRecheck(tenantId, reversalJE);
+    res.status(201).json({ reversalJE, originalJeId: id, closeRecheckQueued });
   } catch (e) {
     if (e instanceof JournalEntryError) {
       res.status(e.code === 'NOT_FOUND' ? 404 : e.code === 'INVALID_STATUS' ? 409 : e.code === 'VALIDATION' ? 409 : 400).json({ error: e.message, code: e.code });
@@ -576,7 +706,15 @@ router.post(
         requiredness: body?.requiredness ?? 'optional',
         attachedBy,
       });
-      res.status(201).json(result);
+      const journalEntry = await getJournalEntry(pool, tenantId, id);
+      const closeRecheckQueued = journalEntry
+        ? await queueJournalEntryCloseRecheck(
+            tenantId,
+            journalEntry,
+            `evidence:${result.evidenceId}`
+          )
+        : false;
+      res.status(201).json({ ...result, closeRecheckQueued });
     } catch (e) {
       if (e instanceof EvidenceAttachmentError) {
         const status = e.code === 'NOT_FOUND' ? 404 : e.code === 'PERIOD_LOCKED' ? 409 : 400;
@@ -608,7 +746,6 @@ router.post('/journal-entries/:id/evidence', async (req: Request, res: Response)
       label?: string;
       role?: string;
       requiredness?: 'optional' | 'required';
-      attachedBy?: string;
       claimedAmount?: string;
       claimedCurrency?: string;
       claimedPeriod?: string;
@@ -638,7 +775,8 @@ router.post('/journal-entries/:id/evidence', async (req: Request, res: Response)
       res.status(400).json({ error: 'assertionType required; must be one of: ' + validAssertionTypes.join(', ') });
       return;
     }
-    const attachedBy = body.attachedBy ?? (req as AuthRequest).userId ?? 'anonymous';
+    // Evidence identity is always derived from the authenticated actor.
+    const attachedBy = (req as AuthRequest).userId ?? 'anonymous';
     const result = await attachEvidenceToJournalEntry(pool, tenantId, id, {
       hashSha256: body.hashSha256,
       sizeBytes: Number(body.sizeBytes),
@@ -655,7 +793,15 @@ router.post('/journal-entries/:id/evidence', async (req: Request, res: Response)
       claimedPeriod: body.claimedPeriod,
       note: body.note,
     });
-    res.status(201).json(result);
+    const journalEntry = await getJournalEntry(pool, tenantId, id);
+    const closeRecheckQueued = journalEntry
+      ? await queueJournalEntryCloseRecheck(
+          tenantId,
+          journalEntry,
+          `evidence:${result.evidenceId}`
+        )
+      : false;
+    res.status(201).json({ ...result, closeRecheckQueued });
   } catch (e) {
     if (e instanceof EvidenceAttachmentError) {
       const status = e.code === 'NOT_FOUND' ? 404 : e.code === 'PERIOD_LOCKED' ? 409 : 400;
@@ -701,6 +847,12 @@ router.post(
         return;
       }
       const id = req.params.id ?? '';
+      const journalEntry = await getJournalEntry(pool, tenantId, id);
+      if (!journalEntry) {
+        res.status(404).json({ error: 'Journal entry not found' });
+        return;
+      }
+      if (!await guardSessionWritable(res, pool, tenantId, journalEntry.closeSessionId)) return;
       let fileRef: string;
       const file = (req as Request & { file?: { buffer: Buffer; originalname?: string; mimetype?: string } }).file;
       if (file?.buffer) {
@@ -733,7 +885,12 @@ router.post(
         fileRef = ref;
       }
       const attachment = await addJEAttachment(pool, tenantId, id, fileRef);
-      res.status(201).json(attachment);
+      const closeRecheckQueued = await queueJournalEntryCloseRecheck(
+        tenantId,
+        journalEntry,
+        `attachment:${attachment.id}`
+      );
+      res.status(201).json({ ...attachment, closeRecheckQueued });
     } catch (e) {
       if (e instanceof JournalEntryError) {
         res.status(e.code === 'NOT_FOUND' ? 404 : 400).json({ error: e.message });

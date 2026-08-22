@@ -10,6 +10,8 @@ import type {
   FinancialStatementsOutput,
 } from '../types/financial.js';
 import { absGt, absLt, sumRound2 } from '../utils/decimal.js';
+import type { AccountingStandard } from '../constants/accounting/standards_registry.js';
+import { getPresentationReferences } from '../constants/accounting/presentation_references.js';
 
 const DEFAULT_MATERIALITY = 0.01;
 
@@ -19,6 +21,7 @@ export interface PlanExecuteVerifyInput {
   profitAndLoss: ProfitAndLoss;
   /** Configurable materiality; when balance gap exceeds this, verification fails. */
   materiality?: number;
+  standard?: AccountingStandard;
 }
 
 /**
@@ -29,11 +32,14 @@ export function runPlanExecuteVerify(input: PlanExecuteVerifyInput): FinancialSt
   const executedAt = new Date().toISOString();
   const materiality = input.materiality ?? DEFAULT_MATERIALITY;
 
+  const presentation = input.standard ? getPresentationReferences(input.standard) : undefined;
   const plan = [
     'P1: Input = Trial Balance (Account, Debit, Credit); Σ Debits = Σ Credits.',
-    'P2: Standards = FASB ASC 205, 210, 220; IAS 1 (Presentation).',
+    presentation
+      ? `P2: Presentation framework = ${presentation.balanceSheet.citation} and ${presentation.incomeStatement.citation}.`
+      : 'P2: Presentation framework = configured reporting framework; no framework is inferred by the verifier.',
     'P3: Output = Balance Sheet (Assets = Liabilities + Equity) + P&L (Revenue − Expenses = Net Income).',
-    'P4: Each line item classified and traced to FASB/IASB codification.',
+    'P4: Each line item is classified and traced to the configured framework.',
   ].join(' ');
 
   const checks: string[] = [];
@@ -88,12 +94,15 @@ export function runPlanExecuteVerify(input: PlanExecuteVerifyInput): FinancialSt
   }
 
   // V4: Codification present on BS and P&L
-  const hasCodification =
-    input.balanceSheet.codificationRef && input.profitAndLoss.codificationRef;
-  if (hasCodification) {
-    checks.push('V4: Balance Sheet and P&L have codification references.');
+  const hasCodification = input.balanceSheet.codificationRef && input.profitAndLoss.codificationRef;
+  const referencesMatch = !presentation || (
+    input.balanceSheet.codificationRef.citation === presentation.balanceSheet.citation &&
+    input.profitAndLoss.codificationRef.citation === presentation.incomeStatement.citation
+  );
+  if (hasCodification && referencesMatch) {
+    checks.push('V4: Balance Sheet and P&L cite the configured reporting framework.');
   } else {
-    checks.push('V4 WARN: Missing codification on one or more statements.');
+    checks.push('V4 WARN: Missing or framework-mismatched presentation reference on one or more statements.');
   }
 
   return {

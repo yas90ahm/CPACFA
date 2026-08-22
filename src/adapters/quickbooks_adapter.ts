@@ -208,7 +208,10 @@ export class QuickBooksAdapter implements IAccountingAdapter {
         Line: lines,
       };
 
-      const response = await this.qbFetch(realmId, accessToken, '/journalentry', {
+      const requestId = input.idempotencyKey
+        ? `?requestid=${encodeURIComponent(input.idempotencyKey)}`
+        : '';
+      const response = await this.qbFetch(realmId, accessToken, `/journalentry${requestId}`, {
         method: 'POST',
         body,
       });

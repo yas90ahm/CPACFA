@@ -7,6 +7,7 @@ import { Router, type Request, type Response } from 'express';
 import { getTenantId, getTenantPool } from '../../lib/tenant_context.js';
 import { send500 } from '../../lib/errorHandler.js';
 import { guardSessionWritable } from '../../lib/session_write_guard.js';
+import { requireSessionAccountingFramework } from '../../lib/session_framework_guard.js';
 import { getCloseSessionById } from '../../db/repositories/close_session_repository.js';
 import {
   listDeferredTaxItems,
@@ -22,6 +23,10 @@ import {
 } from '../../services/deferred_tax_service.js';
 
 const router = Router();
+const requireUsGaapDeferredTax = requireSessionAccountingFramework(['US_GAAP'], 'Legacy ASC 740 deferred-tax calculation');
+router.use('/sessions/:sessionId/deferred-tax/calculate', requireUsGaapDeferredTax);
+router.use('/sessions/:sessionId/deferred-tax/valuation-allowance', requireUsGaapDeferredTax);
+router.use('/sessions/:sessionId/deferred-tax/rate-change-impact', requireUsGaapDeferredTax);
 
 /** GET /sessions/:sessionId/deferred-tax/items — List deferred tax items. */
 router.get('/sessions/:sessionId/deferred-tax/items', async (req: Request, res: Response) => {

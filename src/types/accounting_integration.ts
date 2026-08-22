@@ -36,6 +36,8 @@ export interface PushJournalEntryInput {
   connectionId: string;
   date: string;
   memo?: string;
+  /** Stable caller-generated key used by ERP APIs that support duplicate prevention. */
+  idempotencyKey?: string;
   lines: { accountCode: string; accountName: string; debit: number; credit: number; description?: string }[];
 }
 

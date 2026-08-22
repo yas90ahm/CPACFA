@@ -73,6 +73,20 @@ export interface GeneralLedgerSnapshotEntry {
   }>;
 }
 
+/**
+ * Comparative trial balance copied from the immediately preceding certified,
+ * entity-scoped snapshot. Keeping the values and their immutable source tokens
+ * inside the new snapshot makes certified cash-flow/equity roll-forwards replayable.
+ */
+export interface ComparativeTrialBalanceSnapshot {
+  periodLabel: string;
+  sourceSnapshotId: string;
+  sourceSnapshotHash: string;
+  entries: LedgerSnapshotEntry[];
+  totalDebits: number;
+  totalCredits: number;
+}
+
 /** Canonical payload stored in snapshot_payload_json. */
 export interface LedgerSnapshotPayload {
   trialBalance: {
@@ -86,6 +100,12 @@ export interface LedgerSnapshotPayload {
   evidenceManifest?: EvidenceManifest;
   /** General ledger entries (v4+). Included when TB is derived from GL. */
   generalLedger?: GeneralLedgerSnapshotEntry[];
+  /** Prior certified, entity-scoped TB used for comparative roll-forwards (v5+). */
+  comparativeTrialBalance?: ComparativeTrialBalanceSnapshot;
+  /** Reporting framework captured at certification so replay cannot drift to a default framework. */
+  accountingContext?: {
+    standard: string;
+  };
 }
 
 export interface LedgerSnapshot {
@@ -130,4 +150,17 @@ export interface CreateLedgerSnapshotInput {
   evidenceManifest?: EvidenceManifest;
   /** General ledger entries (v4+). Included when TB is derived from GL. */
   generalLedger?: GeneralLedgerSnapshotEntry[];
+  /** Prior certified TB and immutable provenance used for comparative roll-forwards (v5+). */
+  comparativeTrialBalance?: {
+    periodLabel: string;
+    sourceSnapshotId: string;
+    sourceSnapshotHash: string;
+    entries: CreateLedgerSnapshotEntryInput[];
+    totalDebits: number;
+    totalCredits: number;
+  };
+  /** Explicit reporting framework for deterministic statement presentation. */
+  accountingContext?: {
+    standard: string;
+  };
 }

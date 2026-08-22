@@ -6,13 +6,7 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import {
-  LayoutDashboard,
-  FolderClosed,
-  Briefcase,
   ScrollText,
-  BarChart3,
-  Activity,
-  Settings,
   ChevronRight,
   ShieldCheck,
   Link2,
@@ -44,7 +38,7 @@ interface ReadinessResponse {
 
 interface SessionResponse {
   id: string;
-  state: string;
+  status: string;
   periodLabel: string;
   entityName: string;
   startedAt: string;
@@ -59,6 +53,8 @@ interface AuditEvent {
   actorName?: string;
   actorRole?: string;
   actorId?: string;
+  userId?: string;
+  userName?: string;
   timestamp: string;
   createdAt?: string;
   hash?: string;
@@ -67,70 +63,21 @@ interface AuditEvent {
 }
 
 interface ChainVerification {
+  scope: 'tenant';
   verified: boolean;
-  totalEvents: number;
-  brokenLinks: number;
-  lastVerifiedAt?: string;
+  entryCount: number;
+  verifiedAt: string;
+  latestEntryId: string | null;
+  latestEntryHash: string | null;
+  brokenAtEntryId: string | null;
+  message: string | null;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Nav                                                                */
-/* ------------------------------------------------------------------ */
-
-const NAV_ITEMS = [
-  { label: 'Dashboard', icon: LayoutDashboard, href: (sid: string) => `/close/${sid}/dashboard` },
-  { label: 'Close Sessions', icon: FolderClosed, href: () => '/close' },
-  { label: 'Portfolio', icon: Briefcase, href: () => '/portfolio' },
-  { label: 'Audit Trail', icon: ScrollText, href: (sid: string) => `/close/${sid}/audit-trail` },
-  { label: 'GL Quality', icon: BarChart3, href: (sid: string) => `/close/${sid}/gl-quality` },
-  { label: 'Modules', icon: Activity, href: (sid: string) => `/close/${sid}/modules` },
-  { label: 'Settings', icon: Settings, href: () => '/settings/general' },
-];
-
-/* ------------------------------------------------------------------ */
-/*  Sidebar                                                            */
-/* ------------------------------------------------------------------ */
-
-function Sidebar({ sessionId }: { sessionId: string }) {
-  return (
-    <aside className="fixed top-0 left-0 h-screen w-[260px] bg-[#2C2416] flex flex-col z-50">
-      <div className="px-6 pt-6 pb-4">
-        <div className="text-[#B8860B] text-xl font-medium tracking-wide">SABIT</div>
-        <div className="text-[#8B7A5E] text-xs mt-0.5">Financial Close Engine</div>
-      </div>
-      <nav className="flex-1 px-3 mt-2 space-y-0.5 overflow-y-auto">
-        {NAV_ITEMS.map((item) => {
-          const isActive = item.label === 'Audit Trail';
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.label}
-              href={item.href(sessionId)}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
-                isActive
-                  ? 'bg-[#3B1F0A] text-[#B8860B]'
-                  : 'text-[#8B7A5E] hover:text-[#B8860B] hover:bg-[#3B1F0A]/50'
-              }`}
-            >
-              <Icon size={18} />
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
-      <div className="px-4 py-4 border-t border-[#3B1F0A]">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-[#3B1F0A] flex items-center justify-center text-[#B8860B] text-xs font-medium">
-            YA
-          </div>
-          <div>
-            <div className="text-sm text-[#B8860B] font-medium">Yasir A.</div>
-            <div className="text-xs text-[#8B7A5E]">Controller</div>
-          </div>
-        </div>
-      </div>
-    </aside>
-  );
+interface AuditEventsResponse {
+  events: AuditEvent[];
+  total: number;
+  chainIntegrity: boolean;
+  chainVerification: ChainVerification;
 }
 
 /* ------------------------------------------------------------------ */
@@ -179,21 +126,23 @@ function getEventConfig(eventType: string) {
 /* ------------------------------------------------------------------ */
 
 function humanizeActor(event: AuditEvent): string {
-  if (event.actorName) {
+  const actorName = event.actorName ?? event.userName;
+  const actorId = event.actorId ?? event.userId;
+  if (actorName) {
     return event.actorRole
-      ? `${event.actorName} (${event.actorRole})`
-      : event.actorName;
+      ? `${actorName} (${event.actorRole})`
+      : actorName;
   }
-  if (event.actorId) {
-    if (event.actorId === 'system' || event.actorId === 'sabit') return 'Sabit Engine';
-    return event.actorId;
+  if (actorId) {
+    if (actorId === 'system' || actorId === 'sabit') return 'Sabit Engine';
+    return actorId;
   }
   return 'System';
 }
 
 function isAIActor(event: AuditEvent): boolean {
   const type = event.eventType;
-  const actor = (event.actorId || '').toLowerCase();
+  const actor = (event.actorId ?? event.userId ?? '').toLowerCase();
   return (
     type.startsWith('ai_') ||
     actor === 'system' ||
@@ -418,36 +367,22 @@ export default function AuditTrailPage() {
     enabled: !!sessionId,
   });
 
-  const fetchEvents = useCallback(async (currentOffset: number): Promise<AuditEvent[]> => {
-    try {
-      const data = await apiFetch<AuditEvent[] | { events?: AuditEvent[]; auditEvents?: AuditEvent[] }>(
-        `/api/close/sessions/${sessionId}/audit-events`,
-        { params: { limit: String(PAGE_SIZE), offset: String(currentOffset) } }
-      );
-      if (Array.isArray(data)) return data;
-      return data.events ?? data.auditEvents ?? [];
-    } catch {
-      try {
-        const data = await apiFetch<AuditEvent[] | { events?: AuditEvent[] }>(
-          '/api/verification/audit-chain',
-          { params: { sessionId } }
-        );
-        if (Array.isArray(data)) return data;
-        return data.events ?? [];
-      } catch {
-        return [];
-      }
-    }
+  const fetchEvents = useCallback(async (currentOffset: number): Promise<AuditEventsResponse> => {
+    return apiFetch<AuditEventsResponse>(
+      `/api/close/sessions/${sessionId}/audit-events`,
+      { params: { limit: String(PAGE_SIZE), offset: String(currentOffset) } }
+    );
   }, [sessionId]);
 
   const eventsQuery = useQuery({
     queryKey: ['audit-events', sessionId],
     queryFn: async () => {
-      const batch = await fetchEvents(0);
+      const response = await fetchEvents(0);
+      const batch = response.events;
       setAllEvents(batch);
       setOffset(batch.length);
       setHasMore(batch.length >= PAGE_SIZE);
-      return batch;
+      return response;
     },
     enabled: !!sessionId,
   });
@@ -455,7 +390,8 @@ export default function AuditTrailPage() {
   const handleLoadMore = useCallback(async () => {
     setLoadingMore(true);
     try {
-      const batch = await fetchEvents(offset);
+      const response = await fetchEvents(offset);
+      const batch = response.events;
       setAllEvents((prev) => [...prev, ...batch]);
       setOffset((prev) => prev + batch.length);
       if (batch.length < PAGE_SIZE) setHasMore(false);
@@ -464,31 +400,14 @@ export default function AuditTrailPage() {
     }
   }, [offset, fetchEvents]);
 
-  const chainQuery = useQuery({
-    queryKey: ['chain-verification', sessionId],
-    queryFn: async () => {
-      try {
-        const data = await apiFetch<ChainVerification>(
-          '/api/verification/audit-chain',
-          { params: { sessionId, verify: 'true' } }
-        );
-        return data;
-      } catch {
-        return null;
-      }
-    },
-    enabled: !!sessionId,
-  });
-
   /* --- Derived state --- */
 
   const session = sessionQuery.data;
-  const events = allEvents.length > 0 ? allEvents : (eventsQuery.data ?? []);
-  const chain = chainQuery.data;
+  const events = allEvents.length > 0 ? allEvents : (eventsQuery.data?.events ?? []);
+  const chain = eventsQuery.data?.chainVerification;
 
-  const totalEvents = chain?.totalEvents ?? events.length;
-  const brokenLinks = chain?.brokenLinks ?? 0;
-  const isVerified = chain?.verified ?? (events.length > 0 && brokenLinks === 0);
+  const totalEvents = eventsQuery.data?.total ?? events.length;
+  const isVerified = chain?.verified === true;
 
   // Categorize events
   const materialEvents = events.filter((e) =>
@@ -531,7 +450,7 @@ export default function AuditTrailPage() {
           const _startedAt = session?.startedAt ?? session?.createdAt ?? new Date().toISOString();
           const _dayElapsed = Math.max(1, Math.ceil((Date.now() - new Date(_startedAt).getTime()) / (1000 * 60 * 60 * 24)));
           const _targetDays = 10;
-          const _sessionState = (session?.state ?? 'IN_PROGRESS').replace(/_/g, ' ');
+          const _sessionState = (session?.status ?? 'unknown').replace(/_/g, ' ');
           return _gates.length > 0 ? (
             <div className="bg-[#2C2416] px-6 py-3 flex items-center justify-between">
               <div className="flex items-center gap-4 text-sm">
@@ -584,8 +503,8 @@ export default function AuditTrailPage() {
                   Tamper-Evident Audit Ledger
                 </h1>
                 <p className="text-sm text-[#8B7A5E] mt-1">
-                  Every action is cryptographically chained. Each record hashes the previous,
-                  forming an immutable, verifiable sequence.
+                  Recorded close events are SHA-256 chained. The status below comes from a fresh
+                  server-side verification of the tenant ledger, not from the displayed rows alone.
                 </p>
               </div>
 
@@ -598,26 +517,34 @@ export default function AuditTrailPage() {
                       CHAIN INTEGRITY VERIFIED
                     </span>
                     <span className="text-xs text-[#2D6A4F]/70">
-                      {totalEvents} events · {brokenLinks} broken links
+                      {chain.entryCount} tenant ledger events checked · no broken link detected
                     </span>
                   </div>
-                  {chain?.lastVerifiedAt && (
+                  {chain.verifiedAt && (
                     <span className="text-xs text-[#2D6A4F]/70">
-                      Last verified: {timeAgo(chain.lastVerifiedAt)}
+                      Last verified: {timeAgo(chain.verifiedAt)}
                     </span>
                   )}
                 </div>
-              ) : events.length > 0 ? (
+              ) : chain ? (
+                <div className="bg-[#F5E4DE] border border-[#C44B2B]/20 rounded-lg px-5 py-3 flex items-center gap-3">
+                  <AlertTriangle size={18} className="text-[#C44B2B]" />
+                  <span className="text-sm font-medium text-[#C44B2B]">
+                    CHAIN INTEGRITY FAILED
+                  </span>
+                  <span className="text-xs text-[#C44B2B]/70">
+                    {chain.message ?? 'A ledger hash or link did not verify'}
+                    {chain.brokenAtEntryId ? ` · entry ${chain.brokenAtEntryId}` : ''}
+                  </span>
+                </div>
+              ) : (
                 <div className="bg-[#F0E8D0] border border-[#8B6914]/15 rounded-lg px-5 py-3 flex items-center gap-3">
                   <AlertTriangle size={18} className="text-[#8B6914]" />
                   <span className="text-sm font-medium text-[#8B6914]">
-                    CHAIN VERIFICATION PENDING
-                  </span>
-                  <span className="text-xs text-[#8B6914]/70">
-                    {totalEvents} events · {brokenLinks} broken link{brokenLinks !== 1 ? 's' : ''} detected
+                    CHAIN VERIFICATION UNAVAILABLE
                   </span>
                 </div>
-              ) : null}
+              )}
 
               {/* Stat cards */}
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
@@ -693,10 +620,9 @@ export default function AuditTrailPage() {
                 </h3>
                 <p className="text-xs text-[#5C4F3A] leading-relaxed">
                   This audit ledger uses SHA-256 hash chaining. Each event record includes the hash
-                  of the previous record, creating a tamper-evident chain. If any record is modified
-                  or deleted, the chain breaks and the integrity check fails. This is the same
-                  principle used in blockchain technology but applied to a traditional database for
-                  auditability without the overhead of distributed consensus.
+                  of the previous record, creating a tamper-evident sequence. A changed record or
+                  broken link causes verification to fail. Hash chaining detects changes; database
+                  append-only controls are verified separately in the certification verification view.
                 </p>
               </div>
             </div>

@@ -47,7 +47,7 @@ export class NetSuiteAdapter implements IAccountingAdapter {
     accessToken: string,
     accountId: string,
     path: string,
-    options?: { method?: string; body?: unknown }
+    options?: { method?: string; body?: unknown; idempotencyKey?: string }
   ): Promise<Response> {
     const baseUrl = `https://${accountId.toLowerCase().replace('_', '-')}.suitetalk.api.netsuite.com/services/rest`;
     const headers: Record<string, string> = {
@@ -56,6 +56,9 @@ export class NetSuiteAdapter implements IAccountingAdapter {
       'Prefer': 'transient',
     };
     if (options?.body) headers['Content-Type'] = 'application/json';
+    if (options?.idempotencyKey) {
+      headers['X-NetSuite-idempotency-key'] = options.idempotencyKey;
+    }
     return fetch(`${baseUrl}${path}`, {
       method: options?.method ?? 'GET',
       headers,
@@ -144,6 +147,7 @@ export class NetSuiteAdapter implements IAccountingAdapter {
       const response = await this.nsFetch(accessToken, accountId, '/record/v1/journalentry', {
         method: 'POST',
         body,
+        idempotencyKey: input.idempotencyKey,
       });
 
       if (!response.ok) {

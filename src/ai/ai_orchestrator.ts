@@ -108,8 +108,15 @@ async function queryKbForJustifier(facts: Record<string, unknown>): Promise<Arra
 }
 
 /** Query KB for policy snippets relevant to shadow audit. */
-async function queryKbForShadowAuditor(facts: Record<string, unknown>): Promise<Array<{ rule_id: string; title: string; snippet_markdown: string }>> {
+async function queryKbForShadowAuditor(
+  facts: Record<string, unknown>,
+  reportingFramework?: string
+): Promise<Array<{ rule_id: string; title: string; snippet_markdown: string }>> {
   try {
+    // The current global shadow-audit corpus is U.S.-GAAP oriented. Never
+    // retrieve it for another framework and accidentally present ASC as ASPE.
+    const normalizedFramework = reportingFramework?.trim().toUpperCase().replace(/[ -]/g, '_');
+    if (normalizedFramework && !['GAAP', 'US_GAAP'].includes(normalizedFramework)) return [];
     const query = String(facts['memo'] ?? facts['source'] ?? Object.values(facts).slice(0, 3).join(' ')).slice(0, 300);
     if (!query.trim()) return [];
     const results = searchFinancialMemory(query, { tiers: ['global'], topK: 5 });
@@ -160,6 +167,7 @@ export interface RunJustifierParams {
   /** When set (AI_BOUNDARY_DB_ROLES), used for insertCallLog. */
   aiPool?: Pool;
   tenantId: string;
+  closeSessionId?: string;
   periodLabel: string;
   relatedType: JustifierRelatedType;
   relatedId: string;
@@ -198,6 +206,7 @@ export async function runJustifier(params: RunJustifierParams): Promise<RunJusti
   const result = await callAIWithSchema({
     pool,
     tenantId,
+    closeSessionId: params.closeSessionId,
     pillar: 'justifier',
     promptVersion: JUSTIFIER_PROMPT_VERSION,
     systemPrompt,
@@ -237,12 +246,14 @@ export interface RunShadowAuditParams {
   pool: Pool;
   aiPool?: Pool;
   tenantId: string;
+  closeSessionId?: string;
   periodLabel: string;
   subjectType: ShadowAuditSubjectType;
   subjectId: string;
   facts: Record<string, unknown>;
   materialityThreshold?: number;
   workflowState?: string;
+  reportingFramework?: string;
 }
 
 export interface RunShadowAuditResult {
@@ -259,9 +270,20 @@ const AI_FAILED_FINDING_CODE = 'AI_FAILED';
 
 /** Fail-open: on AI failure return warn + single finding, do not block. */
 export async function runShadowAudit(params: RunShadowAuditParams): Promise<RunShadowAuditResult> {
-  const { pool, aiPool, tenantId, periodLabel, subjectType, subjectId, facts, materialityThreshold, workflowState } = params;
+  const {
+    pool,
+    aiPool,
+    tenantId,
+    periodLabel,
+    subjectType,
+    subjectId,
+    facts,
+    materialityThreshold,
+    workflowState,
+    reportingFramework,
+  } = params;
   const logPool = aiPool ?? pool;
-  const kbSnippets = await queryKbForShadowAuditor(facts);
+  const kbSnippets = await queryKbForShadowAuditor(facts, reportingFramework);
   const standards_snippets = [...getDefaultSnippetsForShadowAuditor(), ...kbSnippets];
   const context = {
     tenantId,
@@ -270,6 +292,7 @@ export async function runShadowAudit(params: RunShadowAuditParams): Promise<RunS
     subjectId,
     materialityThreshold,
     workflowState,
+    reportingFramework,
   };
   const userPrompt = buildShadowAuditorUserPrompt({
     transactionPayload: facts,
@@ -280,7 +303,7 @@ export async function runShadowAudit(params: RunShadowAuditParams): Promise<RunS
   const requestJson = {
     pillar: 'shadow_auditor',
     prompt_version: SHADOW_AUDITOR_PROMPT_VERSION,
-    context: { tenantId, periodLabel, subjectType, subjectId },
+    context: { tenantId, periodLabel, subjectType, subjectId, reportingFramework },
     factsKeys: Object.keys(facts),
     snippetsCount: standards_snippets.length,
   };
@@ -288,6 +311,7 @@ export async function runShadowAudit(params: RunShadowAuditParams): Promise<RunS
   const result = await callAIWithSchema({
     pool: logPool,
     tenantId,
+    closeSessionId: params.closeSessionId,
     pillar: 'shadow_auditor',
     promptVersion: SHADOW_AUDITOR_PROMPT_VERSION,
     systemPrompt,

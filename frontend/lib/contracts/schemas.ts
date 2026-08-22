@@ -12,6 +12,8 @@ export const SessionSchema = z.object({
   tenantId: z.string().optional(),
   entityId: z.string().optional(),
   entityName: z.string().optional(),
+  standard: z.string().optional(),
+  basis: z.string().optional(),
   periodStart: z.string().optional(),
   periodEnd: z.string().optional(),
   periodLabel: z.string().optional(),
@@ -24,6 +26,8 @@ export const SessionSchema = z.object({
   statementsGeneratedAt: z.string().nullable().optional(),
   statementsStale: z.boolean().optional(),
   certifiedBy: z.string().nullable().optional(),
+  certifiedAt: z.string().nullable().optional(),
+  lockedAt: z.string().nullable().optional(),
   advancedToReviewBy: z.string().nullable().optional(),
   advancedToReviewAt: z.string().nullable().optional(),
 });

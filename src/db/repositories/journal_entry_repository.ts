@@ -3,7 +3,7 @@
  * journal_entries, journal_entry_lines, je_attachments.
  */
 
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import type {
   JournalEntry,
   JournalEntryLine,
@@ -12,6 +12,8 @@ import type {
   JournalEntrySource,
 } from '../../types/journal_entry.js';
 import type { AmountProvenance } from '../../types/amount_provenance.js';
+
+type Queryable = Pool | PoolClient;
 
 interface JournalEntryRow {
   id: string;
@@ -80,7 +82,7 @@ const JE_COLS = `id, close_session_id, tenant_id, status, memo, source, created_
 const LINE_COLS = `je_id, line_index, account_ref, debit, credit, description, amount_provenance`;
 
 export async function insertJournalEntry(
-  pool: Pool,
+  pool: Queryable,
   id: string,
   input: {
     closeSessionId: string;
@@ -113,7 +115,7 @@ export async function insertJournalEntry(
   return rowToJE(r.rows[0]);
 }
 
-export async function getJournalEntryById(pool: Pool, id: string, tenantId: string): Promise<JournalEntry | null> {
+export async function getJournalEntryById(pool: Queryable, id: string, tenantId: string): Promise<JournalEntry | null> {
   const r = await pool.query<JournalEntryRow>(
     `SELECT ${JE_COLS} FROM journal_entries WHERE id = $1 AND tenant_id = $2`,
     [id, tenantId]
@@ -124,7 +126,7 @@ export async function getJournalEntryById(pool: Pool, id: string, tenantId: stri
 }
 
 export async function listJournalEntries(
-  pool: Pool,
+  pool: Queryable,
   tenantId: string,
   filters: { closeSessionId?: string; status?: JournalEntryStatus; limit?: number }
 ): Promise<JournalEntry[]> {
@@ -164,7 +166,7 @@ const STATUS_TRANSITION_GUARD: Record<string, string | null> = {
 };
 
 export async function updateJournalEntryStatus(
-  pool: Pool,
+  pool: Queryable,
   id: string,
   tenantId: string,
   status: JournalEntryStatus,
@@ -232,7 +234,7 @@ export async function deleteJournalEntry(pool: Pool, id: string, tenantId: strin
 }
 
 export async function insertJournalEntryLines(
-  pool: Pool,
+  pool: Queryable,
   jeId: string,
   lines: {
     accountRef: string;
@@ -267,7 +269,7 @@ export async function insertJournalEntryLines(
   return result;
 }
 
-export async function listJournalEntryLines(pool: Pool, jeId: string): Promise<JournalEntryLine[]> {
+export async function listJournalEntryLines(pool: Queryable, jeId: string): Promise<JournalEntryLine[]> {
   const r = await pool.query<JournalEntryLineRow>(
     `SELECT ${LINE_COLS} FROM journal_entry_lines WHERE je_id = $1 ORDER BY line_index`,
     [jeId]

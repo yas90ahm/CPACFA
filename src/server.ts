@@ -1,19 +1,14 @@
 /**
- * Sabit — Backend API
- * Trial Balance ingestion → Balance Sheet + P&L with Plan-Execute-Verify and codification traceability.
+ * Sabit — Canadian ASPE close harness API
+ * Configured ERP trial balance → governed close runbook → deterministic controls,
+ * supervisor review, approved JE writeback, and append-only recovery evidence.
+ * The model is advisory; accounting truth, approvals, and posting remain in
+ * deterministic services and the connected ERP.
  * Phase 1: DB (Postgres when DATABASE_URL set), auth (JWT), optionalAuth middleware sets req.tenantId.
  *
- * SERVICE INVENTORY — updated 2026-03-26
- * Active services: 169 (src/services/)
- * Quarantined services: 11 (src/_quarantine/services/)
- *   - slm_client_service: SLM strategy deferred post-funding
- *   - task_assignment_service: handled by reconciliation_resolution_service + hitl_orchestrator
- *   - xbrl_embedding_service: MVP uses trigram search
- *   - ai_account_analyzer_service, cpa_decision_handler, filing_calendar_service,
- *     gaap_reconciliation_service, gl_quality_report_service, google_oauth,
- *     tax_return_service, tax_strategy_service
- * Unwired (known, intentional): notesPolicies (utility), cpa_bridge_manifest (manifest), planExecuteVerify (agent)
- * Last audit: 2026-03-26 by Claude Code (4 parallel agents, 171 services audited)
+ * The API still exposes supporting ingestion, audit, reporting, and integration
+ * capabilities, but the close runbook/orchestrator path is the canonical product
+ * workflow for an accounting close.
  *
  * Deployment modes:
  *   1. Single process (default): API + job worker together.
@@ -56,11 +51,7 @@ import auditRouter from './routes/audit/index.js';
 import exportRouter from './routes/export.js';
 import financialMemoryRouter from './routes/financial_memory.js';
 import vectorStoreRouter from './routes/vector_store.js';
-// TODO: Wire when implemented — bank pipeline, AP/AR aging, payroll accrual, ingestion scheduler
-// import ingestionRouter from './routes/ingestion.js';
-// import pipelinesRouter from './routes/pipelines.js';
 import hitlRouter from './routes/hitl.js';
-import memoryRouter from './routes/memory.js';
 import integrationsRouter from './routes/integrations.js';
 import closeRouter from './routes/close/index.js';
 import precheckRouter from './routes/precheck.js';
@@ -216,17 +207,8 @@ app.use('/api/knowledge-base', financialMemoryRouter);
 // API: RAG Vector Store — pgvector-backed GAAP/IFRS/Tax semantic search
 app.use('/api/vector-store', vectorStoreRouter);
 
-// QUARANTINED — Automated ingestion infrastructure not in MVP architecture
-// app.use('/api/ingestion', ingestionRouter);
-
-// API: Semantic Memory (decisions, user corrections, justifications — vectorized; vendor lookup and consistency check)
-app.use('/api/memory', memoryRouter);
-
 // API: OAuth integrations (Gmail/Drive)
 app.use('/api/integrations', integrationsRouter);
-
-// QUARANTINED — Bank pipeline, AP/AR aging, payroll accrual not in MVP architecture
-// app.use('/api/pipelines', pipelinesRouter);
 
 // API: Month-end close — JE suggestions, checklist, period lock, audit log, segregation
 app.use('/api/close', closeRouter);
@@ -362,8 +344,6 @@ async function start(): Promise<void> {
     console.log('  POST /api/export/pdf — Document package PDF; POST /api/export/csv — Clean Ledger CSV');
     console.log('  GET  /api/knowledge-base/tier1/entries — Global (FASB, IFRS, Tax); POST /api/knowledge-base/search — Hybrid search');
     console.log('  POST /api/vector-store/ingest — Ingest docs; POST /api/vector-store/query — RAG query; POST /api/vector-store/precedent — CPA precedent');
-    console.log('  POST /api/ingestion/agent — Ingestion Agent: .xlsx/.csv/.pdf/.json → classify & route');
-    console.log('  POST /api/pipelines/bank — Bank tx; ap-aging, ar-aging, payroll-accrual, bank-rec, cash-position');
     console.log('  POST /api/close/sessions, /close/sessions/:id/certify — Close sessions; POST /api/close/journal-entries — JE lifecycle');
     console.log('  GET  /api/hitl/staging — Staging; POST /api/hitl/resolve-ingest — fix imbalanced TB ingest; POST /api/hitl/resolve-gl-ingest — fix imbalanced GL entry; POST /api/hitl/webhook — Approve/Reject');
     if (canMountDevApi) {
@@ -379,13 +359,13 @@ if (shouldStart) {
     console.error(e);
     process.exit(1);
   });
-  // QUARANTINED — Automated ingestion infrastructure not in MVP architecture
-  // startIngestionScheduler();
   const workerEnabled = (process.env.JOB_WORKER_ENABLED ?? 'true') === 'true';
   if (workerEnabled && isDbConfigured()) {
     runWorkerLoop({
       pollIntervalMs: Number(process.env.JOB_WORKER_POLL_MS ?? 2000),
       backoffBaseMs: Number(process.env.JOB_WORKER_BACKOFF_BASE_MS ?? 60_000),
+      closeCycleSchedulerEnabled: (process.env.CLOSE_CYCLE_SCHEDULER_ENABLED ?? 'true') === 'true',
+      closeCycleScanIntervalMs: Number(process.env.CLOSE_CYCLE_SCAN_MS ?? 60_000),
     }).catch((e) => console.error('Job worker error:', e));
   }
 }

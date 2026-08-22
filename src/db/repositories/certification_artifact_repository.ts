@@ -129,15 +129,21 @@ export async function getArtifactById(
 export async function getPriorPeriodRetainedEarnings(
   client: Queryable,
   tenantId: string,
+  entityId: string,
   currentPeriodLabel: string
 ): Promise<number | null> {
-  // Find the most recent certification artifact with a period_label before the current one
+  // Find the most recent still-certified artifact for this entity before the current period.
   const r = await client.query<{ artifact_json: unknown }>(
     `SELECT ca.artifact_json
      FROM certification_artifacts ca
-     WHERE ca.tenant_id = $1 AND ca.period_label < $2
+     JOIN close_sessions cs
+       ON cs.id = ca.close_session_id AND cs.tenant_id = ca.tenant_id
+     WHERE ca.tenant_id = $1
+       AND cs.entity_id = $2
+       AND ca.period_label < $3
+       AND cs.status IN ('certified', 'subsequent_events_review', 'locked')
      ORDER BY ca.period_label DESC LIMIT 1`,
-    [tenantId, currentPeriodLabel]
+    [tenantId, entityId, currentPeriodLabel]
   );
   if (r.rows.length === 0) return null;
 
